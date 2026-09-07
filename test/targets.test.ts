@@ -9,27 +9,13 @@ import { compile as compileSvelte } from "svelte/compiler";
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/parser.js";
 
-const fixtureUrl = new URL("./fixtures/looma-button.html", import.meta.url);
+const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
-function componentSource(
-  name: string,
-  tag: string,
-  nativeElement: string,
-  props: Record<string, unknown>,
-  template: string,
-): string {
-  return `<html7-component>
-    <script type="application/html7-contract+json">${JSON.stringify({
-      version: 1,
-      name,
-      tag,
-      status: "experimental",
-      summary: "A target compiler fixture.",
-      nativeElement,
-      props,
-    })}</script>
-    <template>${template}</template>
-  </html7-component>`;
+// The component name is derived from `tag` and the native root inferred from `template`;
+// `props` supplies the `<prop>` declarations for the bindings in `template`.
+function componentSource(tag: string, props: string, template: string): string {
+  const group = props === "" ? "" : `<props>${props}</props>`;
+  return `<template component="${tag}" status="experimental" summary="A target compiler fixture.">${group}${template}</template>`;
 }
 
 function generated(source: string): Map<string, string> {
@@ -41,7 +27,7 @@ function generated(source: string): Map<string, string> {
 async function targets(): Promise<Map<string, string>> {
   const source = await readFile(fixtureUrl, "utf8");
   return new Map(
-    generateComponent(parseComponent(source, "looma-button.html")).map((artifact) => [
+    generateComponent(parseComponent(source, "x-button.html")).map((artifact) => [
       artifact.path,
       artifact.content,
     ]),
@@ -51,19 +37,19 @@ async function targets(): Promise<Map<string, string>> {
 describe("official target compilers", () => {
   it("parses generated Vanilla and React source", async () => {
     const generated = await targets();
-    await transform(generated.get("vanilla/Button.js")!, { loader: "js" });
-    await transform(generated.get("react/Button.tsx")!, { loader: "tsx" });
+    await transform(generated.get("vanilla/XButton.js")!, { loader: "js" });
+    await transform(generated.get("react/XButton.tsx")!, { loader: "tsx" });
   });
 
   it("compiles the generated Vue 3.5 SFC", async () => {
     const generated = await targets();
-    const source = generated.get("vue/Button.vue")!;
-    const parsed = parseVue(source, { filename: "Button.vue" });
+    const source = generated.get("vue/XButton.vue")!;
+    const parsed = parseVue(source, { filename: "XButton.vue" });
     assert.deepEqual(parsed.errors, []);
     const script = compileScript(parsed.descriptor, { id: "html7-button" });
     const template = compileTemplate({
       id: "html7-button",
-      filename: "Button.vue",
+      filename: "XButton.vue",
       source: parsed.descriptor.template!.content,
       compilerOptions: { bindingMetadata: script.bindings ?? {} },
     });
@@ -72,8 +58,8 @@ describe("official target compilers", () => {
 
   it("compiles the generated Svelte 5 component", async () => {
     const generated = await targets();
-    const result = compileSvelte(generated.get("svelte/Button.svelte")!, {
-      filename: "Button.svelte",
+    const result = compileSvelte(generated.get("svelte/XButton.svelte")!, {
+      filename: "XButton.svelte",
       generate: "client",
     });
     assert.ok(result.js.code.length > 0);
@@ -81,33 +67,22 @@ describe("official target compilers", () => {
 
   it("compiles non-button and native-boolean target projections", async () => {
     const audio = generated(componentSource(
-      "Player",
       "demo-player",
-      "audio",
-      {},
+      "",
       `<audio controls><slot></slot></audio>`,
     ));
     const action = generated(componentSource(
-      "Action",
       "demo-action",
-      "button",
-      {
-        disabled: {
-          type: "boolean",
-          default: false,
-          target: { attribute: "disabled" },
-          description: "Disabled state.",
-        },
-      },
+      `<prop name="disabled" type="boolean" default="false">Disabled state.</prop>`,
       `<button :disabled="disabled"><slot></slot></button>`,
     ));
 
-    await transform(audio.get("react/Player.tsx")!, { loader: "tsx" });
-    await transform(action.get("react/Action.tsx")!, { loader: "tsx" });
-    await transform(audio.get("vanilla/Player.js")!, { loader: "js" });
+    await transform(audio.get("react/DemoPlayer.tsx")!, { loader: "tsx" });
+    await transform(action.get("react/DemoAction.tsx")!, { loader: "tsx" });
+    await transform(audio.get("vanilla/DemoPlayer.js")!, { loader: "js" });
     for (const [source, filename] of [
-      [audio.get("svelte/Player.svelte")!, "Player.svelte"],
-      [action.get("svelte/Action.svelte")!, "Action.svelte"],
+      [audio.get("svelte/DemoPlayer.svelte")!, "DemoPlayer.svelte"],
+      [action.get("svelte/DemoAction.svelte")!, "DemoAction.svelte"],
     ] as const) {
       assert.ok(compileSvelte(source, { filename, generate: "client" }).js.code.length > 0);
     }

@@ -51,28 +51,18 @@ describe("browser runtime", { skip: !enabled }, () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        const contract = JSON.stringify({
-          version: 1,
-          name: "TransactionalButton",
-          tag: "demo-transactional-button",
-          status: "early",
-          summary: "Transactional test component.",
-          nativeElement: "button",
-          props: {
-            label: {
-              type: "string",
-              required: true,
-              target: { attribute: "data-label" },
-              description: "Button label.",
-            },
-          },
-        });
-        await page.setContent(`<html7-component id="definition"><script type="application/html7-contract+json">${contract}</script><template><button :data-label="label"><slot></slot></button></template><style id="definition-style">button { color: red; }</style></html7-component><main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
+        const definitionMarkup =
+          `<template component="demo-transactional-button" id="definition" status="early" summary="Transactional test component.">` +
+          `<props><prop name="label" type="string" required>Button label.</prop></props>` +
+          `<button :data-label="label"><slot></slot></button>` +
+          `<style id="definition-style">button { color: red; }</style></template>`;
+        await page.setContent(`${definitionMarkup}<main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
         await page.addScriptTag({ path: bundlePath });
 
         const result = await page.evaluate(`(() => {
           const definition = document.querySelector("#definition");
-          const style = document.querySelector("#definition-style");
+          // A <template>'s <style> lives in its inert content fragment, not the light DOM.
+          const style = definition.content.querySelector("#definition-style");
           const first = document.querySelector("#first");
           const second = document.querySelector("#second");
           const keptChild = document.querySelector("#kept-child");
@@ -85,8 +75,7 @@ describe("browser runtime", { skip: !enabled }, () => {
           const unchanged = {
             diagnostic,
             definitionConnected: definition.isConnected,
-            definitionHidden: definition.hasAttribute("hidden"),
-            styleStillInDefinition: style.parentElement === definition,
+            styleStillInDefinition: definition.content.contains(style),
             firstUnchanged: document.querySelector("#first") === first,
             secondUnchanged: document.querySelector("#second") === second,
             keptChildUnchanged: document.querySelector("#kept-child") === keptChild,
@@ -109,7 +98,6 @@ describe("browser runtime", { skip: !enabled }, () => {
           unchanged: {
             diagnostic: "H7C020",
             definitionConnected: true,
-            definitionHidden: false,
             styleStillInDefinition: true,
             firstUnchanged: true,
             secondUnchanged: true,
@@ -142,39 +130,16 @@ describe("browser runtime", { skip: !enabled }, () => {
             }
           })()`);
         };
-        const buttonContract = JSON.stringify({
-          version: 1,
-          name: "UnsafeButton",
-          tag: "demo-unsafe-button",
-          status: "early",
-          summary: "Unsafe test component.",
-          nativeElement: "button",
-          props: {},
-        });
-        const iframeContract = JSON.stringify({
-          version: 1,
-          name: "UnsafeFrame",
-          tag: "demo-unsafe-frame",
-          status: "early",
-          summary: "Unsafe test component.",
-          nativeElement: "iframe",
-          props: {
-            markup: {
-              type: "string",
-              target: { property: "srcdoc" },
-              description: "Embedded markup.",
-            },
-          },
-        });
+        const buttonMarkup =
+          `<template component="demo-unsafe-button" status="early" summary="Unsafe test component.">` +
+          `<button onclick="alert(1)"></button></template>`;
+        const iframeMarkup =
+          `<template component="demo-unsafe-frame" status="early" summary="Unsafe test component.">` +
+          `<props><prop name="markup" type="string">Embedded markup.</prop></props>` +
+          `<iframe .srcdoc="markup"></iframe></template>`;
 
-        assert.equal(
-          await diagnostic(`<html7-component><script type="application/html7-contract+json">${buttonContract}</script><template><button onclick="alert(1)"></button></template></html7-component>`),
-          "H7T010",
-        );
-        assert.equal(
-          await diagnostic(`<html7-component><script type="application/html7-contract+json">${iframeContract}</script><template><iframe .srcdoc="markup"></iframe></template></html7-component>`),
-          "H7T007",
-        );
+        assert.equal(await diagnostic(buttonMarkup), "H7T010");
+        assert.equal(await diagnostic(iframeMarkup), "H7T007");
       } finally {
         await browser.close();
       }
@@ -222,9 +187,9 @@ describe("browser runtime", { skip: !enabled }, () => {
             disabledDisabled: disabled.disabled,
             statusTextContent: status.textContent,
             childIdentityPreserved: primary.querySelector("#kept-child") === keptChild,
-            definitionsRemaining: document.querySelectorAll("html7-component").length,
-            invocationHostsRemaining: document.querySelectorAll("looma-button, looma-status").length,
-            customElementRegistered: customElements.get("looma-button") !== undefined,
+            definitionsRemaining: document.querySelectorAll("template[component]").length,
+            invocationHostsRemaining: document.querySelectorAll("x-button, x-status").length,
+            customElementRegistered: customElements.get("x-button") !== undefined,
           };
         })()`);
 
@@ -236,10 +201,10 @@ describe("browser runtime", { skip: !enabled }, () => {
             attributes: [
               ["aria-label", "Save changes"],
               ["class", "cta"],
-              ["data-lm-size", "lg"],
-              ["data-lm-variant", "outline"],
-              ["data-looma", ""],
+              ["data-size", "lg"],
               ["data-trace", "runtime"],
+              ["data-variant", "outline"],
+              ["data-x-button", ""],
               ["id", "primary"],
               ["type", "button"],
             ],
@@ -257,9 +222,9 @@ describe("browser runtime", { skip: !enabled }, () => {
             namespace: "http://www.w3.org/1999/xhtml",
             tag: "button",
             attributes: [
-              ["data-lm-size", "md"],
-              ["data-lm-variant", "solid"],
-              ["data-looma", ""],
+              ["data-size", "md"],
+              ["data-variant", "solid"],
+              ["data-x-button", ""],
               ["disabled", ""],
               ["id", "disabled"],
               ["type", "button"],

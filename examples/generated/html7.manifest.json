@@ -2,18 +2,18 @@
   "generatorVersion": "0.0.0",
   "components": [
     {
-      "source": "examples/looma-button.html",
-      "name": "Button",
-      "tag": "looma-button",
+      "source": "examples/x-button.html",
+      "name": "XButton",
+      "tag": "x-button",
       "artifacts": [
-        "vanilla/Button.js",
-        "vanilla/Button.d.ts",
-        "react/Button.tsx",
-        "vue/Button.vue",
-        "svelte/Button.svelte",
-        "styles/looma-button.css",
-        "contracts/looma-button.json",
-        "docs/looma-button.md"
+        "vanilla/XButton.js",
+        "vanilla/XButton.d.ts",
+        "react/XButton.tsx",
+        "vue/XButton.vue",
+        "svelte/XButton.svelte",
+        "styles/x-button.css",
+        "contracts/x-button.json",
+        "docs/x-button.md"
       ]
     }
   ]

@@ -45,6 +45,8 @@ export interface ComponentContract {
 
 export interface DefineContractOptions {
   readonly source?: string;
+  /** The component tag, taken from the carrier's `component=` attribute. */
+  readonly tag?: string;
 }
 
 export type SerializedPropTarget =

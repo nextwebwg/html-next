@@ -1,0 +1,43 @@
+<template component="x-button" status="early" summary="A native button with a themed presentation.">
+  <props>
+    <prop name="variant" type="outline | solid | destructive | ghost" default="outline">Visual treatment.</prop>
+    <prop name="size" type="sm | md | lg" default="md">Control size.</prop>
+  </props>
+
+  <button data-x-button :data-variant="variant" :data-size="size">
+    <slot></slot>
+  </button>
+
+  <style>
+    button[data-x-button] {
+      all: revert;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid currentColor;
+      border-radius: 0.375rem;
+      font: inherit;
+    }
+
+    button[data-x-button][data-size="sm"] {
+      min-height: 2rem;
+      padding: 0.25rem 0.625rem;
+    }
+
+    button[data-x-button][data-size="md"] {
+      min-height: 2.5rem;
+      padding: 0.5rem 0.875rem;
+    }
+
+    button[data-x-button][data-size="lg"] {
+      min-height: 3rem;
+      padding: 0.625rem 1rem;
+    }
+
+    button[data-x-button][data-variant="solid"] {
+      background: CanvasText;
+      color: Canvas;
+    }
+  </style>
+</template>

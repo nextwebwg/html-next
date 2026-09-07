@@ -5,78 +5,36 @@
     <title>HTML7 browser runtime fixture</title>
   </head>
   <body>
-    <html7-component>
-      <script type="application/html7-contract+json">
-        {
-          "version": 1,
-          "name": "Button",
-          "tag": "looma-button",
-          "status": "early",
-          "summary": "A native button with Looma presentation.",
-          "nativeElement": "button",
-          "props": {
-            "variant": {
-              "type": { "enum": ["outline", "solid"] },
-              "default": "outline",
-              "target": { "attribute": "data-lm-variant" },
-              "description": "Visual treatment."
-            },
-            "size": {
-              "type": { "enum": ["sm", "md", "lg"] },
-              "default": "md",
-              "target": { "attribute": "data-lm-size" },
-              "description": "Control size."
-            },
-            "disabled": {
-              "type": "boolean",
-              "default": false,
-              "target": { "property": "disabled" },
-              "description": "Whether the button is disabled."
-            }
-          }
-        }
-      </script>
-      <template>
-        <button data-looma type="button" :data-lm-variant="variant" :data-lm-size="size" .disabled="disabled">
-          <slot></slot>
-        </button>
-      </template>
-      <style>button[data-looma] { box-sizing: border-box; }</style>
-    </html7-component>
+    <template component="x-button" status="early" summary="A native button with a themed presentation.">
+      <props>
+        <prop name="variant" type="outline | solid" default="outline">Visual treatment.</prop>
+        <prop name="size" type="sm | md | lg" default="md">Control size.</prop>
+        <prop name="disabled" type="boolean" default="false">Whether the button is disabled.</prop>
+      </props>
+      <button data-x-button type="button" :data-variant="variant" :data-size="size" .disabled="disabled">
+        <slot></slot>
+      </button>
+      <style>button[data-x-button] { box-sizing: border-box; }</style>
+    </template>
 
-    <html7-component>
-      <script type="application/html7-contract+json">
-        {
-          "version": 1,
-          "name": "Status",
-          "tag": "looma-status",
-          "status": "early",
-          "summary": "A native output status.",
-          "nativeElement": "output",
-          "props": {
-            "message": {
-              "type": "string",
-              "default": "Waiting",
-              "target": { "property": "textContent" },
-              "description": "Status text."
-            }
-          }
-        }
-      </script>
-      <template><output .textContent="message"></output></template>
-    </html7-component>
+    <template component="x-status" status="early" summary="A native output status.">
+      <props>
+        <prop name="message" type="string" default="Waiting">Status text.</prop>
+      </props>
+      <output .textContent="message"></output>
+    </template>
 
     <main>
-      <looma-button
+      <x-button
         id="primary"
         class="cta"
         size="lg"
         type="submit"
         aria-label="Save changes"
         data-trace="runtime"
-      >Save <strong id="kept-child">now</strong></looma-button>
-      <looma-button id="disabled" variant="solid" disabled></looma-button>
-      <looma-status id="status" message="Ready"></looma-status>
+      >Save <strong id="kept-child">now</strong></x-button>
+      <x-button id="disabled" variant="solid" disabled></x-button>
+      <x-status id="status" message="Ready"></x-status>
     </main>
   </body>
 </html>

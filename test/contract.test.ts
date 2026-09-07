@@ -8,21 +8,19 @@ import {
 import { Html7DiagnosticError } from "../src/diagnostics.js";
 
 // Deliberately loose: several tests mutate this fixture into invalid runtime data.
-// `defineContract()` accepts unknown input and is responsible for narrowing it.
+// `defineContract()` accepts unknown input and is responsible for narrowing it. The
+// `component` tag arrives separately (from the carrier attribute), so it is not a field.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function validContract(): any {
   return {
-    version: 1,
-    name: "Button",
-    tag: "looma-button",
     status: "early",
-    summary: "A native button with Looma presentation.",
+    summary: "A native button.",
     nativeElement: "button",
     props: {
       variant: {
         type: { enum: ["outline", "solid", "destructive", "ghost"] },
         default: "outline",
-        target: { attribute: "data-lm-variant" },
+        target: { attribute: "data-variant" },
         description: "Visual treatment.",
       },
     },
@@ -39,27 +37,31 @@ function expectDiagnostic(code: string, operation: () => unknown): void {
   });
 }
 
+function defineWithTag(value: unknown, tag: string) {
+  return defineContract(value, { source: "button.html", tag });
+}
+
 function defineFromButtonFile(value: unknown) {
-  return defineContract(value, { source: "button.html" });
+  return defineWithTag(value, "x-button");
 }
 
 describe("defineContract", () => {
-  it("validates and normalizes a schema v1 component", () => {
+  it("validates and normalizes a component, deriving the name from the tag", () => {
     const contract = defineFromButtonFile(validContract());
 
     assert.deepEqual(contract, {
       version: 1,
-      name: "Button",
-      tag: "looma-button",
+      name: "XButton",
+      tag: "x-button",
       status: "early",
-      summary: "A native button with Looma presentation.",
+      summary: "A native button.",
       nativeElement: "button",
       props: {
         variant: {
           type: { enum: ["outline", "solid", "destructive", "ghost"] },
           required: false,
           default: "outline",
-          target: { attribute: "data-lm-variant" },
+          target: { attribute: "data-variant" },
           description: "Visual treatment.",
         },
       },
@@ -90,7 +92,7 @@ describe("defineContract", () => {
       variant: {
         type: { enum: ["outline", "solid"] },
         default: "outline",
-        target: { attribute: "data-lm-variant" },
+        target: { attribute: "data-variant" },
         description: "Visual treatment.",
       },
     } as typeof input.props;
@@ -135,55 +137,22 @@ describe("defineContract", () => {
     expectDiagnostic("H7C002", () => defineFromButtonFile(unknownTarget));
   });
 
-  it("rejects invalid component and prop names", () => {
-    for (const patch of [
-      { name: "button" },
-      { name: "Button-name" },
-      { tag: "button" },
-      { tag: "Looma-button" },
-      { nativeElement: "bad element" },
-    ]) {
-      expectDiagnostic(
-        patch.name === "button" || patch.name === "Button-name"
-          ? "H7C004"
-          : patch.tag
-            ? "H7C005"
-            : "H7C008",
-        () => defineFromButtonFile({ ...validContract(), ...patch }),
-      );
+  it("rejects invalid tags, native elements, and prop names", () => {
+    for (const tag of ["button", "Looma-button"]) {
+      expectDiagnostic("H7C005", () => defineWithTag(validContract(), tag));
     }
+    expectDiagnostic("H7C008", () =>
+      defineFromButtonFile({ ...validContract(), nativeElement: "bad element" }),
+    );
+    expectDiagnostic("H7C008", () =>
+      defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
+    );
 
     const invalidProp = validContract();
     invalidProp.props = {
       "1variant": invalidProp.props.variant,
     };
     expectDiagnostic("H7C010", () => defineFromButtonFile(invalidProp));
-  });
-
-  it("requires known native elements and canonical property targets", () => {
-    expectDiagnostic("H7C008", () =>
-      defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
-    );
-
-    const canonical = validContract();
-    canonical.props = {
-      action: {
-        type: "string",
-        target: { property: "formaction" },
-        description: "Submission destination.",
-      },
-    };
-    assert.equal(defineFromButtonFile(canonical).props.action?.target.property, "formAction");
-
-    const unknownProperty = validContract();
-    unknownProperty.props = {
-      action: {
-        type: "string",
-        target: { property: "notAButtonProperty" },
-        description: "Invalid destination.",
-      },
-    };
-    expectDiagnostic("H7P001", () => defineFromButtonFile(unknownProperty));
   });
 
   it("rejects invalid types, defaults, required flags, and targets", () => {
@@ -281,9 +250,6 @@ describe("defineContract", () => {
       nativeElement: "button",
       summary: first.summary,
       status: "early",
-      tag: "looma-button",
-      name: "Button",
-      version: 1,
     };
 
     const normalizedFirst = defineFromButtonFile(first);
@@ -330,7 +296,7 @@ describe("serializePropTarget", () => {
 
     assert.deepEqual(serializePropTarget(contract.props.variant!, undefined), {
       kind: "attribute",
-      name: "data-lm-variant",
+      name: "data-variant",
       value: "outline",
     });
     assert.deepEqual(serializePropTarget(contract.props.enabled!, true), {

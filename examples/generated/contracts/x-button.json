@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "name": "Button",
-  "tag": "looma-button",
+  "name": "XButton",
+  "tag": "x-button",
   "status": "early",
-  "summary": "A native button with Looma presentation.",
+  "summary": "A native button with a themed presentation.",
   "nativeElement": "button",
   "props": {
     "size": {
@@ -16,7 +16,7 @@
       },
       "required": false,
       "target": {
-        "attribute": "data-lm-size"
+        "attribute": "data-size"
       },
       "description": "Control size.",
       "default": "md"
@@ -32,7 +32,7 @@
       },
       "required": false,
       "target": {
-        "attribute": "data-lm-variant"
+        "attribute": "data-variant"
       },
       "description": "Visual treatment.",
       "default": "outline"

@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "build:example": "tsx src/cli.ts build examples/looma-button.html --out-dir examples/generated",
+    "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check",
     "test": "node --import tsx --test test/*.test.ts",

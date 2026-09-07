@@ -2,7 +2,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { SvelteHTMLElements } from "svelte/elements";
-  import "../styles/looma-button.css";
+  import "../styles/x-button.css";
 
   interface OwnProps {
     size?: "sm" | "md" | "lg" | null;
@@ -13,6 +13,6 @@
   let { "size": prop0 = "md", "variant": prop1 = "outline", children, ...nativeProps }: Props = $props();
 </script>
 
-<button {...nativeProps} data-looma="" data-lm-variant={prop1} data-lm-size={prop0}>
+<button {...nativeProps} data-x-button="" data-variant={prop1} data-size={prop0}>
   {@render children?.()}
 </button>

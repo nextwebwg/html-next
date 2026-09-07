@@ -15,7 +15,7 @@ status: early-release
 
 ## Goal Capsule
 
-Build the smallest end-to-end HTML7 implementation that proves a Looma primitive can be
+Build the smallest end-to-end HTML7 implementation that proves a component primitive can be
 authored once as literal, browser-parseable HTML and projected into Vanilla DOM, React,
 Vue, Svelte, generated API documentation, and a direct browser-lowering path.
 
@@ -33,7 +33,7 @@ In scope:
 - Vanilla, React, Vue, Svelte, contract JSON, CSS, and Markdown API outputs;
 - a one-shot browser runtime for initial lowering;
 - a CLI that builds one or more component sources;
-- a Looma button fixture demonstrating the entire path; and
+- a button fixture demonstrating the entire path; and
 - Node and real-browser conformance tests.
 
 Out of scope:
@@ -45,12 +45,14 @@ Out of scope:
 - named slots or component composition;
 - SSR/hydration;
 - publishing packages or creating `nextwebwg/html7` on GitHub; and
-- migrating Looma away from its current implementation.
+- migrating any specific component library to HTML7.
 
 ## Key Decisions
 
-- **KTD-1 — Literal HTML source.** The canonical MVP source is an HTML file containing
-  `<html7-component>`, inert JSON contract data, `<template>`, and optional `<style>`.
+- **KTD-1 — Literal HTML source.** The canonical MVP source is an HTML file containing a
+  native inert `<template component>` carrier, an optional declarative `<props>` interface,
+  one native markup root, and optional `<style>`. Prop targets and the native element are
+  inferred from the markup, not restated.
 - **KTD-2 — Contract data, not executed source.** `defineContract()` validates the data
   model programmatically; the source file itself does not execute TypeScript.
 - **KTD-3 — One IR.** All generators and the browser runtime use the same normalized
@@ -62,8 +64,8 @@ Out of scope:
   is not the production resolver.
 - **KTD-6 — Explicit early-release boundary.** Unsupported reserved language features
   fail with diagnostics and are documented as coming soon.
-- **KTD-7 — HTML7 and Looma remain separate.** The fixture models Looma, but the
-  implementation and specification live only in the HTML7 repository.
+- **KTD-7 — Library-agnostic.** The fixture is a neutral `x-button`; the implementation
+  and specification are independent of any specific component library.
 
 ## Requirements
 
@@ -168,13 +170,13 @@ Files:
 - `src/parser.ts`
 - `src/template.ts`
 - `test/parser.test.ts`
-- `test/fixtures/looma-button.html`
+- `test/fixtures/x-button.html`
 
 Dependencies: U1, U2.
 
 Execution note: Test-first with both successful parsing and stable diagnostic codes.
 
-Verification: parser tests cover valid Looma source, malformed contracts, duplicate or
+Verification: parser tests cover valid component source, malformed contracts, duplicate or
 missing blocks, root mismatch, undeclared bindings, property normalization, and reserved
 unsupported syntax.
 
@@ -217,19 +219,19 @@ Dependencies: U3.
 Execution note: Proof-first in a real browser. Compare semantic DOM snapshots rather than
 format-sensitive `outerHTML` strings where attribute order is irrelevant.
 
-Verification: Chromium, Firefox, and WebKit produce the same native root for the Looma
-button fixture; pass-through attributes and child nodes survive; no Custom Element is
+Verification: Chromium, Firefox, and WebKit produce the same native root for the button
+fixture; pass-through attributes and child nodes survive; no Custom Element is
 registered.
 
 ### U6. Add CLI and example output
 
-Goal: Provide a build command and check in an example Looma component plus its generated
+Goal: Provide a build command and check in an example component plus its generated
 artifacts for inspection.
 
 Files:
 
 - `src/cli.ts`
-- `examples/looma-button.html`
+- `examples/x-button.html`
 - `examples/generated/**`
 - `test/cli.test.ts`
 
@@ -288,7 +290,7 @@ gate as incomplete.
 
 ### Happy paths
 
-- Parse the Looma button definition and normalize its contract and template.
+- Parse the button definition and normalize its contract and template.
 - Generate every target and inspect its native `<button>` root.
 - Apply default props and explicit invocation props.
 - Preserve `id`, `class`, native button attributes, ARIA attributes, data attributes, and
@@ -326,7 +328,7 @@ gate as incomplete.
 - The technical specification clearly distinguishes normative MVP behavior from future
   language intent.
 - Every requirement R1-R8 has an implementation and automated evidence.
-- The Looma fixture generates Vanilla, React, Vue, Svelte, CSS, contract JSON, and API
+- The button fixture generates Vanilla, React, Vue, Svelte, CSS, contract JSON, and API
   Markdown from one HTML source.
 - The browser runtime lowers that same source without Custom Elements or dynamic code
   evaluation.

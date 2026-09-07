@@ -1,5 +1,5 @@
 import { fail } from "./diagnostics.js";
-import { getDomInterface, resolveDomProperty } from "./platform.js";
+import { getDomInterface } from "./platform.js";
 import type {
   ComponentContract,
   ContractStatus,
@@ -13,9 +13,6 @@ import type {
 } from "./types.js";
 
 const CONTRACT_FIELDS = new Set([
-  "version",
-  "name",
-  "tag",
   "status",
   "summary",
   "nativeElement",
@@ -37,6 +34,33 @@ const STATUSES = new Set<ContractStatus>([
 const SCALAR_TYPES = new Set(["string", "boolean", "number"]);
 
 type UnknownRecord = Record<string, unknown>;
+
+/** Derives the PascalCase component name from its `component` tag, e.g. `x-button` -> `XButton`. */
+export function deriveName(tag: string): string {
+  return tag
+    .split("-")
+    .filter((segment) => segment !== "")
+    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
+    .join("");
+}
+
+/**
+ * Parses a `<prop type>` attribute into a raw prop type. A single scalar keyword
+ * (`string`/`number`/`boolean`) stays scalar; anything else is an enum whose members are
+ * split on the CSS value-definition-syntax single bar `|` (Values and Units, "one of").
+ */
+export function parseTypeAttribute(value: string): string | { enum: string[] } {
+  const members = value.split("|").map((member) => member.trim()).filter((member) => member !== "");
+  if (members.length === 1 && SCALAR_TYPES.has(members[0]!)) return members[0]!;
+  return { enum: members };
+}
+
+/** Coerces a `<prop default>` attribute string into a value of the declared type. */
+export function coerceDefault(type: string | { enum: string[] }, raw: string): unknown {
+  if (type === "number") return Number(raw);
+  if (type === "boolean") return raw === "true";
+  return raw;
+}
 
 function record(value: unknown, code: string, message: string, source?: string): UnknownRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -162,18 +186,11 @@ export function defineContract(
   const object = record(input, "H7C001", "A component contract must be an object.", source);
   rejectUnknownFields(object, CONTRACT_FIELDS, source);
 
-  if (object.version !== 1) {
-    fail("H7C006", "Only component contract schema version 1 is supported.", source);
-  }
-
-  const name = requiredString(object.name, "name", source);
-  if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) {
-    fail("H7C004", "Component `name` must be a PascalCase identifier.", source);
-  }
-  const tag = requiredString(object.tag, "tag", source);
+  const tag = requiredString(options.tag, "component", source);
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(tag)) {
-    fail("H7C005", "Component `tag` must be lowercase and contain a hyphen.", source);
+    fail("H7C005", "The `component` tag must be lowercase and contain a hyphen.", source);
   }
+  const name = deriveName(tag);
   if (typeof object.status !== "string" || !STATUSES.has(object.status as ContractStatus)) {
     fail("H7C007", "Component `status` is not recognized.", source);
   }
@@ -200,14 +217,6 @@ export function defineContract(
   const props: Record<string, PropContract> = {};
   for (const propName of Object.keys(rawProps).sort()) {
     props[propName] = parseProp(propName, rawProps[propName], source);
-  }
-  for (const [propName, prop] of Object.entries(props)) {
-    if (!("property" in prop.target)) continue;
-    const property = resolveDomProperty(nativeElement, prop.target.property);
-    if (property === undefined) {
-      fail("H7P001", `Property target \`${prop.target.property}\` for prop \`${propName}\` is not known on <${nativeElement}>.`, source);
-    }
-    props[propName] = deepFreeze({ ...prop, target: { property } });
   }
 
   return deepFreeze({

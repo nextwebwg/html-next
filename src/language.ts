@@ -1,8 +1,6 @@
 import { fail } from "./diagnostics.js";
 import type { ComponentContract } from "./types.js";
 
-export const CONTRACT_TYPE = "application/html7-contract+json";
-
 const RESERVED_ELEMENTS = new Set([
   "if",
   "else-if",

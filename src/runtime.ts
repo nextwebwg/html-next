@@ -1,7 +1,6 @@
-import { defineContract, serializePropTarget } from "./contract.js";
+import { coerceDefault, defineContract, parseTypeAttribute, serializePropTarget } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import {
-  CONTRACT_TYPE,
   isReservedElement,
   validateLiteralAttributeName,
   validateMvpDomProperty,
@@ -17,6 +16,7 @@ import type {
 import type {
   ComponentContract,
   PropContract,
+  PropTarget,
   PropValue,
   SerializedPropTarget,
 } from "./types.js";
@@ -44,6 +44,70 @@ function significant(nodes: ArrayLike<Node>): Node[] {
 
 function directElements(wrapper: Element, name: string): Element[] {
   return Array.from(wrapper.children).filter((element) => element.localName === name);
+}
+
+/**
+ * A prop's target is defined by where it is bound in the markup, not restated: a
+ * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property.
+ */
+function collectTargets(root: Element, source: string): Record<string, PropTarget> {
+  const targets: Record<string, PropTarget> = {};
+  const record = (name: string, target: PropTarget): void => {
+    const prior = targets[name];
+    if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(target)) {
+      fail("H7T004", `Prop \`${name}\` is bound to conflicting targets.`, source);
+    }
+    targets[name] = target;
+  };
+  const visit = (element: Element): void => {
+    for (const attribute of Array.from(element.attributes)) {
+      if (attribute.name.startsWith(":")) {
+        record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
+      } else if (attribute.name.startsWith(".")) {
+        const key = attribute.name.slice(1).toLowerCase();
+        record(attribute.value, { property: resolveDomProperty(element.localName, key) ?? key });
+      }
+    }
+    for (const child of Array.from(element.children)) {
+      if (child.localName !== "slot") visit(child);
+    }
+  };
+  visit(root);
+  return targets;
+}
+
+function readProps(
+  group: Element | undefined,
+  targets: Record<string, PropTarget>,
+  source: string,
+): Record<string, unknown> {
+  const props: Record<string, unknown> = {};
+  if (group === undefined) return props;
+  for (const element of directElements(group, "prop")) {
+    const name = element.getAttribute("name");
+    if (name === null || name === "") {
+      fail("H7C010", "A <prop> requires a `name` attribute.", source);
+    }
+    const typeAttribute = element.getAttribute("type");
+    if (typeAttribute === null || typeAttribute === "") {
+      fail("H7C013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
+    }
+    const target = targets[name];
+    if (target === undefined) {
+      fail("H7C018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
+    }
+    const type = parseTypeAttribute(typeAttribute);
+    const spec: Record<string, unknown> = {
+      type,
+      target,
+      description: (element.textContent ?? "").trim(),
+    };
+    if (element.hasAttribute("required")) spec.required = true;
+    const defaultValue = element.getAttribute("default");
+    if (defaultValue !== null) spec.default = coerceDefault(type, defaultValue);
+    props[name] = spec;
+  }
+  return props;
 }
 
 function parseAttributes(
@@ -134,50 +198,42 @@ function parseElement(
   return { kind: "element", name: element.localName, attributes, children };
 }
 
-function parseDefinition(wrapper: Element, index: number): LiveDefinition {
-  const source = `${wrapper.ownerDocument.URL}#html7-component[${index + 1}]`;
-  const contractScripts = directElements(wrapper, "script").filter(
-    (element) => element.getAttribute("type")?.toLowerCase() === CONTRACT_TYPE,
-  );
-  const templates = directElements(wrapper, "template");
-  const styles = directElements(wrapper, "style");
-  if (contractScripts.length !== 1 || templates.length !== 1 || styles.length > 1) {
-    fail("H7S002", "A component requires one contract, one template, and at most one style.", source);
-  }
+function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
+  const tag = wrapper.getAttribute("component") ?? "";
+  const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
 
-  const allowed = new Set<Element>([contractScripts[0]!, templates[0]!, ...styles]);
-  if (
-    significant(wrapper.childNodes).some(
-      (node) => !(node instanceof Element) || !allowed.has(node),
-    )
-  ) {
-    fail("H7S003", "A component contains an unknown definition block.", source);
-  }
-
-  let rawContract: unknown;
-  try {
-    rawContract = JSON.parse(contractScripts[0]!.textContent ?? "");
-  } catch {
-    fail("H7S004", "The component contract is not valid JSON.", source);
-  }
-  const contract = defineContract(rawContract, { source });
-
-  const template = templates[0]!;
-  if (!(template instanceof HTMLTemplateElement)) {
-    fail("H7S002", "The component template is not an HTML template element.", source);
-  }
-  const roots = significant(template.content.childNodes);
-  if (roots.length !== 1 || !(roots[0] instanceof Element)) {
-    fail("H7T001", "The MVP template must contain exactly one element root.", source);
-  }
-  const root = roots[0];
-  if (root.localName !== contract.nativeElement) {
-    fail(
-      "H7T002",
-      `Template root <${root.localName}> does not match nativeElement <${contract.nativeElement}>.`,
-      source,
+  // A <template>'s children live in its inert content fragment.
+  const content = Array.from(wrapper.content.childNodes);
+  const contentElement = (name: string): Element[] =>
+    content.filter(
+      (node): node is Element => node instanceof Element && node.localName === name,
     );
+  const propGroups = contentElement("props");
+  const styles = contentElement("style");
+  if (propGroups.length > 1 || styles.length > 1) {
+    fail("H7S002", "A component has an optional <props> group, one markup root, and an optional <style>.", source);
   }
+
+  const known = new Set<Element>([...propGroups, ...styles]);
+  const markup = significant(content).filter(
+    (node) => !(node instanceof Element) || !known.has(node),
+  );
+  if (markup.length !== 1 || !(markup[0] instanceof Element)) {
+    fail("H7T001", "A component's markup must be exactly one element root.", source);
+  }
+  const root = markup[0] as Element;
+
+  const targets = collectTargets(root, source);
+  const contract = defineContract(
+    {
+      status: wrapper.getAttribute("status") ?? undefined,
+      summary: wrapper.getAttribute("summary") ?? undefined,
+      nativeElement: root.localName,
+      props: readProps(propGroups[0], targets, source),
+    },
+    { source, tag },
+  );
+
   const normalizedTemplate = parseElement(root, contract, source, { value: 0 });
   const style = styles[0] as HTMLStyleElement | undefined;
 
@@ -294,7 +350,9 @@ function renderElement(
  * and invocations. It does not observe later mutations or register Custom Elements.
  */
 export function lowerDocument(root: Document = document): number {
-  const wrappers = Array.from(root.querySelectorAll("html7-component"));
+  const wrappers = Array.from(
+    root.querySelectorAll("template[component]"),
+  ) as HTMLTemplateElement[];
   const definitions = wrappers.map(parseDefinition);
   const tags = new Set<string>();
   for (const { definition } of definitions) {
@@ -306,9 +364,9 @@ export function lowerDocument(root: Document = document): number {
 
   const prepared: PreparedInvocation[] = [];
   for (const { definition } of definitions) {
-    const invocations = Array.from(root.querySelectorAll(definition.contract.tag)).filter(
-      (element) => element.closest("html7-component") === null,
-    );
+    // A <template>'s content is inert, so querySelectorAll never returns definition-internal
+    // markup; every match is a live invocation to lower.
+    const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
     for (const invocation of invocations) {
       const { targets, passThrough } = readInvocation(invocation, definition.contract);
       const children = Array.from(invocation.childNodes);
@@ -325,7 +383,6 @@ export function lowerDocument(root: Document = document): number {
     }
   }
 
-  for (const wrapper of wrappers) wrapper.setAttribute("hidden", "");
   for (const live of definitions) {
     if (live.style !== undefined) live.wrapper.ownerDocument.head.append(live.style);
     live.wrapper.remove();

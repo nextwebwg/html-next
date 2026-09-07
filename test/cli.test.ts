@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import { buildComponents } from "../src/cli.js";
 
-const fixture = new URL("./fixtures/looma-button.html", import.meta.url).pathname;
+const fixture = new URL("./fixtures/x-button.html", import.meta.url).pathname;
 
 async function snapshot(directory: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
@@ -36,15 +36,15 @@ describe("buildComponents", () => {
       assert.deepEqual(first, second);
       assert.deepEqual(firstSnapshot, secondSnapshot);
       assert.deepEqual(Object.keys(firstSnapshot), [
-        "contracts/looma-button.json",
-        "docs/looma-button.md",
+        "contracts/x-button.json",
+        "docs/x-button.md",
         "html7.manifest.json",
-        "react/Button.tsx",
-        "styles/looma-button.css",
-        "svelte/Button.svelte",
-        "vanilla/Button.d.ts",
-        "vanilla/Button.js",
-        "vue/Button.vue",
+        "react/XButton.tsx",
+        "styles/x-button.css",
+        "svelte/XButton.svelte",
+        "vanilla/XButton.d.ts",
+        "vanilla/XButton.js",
+        "vue/XButton.vue",
       ]);
 
       const manifest = JSON.parse(firstSnapshot["html7.manifest.json"]!) as {
@@ -52,8 +52,8 @@ describe("buildComponents", () => {
         components: Array<{ name: string; tag: string; artifacts: string[] }>;
       };
       assert.equal(manifest.generatorVersion, "0.0.0");
-      assert.equal(manifest.components[0]?.name, "Button");
-      assert.equal(manifest.components[0]?.tag, "looma-button");
+      assert.equal(manifest.components[0]?.name, "XButton");
+      assert.equal(manifest.components[0]?.tag, "x-button");
       assert.equal(manifest.components[0]?.artifacts.length, 8);
     } finally {
       await rm(directory, { recursive: true, force: true });
