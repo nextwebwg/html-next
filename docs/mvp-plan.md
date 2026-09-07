@@ -49,22 +49,22 @@ Out of scope:
 
 ## Key Decisions
 
-- **KTD-1 — Literal HTML source.** The canonical MVP source is an HTML file containing a
+- **KTD-1: Literal HTML source.** The canonical MVP source is an HTML file containing a
   native inert `<template component>` carrier, an optional declarative `<props>` interface,
   one native markup root, and optional `<style>`. Prop targets and the native element are
   inferred from the markup, not restated.
-- **KTD-2 — Contract data, not executed source.** `defineContract()` validates the data
+- **KTD-2: Contract data, not executed source.** `defineContract()` validates the data
   model programmatically; the source file itself does not execute TypeScript.
-- **KTD-3 — One IR.** All generators and the browser runtime use the same normalized
+- **KTD-3: One IR.** All generators and the browser runtime use the same normalized
   contract and template node model.
-- **KTD-4 — Native roots.** Primitive components lower directly to the native element
+- **KTD-4: Native roots.** Primitive components lower directly to the native element
   named by their contract and add no semantic wrapper.
-- **KTD-5 — Static property spelling.** Library build tooling generates maps from
+- **KTD-5: Static property spelling.** Library build tooling generates maps from
   ASCII-lowercase lookup keys to exact DOM property names. Runtime prototype reflection
   is not the production resolver.
-- **KTD-6 — Explicit early-release boundary.** Unsupported reserved language features
+- **KTD-6: Explicit early-release boundary.** Unsupported reserved language features
   fail with diagnostics and are documented as coming soon.
-- **KTD-7 — Library-agnostic.** The fixture is a neutral `x-button`; the implementation
+- **KTD-7: Library-agnostic.** The fixture is a neutral `x-button`; the implementation
   and specification are independent of any specific component library.
 
 ## Requirements

@@ -1,14 +1,14 @@
-# HTML Next — polyfill &amp; component bridge
+# HTML Next: polyfill &amp; component bridge
 
 HTML Next is a set of **Stage 0 proposals** for a markup-first authoring layer over HTML:
 reusable typed components, templates, control flow, data sources, and reactivity expressed
 as HTML rather than framework-specific JavaScript. The proposals and their design record
 live in the [`nextwebwg/site`](https://github.com/nextwebwg/site) repository.
 
-**This repository is the polyfill and component bridge** — the reference implementation of
+**This repository is the polyfill and component bridge**: the reference implementation of
 those proposals, not the proposals themselves. It authors a native-root component once as
 literal, browser-parseable HTML, then generates Vanilla DOM, React, Vue, Svelte, CSS,
-machine-readable contracts, and API documentation — and lowers the same source directly in
+machine-readable contracts, and API documentation, and lowers the same source directly in
 Chromium, Firefox, and WebKit without Custom Elements or `eval()`.
 
 > **Stage 0, early:** the proposals are exploratory and this implementation covers only the
@@ -40,7 +40,7 @@ can be inspected without running a framework project.
 
 An MVP component is ordinary HTML: a `<template component>` carrier holding an optional
 `<props>` interface, one native template root, and optional CSS. Only what markup cannot
-already say is declared — a prop's type, default, requiredness, and description. Its
+already say is declared: a prop's type, default, requiredness, and description. Its
 target is inferred from where it is bound (`:attribute` or `.property`), and the native
 root is the template's own root element:
 
@@ -72,10 +72,10 @@ The `<prop>` type grammar borrows from existing platform languages: scalar keywo
 
 The carrier is a native **inert** `<template>`: today's browsers parse it but neither
 render nor execute it, so a definition degrades to inert markup now and could be consumed
-natively if the shape were standardized — the path Declarative Shadow DOM took with
+natively if the shape were standardized: the path Declarative Shadow DOM took with
 `<template shadowrootmode>`. Inertness is the transition guarantee, not the end state.
 
-A converter compiles this to a normalized `contracts/x-button.json` — the JSON is
+A converter compiles this to a normalized `contracts/x-button.json`: the JSON is
 build output, like a `.d.ts`, never the authoring form.
 
 Build one or more sources with:
@@ -187,7 +187,7 @@ and dynamic HTML-bearing property sinks, which need a future typed security cont
 
 ## Architecture and design record
 
-This repository is the reference **implementation** — the browser polyfill and the
+This repository is the reference **implementation**: the browser polyfill and the
 multi-target converter. The HTML Next language specification and its design record live in
 the Next Web Working Group site repository, [`nextwebwg/site`](https://github.com/nextwebwg/site):
 
@@ -208,6 +208,6 @@ HTML Next is library-agnostic. Any demanding component library can become a conf
 corpus for the generator while continuing to publish ordinary generated packages, and
 its consumers never have to adopt the experimental browser runtime.
 
-The `x-button` example uses a neutral native contract shape — semantic native elements, a
+The `x-button` example uses a neutral native contract shape: semantic native elements, a
 `data-x-button` owned-element marker, and plain `data-variant`/`data-size` state
 attributes. It proves the generation architecture, not any particular design system.
