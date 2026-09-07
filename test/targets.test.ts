@@ -11,6 +11,33 @@ import { parseComponent } from "../src/parser.js";
 
 const fixtureUrl = new URL("./fixtures/looma-button.html", import.meta.url);
 
+function componentSource(
+  name: string,
+  tag: string,
+  nativeElement: string,
+  props: Record<string, unknown>,
+  template: string,
+): string {
+  return `<html7-component>
+    <script type="application/html7-contract+json">${JSON.stringify({
+      version: 1,
+      name,
+      tag,
+      status: "experimental",
+      summary: "A target compiler fixture.",
+      nativeElement,
+      props,
+    })}</script>
+    <template>${template}</template>
+  </html7-component>`;
+}
+
+function generated(source: string): Map<string, string> {
+  return new Map(
+    generateComponent(parseComponent(source)).map((artifact) => [artifact.path, artifact.content]),
+  );
+}
+
 async function targets(): Promise<Map<string, string>> {
   const source = await readFile(fixtureUrl, "utf8");
   return new Map(
@@ -50,5 +77,39 @@ describe("official target compilers", () => {
       generate: "client",
     });
     assert.ok(result.js.code.length > 0);
+  });
+
+  it("compiles non-button and native-boolean target projections", async () => {
+    const audio = generated(componentSource(
+      "Player",
+      "demo-player",
+      "audio",
+      {},
+      `<audio controls><slot></slot></audio>`,
+    ));
+    const action = generated(componentSource(
+      "Action",
+      "demo-action",
+      "button",
+      {
+        disabled: {
+          type: "boolean",
+          default: false,
+          target: { attribute: "disabled" },
+          description: "Disabled state.",
+        },
+      },
+      `<button :disabled="disabled"><slot></slot></button>`,
+    ));
+
+    await transform(audio.get("react/Player.tsx")!, { loader: "tsx" });
+    await transform(action.get("react/Action.tsx")!, { loader: "tsx" });
+    await transform(audio.get("vanilla/Player.js")!, { loader: "js" });
+    for (const [source, filename] of [
+      [audio.get("svelte/Player.svelte")!, "Player.svelte"],
+      [action.get("svelte/Action.svelte")!, "Action.svelte"],
+    ] as const) {
+      assert.ok(compileSvelte(source, { filename, generate: "client" }).js.code.length > 0);
+    }
   });
 });

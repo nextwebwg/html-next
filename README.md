@@ -124,10 +124,11 @@ The browser runtime is an explicit one-shot interpreter for the same definition 
 </script>
 ```
 
-`lowerDocument()` validates definitions, replaces invocation hosts with native roots,
-passes through standard attributes, moves children into the default slot, and removes
-definition wrappers. The MVP does not observe later mutations; reactive browser
-execution is coming soon.
+`lowerDocument()` validates every definition and invocation before it changes the live
+document. It then replaces invocation hosts with native roots, passes through standard
+attributes, moves children into the default slot, and removes definition wrappers. A
+failed pass leaves the source DOM available for correction and retry. The MVP does not
+observe later mutations; reactive browser execution is coming soon.
 
 The runtime does not register Custom Elements. HTML7 language nodes and component
 invocations are input syntax that can be lowered to semantic native DOM.
@@ -180,7 +181,8 @@ The intended language also includes:
 - additional targets and restricted static output.
 
 Unsupported reserved syntax fails explicitly in the MVP; it is not silently emitted as
-literal HTML.
+literal HTML. The same is true for inline event-handler/framework-directive attributes
+and dynamic HTML-bearing property sinks, which need a future typed security contract.
 
 ## Architecture and design record
 

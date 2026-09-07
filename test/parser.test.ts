@@ -148,6 +148,49 @@ describe("parseComponent", () => {
     );
   });
 
+  it("rejects executable literal attributes and unsafe property sinks", () => {
+    for (const attribute of [
+      "@click",
+      "v-html",
+      "#default",
+      "on:click",
+      "use:action",
+      "transition:fade",
+      "animate:flip",
+      "onclick",
+    ]) {
+      expectDiagnostic("H7T010", componentSource(`<button ${attribute}="payload"></button>`));
+    }
+
+    expectDiagnostic(
+      "H7T007",
+      componentSource(
+        `<button .outerHTML="markup"></button>`,
+        {
+          markup: {
+            type: "string",
+            target: { property: "outerHTML" },
+            description: "Replacement markup.",
+          },
+        },
+      ),
+    );
+    expectDiagnostic(
+      "H7T007",
+      componentSource(
+        `<iframe .srcdoc="markup"></iframe>`,
+        {
+          markup: {
+            type: "string",
+            target: { property: "srcdoc" },
+            description: "Embedded markup.",
+          },
+        },
+        { nativeElement: "iframe" },
+      ),
+    );
+  });
+
   it("rejects invalid default-slot shapes and reserved language elements", () => {
     expectDiagnostic(
       "H7T008",
@@ -159,4 +202,3 @@ describe("parseComponent", () => {
     );
   });
 });
-

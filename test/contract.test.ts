@@ -160,6 +160,32 @@ describe("defineContract", () => {
     expectDiagnostic("H7C010", () => defineFromButtonFile(invalidProp));
   });
 
+  it("requires known native elements and canonical property targets", () => {
+    expectDiagnostic("H7C008", () =>
+      defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
+    );
+
+    const canonical = validContract();
+    canonical.props = {
+      action: {
+        type: "string",
+        target: { property: "formaction" },
+        description: "Submission destination.",
+      },
+    };
+    assert.equal(defineFromButtonFile(canonical).props.action?.target.property, "formAction");
+
+    const unknownProperty = validContract();
+    unknownProperty.props = {
+      action: {
+        type: "string",
+        target: { property: "notAButtonProperty" },
+        description: "Invalid destination.",
+      },
+    };
+    expectDiagnostic("H7P001", () => defineFromButtonFile(unknownProperty));
+  });
+
   it("rejects invalid types, defaults, required flags, and targets", () => {
     const cases: Array<[string, (input: ReturnType<typeof validContract>) => void]> = [
       ["H7C013", (input) => { input.props.variant.type = "date" as never; }],
@@ -287,6 +313,11 @@ describe("serializePropTarget", () => {
           target: { attribute: "data-count" },
           description: "Item count.",
         },
+        action: {
+          type: "string",
+          target: { property: "formAction" },
+          description: "Submission destination.",
+        },
         variant: validContract().props.variant,
         disabled: {
           type: "boolean",
@@ -327,6 +358,22 @@ describe("serializePropTarget", () => {
       name: "data-enabled",
       value: null,
     });
+    assert.deepEqual(serializePropTarget(contract.props.enabled!, null), {
+      kind: "attribute",
+      name: "data-enabled",
+      value: null,
+    });
+    assert.deepEqual(serializePropTarget(contract.props.action!, null), {
+      kind: "property",
+      name: "formAction",
+      value: null,
+    });
+    assert.throws(
+      () => serializePropTarget(contract.props.disabled!, null),
+      (error: unknown) =>
+        error instanceof Html7DiagnosticError &&
+        error.diagnostic.code === "H7C021",
+    );
     assert.throws(
       () => serializePropTarget(contract.props.disabled!, undefined),
       (error: unknown) =>

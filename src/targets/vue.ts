@@ -1,7 +1,7 @@
 import type { ComponentDefinition, TemplateNode } from "../template.js";
 import {
   escapeHtml,
-  isBooleanAttributeBinding,
+  frameworkBindingExpression,
   literalAttribute,
   propKey,
   quote,
@@ -23,9 +23,13 @@ function renderNode(
   const attributes = node.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
     const value = access(attribute.expression);
-    const expression = isBooleanAttributeBinding(attribute, definition.contract.props)
-      ? `${value} ? '' : undefined`
-      : value;
+    const expression = frameworkBindingExpression(
+      attribute,
+      definition.contract.props,
+      node.name,
+      value,
+      "''",
+    );
     return `:${attribute.name}=${quote(expression)}`;
   });
   const open = `<${node.name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
@@ -48,9 +52,13 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const rootAttributes = template.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
     const value = access(attribute.expression);
-    const expression = isBooleanAttributeBinding(attribute, contract.props)
-      ? `${value} ? '' : undefined`
-      : value;
+    const expression = frameworkBindingExpression(
+      attribute,
+      contract.props,
+      template.name,
+      value,
+      "''",
+    );
     return `:${attribute.name}=${quote(expression)}`;
   });
   const children = template.children.map((child) => renderNode(child, definition, 1)).join("\n");

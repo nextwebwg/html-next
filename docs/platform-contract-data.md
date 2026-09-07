@@ -1,6 +1,6 @@
 # Platform contract data
 
-Status: selected data-source direction; implementation not started
+Status: component-MVP subset implemented; richer Web IDL metadata coming soon
 Last updated: 2026-09-06
 
 HTML7 needs an up-to-date mapping from native element names to DOM interfaces and from
@@ -38,8 +38,9 @@ of universal support.
 
 ## Generated HTML7 manifest
 
-The HTML7 library build—not an application build and not the browser at startup—should
-combine these sources into a compact, versioned manifest. Its central data structure is
+The HTML7 library build—not an application build and not the browser at startup—combines
+pinned TypeScript DOM declarations into the component MVP's compact, versioned manifest.
+Its central data structure is
 a map whose keys are ASCII-lowercase property names and whose values retain the actual
 case-sensitive DOM property spelling:
 
@@ -62,8 +63,11 @@ case-sensitive DOM property spelling:
 }
 ```
 
-This is illustrative. Real generation must model inheritance without needlessly
-duplicating every `Node` and `Element` member under every tag.
+This richer object form is the intended contract. The component MVP already generates
+tag-to-interface mappings, interface inheritance, and lowercase-to-exact property names,
+but does not yet emit the `type`, `writable`, security, or browser-support fields. It
+models inheritance without duplicating every `Node` and `Element` member under every
+tag.
 
 The lowercase key is the browser-normalized lookup key. The `name` field is the exact
 IDL property used by generated code and the browser runtime. Authors may therefore write:
@@ -99,7 +103,8 @@ runtime tie-breaker.
 
 ## Compile-time and runtime use
 
-The HTML7 compiler uses the full manifest for:
+The component MVP uses the implemented manifest subset for property existence, exact
+spelling, and native-element type generation. The future full manifest will also support:
 
 - validating whether a property exists on an element;
 - resolving normalized spelling to the exact IDL member;

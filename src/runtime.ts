@@ -3,6 +3,8 @@ import { fail } from "./diagnostics.js";
 import {
   CONTRACT_TYPE,
   isReservedElement,
+  validateLiteralAttributeName,
+  validateMvpDomProperty,
   validateSimplePropExpression,
 } from "./language.js";
 import { resolveDomProperty } from "./platform.js";
@@ -23,6 +25,13 @@ interface LiveDefinition {
   readonly wrapper: Element;
   readonly style: HTMLStyleElement | undefined;
   readonly definition: ComponentDefinition;
+}
+
+interface PreparedInvocation {
+  readonly invocation: Element;
+  readonly nativeRoot: Element;
+  readonly slotContainers: readonly Element[];
+  readonly children: readonly Node[];
 }
 
 function significant(nodes: ArrayLike<Node>): Node[] {
@@ -68,12 +77,11 @@ function parseAttributes(
       if (name === undefined) {
         fail("H7P001", `\`${key}\` is not a known property of <${element.localName}>.`, source);
       }
-      if (name === "innerHTML") {
-        fail("H7T007", "Dynamic innerHTML requires a future trusted-HTML type.", source);
-      }
+      validateMvpDomProperty(name, source);
       return { kind: "property", key, name, expression };
     }
 
+    validateLiteralAttributeName(attribute.name, source);
     return { kind: "literal", name: attribute.name, value: attribute.value };
   });
 }
@@ -239,6 +247,7 @@ function renderElement(
   slotChildren: readonly Node[],
   document: Document,
   passThrough: readonly Attr[] = [],
+  slotContainers: Element[] = [],
 ): Element {
   const element = document.createElement(node.name);
   for (const attribute of passThrough) {
@@ -271,9 +280,10 @@ function renderElement(
     if (child.kind === "text") {
       element.append(document.createTextNode(child.value));
     } else if (child.kind === "slot") {
+      slotContainers.push(element);
       element.append(...slotChildren);
     } else {
-      element.append(renderElement(child, targets, slotChildren, document));
+      element.append(renderElement(child, targets, slotChildren, document, [], slotContainers));
     }
   }
   return element;
@@ -285,8 +295,6 @@ function renderElement(
  */
 export function lowerDocument(root: Document = document): number {
   const wrappers = Array.from(root.querySelectorAll("html7-component"));
-  for (const wrapper of wrappers) wrapper.setAttribute("hidden", "");
-
   const definitions = wrappers.map(parseDefinition);
   const tags = new Set<string>();
   for (const { definition } of definitions) {
@@ -296,33 +304,38 @@ export function lowerDocument(root: Document = document): number {
     tags.add(definition.contract.tag);
   }
 
-  const invocations = definitions.map(({ definition }) => ({
-    definition,
-    elements: Array.from(root.querySelectorAll(definition.contract.tag)).filter(
+  const prepared: PreparedInvocation[] = [];
+  for (const { definition } of definitions) {
+    const invocations = Array.from(root.querySelectorAll(definition.contract.tag)).filter(
       (element) => element.closest("html7-component") === null,
-    ),
-  }));
+    );
+    for (const invocation of invocations) {
+      const { targets, passThrough } = readInvocation(invocation, definition.contract);
+      const children = Array.from(invocation.childNodes);
+      const slotContainers: Element[] = [];
+      const nativeRoot = renderElement(
+        definition.template,
+        targets,
+        children.map((child) => child.cloneNode(true)),
+        invocation.ownerDocument,
+        passThrough,
+        slotContainers,
+      );
+      prepared.push({ invocation, nativeRoot, slotContainers, children });
+    }
+  }
 
+  for (const wrapper of wrappers) wrapper.setAttribute("hidden", "");
   for (const live of definitions) {
     if (live.style !== undefined) live.wrapper.ownerDocument.head.append(live.style);
     live.wrapper.remove();
   }
 
-  let lowered = 0;
-  for (const { definition, elements } of invocations) {
-    for (const invocation of elements) {
-      const { targets, passThrough } = readInvocation(invocation, definition.contract);
-      const children = Array.from(invocation.childNodes);
-      const nativeRoot = renderElement(
-        definition.template,
-        targets,
-        children,
-        invocation.ownerDocument,
-        passThrough,
-      );
-      invocation.replaceWith(nativeRoot);
-      lowered += 1;
+  for (const invocation of prepared) {
+    for (const slotContainer of invocation.slotContainers) {
+      slotContainer.replaceChildren(...invocation.children);
     }
+    invocation.invocation.replaceWith(invocation.nativeRoot);
   }
-  return lowered;
+  return prepared.length;
 }

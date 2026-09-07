@@ -52,6 +52,21 @@ function componentSource(template: string): string {
   </html7-component>`;
 }
 
+function audioSource(): string {
+  return `<html7-component>
+    <script type="application/html7-contract+json">${JSON.stringify({
+      version: 1,
+      name: "Player",
+      tag: "demo-player",
+      status: "experimental",
+      summary: "An audio fixture.",
+      nativeElement: "audio",
+      props: {},
+    })}</script>
+    <template><audio controls><slot></slot></audio></template>
+  </html7-component>`;
+}
+
 describe("generateComponent", () => {
   it("snapshots every deterministic Looma projection", async () => {
     const source = await readFile(fixtureUrl, "utf8");
@@ -78,7 +93,7 @@ describe("generateComponent", () => {
     assert.ok(vanilla.indexOf("attributes") < vanilla.indexOf('setAttribute("data-looma"'));
 
     const react = byPath.get("react/Button.tsx")!;
-    assert.match(react, /ref\?: Ref<HTMLButtonElement>/);
+    assert.match(react, /ref\?: Ref<ComponentRef<"button">>/);
     assert.doesNotMatch(react, /forwardRef/);
     assert.ok(react.indexOf("{...nativeProps}") < react.indexOf("data-looma"));
 
@@ -125,12 +140,26 @@ describe("generateComponent", () => {
     assert.match(byPath.get("vanilla/Action.js")!, /=== undefined \? false/);
     assert.match(byPath.get("vanilla/Action.js")!, /\["formAction"\] =/);
     assert.match(byPath.get("react/Action.tsx")!, /formAction=\{prop0\}/);
+    assert.match(byPath.get("react/Action.tsx")!, /disabled=\{prop1\}/);
     assert.match(byPath.get("react/Action.tsx")!, /data-selected=\{prop2 \? "" : undefined\}/);
     assert.match(byPath.get("vue/Action.vue")!, /:formAction="props.destination"/);
+    assert.match(byPath.get("vue/Action.vue")!, /:disabled="props.disabled"/);
     assert.match(byPath.get("vue/Action.vue")!, /:data-selected="props.selected \? '' : undefined"/);
     assert.match(byPath.get("svelte/Action.svelte")!, /formAction=\{prop0\}/);
+    assert.match(byPath.get("svelte/Action.svelte")!, /disabled=\{prop1\}/);
     assert.match(byPath.get("svelte/Action.svelte")!, /data-selected=\{prop2 \? "" : undefined\}/);
     assert.match(byPath.get("vue/Action.vue")!, /A &amp; &quot;quote&quot;/);
     assert.match(byPath.get("svelte/Action.svelte")!, /&#123;literal&#125;/);
+  });
+
+  it("derives non-button native types from platform and framework contracts", () => {
+    const byPath = new Map(
+      generateComponent(parseComponent(audioSource())).map((artifact) => [artifact.path, artifact.content]),
+    );
+
+    assert.match(byPath.get("vanilla/Player.d.ts")!, /\): HTMLAudioElement;/);
+    assert.match(byPath.get("react/Player.tsx")!, /ComponentPropsWithoutRef<"audio">/);
+    assert.match(byPath.get("react/Player.tsx")!, /Ref<ComponentRef<"audio">>/);
+    assert.match(byPath.get("svelte/Player.svelte")!, /SvelteHTMLElements\["audio"\]/);
   });
 });

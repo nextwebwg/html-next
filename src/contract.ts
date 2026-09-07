@@ -1,4 +1,5 @@
 import { fail } from "./diagnostics.js";
+import { getDomInterface, resolveDomProperty } from "./platform.js";
 import type {
   ComponentContract,
   ContractStatus,
@@ -178,7 +179,7 @@ export function defineContract(
   }
   const summary = requiredString(object.summary, "summary", source);
   const nativeElement = requiredString(object.nativeElement, "nativeElement", source);
-  if (!/^[a-z][a-z0-9-]*$/.test(nativeElement)) {
+  if (!/^[a-z][a-z0-9-]*$/.test(nativeElement) || getDomInterface(nativeElement) === undefined) {
     fail("H7C008", "`nativeElement` must be a lowercase HTML element name.", source);
   }
 
@@ -200,6 +201,14 @@ export function defineContract(
   for (const propName of Object.keys(rawProps).sort()) {
     props[propName] = parseProp(propName, rawProps[propName], source);
   }
+  for (const [propName, prop] of Object.entries(props)) {
+    if (!("property" in prop.target)) continue;
+    const property = resolveDomProperty(nativeElement, prop.target.property);
+    if (property === undefined) {
+      fail("H7P001", `Property target \`${prop.target.property}\` for prop \`${propName}\` is not known on <${nativeElement}>.`, source);
+    }
+    props[propName] = deepFreeze({ ...prop, target: { property } });
+  }
 
   return deepFreeze({
     version: 1,
@@ -220,6 +229,15 @@ export function serializePropTarget(
   if (value === undefined) {
     if (prop.required) {
       fail("H7C020", "A required prop value was omitted.");
+    }
+    if ("attribute" in prop.target) {
+      return { kind: "attribute", name: prop.target.attribute, value: null };
+    }
+    return { kind: "property", name: prop.target.property, value: null };
+  }
+  if (value === null) {
+    if (prop.required) {
+      fail("H7C021", "A prop value does not satisfy its declared type.");
     }
     if ("attribute" in prop.target) {
       return { kind: "attribute", name: prop.target.attribute, value: null };
@@ -253,4 +271,3 @@ export type {
   PropType,
   SerializedPropTarget,
 } from "./types.js";
-

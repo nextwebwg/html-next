@@ -212,6 +212,9 @@ extension mechanism.
 contain a hyphen so it can coexist with current Custom Element naming constraints even
 though HTML7 does not require Custom Elements for lowering.
 
+`nativeElement` MUST be a lowercase native HTML tag present in the generated platform
+contract. Custom-element roots and unknown tags are outside the component MVP.
+
 Prop names MUST be ASCII identifiers beginning with a letter and containing letters,
 digits, `_`, or `-`. A contract MUST NOT declare two names that collapse to the same
 ASCII-lowercase key.
@@ -240,7 +243,9 @@ Attribute targets are serialized as follows:
 - `null` or an omitted optional prop removes the target unless a default exists.
 
 Property targets are assigned as typed values. Property targets MUST resolve through the
-static platform contract for the component's native root.
+static platform contract for the component's native root, even when a prop is not used by
+the current template. Normalized contracts store the platform contract's exact property
+casing.
 
 ### 5.4 Native attributes
 
@@ -341,13 +346,17 @@ HTML attribute parsing is case-insensitive in HTML documents while DOM property 
 are case-sensitive. HTML7 MUST NOT recover property names by enumerating live element
 objects during ordinary execution.
 
-At HTML7 library build time, a generator consumes pinned Web IDL / DOM type data and
-emits a versioned static manifest. The compact runtime representation contains:
+At HTML7 library build time, a generator consumes pinned DOM type data and emits a
+versioned static manifest. The component MVP's compact runtime representation contains:
 
 - native tag name to DOM interface mapping;
 - DOM interface inheritance;
-- per-interface property maps from ASCII-lowercase keys to exact IDL spelling; and
-- the minimum flags required for writable and security-sensitive properties.
+- per-interface property maps from ASCII-lowercase keys to exact IDL spelling.
+
+A later platform-contract profile will add property types, writability, security-sensitive
+sink classification, and browser-support metadata. Until then, the component MVP applies
+an explicit shared denylist to dynamic HTML/content sinks and inline executable attribute
+syntax; the manifest itself MUST NOT be represented as carrying metadata it does not emit.
 
 Conceptually:
 
@@ -517,6 +526,12 @@ are parsed by HTML7.
 The MVP does not permit raw dynamic HTML. Future URL, style, and HTML-valued sinks MUST
 define contextual validation and escaping. A limited expression language reduces code
 execution risk but does not make untrusted component definitions safe.
+
+Literal template attributes that a generated target could reinterpret as executable
+framework syntax are non-conforming in the MVP. This includes inline `on*` handlers and
+framework directive prefixes such as `@`, `v-`, `#`, `on:`, `use:`, `transition:`, and
+`animate:`. Dynamic property bindings to `innerHTML`, `outerHTML`, `srcdoc`, and `on*`
+properties are also rejected until a later typed security policy defines their inputs.
 
 ## 14. Accessibility and forms
 

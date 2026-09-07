@@ -9,6 +9,8 @@ import { fail } from "./diagnostics.js";
 import {
   CONTRACT_TYPE,
   isReservedElement,
+  validateLiteralAttributeName,
+  validateMvpDomProperty,
   validateSimplePropExpression,
 } from "./language.js";
 import { resolveDomProperty } from "./platform.js";
@@ -88,12 +90,11 @@ function parseAttributes(
       if (name === undefined) {
         fail("H7P001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
       }
-      if (name === "innerHTML") {
-        fail("H7T007", "Dynamic innerHTML requires a future trusted-HTML type.", source);
-      }
+      validateMvpDomProperty(name, source);
       return { kind: "property", key, name, expression };
     }
 
+    validateLiteralAttributeName(attribute.name, source);
     return { kind: "literal", name: attribute.name, value: attribute.value };
   });
 }

@@ -47,6 +47,139 @@ describe("browser runtime", { skip: !enabled }, () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} preserves the document when a later invocation is invalid`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const contract = JSON.stringify({
+          version: 1,
+          name: "TransactionalButton",
+          tag: "demo-transactional-button",
+          status: "early",
+          summary: "Transactional test component.",
+          nativeElement: "button",
+          props: {
+            label: {
+              type: "string",
+              required: true,
+              target: { attribute: "data-label" },
+              description: "Button label.",
+            },
+          },
+        });
+        await page.setContent(`<html7-component id="definition"><script type="application/html7-contract+json">${contract}</script><template><button :data-label="label"><slot></slot></button></template><style id="definition-style">button { color: red; }</style></html7-component><main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
+        await page.addScriptTag({ path: bundlePath });
+
+        const result = await page.evaluate(`(() => {
+          const definition = document.querySelector("#definition");
+          const style = document.querySelector("#definition-style");
+          const first = document.querySelector("#first");
+          const second = document.querySelector("#second");
+          const keptChild = document.querySelector("#kept-child");
+          let diagnostic = "";
+          try {
+            window.Html7Runtime.lowerDocument();
+          } catch (error) {
+            diagnostic = error.diagnostic.code;
+          }
+          const unchanged = {
+            diagnostic,
+            definitionConnected: definition.isConnected,
+            definitionHidden: definition.hasAttribute("hidden"),
+            styleStillInDefinition: style.parentElement === definition,
+            firstUnchanged: document.querySelector("#first") === first,
+            secondUnchanged: document.querySelector("#second") === second,
+            keptChildUnchanged: document.querySelector("#kept-child") === keptChild,
+          };
+
+          second.setAttribute("label", "second");
+          const lowered = window.Html7Runtime.lowerDocument();
+          const loweredFirst = document.querySelector("#first");
+          return {
+            unchanged,
+            lowered,
+            definitionRemoved: !definition.isConnected,
+            styleMovedToHead: style.parentElement === document.head,
+            firstIsButton: loweredFirst instanceof HTMLButtonElement,
+            childIdentityPreserved: loweredFirst.querySelector("#kept-child") === keptChild,
+          };
+        })()`);
+
+        assert.deepEqual(result, {
+          unchanged: {
+            diagnostic: "H7C020",
+            definitionConnected: true,
+            definitionHidden: false,
+            styleStillInDefinition: true,
+            firstUnchanged: true,
+            secondUnchanged: true,
+            keptChildUnchanged: true,
+          },
+          lowered: 2,
+          definitionRemoved: true,
+          styleMovedToHead: true,
+          firstIsButton: true,
+          childIdentityPreserved: true,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} rejects executable literal attributes and unsafe property sinks`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const diagnostic = async (source: string): Promise<string> => {
+          await page.setContent(source);
+          await page.addScriptTag({ path: bundlePath });
+          return page.evaluate(`(() => {
+            try {
+              window.Html7Runtime.lowerDocument();
+              return "no diagnostic";
+            } catch (error) {
+              return error.diagnostic.code;
+            }
+          })()`);
+        };
+        const buttonContract = JSON.stringify({
+          version: 1,
+          name: "UnsafeButton",
+          tag: "demo-unsafe-button",
+          status: "early",
+          summary: "Unsafe test component.",
+          nativeElement: "button",
+          props: {},
+        });
+        const iframeContract = JSON.stringify({
+          version: 1,
+          name: "UnsafeFrame",
+          tag: "demo-unsafe-frame",
+          status: "early",
+          summary: "Unsafe test component.",
+          nativeElement: "iframe",
+          props: {
+            markup: {
+              type: "string",
+              target: { property: "srcdoc" },
+              description: "Embedded markup.",
+            },
+          },
+        });
+
+        assert.equal(
+          await diagnostic(`<html7-component><script type="application/html7-contract+json">${buttonContract}</script><template><button onclick="alert(1)"></button></template></html7-component>`),
+          "H7T010",
+        );
+        assert.equal(
+          await diagnostic(`<html7-component><script type="application/html7-contract+json">${iframeContract}</script><template><iframe .srcdoc="markup"></iframe></template></html7-component>`),
+          "H7T007",
+        );
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} lowers definitions to equivalent native DOM`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
