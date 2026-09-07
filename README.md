@@ -187,13 +187,20 @@ and dynamic HTML-bearing property sinks, which need a future typed security cont
 
 ## Architecture and design record
 
-- [Technical specification](./docs/specification.md)
-- [Component-generation MVP plan](./docs/mvp-plan.md)
-- [Living design notebook](./docs/design-notebook.md)
-- [Template expression proposal](./docs/template-expressions.md)
-- [Static platform contract data](./docs/platform-contract-data.md)
-- [Browser parser findings](./docs/browser-findings.md)
-- [Liquid, Squarespace, Vue, Svelte, Mitosis, and other prior art](./docs/prior-art.md)
+This repository is the reference **implementation** — the browser polyfill and the
+multi-target converter. The HTML7 language specification and its design record live in
+the Next Web Working Group site repository, [`nextwebwg/site`](https://github.com/nextwebwg/site):
+
+- [HTML7 working draft](https://github.com/nextwebwg/site/blob/main/index.html)
+- [Technical specification](https://github.com/nextwebwg/site/blob/main/docs/specification.md)
+- [Living design notebook](https://github.com/nextwebwg/site/blob/main/docs/design-notebook.md)
+- [Template expression proposal](https://github.com/nextwebwg/site/blob/main/docs/template-expressions.md)
+- [Static platform contract data](https://github.com/nextwebwg/site/blob/main/docs/platform-contract-data.md)
+- [Browser parser findings](https://github.com/nextwebwg/site/blob/main/docs/browser-findings.md)
+- [Liquid, Squarespace, Vue, Svelte, Mitosis, and other prior art](https://github.com/nextwebwg/site/blob/main/docs/prior-art.md)
+
+This repository's own build plan remains here:
+[Component-generation MVP plan](./docs/mvp-plan.md).
 
 ## Relationship to Looma
 
