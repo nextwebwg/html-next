@@ -8,6 +8,11 @@ status: early-release
 
 # HTML7 component-generation MVP plan
 
+> The HTML7 language specification and design record now live in the
+> [`nextwebwg/site`](https://github.com/nextwebwg/site) repository. Paths such as
+> `docs/specification.md` referenced below point to their original location during MVP
+> development; this repository is the reference implementation (polyfill + converter).
+
 ## Goal Capsule
 
 Build the smallest end-to-end HTML7 implementation that proves a Looma primitive can be
