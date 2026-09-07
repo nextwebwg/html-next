@@ -1,5 +1,8 @@
 # HTML7 design notebook
 
+Intended public repository: `github.com/nextwebwg/html7` (not created or published by
+this MVP work).
+
 Last updated: 2026-09-06
 
 This is a living record of the idea as it develops. Examples are illustrative unless a

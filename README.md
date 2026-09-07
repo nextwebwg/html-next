@@ -6,7 +6,8 @@ deliberately evolved HTML language—instead of framework-specific JavaScript.
 
 > **Early release:** the repository currently implements only the component-generation
 > MVP. The syntax and generated output are not stable, and no npm package or public
-> GitHub repository has been published from this checkout.
+> GitHub repository has been published from this checkout. The intended public home is
+> `github.com/nextwebwg/html7` when the project is ready to publish.
 
 The MVP proves one end-to-end slice: author a native-root component once as literal,
 browser-parseable HTML, then generate Vanilla DOM, React, Vue, Svelte, CSS,
