@@ -1,0 +1,19 @@
+{
+  "name": "@nextwebwg/html7",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An early HTML7 component-generation experiment.",
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
