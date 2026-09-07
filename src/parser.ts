@@ -67,7 +67,7 @@ function collectTargets(root: Element, source: string): Record<string, PropTarge
   const record = (name: string, target: PropTarget): void => {
     const prior = targets[name];
     if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(target)) {
-      fail("H7T004", `Prop \`${name}\` is bound to conflicting targets.`, source);
+      fail("HT004", `Prop \`${name}\` is bound to conflicting targets.`, source);
     }
     targets[name] = target;
   };
@@ -98,15 +98,15 @@ function readProps(
   for (const element of directElements(group, "prop")) {
     const name = attr(element, "name");
     if (name === undefined || name === "") {
-      fail("H7C010", "A <prop> requires a `name` attribute.", source);
+      fail("HC010", "A <prop> requires a `name` attribute.", source);
     }
     const typeAttribute = attr(element, "type");
     if (typeAttribute === undefined || typeAttribute === "") {
-      fail("H7C013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
+      fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
     }
     const target = targets[name];
     if (target === undefined) {
-      fail("H7C018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
+      fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
     }
     const type = parseTypeAttribute(typeAttribute);
     const spec: Record<string, unknown> = { type, target, description: textContent(element).trim() };
@@ -125,7 +125,7 @@ function parseAttributes(
 ): TemplateAttribute[] {
   return element.attrs.map((attribute) => {
     if (attribute.name.startsWith("bind:")) {
-      fail("H7T005", "Two-way bindings are reserved but not supported by the component MVP.", source);
+      fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
     }
 
     if (attribute.name.startsWith(":")) {
@@ -133,7 +133,7 @@ function parseAttributes(
       const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("attribute" in target) || target.attribute !== name) {
-        fail("H7T004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
+        fail("HT004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
       }
       return { kind: "attribute", name, expression };
     }
@@ -143,11 +143,11 @@ function parseAttributes(
       const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("property" in target) || target.property.toLowerCase() !== key) {
-        fail("H7T004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
+        fail("HT004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
       }
       const name = resolveDomProperty(element.tagName, key);
       if (name === undefined) {
-        fail("H7P001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
+        fail("HP001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
       }
       validateMvpDomProperty(name, source);
       return { kind: "property", key, name, expression };
@@ -165,7 +165,7 @@ function parseElement(
   slotCount: { value: number },
 ): ElementNode {
   if (isReservedElement(element.tagName)) {
-    fail("H7T009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
+    fail("HT009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
   }
 
   const attributes = parseAttributes(element, contract, source);
@@ -180,7 +180,7 @@ function parseElement(
     if (child.tagName === "slot") {
       slotCount.value += 1;
       if (slotCount.value > 1 || child.attrs.length > 0 || significant(child.childNodes).length > 0) {
-        fail("H7T008", "The MVP supports exactly one empty default slot.", source);
+        fail("HT008", "The MVP supports exactly one empty default slot.", source);
       }
       children.push({ kind: "slot" });
       continue;
@@ -194,7 +194,7 @@ function parseElement(
     ) &&
     children.length > 0
   ) {
-    fail("H7T006", "A content-replacing property binding cannot coexist with children.", source);
+    fail("HT006", "A content-replacing property binding cannot coexist with children.", source);
   }
 
   return { kind: "element", name: element.tagName, attributes, children };
@@ -207,7 +207,7 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
     onParseError: (error) => parserErrors.push(error),
   });
   if (parserErrors.length > 0) {
-    fail("H7S005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
+    fail("HS005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
   }
 
   const roots = significant(fragment.childNodes).filter(isElement);
@@ -216,10 +216,10 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
     roots[0]!.tagName !== "template" ||
     attr(roots[0]!, "component") === undefined
   ) {
-    fail("H7S001", "A source must contain exactly one top-level <template component>.", source);
+    fail("HS001", "A source must contain exactly one top-level <template component>.", source);
   }
   if (significant(fragment.childNodes).length !== 1) {
-    fail("H7S001", "A source must contain only one top-level component definition.", source);
+    fail("HS001", "A source must contain only one top-level component definition.", source);
   }
   const wrapper = roots[0]! as Template;
   const tag = attr(wrapper, "component")!;
@@ -231,14 +231,14 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
   const propGroups = contentElement("props");
   const styles = contentElement("style");
   if (propGroups.length > 1 || styles.length > 1) {
-    fail("H7S002", "A component has an optional <props> group, one markup root, and an optional <style>.", source);
+    fail("HS002", "A component has an optional <props> group, one markup root, and an optional <style>.", source);
   }
 
   // Everything that is not the props group or a style is the component markup.
   const known = new Set<Element>([...propGroups, ...styles]);
   const markup = significant(content).filter((node) => !known.has(node as Element));
   if (markup.length !== 1 || !isElement(markup[0]!)) {
-    fail("H7T001", "A component's markup must be exactly one element root.", source);
+    fail("HT001", "A component's markup must be exactly one element root.", source);
   }
   const root = markup[0] as Element;
 

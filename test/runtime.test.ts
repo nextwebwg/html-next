@@ -7,7 +7,7 @@ import { after, before, describe, it } from "node:test";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-const enabled = process.env.HTML7_BROWSER_TEST === "1";
+const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
 const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
 
@@ -21,13 +21,13 @@ describe("browser runtime", { skip: !enabled }, () => {
     const runtimeSource = await readFile(runtimeUrl, "utf8");
     assert.doesNotMatch(runtimeSource, /\beval\s*\(|new\s+Function\s*\(|customElements\.define\s*\(/);
 
-    temporaryDirectory = await mkdtemp(join(tmpdir(), "html7-runtime-"));
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-runtime-"));
     bundlePath = join(temporaryDirectory, "runtime.js");
     await build({
       entryPoints: [runtimeUrl.pathname],
       bundle: true,
       format: "iife",
-      globalName: "Html7Runtime",
+      globalName: "HtmlRuntime",
       outfile: bundlePath,
       platform: "browser",
       target: ["es2022"],
@@ -68,7 +68,7 @@ describe("browser runtime", { skip: !enabled }, () => {
           const keptChild = document.querySelector("#kept-child");
           let diagnostic = "";
           try {
-            window.Html7Runtime.lowerDocument();
+            window.HtmlRuntime.lowerDocument();
           } catch (error) {
             diagnostic = error.diagnostic.code;
           }
@@ -82,7 +82,7 @@ describe("browser runtime", { skip: !enabled }, () => {
           };
 
           second.setAttribute("label", "second");
-          const lowered = window.Html7Runtime.lowerDocument();
+          const lowered = window.HtmlRuntime.lowerDocument();
           const loweredFirst = document.querySelector("#first");
           return {
             unchanged,
@@ -96,7 +96,7 @@ describe("browser runtime", { skip: !enabled }, () => {
 
         assert.deepEqual(result, {
           unchanged: {
-            diagnostic: "H7C020",
+            diagnostic: "HC020",
             definitionConnected: true,
             styleStillInDefinition: true,
             firstUnchanged: true,
@@ -123,7 +123,7 @@ describe("browser runtime", { skip: !enabled }, () => {
           await page.addScriptTag({ path: bundlePath });
           return page.evaluate(`(() => {
             try {
-              window.Html7Runtime.lowerDocument();
+              window.HtmlRuntime.lowerDocument();
               return "no diagnostic";
             } catch (error) {
               return error.diagnostic.code;
@@ -138,8 +138,8 @@ describe("browser runtime", { skip: !enabled }, () => {
           `<props><prop name="markup" type="string">Embedded markup.</prop></props>` +
           `<iframe .srcdoc="markup"></iframe></template>`;
 
-        assert.equal(await diagnostic(buttonMarkup), "H7T010");
-        assert.equal(await diagnostic(iframeMarkup), "H7T007");
+        assert.equal(await diagnostic(buttonMarkup), "HT010");
+        assert.equal(await diagnostic(iframeMarkup), "HT007");
       } finally {
         await browser.close();
       }
@@ -154,7 +154,7 @@ describe("browser runtime", { skip: !enabled }, () => {
 
         const result = await page.evaluate(`(() => {
           const keptChild = document.querySelector("#kept-child");
-          const lowered = window.Html7Runtime.lowerDocument();
+          const lowered = window.HtmlRuntime.lowerDocument();
 
           function snapshot(element) {
             return {

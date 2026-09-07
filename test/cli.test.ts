@@ -26,7 +26,7 @@ async function snapshot(directory: string): Promise<Record<string, string>> {
 
 describe("buildComponents", () => {
   it("builds deterministic component, documentation, and manifest artifacts", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "html7-cli-"));
+    const directory = await mkdtemp(join(tmpdir(), "html-next-cli-"));
     try {
       const first = await buildComponents([fixture], directory);
       const firstSnapshot = await snapshot(directory);
@@ -38,7 +38,7 @@ describe("buildComponents", () => {
       assert.deepEqual(Object.keys(firstSnapshot), [
         "contracts/x-button.json",
         "docs/x-button.md",
-        "html7.manifest.json",
+        "html.manifest.json",
         "react/XButton.tsx",
         "styles/x-button.css",
         "svelte/XButton.svelte",
@@ -47,7 +47,7 @@ describe("buildComponents", () => {
         "vue/XButton.vue",
       ]);
 
-      const manifest = JSON.parse(firstSnapshot["html7.manifest.json"]!) as {
+      const manifest = JSON.parse(firstSnapshot["html.manifest.json"]!) as {
         generatorVersion: string;
         components: Array<{ name: string; tag: string; artifacts: string[] }>;
       };
@@ -61,7 +61,7 @@ describe("buildComponents", () => {
   });
 
   it("rejects an empty build and colliding generated paths", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "html7-cli-errors-"));
+    const directory = await mkdtemp(join(tmpdir(), "html-next-cli-errors-"));
     try {
       await assert.rejects(() => buildComponents([], directory), /at least one component/i);
       await assert.rejects(

@@ -1,11 +1,11 @@
 {
-  "name": "@nextwebwg/html7",
+  "name": "@nextwebwg/html",
   "version": "0.0.0",
   "private": true,
-  "description": "An early HTML7 component-generation experiment.",
+  "description": "Polyfill and component bridge for the HTML Next proposals.",
   "type": "module",
   "bin": {
-    "html7": "./dist/cli.js"
+    "html-next": "./dist/cli.js"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -20,7 +20,7 @@
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check",
     "test": "node --import tsx --test test/*.test.ts",
-    "test:browser": "HTML7_BROWSER_TEST=1 node --import tsx --test test/runtime.test.ts",
+    "test:browser": "HTMLNEXT_BROWSER_TEST=1 node --import tsx --test test/runtime.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

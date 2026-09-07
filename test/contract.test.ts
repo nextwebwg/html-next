@@ -5,7 +5,7 @@ import {
   defineContract,
   serializePropTarget,
 } from "../src/contract.js";
-import { Html7DiagnosticError } from "../src/diagnostics.js";
+import { HtmlDiagnosticError } from "../src/diagnostics.js";
 
 // Deliberately loose: several tests mutate this fixture into invalid runtime data.
 // `defineContract()` accepts unknown input and is responsible for narrowing it. The
@@ -29,7 +29,7 @@ function validContract(): any {
 
 function expectDiagnostic(code: string, operation: () => unknown): void {
   assert.throws(operation, (error: unknown) => {
-    assert.ok(error instanceof Html7DiagnosticError);
+    assert.ok(error instanceof HtmlDiagnosticError);
     assert.equal(error.diagnostic.code, code);
     assert.equal(error.diagnostic.source, "button.html");
     assert.ok(error.diagnostic.message.length > 0);
@@ -114,37 +114,37 @@ describe("defineContract", () => {
   });
 
   it("rejects unknown fields at every schema object boundary", () => {
-    expectDiagnostic("H7C002", () =>
+    expectDiagnostic("HC002", () =>
       defineFromButtonFile({ ...validContract(), typo: true }),
     );
 
     const unknownProp = validContract();
     Object.assign(unknownProp.props.variant, { typo: true });
-    expectDiagnostic("H7C002", () => defineFromButtonFile(unknownProp));
+    expectDiagnostic("HC002", () => defineFromButtonFile(unknownProp));
 
     const unknownType = validContract();
     unknownType.props.variant.type = {
       enum: ["outline", "solid"],
       typo: true,
     } as typeof unknownType.props.variant.type;
-    expectDiagnostic("H7C002", () => defineFromButtonFile(unknownType));
+    expectDiagnostic("HC002", () => defineFromButtonFile(unknownType));
 
     const unknownTarget = validContract();
     unknownTarget.props.variant.target = {
       attribute: "data-variant",
       typo: true,
     } as typeof unknownTarget.props.variant.target;
-    expectDiagnostic("H7C002", () => defineFromButtonFile(unknownTarget));
+    expectDiagnostic("HC002", () => defineFromButtonFile(unknownTarget));
   });
 
   it("rejects invalid tags, native elements, and prop names", () => {
     for (const tag of ["button", "Looma-button"]) {
-      expectDiagnostic("H7C005", () => defineWithTag(validContract(), tag));
+      expectDiagnostic("HC005", () => defineWithTag(validContract(), tag));
     }
-    expectDiagnostic("H7C008", () =>
+    expectDiagnostic("HC008", () =>
       defineFromButtonFile({ ...validContract(), nativeElement: "bad element" }),
     );
-    expectDiagnostic("H7C008", () =>
+    expectDiagnostic("HC008", () =>
       defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
     );
 
@@ -152,28 +152,28 @@ describe("defineContract", () => {
     invalidProp.props = {
       "1variant": invalidProp.props.variant,
     };
-    expectDiagnostic("H7C010", () => defineFromButtonFile(invalidProp));
+    expectDiagnostic("HC010", () => defineFromButtonFile(invalidProp));
   });
 
   it("rejects invalid types, defaults, required flags, and targets", () => {
     const cases: Array<[string, (input: ReturnType<typeof validContract>) => void]> = [
-      ["H7C013", (input) => { input.props.variant.type = "date" as never; }],
-      ["H7C014", (input) => { input.props.variant.type = { enum: [] }; }],
-      ["H7C014", (input) => { input.props.variant.type = { enum: ["a", "a"] }; }],
-      ["H7C015", (input) => { input.props.variant.default = "missing"; }],
-      ["H7C016", (input) => { input.props.variant.required = "yes" as never; }],
-      ["H7C019", (input) => { input.props.variant.required = true; }],
-      ["H7C017", (input) => { input.props.variant.target = {} as never; }],
-      ["H7C017", (input) => {
+      ["HC013", (input) => { input.props.variant.type = "date" as never; }],
+      ["HC014", (input) => { input.props.variant.type = { enum: [] }; }],
+      ["HC014", (input) => { input.props.variant.type = { enum: ["a", "a"] }; }],
+      ["HC015", (input) => { input.props.variant.default = "missing"; }],
+      ["HC016", (input) => { input.props.variant.required = "yes" as never; }],
+      ["HC019", (input) => { input.props.variant.required = true; }],
+      ["HC017", (input) => { input.props.variant.target = {} as never; }],
+      ["HC017", (input) => {
         input.props.variant.target = {
           attribute: "data-variant",
           property: "value",
         } as never;
       }],
-      ["H7C017", (input) => {
+      ["HC017", (input) => {
         input.props.variant.target = { attribute: "bad name" };
       }],
-      ["H7C017", (input) => {
+      ["HC017", (input) => {
         input.props.variant.target = { property: "bad-name" } as never;
       }],
     ];
@@ -195,7 +195,7 @@ describe("defineContract", () => {
       },
     };
 
-    expectDiagnostic("H7C011", () => defineFromButtonFile(input));
+    expectDiagnostic("HC011", () => defineFromButtonFile(input));
   });
 
   it("returns deeply immutable normalized data", () => {
@@ -337,14 +337,14 @@ describe("serializePropTarget", () => {
     assert.throws(
       () => serializePropTarget(contract.props.disabled!, null),
       (error: unknown) =>
-        error instanceof Html7DiagnosticError &&
-        error.diagnostic.code === "H7C021",
+        error instanceof HtmlDiagnosticError &&
+        error.diagnostic.code === "HC021",
     );
     assert.throws(
       () => serializePropTarget(contract.props.disabled!, undefined),
       (error: unknown) =>
-        error instanceof Html7DiagnosticError &&
-        error.diagnostic.code === "H7C020",
+        error instanceof HtmlDiagnosticError &&
+        error.diagnostic.code === "HC020",
     );
   });
 });

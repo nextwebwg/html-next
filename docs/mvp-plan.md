@@ -2,24 +2,24 @@
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-title: HTML7 component-generation MVP
+title: HTML Next component-generation MVP
 status: early-release
 ---
 
-# HTML7 component-generation MVP plan
+# HTML Next component-generation MVP plan
 
-> The HTML7 language specification and design record now live in the
+> The HTML Next language specification and design record now live in the
 > [`nextwebwg/site`](https://github.com/nextwebwg/site) repository. Paths such as
 > `docs/specification.md` referenced below point to their original location during MVP
 > development; this repository is the reference implementation (polyfill + converter).
 
 ## Goal Capsule
 
-Build the smallest end-to-end HTML7 implementation that proves a component primitive can be
+Build the smallest end-to-end HTML Next implementation that proves a component primitive can be
 authored once as literal, browser-parseable HTML and projected into Vanilla DOM, React,
 Vue, Svelte, generated API documentation, and a direct browser-lowering path.
 
-The MVP proves the architecture; it does not attempt the full HTML7 application language.
+The MVP proves the architecture; it does not attempt the full HTML Next application language.
 
 ## Scope Boundaries
 
@@ -44,8 +44,8 @@ Out of scope:
 - behavior controllers and compound widgets;
 - named slots or component composition;
 - SSR/hydration;
-- publishing packages or creating `nextwebwg/html7` on GitHub; and
-- migrating any specific component library to HTML7.
+- publishing packages or creating `nextwebwg/html` on GitHub; and
+- migrating any specific component library to HTML Next.
 
 ## Key Decisions
 
@@ -107,7 +107,7 @@ attributes and invocation children and does not register custom elements.
 
 ### R7. CLI and repeatability
 
-`html7 build <entries...> --out-dir <directory>` creates all selected outputs,
+`html-next build <entries...> --out-dir <directory>` creates all selected outputs,
 directories, and a deterministic manifest. A repeated build with unchanged inputs
 produces byte-identical files.
 
@@ -160,7 +160,7 @@ freshness check rather than hand-edited assertions.
 Verification: the generator is deterministic, freshness check is clean, and exact
 property spelling tests pass.
 
-### U3. Parse HTML7 components into IR
+### U3. Parse HTML Next components into IR
 
 Goal: Parse an HTML source artifact, validate its blocks and template subset, and produce
 the normalized component IR.

@@ -63,7 +63,7 @@ export async function buildComponents(
     components,
   };
   await writeFile(
-    resolve(outputRoot, "html7.manifest.json"),
+    resolve(outputRoot, "html.manifest.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
@@ -71,7 +71,7 @@ export async function buildComponents(
 }
 
 function usage(): string {
-  return "Usage: html7 build <component.html...> --out-dir <directory>";
+  return "Usage: html-next build <component.html...> --out-dir <directory>";
 }
 
 async function main(argv: readonly string[]): Promise<void> {

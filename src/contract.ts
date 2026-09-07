@@ -76,7 +76,7 @@ function rejectUnknownFields(
 ): void {
   const unknown = Object.keys(value).filter((key) => !allowed.has(key)).sort();
   if (unknown.length > 0) {
-    fail("H7C002", `Unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`, source);
+    fail("HC002", `Unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`, source);
   }
 }
 
@@ -86,7 +86,7 @@ function requiredString(
   source?: string,
 ): string {
   if (typeof value !== "string" || value.trim() === "") {
-    fail("H7C003", `\`${field}\` must be a non-empty string.`, source);
+    fail("HC003", `\`${field}\` must be a non-empty string.`, source);
   }
   return value;
 }
@@ -94,32 +94,32 @@ function requiredString(
 function parseType(value: unknown, source?: string): PropType {
   if (typeof value === "string") {
     if (!SCALAR_TYPES.has(value)) {
-      fail("H7C013", `Unsupported prop type \`${value}\`.`, source);
+      fail("HC013", `Unsupported prop type \`${value}\`.`, source);
     }
     return value as PropType;
   }
 
-  const object = record(value, "H7C013", "A prop type must be a scalar name or enum object.", source);
+  const object = record(value, "HC013", "A prop type must be a scalar name or enum object.", source);
   rejectUnknownFields(object, new Set(["enum"]), source);
   if (!Array.isArray(object.enum) || object.enum.length === 0) {
-    fail("H7C014", "An enum must contain at least one string member.", source);
+    fail("HC014", "An enum must contain at least one string member.", source);
   }
   if (!object.enum.every((member) => typeof member === "string")) {
-    fail("H7C014", "Every enum member must be a string.", source);
+    fail("HC014", "Every enum member must be a string.", source);
   }
   const members = object.enum as string[];
   if (new Set(members).size !== members.length) {
-    fail("H7C014", "Enum members must be unique.", source);
+    fail("HC014", "Enum members must be unique.", source);
   }
   return { enum: Object.freeze([...members]) } satisfies EnumType;
 }
 
 function parseTarget(value: unknown, source?: string): PropTarget {
-  const object = record(value, "H7C017", "A prop target must be an object.", source);
+  const object = record(value, "HC017", "A prop target must be an object.", source);
   rejectUnknownFields(object, new Set(["attribute", "property"]), source);
   const keys = Object.keys(object);
   if (keys.length !== 1) {
-    fail("H7C017", "A prop target must declare exactly one attribute or property.", source);
+    fail("HC017", "A prop target must declare exactly one attribute or property.", source);
   }
 
   if ("attribute" in object) {
@@ -128,7 +128,7 @@ function parseTarget(value: unknown, source?: string): PropTarget {
       object.attribute === "" ||
       !/^[^\u0000\t\n\f\r "'>\/=]+$/.test(object.attribute)
     ) {
-      fail("H7C017", "An attribute target must be a valid HTML attribute name.", source);
+      fail("HC017", "An attribute target must be a valid HTML attribute name.", source);
     }
     return { attribute: object.attribute.toLowerCase() };
   }
@@ -137,7 +137,7 @@ function parseTarget(value: unknown, source?: string): PropTarget {
     typeof object.property !== "string" ||
     !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(object.property)
   ) {
-    fail("H7C017", "A property target must be a valid DOM property identifier.", source);
+    fail("HC017", "A property target must be a valid DOM property identifier.", source);
   }
   return { property: object.property };
 }
@@ -150,19 +150,19 @@ function accepts(type: PropType, value: unknown): value is PropValue {
 }
 
 function parseProp(name: string, value: unknown, source?: string): PropContract {
-  const object = record(value, "H7C012", `Prop \`${name}\` must be an object.`, source);
+  const object = record(value, "HC012", `Prop \`${name}\` must be an object.`, source);
   rejectUnknownFields(object, PROP_FIELDS, source);
 
   const type = parseType(object.type, source);
   const required = object.required ?? false;
   if (typeof required !== "boolean") {
-    fail("H7C016", `Prop \`${name}\` has a non-boolean \`required\` value.`, source);
+    fail("HC016", `Prop \`${name}\` has a non-boolean \`required\` value.`, source);
   }
   if (required && "default" in object) {
-    fail("H7C019", `Required prop \`${name}\` cannot also declare a default.`, source);
+    fail("HC019", `Required prop \`${name}\` cannot also declare a default.`, source);
   }
   if ("default" in object && !accepts(type, object.default)) {
-    fail("H7C015", `Default for prop \`${name}\` does not satisfy its type.`, source);
+    fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
   }
 
   const target = parseTarget(object.target, source);
@@ -183,33 +183,33 @@ export function defineContract(
   options: DefineContractOptions = {},
 ): ComponentContract {
   const source = options.source;
-  const object = record(input, "H7C001", "A component contract must be an object.", source);
+  const object = record(input, "HC001", "A component contract must be an object.", source);
   rejectUnknownFields(object, CONTRACT_FIELDS, source);
 
   const tag = requiredString(options.tag, "component", source);
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(tag)) {
-    fail("H7C005", "The `component` tag must be lowercase and contain a hyphen.", source);
+    fail("HC005", "The `component` tag must be lowercase and contain a hyphen.", source);
   }
   const name = deriveName(tag);
   if (typeof object.status !== "string" || !STATUSES.has(object.status as ContractStatus)) {
-    fail("H7C007", "Component `status` is not recognized.", source);
+    fail("HC007", "Component `status` is not recognized.", source);
   }
   const summary = requiredString(object.summary, "summary", source);
   const nativeElement = requiredString(object.nativeElement, "nativeElement", source);
   if (!/^[a-z][a-z0-9-]*$/.test(nativeElement) || getDomInterface(nativeElement) === undefined) {
-    fail("H7C008", "`nativeElement` must be a lowercase HTML element name.", source);
+    fail("HC008", "`nativeElement` must be a lowercase HTML element name.", source);
   }
 
-  const rawProps = record(object.props, "H7C009", "`props` must be an object.", source);
+  const rawProps = record(object.props, "HC009", "`props` must be an object.", source);
   const normalizedKeys = new Map<string, string>();
   for (const propName of Object.keys(rawProps)) {
     if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(propName)) {
-      fail("H7C010", `Invalid prop name \`${propName}\`.`, source);
+      fail("HC010", `Invalid prop name \`${propName}\`.`, source);
     }
     const key = propName.toLowerCase();
     const prior = normalizedKeys.get(key);
     if (prior !== undefined) {
-      fail("H7C011", `Props \`${prior}\` and \`${propName}\` collide after lowercase normalization.`, source);
+      fail("HC011", `Props \`${prior}\` and \`${propName}\` collide after lowercase normalization.`, source);
     }
     normalizedKeys.set(key, propName);
   }
@@ -237,7 +237,7 @@ export function serializePropTarget(
   const value = provided === undefined ? prop.default : provided;
   if (value === undefined) {
     if (prop.required) {
-      fail("H7C020", "A required prop value was omitted.");
+      fail("HC020", "A required prop value was omitted.");
     }
     if ("attribute" in prop.target) {
       return { kind: "attribute", name: prop.target.attribute, value: null };
@@ -246,7 +246,7 @@ export function serializePropTarget(
   }
   if (value === null) {
     if (prop.required) {
-      fail("H7C021", "A prop value does not satisfy its declared type.");
+      fail("HC021", "A prop value does not satisfy its declared type.");
     }
     if ("attribute" in prop.target) {
       return { kind: "attribute", name: prop.target.attribute, value: null };
@@ -254,7 +254,7 @@ export function serializePropTarget(
     return { kind: "property", name: prop.target.property, value: null };
   }
   if (!accepts(prop.type, value)) {
-    fail("H7C021", "A prop value does not satisfy its declared type.");
+    fail("HC021", "A prop value does not satisfy its declared type.");
   }
 
   if ("property" in prop.target) {

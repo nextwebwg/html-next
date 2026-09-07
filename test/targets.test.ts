@@ -46,9 +46,9 @@ describe("official target compilers", () => {
     const source = generated.get("vue/XButton.vue")!;
     const parsed = parseVue(source, { filename: "XButton.vue" });
     assert.deepEqual(parsed.errors, []);
-    const script = compileScript(parsed.descriptor, { id: "html7-button" });
+    const script = compileScript(parsed.descriptor, { id: "html-next-button" });
     const template = compileTemplate({
-      id: "html7-button",
+      id: "html-next-button",
       filename: "XButton.vue",
       source: parsed.descriptor.template!.content,
       compilerOptions: { bindingMetadata: script.bindings ?? {} },

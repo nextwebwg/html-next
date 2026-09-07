@@ -39,7 +39,7 @@ export function validateSimplePropExpression(
   source: string,
 ): string {
   if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(expression) || contract.props[expression] === undefined) {
-    fail("H7T003", `\`${expression}\` is not a declared MVP prop expression.`, source);
+    fail("HT003", `\`${expression}\` is not a declared MVP prop expression.`, source);
   }
   return expression;
 }
@@ -51,7 +51,7 @@ export function validateLiteralAttributeName(name: string, source: string): stri
     UNSUPPORTED_LITERAL_ATTRIBUTE_PREFIXES.some((prefix) => lowerName.startsWith(prefix))
   ) {
     fail(
-      "H7T010",
+      "HT010",
       `Literal attribute \`${name}\` uses target-framework directive syntax that is not supported by the MVP.`,
       source,
     );
@@ -62,7 +62,7 @@ export function validateLiteralAttributeName(name: string, source: string): stri
 export function validateMvpDomProperty(name: string, source: string): string {
   const lowerName = name.toLowerCase();
   if (lowerName.startsWith("on") || UNSAFE_DOM_PROPERTY_NAMES.has(lowerName)) {
-    fail("H7T007", `Dynamic ${name} requires a future trusted-content type.`, source);
+    fail("HT007", `Dynamic ${name} requires a future trusted-content type.`, source);
   }
   return name;
 }

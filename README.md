@@ -1,22 +1,24 @@
-# HTML7
+# HTML Next — polyfill &amp; component bridge
 
-HTML7 is a markup-first application language experiment: reusable typed components,
-templates, control flow, data sources, and reactivity expressed as HTML—or as a
-deliberately evolved HTML language—instead of framework-specific JavaScript.
+HTML Next is a set of **Stage 0 proposals** for a markup-first authoring layer over HTML:
+reusable typed components, templates, control flow, data sources, and reactivity expressed
+as HTML rather than framework-specific JavaScript. The proposals and their design record
+live in the [`nextwebwg/site`](https://github.com/nextwebwg/site) repository.
 
-> **Early release:** the repository currently implements only the component-generation
-> MVP. The syntax and generated output are not stable, and no npm package or public
-> GitHub repository has been published from this checkout. The intended public home is
-> `github.com/nextwebwg/html7` when the project is ready to publish.
+**This repository is the polyfill and component bridge** — the reference implementation of
+those proposals, not the proposals themselves. It authors a native-root component once as
+literal, browser-parseable HTML, then generates Vanilla DOM, React, Vue, Svelte, CSS,
+machine-readable contracts, and API documentation — and lowers the same source directly in
+Chromium, Firefox, and WebKit without Custom Elements or `eval()`.
 
-The MVP proves one end-to-end slice: author a native-root component once as literal,
-browser-parseable HTML, then generate Vanilla DOM, React, Vue, Svelte, CSS,
-machine-readable contracts, and API documentation. The same source can also be lowered
-directly in Chromium, Firefox, and WebKit without Custom Elements or `eval()`.
+> **Stage 0, early:** the proposals are exploratory and this implementation covers only the
+> component-generation slice. Syntax and generated output are not stable, and no npm package
+> has been published from this checkout. The intended public home is
+> `github.com/nextwebwg/html`.
 
 ## Try it locally
 
-HTML7 currently installs from this repository:
+HTML Next currently installs from this repository:
 
 ```sh
 npm install
@@ -79,7 +81,7 @@ build output, like a `.d.ts`, never the authoring form.
 Build one or more sources with:
 
 ```sh
-npx html7 build components/button.html --out-dir generated
+npx html-next build components/button.html --out-dir generated
 ```
 
 Until the package is published, run the source CLI from this checkout:
@@ -101,7 +103,7 @@ For the example above, one compiler call produces:
 | `styles/x-button.css` | Ordinary shared CSS against the native DOM |
 | `contracts/x-button.json` | Normalized machine-readable API contract |
 | `docs/x-button.md` | Generated consumer API page with release status |
-| `html7.manifest.json` | Deterministic build inventory |
+| `html.manifest.json` | Deterministic build inventory |
 
 Every framework projection renders the same native root. The component remains a real
 `<button>` with native form, focus, event, and accessibility behavior; there is no
@@ -128,12 +130,12 @@ attributes, moves children into the default slot, and removes definition carrier
 failed pass leaves the source DOM available for correction and retry. The MVP does not
 observe later mutations; reactive browser execution is coming soon.
 
-The runtime does not register Custom Elements. HTML7 language nodes and component
+The runtime does not register Custom Elements. HTML Next language nodes and component
 invocations are input syntax that can be lowered to semantic native DOM.
 
 ## Property-name normalization
 
-HTML parsers lowercase attribute names, but DOM properties are case-sensitive. HTML7
+HTML parsers lowercase attribute names, but DOM properties are case-sensitive. HTML Next
 generates a static platform manifest at library build time from pinned DOM declarations:
 
 ```text
@@ -186,10 +188,10 @@ and dynamic HTML-bearing property sinks, which need a future typed security cont
 ## Architecture and design record
 
 This repository is the reference **implementation** — the browser polyfill and the
-multi-target converter. The HTML7 language specification and its design record live in
+multi-target converter. The HTML Next language specification and its design record live in
 the Next Web Working Group site repository, [`nextwebwg/site`](https://github.com/nextwebwg/site):
 
-- [HTML7 working draft](https://github.com/nextwebwg/site/blob/main/index.html)
+- [HTML Next working draft](https://github.com/nextwebwg/site/blob/main/index.html)
 - [Technical specification](https://github.com/nextwebwg/site/blob/main/docs/specification.md)
 - [Living design notebook](https://github.com/nextwebwg/site/blob/main/docs/design-notebook.md)
 - [Template expression proposal](https://github.com/nextwebwg/site/blob/main/docs/template-expressions.md)
@@ -202,7 +204,7 @@ This repository's own build plan remains here:
 
 ## Library independence
 
-HTML7 is library-agnostic. Any demanding component library can become a conformance
+HTML Next is library-agnostic. Any demanding component library can become a conformance
 corpus for the generator while continuing to publish ordinary generated packages, and
 its consumers never have to adopt the experimental browser runtime.
 

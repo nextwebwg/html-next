@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-import { Html7DiagnosticError } from "../src/diagnostics.js";
+import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { parseComponent } from "../src/parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -11,7 +11,7 @@ function expectDiagnostic(code: string, source: string): void {
   assert.throws(
     () => parseComponent(source, "component.html"),
     (error: unknown) =>
-      error instanceof Html7DiagnosticError && error.diagnostic.code === code,
+      error instanceof HtmlDiagnosticError && error.diagnostic.code === code,
   );
 }
 
@@ -65,22 +65,22 @@ describe("parseComponent", () => {
   });
 
   it("rejects missing, duplicate, and malformed carriers", () => {
-    expectDiagnostic("H7S001", `<p>not a definition</p>`);
+    expectDiagnostic("HS001", `<p>not a definition</p>`);
     expectDiagnostic(
-      "H7S001",
+      "HS001",
       `<template component="a-one"><button></button></template>` +
         `<template component="a-two"><button></button></template>`,
     );
     expectDiagnostic(
-      "H7S002",
+      "HS002",
       `<template component="demo-example" status="early" summary="Two prop groups.">` +
         `<props></props><props></props><button><slot></slot></button></template>`,
     );
   });
 
   it("rejects zero or multiple markup roots", () => {
-    expectDiagnostic("H7T001", componentSource(`<button></button><button></button>`));
-    expectDiagnostic("H7T001", componentSource(`<button><slot></slot></button><aside></aside>`));
+    expectDiagnostic("HT001", componentSource(`<button></button><button></button>`));
+    expectDiagnostic("HT001", componentSource(`<button><slot></slot></button><aside></aside>`));
   });
 
   it("infers a non-button native root from the markup", () => {
@@ -89,9 +89,9 @@ describe("parseComponent", () => {
   });
 
   it("rejects undeclared expressions and props bound to conflicting targets", () => {
-    expectDiagnostic("H7T003", componentSource(`<button :title="missing"></button>`));
+    expectDiagnostic("HT003", componentSource(`<button :title="missing"></button>`));
     expectDiagnostic(
-      "H7T004",
+      "HT004",
       componentSource(
         `<button :title="label" :aria-label="label"></button>`,
         `<prop name="label" type="string">Label.</prop>`,
@@ -101,15 +101,15 @@ describe("parseComponent", () => {
 
   it("rejects props declared without a name, type, or binding", () => {
     expectDiagnostic(
-      "H7C010",
+      "HC010",
       componentSource(`<button :data-x="v"></button>`, `<prop type="string">No name.</prop>`),
     );
     expectDiagnostic(
-      "H7C013",
+      "HC013",
       componentSource(`<button :data-x="v"></button>`, `<prop name="v">No type.</prop>`),
     );
     expectDiagnostic(
-      "H7C018",
+      "HC018",
       componentSource(
         `<button><slot></slot></button>`,
         `<prop name="ghost" type="string">Never bound.</prop>`,
@@ -118,9 +118,9 @@ describe("parseComponent", () => {
   });
 
   it("rejects unsupported two-way bindings and unsafe raw HTML", () => {
-    expectDiagnostic("H7T005", componentSource(`<button bind:value="value"></button>`));
+    expectDiagnostic("HT005", componentSource(`<button bind:value="value"></button>`));
     expectDiagnostic(
-      "H7T007",
+      "HT007",
       componentSource(
         `<button .innerHTML="markup"></button>`,
         `<prop name="markup" type="string">Markup.</prop>`,
@@ -139,18 +139,18 @@ describe("parseComponent", () => {
       "animate:flip",
       "onclick",
     ]) {
-      expectDiagnostic("H7T010", componentSource(`<button ${attribute}="payload"></button>`));
+      expectDiagnostic("HT010", componentSource(`<button ${attribute}="payload"></button>`));
     }
 
     expectDiagnostic(
-      "H7T007",
+      "HT007",
       componentSource(
         `<button .outerHTML="markup"></button>`,
         `<prop name="markup" type="string">Replacement markup.</prop>`,
       ),
     );
     expectDiagnostic(
-      "H7T007",
+      "HT007",
       componentSource(
         `<iframe .srcdoc="markup"></iframe>`,
         `<prop name="markup" type="string">Embedded markup.</prop>`,
@@ -160,11 +160,11 @@ describe("parseComponent", () => {
 
   it("rejects invalid default-slot shapes and reserved language elements", () => {
     expectDiagnostic(
-      "H7T008",
+      "HT008",
       componentSource(`<button><slot></slot><slot></slot></button>`),
     );
     expectDiagnostic(
-      "H7T009",
+      "HT009",
       componentSource(`<button><if test="ready"></if></button>`),
     );
   });

@@ -1,5 +1,5 @@
 export { defineContract, serializePropTarget } from "./contract.js";
-export { Html7DiagnosticError } from "./diagnostics.js";
+export { HtmlDiagnosticError } from "./diagnostics.js";
 export {
   generateComponent,
   GENERATOR_VERSION,
