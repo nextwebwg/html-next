@@ -5,6 +5,8 @@
   "description": "An early HTML7 component-generation experiment.",
   "type": "module",
   "scripts": {
+    "generate:dom": "tsx scripts/generate-dom-properties.ts",
+    "check:generated": "tsx scripts/generate-dom-properties.ts --check",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
