@@ -435,20 +435,24 @@ attributes through an `attributes` record, and accepts strings or Nodes as child
 
 The React target emits TypeScript JSX. Primitive props compose
 `React.<Native>HTMLAttributes`, omitting names redefined by the component contract.
-The component forwards its ref to the native element and renders `children` in the
-default slot.
+For the React 19 baseline, the component accepts a typed `ref` prop directly and places
+it on the native element; generated code does not wrap the component in `forwardRef`.
+It renders `children` in the default slot.
 
 ### 9.4 Vue
 
 The Vue target emits a Vue single-file component using `<script setup lang="ts">`.
 Component props are declared with `defineProps`, defaults with `withDefaults`, native
-attributes pass through with `$attrs`, and default children use `<slot></slot>`.
+attributes use Vue's single-root fallthrough behavior, and default children use
+`<slot></slot>`. A generator MAY bind `$attrs` explicitly when owned-attribute ordering
+or a future compound root requires it.
 
 ### 9.5 Svelte
 
 The Svelte target emits a Svelte component using the current runes-style props API and
-native attribute types from `svelte/elements`. Native attributes are spread onto the
-root and default children are rendered through the framework's children snippet.
+native attribute types from `svelte/elements`. Default children are typed as a `Snippet`,
+native attributes are spread onto the root, and children are rendered with
+`{@render children?.()}`.
 
 Target syntax versions MUST be recorded in generated-file headers and package metadata.
 
@@ -579,4 +583,3 @@ The following remain genuine design questions rather than MVP implementation cho
 - SVG, MathML, table, and select parser contexts;
 - extension and capability negotiation; and
 - the governance path for language and platform-contract evolution.
-
