@@ -14,24 +14,20 @@ export function resolveDomProperty(
   const interfaceName = getDomInterface(tagName);
   if (interfaceName === undefined) return undefined;
   const key = propertyName.toLowerCase();
-  return resolveFromInterface(interfaceName, key, new Set());
+  return resolveFromInterface(interfaceName, key);
 }
 
 function resolveFromInterface(
   interfaceName: string,
   key: string,
-  visited: Set<string>,
 ): string | undefined {
-  if (visited.has(interfaceName)) return undefined;
-  visited.add(interfaceName);
   const contract = DOM_INTERFACES[interfaceName];
   if (contract === undefined) return undefined;
   const own = contract.properties[key];
   if (own !== undefined) return own;
   for (const parent of contract.extends) {
-    const inherited = resolveFromInterface(parent, key, visited);
+    const inherited = resolveFromInterface(parent, key);
     if (inherited !== undefined) return inherited;
   }
   return undefined;
 }
-

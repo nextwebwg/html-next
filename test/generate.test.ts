@@ -40,6 +40,12 @@ function componentSource(template: string): string {
           target: { attribute: "disabled" },
           description: "Whether the action is disabled.",
         },
+        selected: {
+          type: "boolean",
+          default: false,
+          target: { attribute: "data-selected" },
+          description: "Selected state.",
+        },
       },
     })}</script>
     <template>${template}</template>
@@ -112,15 +118,18 @@ describe("generateComponent", () => {
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
-      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" :disabled="disabled">Text &amp; {literal}<slot></slot></button>`,
+      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" :disabled="disabled" :data-selected="selected">Text &amp; {literal}<slot></slot></button>`,
     ));
     const byPath = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
 
     assert.match(byPath.get("vanilla/Action.js")!, /=== undefined \? false/);
     assert.match(byPath.get("vanilla/Action.js")!, /\["formAction"\] =/);
     assert.match(byPath.get("react/Action.tsx")!, /formAction=\{prop0\}/);
+    assert.match(byPath.get("react/Action.tsx")!, /data-selected=\{prop2 \? "" : undefined\}/);
     assert.match(byPath.get("vue/Action.vue")!, /:formAction="props.destination"/);
+    assert.match(byPath.get("vue/Action.vue")!, /:data-selected="props.selected \? '' : undefined"/);
     assert.match(byPath.get("svelte/Action.svelte")!, /formAction=\{prop0\}/);
+    assert.match(byPath.get("svelte/Action.svelte")!, /data-selected=\{prop2 \? "" : undefined\}/);
     assert.match(byPath.get("vue/Action.vue")!, /A &amp; &quot;quote&quot;/);
     assert.match(byPath.get("svelte/Action.svelte")!, /&#123;literal&#125;/);
   });

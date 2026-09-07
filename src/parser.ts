@@ -6,6 +6,11 @@ import {
 
 import { defineContract } from "./contract.js";
 import { fail } from "./diagnostics.js";
+import {
+  CONTRACT_TYPE,
+  isReservedElement,
+  validateSimplePropExpression,
+} from "./language.js";
 import { resolveDomProperty } from "./platform.js";
 import type {
   ComponentDefinition,
@@ -18,19 +23,6 @@ import type { ComponentContract } from "./types.js";
 type ChildNode = DefaultTreeAdapterTypes.ChildNode;
 type Element = DefaultTreeAdapterTypes.Element;
 type Template = DefaultTreeAdapterTypes.Template;
-
-const CONTRACT_TYPE = "application/html7-contract+json";
-const RESERVED_ELEMENTS = new Set([
-  "if",
-  "else-if",
-  "else",
-  "for",
-  "with",
-  "value",
-  "state",
-  "computed",
-  "data",
-]);
 
 function isElement(node: ChildNode): node is Element {
   return "tagName" in node;
@@ -65,17 +57,6 @@ function directElements(element: Element, name: string): Element[] {
   );
 }
 
-function validateSimpleExpression(
-  expression: string,
-  contract: ComponentContract,
-  source: string,
-): string {
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(expression) || contract.props[expression] === undefined) {
-    fail("H7T003", `\`${expression}\` is not a declared MVP prop expression.`, source);
-  }
-  return expression;
-}
-
 function parseAttributes(
   element: Element,
   contract: ComponentContract,
@@ -88,7 +69,7 @@ function parseAttributes(
 
     if (attribute.name.startsWith(":")) {
       const name = attribute.name.slice(1).toLowerCase();
-      const expression = validateSimpleExpression(attribute.value, contract, source);
+      const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("attribute" in target) || target.attribute !== name) {
         fail("H7T004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
@@ -98,7 +79,7 @@ function parseAttributes(
 
     if (attribute.name.startsWith(".")) {
       const key = attribute.name.slice(1).toLowerCase();
-      const expression = validateSimpleExpression(attribute.value, contract, source);
+      const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("property" in target) || target.property.toLowerCase() !== key) {
         fail("H7T004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
@@ -123,7 +104,7 @@ function parseElement(
   source: string,
   slotCount: { value: number },
 ): ElementNode {
-  if (RESERVED_ELEMENTS.has(element.tagName)) {
+  if (isReservedElement(element.tagName)) {
     fail("H7T009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
   }
 

@@ -1,5 +1,10 @@
 import { defineContract, serializePropTarget } from "./contract.js";
 import { fail } from "./diagnostics.js";
+import {
+  CONTRACT_TYPE,
+  isReservedElement,
+  validateSimplePropExpression,
+} from "./language.js";
 import { resolveDomProperty } from "./platform.js";
 import type {
   ComponentDefinition,
@@ -7,20 +12,12 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import type { ComponentContract, PropContract, PropValue } from "./types.js";
-
-const CONTRACT_TYPE = "application/html7-contract+json";
-const RESERVED_ELEMENTS = new Set([
-  "if",
-  "else-if",
-  "else",
-  "for",
-  "with",
-  "value",
-  "state",
-  "computed",
-  "data",
-]);
+import type {
+  ComponentContract,
+  PropContract,
+  PropValue,
+  SerializedPropTarget,
+} from "./types.js";
 
 interface LiveDefinition {
   readonly wrapper: Element;
@@ -40,23 +37,11 @@ function directElements(wrapper: Element, name: string): Element[] {
   return Array.from(wrapper.children).filter((element) => element.localName === name);
 }
 
-function validateExpression(
-  expression: string,
-  contract: ComponentContract,
-  source: string,
-): string {
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(expression) || contract.props[expression] === undefined) {
-    fail("H7T003", `\`${expression}\` is not a declared MVP prop expression.`, source);
-  }
-  return expression;
-}
-
 function parseAttributes(
   element: Element,
   contract: ComponentContract,
   source: string,
 ): TemplateAttribute[] {
-  const bindings = new Set<string>();
   return Array.from(element.attributes).map((attribute) => {
     if (attribute.name.startsWith("bind:")) {
       fail("H7T005", "Two-way bindings are reserved but not supported by the component MVP.", source);
@@ -64,21 +49,17 @@ function parseAttributes(
 
     if (attribute.name.startsWith(":")) {
       const name = attribute.name.slice(1).toLowerCase();
-      const expression = validateExpression(attribute.value, contract, source);
+      const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("attribute" in target) || target.attribute !== name) {
         fail("H7T004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
       }
-      if (bindings.has(`attribute:${name}`)) {
-        fail("H7T010", `More than one binding targets attribute \`${name}\`.`, source);
-      }
-      bindings.add(`attribute:${name}`);
       return { kind: "attribute", name, expression };
     }
 
     if (attribute.name.startsWith(".")) {
       const key = attribute.name.slice(1).toLowerCase();
-      const expression = validateExpression(attribute.value, contract, source);
+      const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("property" in target) || target.property.toLowerCase() !== key) {
         fail("H7T004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
@@ -90,10 +71,6 @@ function parseAttributes(
       if (name === "innerHTML") {
         fail("H7T007", "Dynamic innerHTML requires a future trusted-HTML type.", source);
       }
-      if (bindings.has(`property:${name}`)) {
-        fail("H7T010", `More than one binding targets property \`${name}\`.`, source);
-      }
-      bindings.add(`property:${name}`);
       return { kind: "property", key, name, expression };
     }
 
@@ -107,7 +84,7 @@ function parseElement(
   source: string,
   slotCount: { value: number },
 ): ElementNode {
-  if (RESERVED_ELEMENTS.has(element.localName)) {
+  if (isReservedElement(element.localName)) {
     fail("H7T009", `<${element.localName}> is reserved but not supported by the component MVP.`, source);
   }
 
@@ -227,7 +204,7 @@ function readInvocation(
   invocation: Element,
   contract: ComponentContract,
 ): {
-  readonly values: Readonly<Record<string, PropValue | undefined>>;
+  readonly targets: Readonly<Record<string, SerializedPropTarget>>;
   readonly passThrough: readonly Attr[];
 } {
   const names = new Map<string, string>();
@@ -244,10 +221,11 @@ function readInvocation(
     values[propName] = invocationValue(contract.props[propName]!, attribute.value);
   }
 
+  const targets: Record<string, SerializedPropTarget> = {};
   for (const [name, prop] of Object.entries(contract.props)) {
-    serializePropTarget(prop, values[name]);
+    targets[name] = serializePropTarget(prop, values[name]);
   }
-  return { values, passThrough };
+  return { targets, passThrough };
 }
 
 function setAttribute(element: Element, name: string, value: string | null): void {
@@ -257,8 +235,7 @@ function setAttribute(element: Element, name: string, value: string | null): voi
 
 function renderElement(
   node: ElementNode,
-  definition: ComponentDefinition,
-  values: Readonly<Record<string, PropValue | undefined>>,
+  targets: Readonly<Record<string, SerializedPropTarget>>,
   slotChildren: readonly Node[],
   document: Document,
   passThrough: readonly Attr[] = [],
@@ -274,8 +251,7 @@ function renderElement(
       continue;
     }
 
-    const prop = definition.contract.props[attribute.expression]!;
-    const target = serializePropTarget(prop, values[attribute.expression]);
+    const target = targets[attribute.expression]!;
     if (attribute.kind === "attribute") {
       if (target.kind !== "attribute") {
         fail("H7R003", `Binding \`${attribute.expression}\` did not resolve to an attribute.`);
@@ -297,7 +273,7 @@ function renderElement(
     } else if (child.kind === "slot") {
       element.append(...slotChildren);
     } else {
-      element.append(renderElement(child, definition, values, slotChildren, document));
+      element.append(renderElement(child, targets, slotChildren, document));
     }
   }
   return element;
@@ -320,12 +296,11 @@ export function lowerDocument(root: Document = document): number {
     tags.add(definition.contract.tag);
   }
 
-  const invocations = definitions.map(({ wrapper, definition }) => ({
+  const invocations = definitions.map(({ definition }) => ({
     definition,
     elements: Array.from(root.querySelectorAll(definition.contract.tag)).filter(
-      (element) => !wrappers.some((candidate) => candidate === element || candidate.contains(element)),
+      (element) => element.closest("html7-component") === null,
     ),
-    wrapper,
   }));
 
   for (const live of definitions) {
@@ -336,12 +311,11 @@ export function lowerDocument(root: Document = document): number {
   let lowered = 0;
   for (const { definition, elements } of invocations) {
     for (const invocation of elements) {
-      const { values, passThrough } = readInvocation(invocation, definition.contract);
+      const { targets, passThrough } = readInvocation(invocation, definition.contract);
       const children = Array.from(invocation.childNodes);
       const nativeRoot = renderElement(
         definition.template,
-        definition,
-        values,
+        targets,
         children,
         invocation.ownerDocument,
         passThrough,

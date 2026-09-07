@@ -120,8 +120,11 @@ function reachableInterfaces(
 function assertNoReachableCollisions(
   name: string,
   interfaces: ReadonlyMap<string, InterfaceInfo>,
+  memo: Map<string, Map<string, string>>,
   stack = new Set<string>(),
 ): Map<string, string> {
+  const cached = memo.get(name);
+  if (cached !== undefined) return cached;
   if (stack.has(name)) throw new Error(`DOM interface inheritance cycle at ${name}.`);
   const nextStack = new Set(stack).add(name);
   const result = new Map<string, string>();
@@ -129,7 +132,7 @@ function assertNoReachableCollisions(
   if (info === undefined) return result;
 
   for (const parent of info.extends) {
-    for (const [key, exact] of assertNoReachableCollisions(parent, interfaces, nextStack)) {
+    for (const [key, exact] of assertNoReachableCollisions(parent, interfaces, memo, nextStack)) {
       result.set(key, exact);
     }
   }
@@ -140,6 +143,7 @@ function assertNoReachableCollisions(
     }
     result.set(key, exact);
   }
+  memo.set(name, result);
   return result;
 }
 
@@ -152,7 +156,10 @@ export async function generateDomProperties(): Promise<string> {
   const source = await readFile(dom.path, "utf8");
   const parsed = parseDeclarations(source);
   const reachable = reachableInterfaces(parsed.interfaces, parsed.tags);
-  for (const name of reachable) assertNoReachableCollisions(name, parsed.interfaces);
+  const collisionMemo = new Map<string, Map<string, string>>();
+  for (const name of reachable) {
+    assertNoReachableCollisions(name, parsed.interfaces, collisionMemo);
+  }
 
   const interfaceData: Record<string, { extends: readonly string[]; properties: Record<string, string> }> = {};
   for (const name of [...reachable].sort()) {
