@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>HTML7 browser runtime fixture</title>
+  </head>
+  <body>
+    <html7-component>
+      <script type="application/html7-contract+json">
+        {
+          "version": 1,
+          "name": "Button",
+          "tag": "looma-button",
+          "status": "early",
+          "summary": "A native button with Looma presentation.",
+          "nativeElement": "button",
+          "props": {
+            "variant": {
+              "type": { "enum": ["outline", "solid"] },
+              "default": "outline",
+              "target": { "attribute": "data-lm-variant" },
+              "description": "Visual treatment."
+            },
+            "size": {
+              "type": { "enum": ["sm", "md", "lg"] },
+              "default": "md",
+              "target": { "attribute": "data-lm-size" },
+              "description": "Control size."
+            },
+            "disabled": {
+              "type": "boolean",
+              "default": false,
+              "target": { "property": "disabled" },
+              "description": "Whether the button is disabled."
+            }
+          }
+        }
+      </script>
+      <template>
+        <button data-looma type="button" :data-lm-variant="variant" :data-lm-size="size" .disabled="disabled">
+          <slot></slot>
+        </button>
+      </template>
+      <style>button[data-looma] { box-sizing: border-box; }</style>
+    </html7-component>
+
+    <html7-component>
+      <script type="application/html7-contract+json">
+        {
+          "version": 1,
+          "name": "Status",
+          "tag": "looma-status",
+          "status": "early",
+          "summary": "A native output status.",
+          "nativeElement": "output",
+          "props": {
+            "message": {
+              "type": "string",
+              "default": "Waiting",
+              "target": { "property": "textContent" },
+              "description": "Status text."
+            }
+          }
+        }
+      </script>
+      <template><output .textContent="message"></output></template>
+    </html7-component>
+
+    <main>
+      <looma-button
+        id="primary"
+        class="cta"
+        size="lg"
+        type="submit"
+        aria-label="Save changes"
+        data-trace="runtime"
+      >Save <strong id="kept-child">now</strong></looma-button>
+      <looma-button id="disabled" variant="solid" disabled></looma-button>
+      <looma-status id="status" message="Ready"></looma-status>
+    </main>
+  </body>
+</html>
