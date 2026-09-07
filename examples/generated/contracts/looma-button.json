@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "name": "Button",
+  "tag": "looma-button",
+  "status": "early",
+  "summary": "A native button with Looma presentation.",
+  "nativeElement": "button",
+  "props": {
+    "size": {
+      "type": {
+        "enum": [
+          "sm",
+          "md",
+          "lg"
+        ]
+      },
+      "required": false,
+      "target": {
+        "attribute": "data-lm-size"
+      },
+      "description": "Control size.",
+      "default": "md"
+    },
+    "variant": {
+      "type": {
+        "enum": [
+          "outline",
+          "solid",
+          "destructive",
+          "ghost"
+        ]
+      },
+      "required": false,
+      "target": {
+        "attribute": "data-lm-variant"
+      },
+      "description": "Visual treatment.",
+      "default": "outline"
+    }
+  }
+}

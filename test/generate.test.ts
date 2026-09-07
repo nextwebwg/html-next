@@ -78,7 +78,8 @@ describe("generateComponent", () => {
 
     const vue = byPath.get("vue/Button.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
-    assert.doesNotMatch(vue, /\$attrs|v-bind="\$attrs"/);
+    assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
+    assert.ok(vue.indexOf('v-bind="$attrs"') < vue.indexOf("data-looma"));
 
     const svelte = byPath.get("svelte/Button.svelte")!;
     assert.match(svelte, /from "svelte\/elements"/);

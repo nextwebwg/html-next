@@ -4,7 +4,19 @@
   "private": true,
   "description": "An early HTML7 component-generation experiment.",
   "type": "module",
+  "bin": {
+    "html7": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./runtime": "./dist/runtime.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:example": "tsx src/cli.ts build examples/looma-button.html --out-dir examples/generated",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check",
     "test": "node --import tsx --test test/*.test.ts",
@@ -13,8 +25,10 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@vue/compiler-sfc": "~3.5.42",
     "esbuild": "~0.25.12",
     "playwright": "~1.63.0",
+    "svelte": "~5.57.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },

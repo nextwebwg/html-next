@@ -1,0 +1,20 @@
+{
+  "generatorVersion": "0.0.0",
+  "components": [
+    {
+      "source": "examples/looma-button.html",
+      "name": "Button",
+      "tag": "looma-button",
+      "artifacts": [
+        "vanilla/Button.js",
+        "vanilla/Button.d.ts",
+        "react/Button.tsx",
+        "vue/Button.vue",
+        "svelte/Button.svelte",
+        "styles/looma-button.css",
+        "contracts/looma-button.json",
+        "docs/looma-button.md"
+      ]
+    }
+  ]
+}
