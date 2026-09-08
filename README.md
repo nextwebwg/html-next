@@ -199,8 +199,10 @@ the Next Web Working Group site repository, [`nextwebwg/site`](https://github.co
 - [Browser parser findings](https://github.com/nextwebwg/site/blob/main/docs/browser-findings.md)
 - [Liquid, Squarespace, Vue, Svelte, Mitosis, and other prior art](https://github.com/nextwebwg/site/blob/main/docs/prior-art.md)
 
-This repository's own build plan remains here:
-[Component-generation MVP plan](./docs/mvp-plan.md).
+This repository's own build and implementation notes remain here:
+
+- [Component-generation MVP plan](./docs/mvp-plan.md)
+- [Style scoping: implementation](./docs/style-scoping.md) — how the polyfill and converter realize the spec's scoping behaviour via CSS `@scope` and provenance-keyed attribute scoping
 
 ## Library independence
 
