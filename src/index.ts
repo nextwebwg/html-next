@@ -7,6 +7,14 @@ export {
 } from "./generate.js";
 export { parseComponent } from "./parser.js";
 export { getDomInterface, resolveDomProperty } from "./platform.js";
+export {
+  NATIVE_FLAG,
+  validate,
+  type Constraint,
+  type Validity,
+  type ValidityError,
+  type ValidityReason,
+} from "./validate.js";
 export type * from "./template.js";
 export type * from "./types.js";
 
