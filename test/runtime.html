@@ -6,22 +6,22 @@
   </head>
   <body>
     <template component="x-button" status="early" summary="A native button with a themed presentation.">
-      <props>
+      <defs>
         <prop name="variant" type="outline | solid" default="outline">Visual treatment.</prop>
         <prop name="size" type="sm | md | lg" default="md">Control size.</prop>
         <prop name="disabled" type="boolean" default="false">Whether the button is disabled.</prop>
-      </props>
-      <button data-x-button type="button" :data-variant="variant" :data-size="size" .disabled="disabled">
+      </defs>
+      <button data-x-button type="button" :data-variant="variant" :data-size="size" :disabled="disabled">
         <slot></slot>
       </button>
       <style>button[data-x-button] { box-sizing: border-box; }</style>
     </template>
 
     <template component="x-status" status="early" summary="A native output status.">
-      <props>
+      <defs>
         <prop name="message" type="string" default="Waiting">Status text.</prop>
-      </props>
-      <output .textContent="message"></output>
+      </defs>
+      <output $value="message"></output>
     </template>
 
     <main>

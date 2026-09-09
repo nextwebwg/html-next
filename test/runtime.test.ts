@@ -145,6 +145,43 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} evaluates $value/$html and sanitizes $html markup`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-note" status="early" summary="Note.">` +
+            `<defs><prop name="body" type="string">Body markup.</prop>` +
+            `<prop name="label" type="string" default="Note">Label.</prop></defs>` +
+            `<article><h3 $value="label"></h3><div class="body" $html="body"></div></article>` +
+            `</template>` +
+            `<x-note id="n" label="Hi" body="<b>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2>"></x-note>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const note = document.querySelector("#n");
+          const body = note.querySelector(".body");
+          return {
+            heading: note.querySelector("h3").textContent,
+            hasBold: body.querySelector("b") !== null,
+            scriptCount: body.querySelectorAll("script").length,
+            onerror: body.querySelector("img")?.hasAttribute("onerror") ?? null,
+            xflag: window.__x ?? "unset",
+          };
+        })()`);
+        assert.deepEqual(result, {
+          heading: "Hi",
+          hasBold: true,
+          scriptCount: 0,
+          onerror: false,
+          xflag: "unset",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} lowers definitions to equivalent native DOM`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

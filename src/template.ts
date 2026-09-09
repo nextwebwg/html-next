@@ -28,7 +28,15 @@ export interface SlotNode {
 export type TemplateAttribute =
   | LiteralAttribute
   | AttributeBinding
-  | PropertyBinding;
+  | PropertyBinding
+  | DirectiveAttribute;
+
+/** A `$`-directive that sets an element's content: `$value` (escaped text) or `$html` (sanitized). */
+export interface DirectiveAttribute {
+  readonly kind: "directive";
+  readonly name: "value" | "html";
+  readonly expression: string;
+}
 
 export interface LiteralAttribute {
   readonly kind: "literal";
