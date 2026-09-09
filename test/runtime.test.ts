@@ -227,6 +227,55 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} seeds state/computed/data and consumes on:/bind:/handlers (L1 one-shot)`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-counter" status="early" summary="Counter.">` +
+            `<defs>` +
+            `<prop name="start" type="number" default="3">Start.</prop>` +
+            `<state name="count" :value="start"></state>` +
+            `<computed name="doubled" from="count * 2"></computed>` +
+            `<data name="feed"></data>` +
+            `<handler name="inc"><set name="count" :value="count + 1"></set></handler>` +
+            `</defs>` +
+            `<div :data-count="count" :data-doubled="doubled">` +
+            `<button on:click="inc" $value="count"></button>` +
+            `<output bind:value="count"></output>` +
+            `<i $value="feed.pending"></i>` +
+            `<span on:connect="ready"></span>` +
+            `</div></template>` +
+            `<x-counter id="c" start="5"></x-counter>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#c");
+          return {
+            count: root.getAttribute("data-count"),
+            doubled: root.getAttribute("data-doubled"),
+            buttonText: root.querySelector("button").textContent,
+            buttonHasOnClick: root.querySelector("button").hasAttribute("on:click"),
+            boundValue: root.querySelector("output").getAttribute("value"),
+            pending: root.querySelector("i").textContent,
+            spanHasOnConnect: root.querySelector("span").hasAttribute("on:connect"),
+          };
+        })()`);
+        assert.deepEqual(result, {
+          count: "5", // state seeded from the start prop
+          doubled: "10", // computed evaluated once over state
+          buttonText: "5", // $value reads state
+          buttonHasOnClick: false, // on: consumed, never emitted
+          boundValue: "5", // bind: renders one-way at L1
+          pending: "true", // data seeded in its pending shape
+          spanHasOnConnect: false, // lifecycle consumed
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} lowers definitions to equivalent native DOM`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

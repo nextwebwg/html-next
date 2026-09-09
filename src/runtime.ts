@@ -21,10 +21,22 @@ import type {
 } from "./template.js";
 import type { ComponentContract, PropContract, PropValue } from "./types.js";
 
+/**
+ * A `<defs>` reactive declaration seeding the render scope. At L1 the runtime lowers once
+ * (no live updates): `state`/`computed` seed their initial value, `data` seeds the pending
+ * reactive-read shape. Live reactivity, and executing `<handler>` steps, are the L2 layer.
+ */
+interface Decl {
+  readonly kind: "state" | "computed" | "data";
+  readonly name: string;
+  readonly expr?: string;
+}
+
 interface LiveDefinition {
   readonly wrapper: Element;
   readonly style: HTMLStyleElement | undefined;
   readonly definition: ComponentDefinition;
+  readonly decls: readonly Decl[];
 }
 
 interface PreparedInvocation {
@@ -155,12 +167,55 @@ function readProps(group: Element | undefined, source: string): Record<string, u
   return props;
 }
 
+/**
+ * Read the reactive declarations from `<defs>`: `<state name :value>`, `<computed name from>`,
+ * `<data name src>`. `<handler>` blocks are validated as present-and-named but not executed at L1.
+ */
+function readDecls(group: Element | undefined, source: string): Decl[] {
+  if (group === undefined) return [];
+  const decls: Decl[] = [];
+  for (const element of Array.from(group.children)) {
+    const kind = element.localName;
+    if (kind !== "state" && kind !== "computed" && kind !== "data") {
+      if (kind === "handler" && (element.getAttribute("name") ?? "") === "") {
+        fail("HC010", "A <handler> requires a `name` attribute.", source);
+      }
+      continue; // <prop>, <handler>, and other defs children are handled elsewhere.
+    }
+    const name = element.getAttribute("name") ?? "";
+    if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
+    if (kind === "data") {
+      decls.push({ kind, name });
+      continue;
+    }
+    const expr = kind === "computed" ? element.getAttribute("from") ?? "" : element.getAttribute(":value");
+    if (kind === "computed" && expr === "") {
+      fail("HC013", `<computed name="${name}"> requires a \`from\` expression.`, source);
+    }
+    if (expr !== null && expr !== undefined) {
+      checkExpr(expr, source);
+      decls.push({ kind, name, expr });
+    } else {
+      decls.push({ kind, name });
+    }
+  }
+  return decls;
+}
+
 function parseAttributes(element: Element, source: string): TemplateAttribute[] {
   return Array.from(element.attributes)
-    .filter((attribute) => !FLOW_NAMES.has(attribute.name.toLowerCase()))
+    .filter((attribute) => {
+      const name = attribute.name.toLowerCase();
+      // Flow directives are read as flow; `on:` events are inert at L1 (parsed, not wired), so
+      // they are consumed here and emitted to no output attribute.
+      return !FLOW_NAMES.has(name) && !name.startsWith("on:");
+    })
     .map((attribute) => {
       if (attribute.name.startsWith("bind:")) {
-        fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
+        // `bind:` renders one-way at L1 (identical to `:`); its write-back is the L2 layer.
+        const name = attribute.name.slice("bind:".length).toLowerCase();
+        checkExpr(attribute.value, source);
+        return { kind: "attribute", name, expression: attribute.value };
       }
 
       if (attribute.name.startsWith(".")) {
@@ -303,12 +358,24 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
     { source, tag },
   );
 
+  const decls = readDecls(defsRegions[0], source);
+  // The component layer is flat: props, state, computed, and data share one namespace, so a
+  // collision is a conformance error, not a silent precedence.
+  const seen = new Set<string>(Object.keys(contract.props));
+  for (const decl of decls) {
+    if (seen.has(decl.name)) {
+      fail("HC021", `\`${decl.name}\` is declared more than once in the component scope.`, source);
+    }
+    seen.add(decl.name);
+  }
+
   const normalizedTemplate = parseElement(root, contract, source, { value: 0 });
   const style = styles[0] as HTMLStyleElement | undefined;
 
   return {
     wrapper,
     style,
+    decls,
     definition: Object.freeze({
       source: Object.freeze({ file: source }),
       contract,
@@ -336,6 +403,7 @@ function invocationValue(prop: PropContract, attributeValue: string): PropValue 
 function readInvocation(
   invocation: Element,
   contract: ComponentContract,
+  decls: readonly Decl[],
 ): {
   readonly scope: Scope;
   readonly passThrough: readonly Attr[];
@@ -361,6 +429,16 @@ function readInvocation(
     }
     // The effective value seen by expressions: the passed value, else the default, else null.
     scope.set(name, values[name] !== undefined ? values[name]! : prop.default ?? null);
+  }
+
+  // Seed reactive declarations in document order, each evaluated against the scope so far
+  // (props, then earlier declarations). One-shot: `data` starts in its pending shape.
+  for (const decl of decls) {
+    if (decl.kind === "data") {
+      scope.set(decl.name, { pending: true, value: null, error: null, ok: false });
+    } else {
+      scope.set(decl.name, decl.expr !== undefined ? evalValue(decl.expr, scope) : null);
+    }
   }
   return { scope, passThrough };
 }
@@ -636,12 +714,12 @@ export function lowerDocument(root: Document = document): number {
   }
 
   const prepared: PreparedInvocation[] = [];
-  for (const { definition } of definitions) {
+  for (const { definition, decls } of definitions) {
     // A <template>'s content is inert, so querySelectorAll never returns definition-internal
     // markup; every match is a live invocation to lower.
     const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
     for (const invocation of invocations) {
-      const { scope, passThrough } = readInvocation(invocation, definition.contract);
+      const { scope, passThrough } = readInvocation(invocation, definition.contract, decls);
       const children = Array.from(invocation.childNodes);
       const slotContainers: Element[] = [];
       const rendered = renderNode(
