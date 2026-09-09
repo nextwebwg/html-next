@@ -1,33 +1,25 @@
-import { coerceDefault, defineContract, parseTypeAttribute, serializePropTarget } from "./contract.js";
+import { coerceDefault, defineContract, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import {
   UndeclaredName,
   checkExpression,
   evaluate,
+  toAttribute,
   toText,
+  truthy,
   type Scope,
   type Value,
 } from "./expression.js";
-import {
-  isReservedElement,
-  validateLiteralAttributeName,
-  validateSimplePropExpression,
-} from "./language.js";
-import { resolveDomProperty } from "./platform.js";
+import { isReservedElement, validateLiteralAttributeName } from "./language.js";
 import type {
   ComponentDefinition,
   DirectiveAttribute,
   ElementNode,
+  Flow,
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import type {
-  ComponentContract,
-  PropContract,
-  PropTarget,
-  PropValue,
-  SerializedPropTarget,
-} from "./types.js";
+import type { ComponentContract, PropContract, PropValue } from "./types.js";
 
 interface LiveDefinition {
   readonly wrapper: Element;
@@ -61,39 +53,81 @@ function directElements(wrapper: Element, name: string): Element[] {
  */
 const RAW_SINKS = new Set(["innerhtml", "outerhtml", "textcontent", "innertext", "srcdoc"]);
 
-/**
- * A prop's target is where it is bound in the markup, not restated. There is one binding
- * prefix, `:name`, which targets the attribute `name`; the removed `.property` syntax and
- * hand-picked IDL spellings are gone.
- */
-function collectTargets(root: Element, source: string): Record<string, PropTarget> {
-  const targets: Record<string, PropTarget> = {};
-  const record = (name: string, target: PropTarget): void => {
-    const prior = targets[name];
-    if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(target)) {
-      fail("HT004", `Prop \`${name}\` is bound to conflicting targets.`, source);
-    }
-    targets[name] = target;
-  };
-  const visit = (element: Element): void => {
-    for (const attribute of Array.from(element.attributes)) {
-      if (attribute.name.startsWith(":")) {
-        record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
-      }
-    }
-    for (const child of Array.from(element.children)) {
-      if (child.localName !== "slot") visit(child);
-    }
-  };
-  visit(root);
-  return targets;
+/** Structural `$`-directive attribute names (extracted as flow, not passed to parseAttributes). */
+const FLOW_NAMES = new Set([
+  "$if", "$each", "$where", "$sort", "$limit", "$key", "$with", "$match", "$when", "$else",
+]);
+
+const EACH_RE = /^\s*([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*)\s*)?\bof\b\s*(.+)$/;
+const AS_RE = /^\s*(.+?)\s+\bas\b\s+([A-Za-z_$][\w$]*)\s*$/;
+
+function checkExpr(src: string, source: string): void {
+  try {
+    checkExpression(src);
+  } catch {
+    fail("HT013", `Malformed expression \`${src}\`.`, source);
+  }
 }
 
-function readProps(
-  group: Element | undefined,
-  targets: Record<string, PropTarget>,
-  source: string,
-): Record<string, unknown> {
+/** Read the one structural directive on an element (with `$each`'s modifiers), if any. */
+function extractFlow(element: Element, source: string): Flow | undefined {
+  const has = (name: string): boolean => element.hasAttribute(name);
+  const val = (name: string): string => element.getAttribute(name) ?? "";
+  const structural = ["$if", "$each", "$with", "$match", "$when", "$else"].filter(has);
+  if (structural.length > 1) {
+    fail("HT014", `An element carries one structural directive; found ${structural.join(", ")}.`, source);
+  }
+
+  if (has("$if")) {
+    checkExpr(val("$if"), source);
+    return { kind: "if", test: val("$if") };
+  }
+  if (has("$with")) {
+    const match = AS_RE.exec(val("$with"));
+    if (match === null) fail("HT015", "`$with` must be written `expr as name`.", source);
+    checkExpr(match![1]!, source);
+    return { kind: "with", expr: match![1]!, alias: match![2]! };
+  }
+  if (has("$each")) {
+    const match = EACH_RE.exec(val("$each"));
+    if (match === null) {
+      fail("HT016", "`$each` must be written `item of items` (optionally `item, i of items`).", source);
+    }
+    checkExpr(match![3]!, source);
+    const flow: {
+      kind: "each";
+      item: string;
+      index?: string;
+      list: string;
+      where?: string;
+      sort?: string;
+      limit?: string;
+      key?: string;
+    } = { kind: "each", item: match![1]!, list: match![3]! };
+    if (match![2] !== undefined) flow.index = match![2];
+    if (has("$where")) { checkExpr(val("$where"), source); flow.where = val("$where"); }
+    if (has("$sort")) flow.sort = val("$sort"); // a comma-list of keys, not an expression
+    if (has("$limit")) { checkExpr(val("$limit"), source); flow.limit = val("$limit"); }
+    if (has("$key")) { checkExpr(val("$key"), source); flow.key = val("$key"); }
+    return flow;
+  }
+  if (has("$match")) {
+    const raw = val("$match").trim();
+    if (raw === "") return { kind: "match" };
+    const match = AS_RE.exec(raw);
+    if (match === null) fail("HT017", "`$match` scope must be written `expr as name`.", source);
+    checkExpr(match![1]!, source);
+    return { kind: "match", expr: match![1]!, alias: match![2]! };
+  }
+  if (has("$when")) {
+    checkExpr(val("$when"), source);
+    return { kind: "when", test: val("$when") };
+  }
+  if (has("$else")) return { kind: "else" };
+  return undefined;
+}
+
+function readProps(group: Element | undefined, source: string): Record<string, unknown> {
   const props: Record<string, unknown> = {};
   if (group === undefined) return props;
   for (const element of directElements(group, "prop")) {
@@ -105,14 +139,12 @@ function readProps(
     if (typeAttribute === null || typeAttribute === "") {
       fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
     }
-    // A prop may be bound to an attribute (`:name`) or consumed only in expressions
-    // ($value/$html); the latter has no serialization target, so default a nominal one
-    // that is never read (no `:name` binding exists to serialize it).
-    const target = targets[name] ?? { attribute: name.toLowerCase() };
     const type = parseTypeAttribute(typeAttribute);
+    // The target is a nominal attribute of the same name, kept for contract shape; the
+    // in-browser render resolves bindings as expressions over scope, not by target.
     const spec: Record<string, unknown> = {
       type,
-      target,
+      target: { attribute: name.toLowerCase() },
       description: (element.textContent ?? "").trim(),
     };
     if (element.hasAttribute("required")) spec.required = true;
@@ -123,53 +155,43 @@ function readProps(
   return props;
 }
 
-function parseAttributes(
-  element: Element,
-  contract: ComponentContract,
-  source: string,
-): TemplateAttribute[] {
-  return Array.from(element.attributes).map((attribute) => {
-    if (attribute.name.startsWith("bind:")) {
-      fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
-    }
-
-    if (attribute.name.startsWith(".")) {
-      fail(
-        "HT011",
-        `The \`.property\` binding syntax has been removed; bind with \`:${attribute.name.slice(1)}\`, or set content with \`$value\`/\`$html\`.`,
-        source,
-      );
-    }
-
-    if (attribute.name.startsWith("$")) {
-      const directive = attribute.name.slice(1).toLowerCase();
-      if (directive !== "value" && directive !== "html") {
-        fail("HT012", `\`$${directive}\` is reserved but not yet supported by the in-browser runtime.`, source);
+function parseAttributes(element: Element, source: string): TemplateAttribute[] {
+  return Array.from(element.attributes)
+    .filter((attribute) => !FLOW_NAMES.has(attribute.name.toLowerCase()))
+    .map((attribute) => {
+      if (attribute.name.startsWith("bind:")) {
+        fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
       }
-      try {
-        checkExpression(attribute.value);
-      } catch {
-        fail("HT013", `\`$${directive}\` has a malformed expression.`, source);
-      }
-      return { kind: "directive", name: directive, expression: attribute.value };
-    }
 
-    if (attribute.name.startsWith(":")) {
-      const name = attribute.name.slice(1).toLowerCase();
-      if (RAW_SINKS.has(name)) {
-        fail("HT007", `\`:${name}\` cannot bind a raw content sink; use \`$value\`/\`$html\` or the trusted-HTML type.`, source);
+      if (attribute.name.startsWith(".")) {
+        fail(
+          "HT011",
+          `The \`.property\` binding syntax has been removed; bind with \`:${attribute.name.slice(1)}\`, or set content with \`$value\`/\`$html\`.`,
+          source,
+        );
       }
-      const expression = validateSimplePropExpression(attribute.value, contract, source);
-      const target = contract.props[expression]!.target;
-      if (!("attribute" in target) || target.attribute !== name) {
-        fail("HT004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
-      }
-      return { kind: "attribute", name, expression };
-    }
 
-    validateLiteralAttributeName(attribute.name, source);
-    return { kind: "literal", name: attribute.name, value: attribute.value };
-  });
+      if (attribute.name.startsWith("$")) {
+        const directive = attribute.name.slice(1).toLowerCase();
+        if (directive !== "value" && directive !== "html") {
+          fail("HT012", `\`$${directive}\` is not a known directive.`, source);
+        }
+        checkExpr(attribute.value, source);
+        return { kind: "directive", name: directive, expression: attribute.value };
+      }
+
+      if (attribute.name.startsWith(":")) {
+        const name = attribute.name.slice(1).toLowerCase();
+        if (RAW_SINKS.has(name)) {
+          fail("HT007", `\`:${name}\` cannot bind a raw content sink; use \`$value\`/\`$html\` or the trusted-HTML type.`, source);
+        }
+        checkExpr(attribute.value, source);
+        return { kind: "attribute", name, expression: attribute.value };
+      }
+
+      validateLiteralAttributeName(attribute.name, source);
+      return { kind: "literal", name: attribute.name, value: attribute.value };
+    });
 }
 
 function parseElement(
@@ -182,9 +204,15 @@ function parseElement(
     fail("HT009", `<${element.localName}> is reserved but not supported by the component MVP.`, source);
   }
 
-  const attributes = parseAttributes(element, contract, source);
+  const attributes = parseAttributes(element, source);
+  const flow = extractFlow(element, source);
   const children: TemplateNode[] = [];
-  for (const child of Array.from(element.childNodes)) {
+  // A nested <template>'s children live in its inert content fragment, not childNodes.
+  const childNodes =
+    element.localName === "template"
+      ? Array.from((element as HTMLTemplateElement).content.childNodes)
+      : Array.from(element.childNodes);
+  for (const child of childNodes) {
     if (child.nodeType === Node.COMMENT_NODE) continue;
     if (child.nodeType === Node.TEXT_NODE) {
       if (child.textContent?.trim() !== "") {
@@ -217,7 +245,27 @@ function parseElement(
     );
   }
 
-  return { kind: "element", name: element.localName, attributes, children };
+  // A $match container's direct element children must all be $when/$else arms, at most one
+  // $else, and $else last.
+  if (flow?.kind === "match") {
+    const arms = children.filter((node): node is ElementNode => node.kind === "element");
+    let elseSeen = false;
+    arms.forEach((arm, index) => {
+      if (arm.flow?.kind === "when") {
+        if (elseSeen) fail("HT018", "A `$when` arm may not follow `$else`.", source);
+      } else if (arm.flow?.kind === "else") {
+        if (elseSeen) fail("HT018", "A `$match` has at most one `$else`.", source);
+        elseSeen = true;
+        if (index !== arms.length - 1) fail("HT018", "`$else` must be the last arm.", source);
+      } else {
+        fail("HT018", "Every direct child of a `$match` must be a `$when` or `$else` arm.", source);
+      }
+    });
+  }
+
+  return flow === undefined
+    ? { kind: "element", name: element.localName, attributes, children }
+    : { kind: "element", name: element.localName, attributes, children, flow };
 }
 
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
@@ -245,13 +293,12 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
   }
   const root = markup[0] as Element;
 
-  const targets = collectTargets(root, source);
   const contract = defineContract(
     {
       status: wrapper.getAttribute("status") ?? undefined,
       summary: wrapper.getAttribute("summary") ?? undefined,
       nativeElement: root.localName,
-      props: readProps(defsRegions[0], targets, source),
+      props: readProps(defsRegions[0], source),
     },
     { source, tag },
   );
@@ -290,7 +337,6 @@ function readInvocation(
   invocation: Element,
   contract: ComponentContract,
 ): {
-  readonly targets: Readonly<Record<string, SerializedPropTarget>>;
   readonly scope: Scope;
   readonly passThrough: readonly Attr[];
 } {
@@ -308,15 +354,20 @@ function readInvocation(
     values[propName] = invocationValue(contract.props[propName]!, attribute.value);
   }
 
-  const targets: Record<string, SerializedPropTarget> = {};
   const scope = new Map<string, Value>();
   for (const [name, prop] of Object.entries(contract.props)) {
-    targets[name] = serializePropTarget(prop, values[name]);
-    // The effective value seen by expressions: the passed value, else the default, else absent.
-    const effective = values[name] !== undefined ? values[name]! : prop.default ?? null;
-    scope.set(name, effective);
+    if (prop.required && values[name] === undefined) {
+      fail("HC020", `Required prop \`${name}\` was not provided.`);
+    }
+    // The effective value seen by expressions: the passed value, else the default, else null.
+    scope.set(name, values[name] !== undefined ? values[name]! : prop.default ?? null);
   }
-  return { targets, scope, passThrough };
+  return { scope, passThrough };
+}
+
+/** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
+function layer(parent: Scope, locals: Record<string, Value>): Scope {
+  return new Map<string, Value>([...parent, ...Object.entries(locals)]);
 }
 
 function evalValue(expression: string, scope: Scope): Value {
@@ -379,50 +430,160 @@ function inlineDirective(directive: DirectiveAttribute, scope: Scope, document: 
   return sanitizedFragment(toText(value), document);
 }
 
-function renderElement(
+function compareValues(a: Value, b: Value): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return toText(a).localeCompare(toText(b));
+}
+
+/** Apply the `$each` modifiers: `$where` filter, `$sort` (comma keys, `-` = descending), `$limit`. */
+function shapeList(
+  items: readonly Value[],
+  flow: Extract<Flow, { kind: "each" }>,
+  scope: Scope,
+): Value[] {
+  let result = items.slice();
+  if (flow.where !== undefined) {
+    const where = flow.where;
+    result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
+  }
+  if (flow.sort !== undefined) {
+    const keys = flow.sort.split(",").map((raw) => raw.trim()).filter((key) => key !== "");
+    result.sort((a, b) => {
+      for (const key of keys) {
+        const descending = key.startsWith("-");
+        const path = descending ? key.slice(1) : key;
+        const order = compareValues(
+          evalValue(path, layer(scope, { [flow.item]: a })),
+          evalValue(path, layer(scope, { [flow.item]: b })),
+        );
+        if (order !== 0) return descending ? -order : order;
+      }
+      return 0;
+    });
+  }
+  if (flow.limit !== undefined) {
+    const limit = evalValue(flow.limit, scope);
+    if (typeof limit === "number") result = result.slice(0, Math.max(0, Math.trunc(limit)));
+  }
+  return result;
+}
+
+/** The scopes in which a node's body should render, per its structural directive. */
+function expandFlow(flow: Flow | undefined, scope: Scope): Scope[] {
+  if (flow === undefined) return [scope];
+  switch (flow.kind) {
+    case "if":
+      return truthy(evalValue(flow.test, scope)) ? [scope] : [];
+    case "with":
+      return [layer(scope, { [flow.alias]: evalValue(flow.expr, scope) })];
+    case "each": {
+      const list = evalValue(flow.list, scope);
+      if (!Array.isArray(list)) return [];
+      const items = shapeList(list, flow, scope);
+      return items.map((item, index) => {
+        const locals: Record<string, Value> = {
+          [flow.item]: item,
+          loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+        };
+        if (flow.index !== undefined) locals[flow.index] = index;
+        return layer(scope, locals);
+      });
+    }
+    default:
+      // A stray when/else (no enclosing $match) renders once, its marker ignored.
+      return [scope];
+  }
+}
+
+function renderNode(
   node: ElementNode,
-  targets: Readonly<Record<string, SerializedPropTarget>>,
   scope: Scope,
   slotChildren: readonly Node[],
   document: Document,
+  slotContainers: Element[],
   passThrough: readonly Attr[] = [],
-  slotContainers: Element[] = [],
-): Element {
-  const element = document.createElement(node.name);
-  for (const attribute of passThrough) {
-    element.setAttribute(attribute.name, attribute.value);
+): Node[] {
+  if (node.flow?.kind === "match") {
+    return renderMatch(node, scope, slotChildren, document, slotContainers);
+  }
+  const out: Node[] = [];
+  for (const childScope of expandFlow(node.flow, scope)) {
+    out.push(...renderInstance(node, childScope, slotChildren, document, slotContainers, passThrough));
+  }
+  return out;
+}
+
+function renderMatch(
+  node: ElementNode,
+  scope: Scope,
+  slotChildren: readonly Node[],
+  document: Document,
+  slotContainers: Element[],
+): Node[] {
+  const flow = node.flow as Extract<Flow, { kind: "match" }>;
+  const matchScope =
+    flow.expr !== undefined ? layer(scope, { [flow.alias!]: evalValue(flow.expr, scope) }) : scope;
+
+  let chosen: ElementNode | undefined;
+  for (const child of node.children) {
+    if (child.kind !== "element") continue;
+    if (child.flow?.kind === "when" && truthy(evalValue(child.flow.test, matchScope))) {
+      chosen = child;
+      break;
+    }
+    if (child.flow?.kind === "else") {
+      chosen = child;
+      break;
+    }
+  }
+  if (chosen === undefined) return [];
+
+  // Render the winning arm, ignoring its own $when/$else marker.
+  const { flow: _armFlow, ...armNode } = chosen;
+  const rendered = renderInstance(armNode, matchScope, slotChildren, document, slotContainers);
+  if (node.name === "template") return rendered;
+
+  // $match on a real element wraps the winning arm in that element.
+  const wrapper = document.createElement(node.name);
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "literal") wrapper.setAttribute(attribute.name, attribute.value);
+  }
+  wrapper.append(...rendered);
+  return [wrapper];
+}
+
+/** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */
+function renderInstance(
+  node: ElementNode,
+  scope: Scope,
+  slotChildren: readonly Node[],
+  document: Document,
+  slotContainers: Element[],
+  passThrough: readonly Attr[] = [],
+): Node[] {
+  const contentDirective = node.attributes.find(
+    (attribute): attribute is DirectiveAttribute => attribute.kind === "directive",
+  );
+
+  // A <template> is a fragment carrier: it contributes no wrapper element to the output.
+  if (node.name === "template") {
+    if (contentDirective !== undefined) return [inlineDirective(contentDirective, scope, document)];
+    return renderChildren(node.children, scope, slotChildren, document, slotContainers);
   }
 
-  let contentDirective: DirectiveAttribute | undefined;
+  const element = document.createElement(node.name);
+  for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") {
-      element.setAttribute(attribute.name, attribute.value);
-      continue;
+    if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+    else if (attribute.kind === "attribute") {
+      setAttribute(element, attribute.name, toAttribute(evalValue(attribute.expression, scope)));
     }
-    if (attribute.kind === "directive") {
-      contentDirective = attribute;
-      continue;
-    }
-
-    const target = targets[attribute.expression]!;
-    if (attribute.kind === "attribute") {
-      if (target.kind !== "attribute") {
-        fail("HR003", `Binding \`${attribute.expression}\` did not resolve to an attribute.`);
-      }
-      setAttribute(element, attribute.name, target.value);
-      continue;
-    }
-
-    const propertyName = resolveDomProperty(node.name, attribute.key);
-    if (propertyName === undefined || propertyName !== attribute.name || target.kind !== "property") {
-      fail("HR003", `Binding \`${attribute.expression}\` did not resolve to a known DOM property.`);
-    }
-    (element as unknown as Record<string, unknown>)[propertyName] = target.value;
+    // Content directives are handled below; property bindings are not produced in-browser.
   }
 
   if (contentDirective !== undefined) {
     applyContent(element, contentDirective, scope, document);
-    return element;
+    return [element];
   }
 
   for (const child of node.children) {
@@ -432,17 +593,29 @@ function renderElement(
       slotContainers.push(element);
       element.append(...slotChildren);
     } else {
-      const directive = child.attributes.find(
-        (attribute): attribute is DirectiveAttribute => attribute.kind === "directive",
-      );
-      if (child.name === "template" && directive !== undefined) {
-        element.append(inlineDirective(directive, scope, document));
-      } else {
-        element.append(renderElement(child, targets, scope, slotChildren, document, [], slotContainers));
+      for (const rendered of renderNode(child, scope, slotChildren, document, slotContainers)) {
+        element.append(rendered);
       }
     }
   }
-  return element;
+  return [element];
+}
+
+function renderChildren(
+  children: readonly TemplateNode[],
+  scope: Scope,
+  slotChildren: readonly Node[],
+  document: Document,
+  slotContainers: Element[],
+): Node[] {
+  const out: Node[] = [];
+  for (const child of children) {
+    if (child.kind === "text") out.push(document.createTextNode(child.value));
+    else if (child.kind !== "slot") {
+      out.push(...renderNode(child, scope, slotChildren, document, slotContainers));
+    }
+  }
+  return out;
 }
 
 /**
@@ -468,18 +641,18 @@ export function lowerDocument(root: Document = document): number {
     // markup; every match is a live invocation to lower.
     const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
     for (const invocation of invocations) {
-      const { targets, scope, passThrough } = readInvocation(invocation, definition.contract);
+      const { scope, passThrough } = readInvocation(invocation, definition.contract);
       const children = Array.from(invocation.childNodes);
       const slotContainers: Element[] = [];
-      const nativeRoot = renderElement(
+      const rendered = renderNode(
         definition.template,
-        targets,
         scope,
         children.map((child) => child.cloneNode(true)),
         invocation.ownerDocument,
-        passThrough,
         slotContainers,
+        passThrough,
       );
+      const nativeRoot = rendered[0] as Element;
       prepared.push({ invocation, nativeRoot, slotContainers, children });
     }
   }

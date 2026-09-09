@@ -182,6 +182,51 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} renders control flow: $each, $if, $match, $with`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-demo" status="early" summary="Control flow.">` +
+            `<defs>` +
+            `<prop name="tier" type="free | pro" default="free">Plan.</prop>` +
+            `<prop name="show" type="boolean" default="false">Show.</prop>` +
+            `</defs>` +
+            `<div>` +
+            `<ul class="nums"><li $each="n, i of [10, 20, 30]" $where="n > 10" :data-i="i" $value="n"></li></ul>` +
+            `<p class="maybe" $if="show">extra</p>` +
+            `<template $match="tier as t">` +
+            `<span class="tier" $when="t = 'pro'">Pro</span>` +
+            `<span class="tier" $else>Free</span>` +
+            `</template>` +
+            `<template $with="{ name: 'Ada' } as u"><b class="who" $value="u.name"></b></template>` +
+            `</div></template>` +
+            `<x-demo id="d" tier="pro"></x-demo>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#d");
+          return {
+            nums: Array.from(root.querySelectorAll(".nums li")).map((li) => [li.getAttribute("data-i"), li.textContent]),
+            maybePresent: root.querySelector(".maybe") !== null,
+            tier: root.querySelector(".tier")?.textContent ?? null,
+            tierCount: root.querySelectorAll(".tier").length,
+            who: root.querySelector(".who")?.textContent ?? null,
+          };
+        })()`);
+        assert.deepEqual(result, {
+          nums: [["0", "20"], ["1", "30"]], // $where drops 10; index is post-filter
+          maybePresent: false, // show defaults false
+          tier: "Pro",
+          tierCount: 1, // only the winning arm renders
+          who: "Ada",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} lowers definitions to equivalent native DOM`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

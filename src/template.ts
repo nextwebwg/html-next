@@ -14,7 +14,26 @@ export interface ElementNode {
   readonly name: string;
   readonly attributes: readonly TemplateAttribute[];
   readonly children: readonly TemplateNode[];
+  /** A structural `$`-directive controlling whether/how-many-times/in-what-scope this node is produced. */
+  readonly flow?: Flow;
 }
+
+export type Flow =
+  | { readonly kind: "if"; readonly test: string }
+  | {
+      readonly kind: "each";
+      readonly item: string;
+      readonly index?: string;
+      readonly list: string;
+      readonly where?: string;
+      readonly sort?: string;
+      readonly limit?: string;
+      readonly key?: string;
+    }
+  | { readonly kind: "with"; readonly expr: string; readonly alias: string }
+  | { readonly kind: "match"; readonly expr?: string; readonly alias?: string }
+  | { readonly kind: "when"; readonly test: string }
+  | { readonly kind: "else" };
 
 export interface TextNode {
   readonly kind: "text";
