@@ -53,7 +53,7 @@ describe("browser runtime", { skip: !enabled }, () => {
         const page = await browser.newPage();
         const definitionMarkup =
           `<template component="demo-transactional-button" id="definition" status="early" summary="Transactional test component.">` +
-          `<props><prop name="label" type="string" required>Button label.</prop></props>` +
+          `<defs><prop name="label" type="string" required>Button label.</prop></defs>` +
           `<button :data-label="label"><slot></slot></button>` +
           `<style id="definition-style">button { color: red; }</style></template>`;
         await page.setContent(`${definitionMarkup}<main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
@@ -135,8 +135,8 @@ describe("browser runtime", { skip: !enabled }, () => {
           `<button onclick="alert(1)"></button></template>`;
         const iframeMarkup =
           `<template component="demo-unsafe-frame" status="early" summary="Unsafe test component.">` +
-          `<props><prop name="markup" type="string">Embedded markup.</prop></props>` +
-          `<iframe .srcdoc="markup"></iframe></template>`;
+          `<defs><prop name="markup" type="string">Embedded markup.</prop></defs>` +
+          `<iframe :srcdoc="markup"></iframe></template>`;
 
         assert.equal(await diagnostic(buttonMarkup), "HT010");
         assert.equal(await diagnostic(iframeMarkup), "HT007");

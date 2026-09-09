@@ -3,7 +3,6 @@ import { fail } from "./diagnostics.js";
 import {
   isReservedElement,
   validateLiteralAttributeName,
-  validateMvpDomProperty,
   validateSimplePropExpression,
 } from "./language.js";
 import { resolveDomProperty } from "./platform.js";
@@ -47,8 +46,16 @@ function directElements(wrapper: Element, name: string): Element[] {
 }
 
 /**
- * A prop's target is defined by where it is bound in the markup, not restated: a
- * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property.
+ * Content and raw-HTML sinks are never reachable by a binding; markup is set with the
+ * `$value`/`$html` directives (or the trusted-HTML type), never a string assigned to a
+ * property. A `:name` binding that names one of these is a conformance error.
+ */
+const RAW_SINKS = new Set(["innerhtml", "outerhtml", "textcontent", "innertext", "srcdoc"]);
+
+/**
+ * A prop's target is where it is bound in the markup, not restated. There is one binding
+ * prefix, `:name`, which targets the attribute `name`; the removed `.property` syntax and
+ * hand-picked IDL spellings are gone.
  */
 function collectTargets(root: Element, source: string): Record<string, PropTarget> {
   const targets: Record<string, PropTarget> = {};
@@ -63,9 +70,6 @@ function collectTargets(root: Element, source: string): Record<string, PropTarge
     for (const attribute of Array.from(element.attributes)) {
       if (attribute.name.startsWith(":")) {
         record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
-      } else if (attribute.name.startsWith(".")) {
-        const key = attribute.name.slice(1).toLowerCase();
-        record(attribute.value, { property: resolveDomProperty(element.localName, key) ?? key });
       }
     }
     for (const child of Array.from(element.children)) {
@@ -120,29 +124,25 @@ function parseAttributes(
       fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
     }
 
+    if (attribute.name.startsWith(".")) {
+      fail(
+        "HT011",
+        `The \`.property\` binding syntax has been removed; bind with \`:${attribute.name.slice(1)}\`, or set content with \`$value\`/\`$html\`.`,
+        source,
+      );
+    }
+
     if (attribute.name.startsWith(":")) {
       const name = attribute.name.slice(1).toLowerCase();
+      if (RAW_SINKS.has(name)) {
+        fail("HT007", `\`:${name}\` cannot bind a raw content sink; use \`$value\`/\`$html\` or the trusted-HTML type.`, source);
+      }
       const expression = validateSimplePropExpression(attribute.value, contract, source);
       const target = contract.props[expression]!.target;
       if (!("attribute" in target) || target.attribute !== name) {
         fail("HT004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
       }
       return { kind: "attribute", name, expression };
-    }
-
-    if (attribute.name.startsWith(".")) {
-      const key = attribute.name.slice(1).toLowerCase();
-      const expression = validateSimplePropExpression(attribute.value, contract, source);
-      const target = contract.props[expression]!.target;
-      if (!("property" in target) || target.property.toLowerCase() !== key) {
-        fail("HT004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
-      }
-      const name = resolveDomProperty(element.localName, key);
-      if (name === undefined) {
-        fail("HP001", `\`${key}\` is not a known property of <${element.localName}>.`, source);
-      }
-      validateMvpDomProperty(name, source);
-      return { kind: "property", key, name, expression };
     }
 
     validateLiteralAttributeName(attribute.name, source);
@@ -186,15 +186,6 @@ function parseElement(
     children.push(parseElement(child, contract, source, slotCount));
   }
 
-  if (
-    attributes.some(
-      (binding) => binding.kind === "property" && binding.name === "textContent",
-    ) &&
-    children.length > 0
-  ) {
-    fail("HT006", "A content-replacing property binding cannot coexist with children.", source);
-  }
-
   return { kind: "element", name: element.localName, attributes, children };
 }
 
@@ -208,13 +199,13 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
     content.filter(
       (node): node is Element => node instanceof Element && node.localName === name,
     );
-  const propGroups = contentElement("props");
+  const defsRegions = contentElement("defs");
   const styles = contentElement("style");
-  if (propGroups.length > 1 || styles.length > 1) {
-    fail("HS002", "A component has an optional <props> group, one markup root, and an optional <style>.", source);
+  if (defsRegions.length > 1 || styles.length > 1) {
+    fail("HS002", "A component has an optional <defs> region, one markup root, and an optional <style>.", source);
   }
 
-  const known = new Set<Element>([...propGroups, ...styles]);
+  const known = new Set<Element>([...defsRegions, ...styles]);
   const markup = significant(content).filter(
     (node) => !(node instanceof Element) || !known.has(node),
   );
@@ -229,7 +220,7 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
       status: wrapper.getAttribute("status") ?? undefined,
       summary: wrapper.getAttribute("summary") ?? undefined,
       nativeElement: root.localName,
-      props: readProps(propGroups[0], targets, source),
+      props: readProps(defsRegions[0], targets, source),
     },
     { source, tag },
   );
