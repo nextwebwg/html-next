@@ -5,16 +5,19 @@
 //  - definitions are inert .html data; controllers are .js modules that self-register
 //    with an explicit defineController(tag, fn) call;
 //  - controllers load lazily via import() on first connect;
-//  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM).
+//  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM);
+//  - lowered roots are torn down (effects + disconnect) when removed from the DOM;
+//  - author markup is sanitized on lowering (script / on* / javascript: are dropped).
 //
-// ponytail: lowering is deliberately coarse — dotted-path expressions only (no operators,
-// no $if/$each), coarse per-binding effects. The production runtime (src/runtime.ts) has the
-// real expression engine and control flow; this file exists to prove the composition/loading
-// shape end to end, runnable by opening index.html through any static server.
+// ponytail: still POC-simplified — dotted-path expressions only (no operators, no $if/$each),
+// EAGER-transitive definition loading (the spec's model is demand-driven), coarse reactivity,
+// no SSR/hydration. See README for the full list. The production runtime (src/runtime.ts) has
+// the real expression engine and control flow; this file proves the composition/loading shape.
 
 const registry = new Map(); // tag -> { template }
 const controllers = new Map(); // tag -> fn
 const controllerHints = new Map(); // tag -> module URL (from <link rel="controller">)
+const importing = new Set(); // controller URLs whose import() is in flight
 const loaded = new Set(); // definition URLs already fetched
 const whenDefinedResolvers = new Map();
 
@@ -24,15 +27,20 @@ const whenDefinedResolvers = new Map();
 
 export function defineController(tag, fn) {
   controllers.set(tag, fn);
-  // Upgrade: run the controller on any already-lowered, not-yet-controlled instances,
+  // Upgrade: run the controller on already-lowered, not-yet-controlled instances,
   // exactly like a late customElements.define upgrades existing elements.
-  document.querySelectorAll(`[data-component~="${tag}"]`).forEach((root) => {
+  document.querySelectorAll(`[data-component]`).forEach((root) => {
     if (root.__tag === tag && !root.__controlled) connect(root);
   });
 }
 
 export const components = {
   define(tag, template) {
+    if (registry.has(tag)) {
+      // Like customElements.define, a tag may be defined once (security.vue: no silent winner).
+      console.error(`[html-next] <${tag}> is already defined; ignoring the duplicate definition.`);
+      return;
+    }
     registry.set(tag, { template });
     (whenDefinedResolvers.get(tag) || []).forEach((r) => r());
     whenDefinedResolvers.delete(tag);
@@ -50,7 +58,7 @@ export const components = {
 };
 
 // ---------------------------------------------------------------------------
-// Reactivity — a tiny signal system (read-tracking + microtask-batched effects)
+// Reactivity — a tiny signal system with proper per-effect cleanup
 // ---------------------------------------------------------------------------
 
 let currentEffect = null;
@@ -61,23 +69,36 @@ function flush() {
   scheduled = false;
   const fns = [...pending];
   pending.clear();
-  fns.forEach(runEffect);
+  fns.forEach((e) => !e.disposed && e.execute());
 }
-function schedule(fn) {
-  pending.add(fn);
+function schedule(effect) {
+  pending.add(effect);
   if (!scheduled) {
     scheduled = true;
     queueMicrotask(flush);
   }
 }
-function runEffect(fn) {
-  const prev = currentEffect;
-  currentEffect = fn;
-  try {
-    fn();
-  } finally {
-    currentEffect = prev;
-  }
+function unsubscribe(effect) {
+  effect.deps.forEach((set) => set.delete(effect));
+  effect.deps.clear();
+}
+// Create an effect that re-runs when a reactive key it read changes. Returns the effect
+// so its owner can dispose it (unsubscribe) on disconnect.
+function createEffect(run) {
+  const effect = { run, deps: new Set(), disposed: false };
+  effect.execute = () => {
+    if (effect.disposed) return;
+    unsubscribe(effect); // clear stale subscriptions before re-tracking (no over-firing/leaks)
+    const prev = currentEffect;
+    currentEffect = effect;
+    try {
+      run();
+    } finally {
+      currentEffect = prev;
+    }
+  };
+  effect.execute();
+  return effect;
 }
 
 function reactive(obj) {
@@ -88,6 +109,7 @@ function reactive(obj) {
         let set = subs.get(key);
         if (!set) subs.set(key, (set = new Set()));
         set.add(currentEffect);
+        currentEffect.deps.add(set);
       }
       return target[key];
     },
@@ -111,7 +133,33 @@ function evalExpr(expr, scope) {
   } catch {
     /* not a literal — treat as a path */
   }
-  return text.split(".").reduce((v, k) => (v == null ? undefined : v[k]), scope);
+  const value = text.split(".").reduce((v, k) => (v == null ? undefined : v[k]), scope);
+  if (value === undefined) console.warn(`[html-next] expression "${expr}" resolved to nothing.`);
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Sanitizing author markup on lowering (definitions are inert, but their markup
+// must still be safe to render: drop <script>, on* handlers, and javascript: URLs).
+// ponytail: a conservative allow-nothing-dangerous pass; the spec points at the HTML
+// Sanitizer API for the real thing.
+// ---------------------------------------------------------------------------
+
+const URL_ATTRS = new Set(["href", "src", "action", "formaction", "poster", "xlink:href"]);
+function sanitize(root) {
+  const walk = (el) => {
+    if (el.localName === "script") {
+      el.remove();
+      return;
+    }
+    [...el.attributes].forEach((a) => {
+      const name = a.name.toLowerCase();
+      if (name.startsWith("on")) el.removeAttribute(a.name);
+      else if (URL_ATTRS.has(name) && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+    });
+    [...el.children].forEach(walk);
+  };
+  walk(root);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +167,7 @@ function evalExpr(expr, scope) {
 // ---------------------------------------------------------------------------
 
 async function loadDefinition(url) {
-  if (loaded.has(url)) return;
+  if (loaded.has(url)) return; // dedup by URL: safe for diamonds (B,C -> D) and cycles (A <-> B)
   loaded.add(url);
   const res = await fetch(url);
   const doc = new DOMParser().parseFromString(await res.text(), "text/html");
@@ -134,7 +182,6 @@ async function loadDefinition(url) {
   }
   components.define(tag, template);
 
-  // Each definition declares its OWN component dependencies; walk them transitively.
   const deps = [...doc.querySelectorAll('link[rel="component"]')].map(
     (l) => new URL(l.getAttribute("href"), url).href,
   );
@@ -154,7 +201,6 @@ function markupRoot(template) {
 function buildScope(template, el) {
   const scope = {};
   const defs = template.content.querySelector("defs");
-  // props from invocation attributes (typed coercion for number/boolean)
   defs?.querySelectorAll("prop").forEach((p) => {
     const name = p.getAttribute("name");
     const type = p.getAttribute("type");
@@ -164,7 +210,6 @@ function buildScope(template, el) {
     scope[name] = val;
   });
   const state = reactive(scope);
-  // state decls may read props declared above them
   defs?.querySelectorAll("state").forEach((s) => {
     const name = s.getAttribute("name");
     const v = s.getAttribute(":value");
@@ -173,7 +218,7 @@ function buildScope(template, el) {
   return state;
 }
 
-function bindTree(node, scope, refs, slotChildren) {
+function bindTree(node, scope, refs, slotChildren, effects) {
   if (node.nodeType !== Node.ELEMENT_NODE) return;
 
   if (node.localName === "slot") {
@@ -187,40 +232,49 @@ function bindTree(node, scope, refs, slotChildren) {
   if (node.hasAttribute("$value")) {
     const expr = node.getAttribute("$value");
     node.removeAttribute("$value");
-    runEffect(() => {
+    effects.push(createEffect(() => {
       node.textContent = String(evalExpr(expr, scope) ?? "");
-    });
+    }));
   }
   [...node.attributes].forEach((a) => {
     if (!a.name.startsWith(":")) return;
     const name = a.name.slice(1);
     const expr = a.value;
     node.removeAttribute(a.name);
-    runEffect(() => {
-      const v = evalExpr(expr, scope);
+    effects.push(createEffect(() => {
+      let v = evalExpr(expr, scope);
+      if (URL_ATTRS.has(name.toLowerCase()) && /^\s*javascript:/i.test(String(v))) v = null; // no bound javascript: sink
       if (v == null || v === false) node.removeAttribute(name);
       else node.setAttribute(name, v === true ? "" : String(v));
-    });
+    }));
   });
-  [...node.childNodes].forEach((c) => bindTree(c, scope, refs, slotChildren));
+  [...node.childNodes].forEach((c) => bindTree(c, scope, refs, slotChildren, effects));
 }
 
 function lowerElement(el) {
   const tag = el.localName;
   const def = registry.get(tag);
   if (!def) return;
+  if (customElements.get(tag)) {
+    // The tag is a registered custom element; the browser owns it. Do not fight it.
+    console.warn(`[html-next] <${tag}> is a defined custom element; skipping HTML Next lowering.`);
+    return;
+  }
 
   const scope = buildScope(def.template, el);
   const refs = {};
+  const effects = [];
   const slotChildren = [...el.childNodes];
   const root = markupRoot(def.template).cloneNode(true);
-  bindTree(root, scope, refs, slotChildren);
+  sanitize(root); // author markup made safe before it becomes live
+  bindTree(root, scope, refs, slotChildren, effects);
 
   const prior = el.getAttribute("data-component");
   root.setAttribute("data-component", prior ? `${tag} ${prior}` : tag);
   root.__tag = tag;
   root.__scope = scope;
   root.__refs = refs;
+  root.__effects = effects;
   el.replaceWith(root);
 
   lowerAll(root); // nested components
@@ -232,7 +286,7 @@ function lowerAll(container) {
   while (changed) {
     changed = false;
     for (const tag of registry.keys()) {
-      const el = container.querySelector(tag);
+      const el = container.querySelector(`${tag}:not([data-component])`);
       if (el) {
         lowerElement(el);
         changed = true;
@@ -243,16 +297,21 @@ function lowerAll(container) {
 }
 
 // ---------------------------------------------------------------------------
-// Controllers — the host, and lazy connect
+// Controllers — the host, lazy connect, and teardown
 // ---------------------------------------------------------------------------
 
 function makeHost(root) {
   const onDisconnect = [];
+  root.__onDisconnect = onDisconnect;
   return {
     state: root.__scope,
     refs: root.__refs,
     elements: {}, // (POC omits form named-access)
-    effect: (fn) => runEffect(fn),
+    effect: (fn) => {
+      const e = createEffect(fn);
+      root.__effects.push(e);
+      return e;
+    },
     on(event, fn) {
       if (event === "connect") fn();
       else if (event === "disconnect") onDisconnect.push(fn);
@@ -260,17 +319,15 @@ function makeHost(root) {
     },
     dispatch: (event, detail) =>
       root.dispatchEvent(new CustomEvent(event, { detail, bubbles: true })),
-    __disconnect: () => onDisconnect.forEach((f) => f()),
   };
 }
 
 function connect(root) {
   if (root.__controlled) return;
   root.__controlled = true;
-  const fn = controllers.get(root.__tag);
   const host = makeHost(root);
-  const dispose = fn(host);
-  root.__dispose = typeof dispose === "function" ? dispose : host.__disconnect;
+  const dispose = controllers.get(root.__tag)(host);
+  if (typeof dispose === "function") root.__onDisconnect.push(dispose);
 }
 
 function connectOrLoad(root) {
@@ -280,19 +337,41 @@ function connectOrLoad(root) {
     return;
   }
   const url = controllerHints.get(tag);
-  if (url) import(url); // the module's own defineController() call registers + upgrades this instance
+  if (!url || importing.has(url)) return;
+  importing.add(url);
+  // The module's own defineController() call registers + upgrades this instance (and siblings).
+  import(url).catch((err) => console.error(`[html-next] controller ${url} failed to load:`, err));
 }
+
+function disposeRoot(root) {
+  if (root.__disposed) return;
+  root.__disposed = true;
+  (root.__effects || []).forEach((e) => {
+    e.disposed = true;
+    unsubscribe(e);
+  });
+  (root.__onDisconnect || []).forEach((f) => f());
+}
+
+// Observe removals so teardown (effect disposal + on:disconnect) actually runs.
+new MutationObserver((records) => {
+  for (const record of records) {
+    record.removedNodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (node.hasAttribute("data-component")) disposeRoot(node);
+      node.querySelectorAll?.("[data-component]").forEach(disposeRoot);
+    });
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
 
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
 async function boot() {
-  // inline <template component> definitions
   document.querySelectorAll("template[component]").forEach((tpl) => {
     components.define(tpl.getAttribute("component"), tpl);
   });
-  // linked definitions, walked transitively
   const links = [...document.querySelectorAll('link[rel="component"]')];
   await Promise.all(
     links.map((l) => loadDefinition(new URL(l.getAttribute("href"), location.href).href)),

@@ -34,6 +34,14 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
   the runtime reflects it to the `<span>`. The chart's controller owns its own canvas subtree.
 - **Lowers to real native DOM.** The output is `<main>`/`<button>`/`<figure>` with a
   `data-component` provenance stamp and every `$`-directive consumed — inspect it in devtools.
+- **Author markup is sanitized on lowering.** `<script>`, `on*` handlers, and `javascript:`
+  URLs (literal or bound) are dropped before markup becomes live, so a definition is safe to
+  render — a conservative stand-in for the HTML Sanitizer API.
+- **Instances are torn down.** A `MutationObserver` disposes an instance's effects and runs
+  its `on("disconnect")` teardown when it leaves the DOM; effects also drop stale
+  subscriptions on each re-run, so nothing leaks.
+- **The custom-element namespace is respected.** If a tag is a defined custom element,
+  the runtime leaves it to the browser instead of lowering it.
 
 ## What is POC-simplified (vs. `src/runtime.ts` and the spec)
 
@@ -42,8 +50,13 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
 - Expressions are **dotted paths or JSON literals only** — no operator grammar, no `$if`/`$each`.
   The production runtime (`src/runtime.ts`) has the real expression engine and control flow.
 - Definition loading here is **eager-transitive** (the whole reachable graph loads at boot);
-  the spec's model is demand-driven per first render. Controllers **are** lazy (on connect).
-- Reactivity is a coarse read-tracking signal with microtask batching — enough to show
-  "drive state → DOM updates," not the full reactive semantics.
-- No SSR, no `on:`/`<handler>` declarative events (the counter wires its click in the
-  controller), no form association, no sanitizer.
+  the spec's model is demand-driven per first render, and demand-driven fetching gated on
+  reactive state (the spec's `$match` example) is the genuinely hard, unimplemented part.
+  Controllers **are** lazy (imported on first connect).
+- Reactivity is a coarse read-tracking signal with microtask batching (with per-effect
+  cleanup) — enough to show "drive state → DOM updates," not the full reactive semantics.
+- **No SSR** — so the no-JS baseline is not demonstrated here: remove `poc.js` and the page
+  is blank, because that baseline is an SSR guarantee, not a client-only one.
+- No `on:`/`<handler>` declarative events (the counter wires its click in the controller),
+  no form association, no scoped slots, no hydration/adopt-in-place.
+- The sanitizer is conservative, not the full HTML Sanitizer API.
