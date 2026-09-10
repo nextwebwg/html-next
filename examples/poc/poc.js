@@ -7,7 +7,8 @@
 //  - controllers load lazily via import() on first connect;
 //  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM);
 //  - lowered roots are torn down (effects + disconnect) when removed from the DOM;
-//  - author markup is sanitized on lowering (script / on* / javascript: are dropped).
+//  - author markup is sanitized on lowering (script / on* / javascript: / srcdoc dropped;
+//    this is a demo stand-in, NOT a security boundary — see the sanitize() note).
 //
 // ponytail: still POC-simplified — dotted-path expressions only (no operators, no $if/$each),
 // EAGER-transitive definition loading (the spec's model is demand-driven), coarse reactivity,
@@ -139,13 +140,23 @@ function evalExpr(expr, scope) {
 }
 
 // ---------------------------------------------------------------------------
-// Sanitizing author markup on lowering (definitions are inert, but their markup
-// must still be safe to render: drop <script>, on* handlers, and javascript: URLs).
-// ponytail: a conservative allow-nothing-dangerous pass; the spec points at the HTML
-// Sanitizer API for the real thing.
+// Sanitizing author markup on lowering. Definitions are inert, but their markup must
+// still be safe to render, so this drops the common script vectors: <script>, on*
+// handlers, javascript: URLs, and iframe srcdoc.
+// ponytail: this is NOT a security boundary — it covers the obvious vectors so the demo
+// is safe, but the real runtime uses the HTML Sanitizer API (Element.setHTML). Do not
+// rely on this function's completeness.
 // ---------------------------------------------------------------------------
 
 const URL_ATTRS = new Set(["href", "src", "action", "formaction", "poster", "xlink:href"]);
+const DROP_ATTRS = new Set(["srcdoc"]); // an iframe srcdoc can carry a whole executable document
+
+// Browsers strip C0 controls and whitespace from a URL before resolving its scheme, so a
+// `java\tscript:` or a leading-control-char URL still runs. Normalize before testing.
+function dangerousUrl(value) {
+  return /^javascript:/i.test(String(value).replace(/[\u0000-\u0020]+/g, ""));
+}
+
 function sanitize(root) {
   const walk = (el) => {
     if (el.localName === "script") {
@@ -155,7 +166,8 @@ function sanitize(root) {
     [...el.attributes].forEach((a) => {
       const name = a.name.toLowerCase();
       if (name.startsWith("on")) el.removeAttribute(a.name);
-      else if (URL_ATTRS.has(name) && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+      else if (DROP_ATTRS.has(name)) el.removeAttribute(a.name);
+      else if (URL_ATTRS.has(name) && dangerousUrl(a.value)) el.removeAttribute(a.name);
     });
     [...el.children].forEach(walk);
   };
@@ -193,6 +205,8 @@ async function loadDefinition(url) {
 // ---------------------------------------------------------------------------
 
 function markupRoot(template) {
+  // ponytail: takes the first non-defs/non-style child; a definition has exactly one root, so
+  // trailing siblings (a malformed multi-root definition) are silently ignored here.
   return [...template.content.children].find(
     (c) => c.localName !== "defs" && c.localName !== "style",
   );
@@ -243,7 +257,9 @@ function bindTree(node, scope, refs, slotChildren, effects) {
     node.removeAttribute(a.name);
     effects.push(createEffect(() => {
       let v = evalExpr(expr, scope);
-      if (URL_ATTRS.has(name.toLowerCase()) && /^\s*javascript:/i.test(String(v))) v = null; // no bound javascript: sink
+      const lower = name.toLowerCase();
+      if (DROP_ATTRS.has(lower)) v = null; // no bound srcdoc
+      if (URL_ATTRS.has(lower) && dangerousUrl(v)) v = null; // no bound javascript: sink
       if (v == null || v === false) node.removeAttribute(name);
       else node.setAttribute(name, v === true ? "" : String(v));
     }));
@@ -282,6 +298,9 @@ function lowerElement(el) {
 }
 
 function lowerAll(container) {
+  // ponytail: O(tags × instances) rescan-from-scratch after each lowering; fine at POC scale.
+  // A self-referential component (its markup root is its own tag) is not handled — that needs
+  // $if/$each to terminate, which this POC does not implement.
   let changed = true;
   while (changed) {
     changed = false;

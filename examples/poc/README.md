@@ -34,9 +34,10 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
   the runtime reflects it to the `<span>`. The chart's controller owns its own canvas subtree.
 - **Lowers to real native DOM.** The output is `<main>`/`<button>`/`<figure>` with a
   `data-component` provenance stamp and every `$`-directive consumed — inspect it in devtools.
-- **Author markup is sanitized on lowering.** `<script>`, `on*` handlers, and `javascript:`
-  URLs (literal or bound) are dropped before markup becomes live, so a definition is safe to
-  render — a conservative stand-in for the HTML Sanitizer API.
+- **Author markup is sanitized on lowering.** `<script>`, `on*` handlers, `javascript:` URLs
+  (literal or bound, control-char-normalized), and iframe `srcdoc` are dropped before markup
+  becomes live. This is a **demo stand-in, not a security boundary** — it covers the obvious
+  vectors; the real runtime uses the HTML Sanitizer API (`Element.setHTML`).
 - **Instances are torn down.** A `MutationObserver` disposes an instance's effects and runs
   its `on("disconnect")` teardown when it leaves the DOM; effects also drop stale
   subscriptions on each re-run, so nothing leaks.
