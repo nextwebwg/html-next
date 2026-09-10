@@ -275,7 +275,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$sort with multiple keys and descending (a,-b)",
     source: scene({
-      root: `<ul><li $each="r of [{ p: 1, q: 2 }, { p: 1, q: 1 }, { p: 2, q: 0 }]" $sort="r.p,-r.q" $value="r.q"></li></ul>`,
+      root: `<ul><li $each="r of [{ p: 1, q: 2 }, { p: 1, q: 1 }, { p: 2, q: 0 }]" $sort="p,-q" $value="r.q"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
