@@ -1,0 +1,11 @@
+<!-- x-counter: local state, and a controller that wires the click. The definition is
+     pure data: it names a $ref and a <state>, and points at (does not contain) its behavior. -->
+<link rel="controller" href="./counter.js" />
+
+<template component="x-counter">
+  <defs>
+    <prop name="start" type="number" default="0"></prop>
+    <state name="count" :value="start"></state>
+  </defs>
+  <button $ref="btn" type="button">count: <span $value="count"></span></button>
+</template>

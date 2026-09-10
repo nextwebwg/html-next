@@ -1,0 +1,16 @@
+<!-- x-app: purely declarative composition. No controller, no <script>.
+     It declares only the components IT renders; they compose transitively. -->
+<link rel="component" href="./counter.html" />
+<link rel="component" href="./chart.html" />
+
+<template component="x-app">
+  <defs>
+    <prop name="title" type="string" default="App"></prop>
+  </defs>
+  <main>
+    <h1 $value="title"></h1>
+    <p>A counter (state driven by a controller) and a chart (a foreign library via <code>$ref</code>):</p>
+    <x-counter start="3"></x-counter>
+    <x-chart></x-chart>
+  </main>
+</template>
