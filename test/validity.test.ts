@@ -46,7 +46,7 @@ describe("browser validity", { skip: !enabled }, () => {
       try {
         const page = await browser.newPage();
         await page.setContent(
-          `<style>[data-invalid] { outline: 2px solid red; }</style>` +
+          `<style>#field:invalid { outline: 2px solid red; } #field:user-invalid { color: rgb(255, 0, 0); }</style>` +
             `<div id="field" data-value="">content</div>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -60,6 +60,7 @@ describe("browser validity", { skip: !enabled }, () => {
 
           const invalid = V.validateElement(el, { required: true }); // empty + required
           const shimStyled = getComputedStyle(el).outlineStyle === "solid";
+          const userInvalidStyled = getComputedStyle(el).color === "rgb(255, 0, 0)";
           const ariaWhenInvalid = el.getAttribute("aria-invalid");
           const message = V.validationMessage(el);
 
@@ -71,6 +72,7 @@ describe("browser validity", { skip: !enabled }, () => {
             invalidValid: invalid.valid,
             invalidReason: invalid.errors[0]?.reason,
             shimStyled,
+            userInvalidStyled,
             ariaWhenInvalid,
             message,
             invalidEvents,
@@ -82,7 +84,8 @@ describe("browser validity", { skip: !enabled }, () => {
         assert.equal(result.invalidValid, false);
         assert.equal(result.invalidReason, "missing");
         assert.equal(result.ariaWhenInvalid, "true");
-        assert.equal(result.shimStyled, true, "[data-invalid] CSS should apply");
+        assert.equal(result.shimStyled, true, "authored :invalid CSS should apply");
+        assert.equal(result.userInvalidStyled, true, "authored :user-invalid CSS should apply");
         assert.ok(result.message.length > 0);
         assert.equal(result.invalidEvents, 1);
         assert.equal(result.nowValidValid, true);

@@ -15,7 +15,6 @@ const expectedPaths = [
   "vue/XButton.vue",
   "svelte/XButton.svelte",
   "styles/x-button.css",
-  "contracts/x-button.json",
   "docs/x-button.md",
 ] as const;
 
@@ -84,22 +83,31 @@ describe("generateComponent", () => {
     }
   });
 
-  it("publishes normalized contract data and prominently early-release documentation", async () => {
+  it("publishes prominently early-release documentation without a detached contract artifact", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const artifacts = generateComponent(parseComponent(source, "x-button.html"));
     const byPath = new Map(artifacts.map((artifact) => [artifact.path, artifact.content]));
 
-    const contract = JSON.parse(byPath.get("contracts/x-button.json")!) as {
-      status: string;
-      props: Record<string, unknown>;
-    };
-    assert.equal(contract.status, "early");
-    assert.deepEqual(Object.keys(contract.props), ["size", "variant"]);
+    assert.equal(byPath.has("contracts/x-button.json"), false);
 
     const docs = byPath.get("docs/x-button.md")!;
     assert.match(docs.slice(0, 200), /Status: EARLY/);
     assert.match(docs, /## Coming soon/);
     assert.match(docs, /State, computed values, data sources, control flow, filters, and actions/);
+  });
+
+  it("makes authored validity pseudo-classes work in generated CSS", () => {
+    const source =
+      `<template component="demo-action" status="experimental" summary="An action fixture.">` +
+      `<style>button:invalid { outline: 2px solid red; }</style><button>Save</button></template>`;
+    const byPath = new Map(
+      generateComponent(parseComponent(source)).map((artifact) => [artifact.path, artifact.content]),
+    );
+
+    assert.match(
+      byPath.get("styles/demo-action.css")!,
+      /button:is\(:invalid, \[data-invalid\]\)/,
+    );
   });
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {

@@ -12,7 +12,6 @@
         "vue/XButton.vue",
         "svelte/XButton.svelte",
         "styles/x-button.css",
-        "contracts/x-button.json",
         "docs/x-button.md"
       ]
     }

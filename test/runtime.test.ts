@@ -155,7 +155,7 @@ describe("browser runtime", { skip: !enabled }, () => {
             `<prop name="label" type="string" default="Note">Label.</prop></defs>` +
             `<article><h3 $value="label"></h3><div class="body" $html="body"></div></article>` +
             `</template>` +
-            `<x-note id="n" label="Hi" body="<b>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2>"></x-note>`,
+            `<x-note id="n" label="Hi" body="<b>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(() => {
@@ -167,6 +167,8 @@ describe("browser runtime", { skip: !enabled }, () => {
             hasBold: body.querySelector("b") !== null,
             scriptCount: body.querySelectorAll("script").length,
             onerror: body.querySelector("img")?.hasAttribute("onerror") ?? null,
+            dangerousHref: body.querySelector("a")?.hasAttribute("href") ?? null,
+            iframeCount: body.querySelectorAll("iframe").length,
             xflag: window.__x ?? "unset",
           };
         })()`);
@@ -175,8 +177,32 @@ describe("browser runtime", { skip: !enabled }, () => {
           hasBold: true,
           scriptCount: 0,
           onerror: false,
+          dangerousHref: false,
+          iframeCount: 0,
           xflag: "unset",
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} drops executable schemes from bound URL attributes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-link" status="early" summary="Link.">` +
+            `<defs><prop name="destination" type="string">Destination.</prop></defs>` +
+            `<a :href="destination"><slot></slot></a></template>` +
+            `<x-link id="link" destination="java&#x0A;script:alert(1)">Open</x-link>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const hasHref = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          return document.getElementById("link")!.hasAttribute("href");
+        });
+
+        assert.equal(hasHref, false);
       } finally {
         await browser.close();
       }

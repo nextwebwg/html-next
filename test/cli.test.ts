@@ -36,7 +36,6 @@ describe("buildComponents", () => {
       assert.deepEqual(first, second);
       assert.deepEqual(firstSnapshot, secondSnapshot);
       assert.deepEqual(Object.keys(firstSnapshot), [
-        "contracts/x-button.json",
         "docs/x-button.md",
         "html.manifest.json",
         "react/XButton.tsx",
@@ -54,7 +53,7 @@ describe("buildComponents", () => {
       assert.equal(manifest.generatorVersion, "0.0.0");
       assert.equal(manifest.components[0]?.name, "XButton");
       assert.equal(manifest.components[0]?.tag, "x-button");
-      assert.equal(manifest.components[0]?.artifacts.length, 8);
+      assert.equal(manifest.components[0]?.artifacts.length, 7);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -73,4 +72,3 @@ describe("buildComponents", () => {
     }
   });
 });
-

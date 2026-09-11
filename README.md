@@ -75,8 +75,8 @@ render nor execute it, so a definition degrades to inert markup now and could be
 natively if the shape were standardized: the path Declarative Shadow DOM took with
 `<template shadowrootmode>`. Inertness is the transition guarantee, not the end state.
 
-A converter compiles this to a normalized `contracts/x-button.json`: the JSON is
-build output, like a `.d.ts`, never the authoring form.
+The converter reads that declaration directly into its internal representation. It does not
+emit a second, detached contract file; the HTML definition remains the single source of truth.
 
 Build one or more sources with:
 
@@ -101,7 +101,6 @@ For the example above, one compiler call produces:
 | `vue/XButton.vue` | Vue 3.5 SFC with typed props and controlled fallthrough attributes |
 | `svelte/XButton.svelte` | Svelte 5 runes component with native element props |
 | `styles/x-button.css` | Ordinary shared CSS against the native DOM |
-| `contracts/x-button.json` | Normalized machine-readable API contract |
 | `docs/x-button.md` | Generated consumer API page with release status |
 | `html.manifest.json` | Deterministic build inventory |
 

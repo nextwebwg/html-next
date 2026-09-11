@@ -11,6 +11,7 @@ import {
   type Value,
 } from "./expression.js";
 import { isReservedElement, validateLiteralAttributeName } from "./language.js";
+import { rewriteValiditySelectors } from "./validity-css.js";
 import type {
   ComponentDefinition,
   DirectiveAttribute,
@@ -458,10 +459,18 @@ function evalValue(expression: string, scope: Scope): Value {
 }
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href"]);
+const BLOCKED_HTML_ELEMENTS = new Set(["base", "embed", "iframe", "link", "meta", "object", "script", "style"]);
+const BLOCKED_HTML_ATTRIBUTES = new Set(["srcdoc", "style"]);
+
+function hasExecutableUrl(value: string): boolean {
+  const normalized = value.replace(/[\u0000-\u0020\u007f]+/g, "");
+  return /^(?:data|javascript|vbscript):/i.test(normalized);
+}
 
 /**
- * `$html` sanitizes an ordinary string, dropping `<script>`, inline `on*` handlers, and
- * `javascript:` URLs. This is a conservative placeholder for the HTML Sanitizer API
+ * `$html` sanitizes an ordinary string, dropping active embedding elements, inline `on*`
+ * handlers, raw style/srcdoc sinks, and executable URLs. This is a conservative placeholder
+ * for the HTML Sanitizer API
  * (`Element.setHTML`), which the reference library will lazy-load where the browser lacks it.
  * ponytail: minimal sanitizer; swap for the Sanitizer API polyfill when it lands.
  */
@@ -469,14 +478,15 @@ function sanitizedFragment(html: string, document: Document): DocumentFragment {
   const template = document.createElement("template");
   template.innerHTML = html;
   for (const element of Array.from(template.content.querySelectorAll("*"))) {
-    if (element.localName === "script") {
+    if (BLOCKED_HTML_ELEMENTS.has(element.localName)) {
       element.remove();
       continue;
     }
     for (const attribute of Array.from(element.attributes)) {
       const name = attribute.name.toLowerCase();
-      if (name.startsWith("on")) element.removeAttribute(attribute.name);
-      else if (URL_ATTRIBUTES.has(name) && /^\s*javascript:/i.test(attribute.value)) {
+      if (name.startsWith("on") || BLOCKED_HTML_ATTRIBUTES.has(name)) {
+        element.removeAttribute(attribute.name);
+      } else if (URL_ATTRIBUTES.has(name) && hasExecutableUrl(attribute.value)) {
         element.removeAttribute(attribute.name);
       }
     }
@@ -485,7 +495,9 @@ function sanitizedFragment(html: string, document: Document): DocumentFragment {
 }
 
 function setAttribute(element: Element, name: string, value: string | null): void {
-  if (value === null) element.removeAttribute(name);
+  if (value === null || (URL_ATTRIBUTES.has(name.toLowerCase()) && hasExecutableUrl(value))) {
+    element.removeAttribute(name);
+  }
   else element.setAttribute(name, value);
 }
 
@@ -740,7 +752,10 @@ export function lowerDocument(root: Document = document): number {
   }
 
   for (const live of definitions) {
-    if (live.style !== undefined) live.wrapper.ownerDocument.head.append(live.style);
+    if (live.style !== undefined) {
+      live.style.textContent = rewriteValiditySelectors(live.style.textContent ?? "");
+      live.wrapper.ownerDocument.head.append(live.style);
+    }
     live.wrapper.remove();
   }
 

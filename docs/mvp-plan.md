@@ -30,7 +30,7 @@ In scope:
 - HTML source parsing into one framework-neutral IR;
 - build-time generation of lowercase-to-canonical DOM property metadata;
 - primitive component validation and code generation;
-- Vanilla, React, Vue, Svelte, contract JSON, CSS, and Markdown API outputs;
+- Vanilla, React, Vue, Svelte, CSS, and Markdown API outputs;
 - a one-shot browser runtime for initial lowering;
 - a CLI that builds one or more component sources;
 - a button fixture demonstrating the entire path; and
@@ -182,7 +182,7 @@ unsupported syntax.
 
 ### U4. Generate component projections
 
-Goal: Emit deterministic Vanilla, React, Vue, Svelte, CSS, normalized contract JSON, and
+Goal: Emit deterministic Vanilla, React, Vue, Svelte, CSS, and
 Markdown API outputs from the IR.
 
 Files:
@@ -328,7 +328,7 @@ gate as incomplete.
 - The technical specification clearly distinguishes normative MVP behavior from future
   language intent.
 - Every requirement R1-R8 has an implementation and automated evidence.
-- The button fixture generates Vanilla, React, Vue, Svelte, CSS, contract JSON, and API
+- The button fixture generates Vanilla, React, Vue, Svelte, CSS, and API
   Markdown from one HTML source.
 - The browser runtime lowers that same source without Custom Elements or dynamic code
   evaluation.
@@ -337,4 +337,3 @@ gate as incomplete.
 - Node and three-engine browser suites pass.
 - Type checking and whitespace checks pass.
 - No package, repository, release, or remote is published as part of the MVP.
-

@@ -1,16 +1,49 @@
 import { validate, type Constraint, type Validity } from "./validate.js";
+import { rewriteValiditySelectors } from "./validity-css.js";
 
 /**
  * The DOM side of the Validation module: give any element the same validity surface a form
  * control has. Where the element is a real form control, delegate to the native Constraint
- * Validation API so real `:invalid` and form submission keep working; everywhere else, apply
- * a general shim (`aria-invalid` + `[data-invalid]` + the `invalid` event) since a polyfill
- * cannot set the real `:invalid` pseudo-class on an arbitrary element. That shim is exactly
- * what the platform should make unnecessary by exposing validity on any element.
+ * Validation API so form submission keeps working; everywhere else, mirror validity into
+ * internal attributes. Styles are mirrored too, so authors use the proposed `:valid` and
+ * `:invalid` surface rather than polyfill-specific selectors.
  */
 
 const store = new WeakMap<Element, Validity>();
 const VALID: Validity = { valid: true, errors: [] };
+const installedDocuments = new WeakMap<Document, MutationObserver>();
+
+function refreshValidityStyles(document: Document, companion: HTMLStyleElement): void {
+  const mirrored: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    if (sheet.ownerNode === companion) continue;
+    try {
+      const source = Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
+      const rewritten = rewriteValiditySelectors(source);
+      if (rewritten !== source) mirrored.push(rewritten);
+    } catch {
+      // Cross-origin sheets cannot expose cssRules. Generated HTML Next CSS is rewritten
+      // ahead of time; applications should run external author CSS through the same helper.
+    }
+  }
+  companion.textContent = mirrored.join("\n");
+}
+
+/** Install automatic selector mirroring for styles added to a document. */
+export function installValidityStyles(document: Document): void {
+  if (installedDocuments.has(document)) return;
+  const companion = document.createElement("style");
+  companion.setAttribute("data-html-next-validity-styles", "");
+  document.head.append(companion);
+  refreshValidityStyles(document, companion);
+
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.every((mutation) => mutation.target === companion)) return;
+    refreshValidityStyles(document, companion);
+  });
+  observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+  installedDocuments.set(document, observer);
+}
 
 function supportsSetCustomValidity(
   el: Element,
@@ -48,6 +81,7 @@ export function validationMessage(el: Element): string {
  * every element additionally gets the general shim.
  */
 export function setElementValidity(el: Element, validity: Validity): void {
+  installValidityStyles(el.ownerDocument);
   store.set(el, validity);
   const message = validity.valid ? "" : validity.errors[0]!.message;
 
@@ -58,7 +92,10 @@ export function setElementValidity(el: Element, validity: Validity): void {
   if (validity.valid) {
     el.removeAttribute("aria-invalid");
     el.removeAttribute("data-invalid");
+    el.removeAttribute("data-user-invalid");
+    el.setAttribute("data-valid", "");
   } else {
+    el.removeAttribute("data-valid");
     el.setAttribute("aria-invalid", "true");
     el.setAttribute("data-invalid", "");
     el.dispatchEvent(new Event("invalid", { cancelable: true }));
@@ -73,5 +110,6 @@ export function setElementValidity(el: Element, validity: Validity): void {
 export function validateElement(el: Element, constraint: Constraint): Validity {
   const validity = validate(readValue(el), constraint);
   setElementValidity(el, validity);
+  if (!validity.valid) el.setAttribute("data-user-invalid", "");
   return validity;
 }
