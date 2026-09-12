@@ -1,8 +1,8 @@
-<template component="ui-toast-region" status="early" summary="HTML Next migration of UiToastRegion.">
+<template component="ui-toast-region" status="early" summary="A live notification region in the viewport layer." controller="./ui-toast-region.js">
   <defs>
-    <prop name="open" type="boolean" default="true">open property.</prop>
+    <prop name="open" type="boolean" default="true">Whether notifications may be shown.</prop>
+    <event name="dismiss" type="object({ id: string, reason: action, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-open="open">
-    <slot></slot>
-  </div>
+  <div class="toast-region" role="region" aria-label="Notifications" aria-live="polite" :data-enabled="open"><slot></slot></div>
 </template>

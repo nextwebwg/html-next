@@ -1,13 +1,8 @@
 [
   {
     "tag": "ui-affordance-scope",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-affordance-scope> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-avatar",
@@ -74,13 +69,8 @@
   },
   {
     "tag": "ui-dialog",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-dialog> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-disclosure",
@@ -152,13 +142,8 @@
   },
   {
     "tag": "ui-popover",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-popover> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-radio",
@@ -202,23 +187,13 @@
   },
   {
     "tag": "ui-toast-region",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-toast-region> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-tooltip",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-tooltip> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-top-bar",

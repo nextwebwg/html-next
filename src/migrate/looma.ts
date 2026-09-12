@@ -214,6 +214,54 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <div class="tabs" :data-value="value" :data-default-value="defaultValue" :data-orientation="orientation"><slot></slot></div>
 </template>`,
+  "ui-affordance-scope": `<template component="ui-affordance-scope" status="early" summary="A pointer-proximity coordination boundary." controller="./ui-affordance-scope.js">
+  <defs><prop name="nearRadius" type="number" default="16">Distance outside an affordance that activates its near state.</prop></defs>
+  <div class="affordance-scope" :data-near-radius="nearRadius"><slot></slot></div>
+</template>`,
+  "ui-dialog": `<template component="ui-dialog" status="early" summary="A native modal or non-modal dialog." controller="./ui-dialog.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="modal" type="boolean" default="true">Whether the dialog is modal.</prop>
+    <prop name="dismissible" type="boolean" default="true">Whether Escape and light dismissal may close the dialog.</prop>
+    <prop name="label" type="string?">Explicit accessible name.</prop>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="dialog-host" :data-open="open" :data-default-open="defaultOpen" :data-modal="modal" :data-dismissible="dismissible" :data-label="label"><dialog $ref="dialog"><slot></slot></dialog></div>
+</template>`,
+  "ui-popover": `<template component="ui-popover" status="early" summary="A controlled or uncontrolled anchored popover." controller="./ui-popover.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="for" type="string?">Id of the anchor element.</prop>
+    <prop name="placement" type="bottom-start | bottom-end | top-start | top-end" default="bottom-start">Preferred anchored placement.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="popover__surface" :data-open="open" :data-default-open="defaultOpen" :data-for="for" :data-placement="placement"><slot></slot></div>
+</template>`,
+  "ui-tooltip": `<template component="ui-tooltip" status="early" summary="An anchored description with pointer and keyboard intent." controller="./ui-tooltip.js">
+  <defs>
+    <prop name="for" type="string" default="">Id of the described element.</prop>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="placement" type="bottom-start | bottom-end | top-start | top-end" default="top-start">Preferred anchored placement.</prop>
+    <prop name="showDelay" type="number" default="500">Pointer hover intent delay in milliseconds.</prop>
+    <prop name="hideDelay" type="number" default="100">Pointer leave grace period in milliseconds.</prop>
+    <prop name="toggleOnClick" type="boolean" default="false">Whether activation pins the tooltip.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="tooltip__surface" role="tooltip" :data-for="for" :data-open="open" :data-default-open="defaultOpen" :data-placement="placement" :data-show-delay="showDelay" :data-hide-delay="hideDelay" :data-toggle-on-click="toggleOnClick"><slot></slot></div>
+</template>`,
+  "ui-toast-region": `<template component="ui-toast-region" status="early" summary="A live notification region in the viewport layer." controller="./ui-toast-region.js">
+  <defs>
+    <prop name="open" type="boolean" default="true">Whether notifications may be shown.</prop>
+    <event name="dismiss" type="object({ id: string, reason: action, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="toast-region" role="region" aria-label="Notifications" aria-live="polite" :data-enabled="open"><slot></slot></div>
+</template>`,
 });
 
 const TRIGGER_OF = String.raw`function triggerOf(event) {
@@ -578,6 +626,127 @@ export default function controller(host) {
   return () => { stop(); observer.disconnect(); host.element.removeEventListener("click", click); host.element.removeEventListener("keydown", keydown); };
 }`;
 
+const AFFORDANCE_CONTROLLER = String.raw`import { createProximityCoordinator } from "./overlay.js";
+export default function controller(host) {
+  let coordinator;
+  const stop = host.effect(() => {
+    coordinator?.destroy();
+    coordinator = createProximityCoordinator(host.element, host.state.nearRadius);
+  });
+  const observer = new MutationObserver(() => coordinator?.refresh());
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); coordinator?.destroy(); };
+}`;
+
+const DIALOG_CONTROLLER = String.raw`import { createOverlay } from "./overlay.js";
+export default function controller(host) {
+  const dialog = host.refs.dialog;
+  let initialized = false;
+  let internal = false;
+  let shown = false;
+  let mode;
+  let overlay;
+  let closing = false;
+  const label = () => {
+    const heading = host.element.querySelector('[slot="heading"], [data-ui-dialog-title], h1, h2, h3, h4, h5, h6');
+    return host.state.label?.trim() || heading?.textContent?.trim() || "Dialog";
+  };
+  const hide = () => {
+    overlay?.destroy();
+    overlay = undefined;
+    if (dialog.open) {
+      closing = true;
+      dialog.close();
+      closing = false;
+    }
+    shown = false;
+  };
+  const requestClose = (reason, trigger) => {
+    if (!internal || !host.state.dismissible) return;
+    if (typeof host.state.open !== "boolean") internal = false;
+    if (!internal) hide();
+    host.element.toggleAttribute("data-open", internal);
+    host.dispatch("close", { open: false, reason, trigger });
+  };
+  const apply = () => {
+    const controlled = typeof host.state.open === "boolean";
+    if (!initialized) internal = controlled ? host.state.open : Boolean(host.state.defaultOpen);
+    else if (controlled) internal = host.state.open;
+    dialog.setAttribute("aria-label", label());
+    host.element.toggleAttribute("data-open", internal);
+    const nextMode = host.state.modal ? "modal" : "modeless";
+    if (shown && mode !== nextMode) hide();
+    if (internal && !shown) {
+      mode = nextMode;
+      if (host.state.modal) dialog.showModal(); else dialog.show();
+      shown = true;
+      overlay = createOverlay(host.element, {
+        modal: host.state.modal,
+        dismissible: host.state.dismissible,
+        requestClose,
+      });
+      overlay.open();
+    } else if (!internal && shown) hide();
+    initialized = true;
+  };
+  const stop = host.effect(apply);
+  const cancel = (event) => { event.preventDefault(); requestClose("escape", "keyboard"); };
+  const nativeClose = () => {
+    if (closing || !shown) return;
+    shown = false;
+    overlay?.destroy();
+    overlay = undefined;
+    if (typeof host.state.open !== "boolean") internal = false;
+    host.dispatch("close", { open: false, reason: "programmatic", trigger: "programmatic" });
+  };
+  dialog.addEventListener("cancel", cancel);
+  dialog.addEventListener("close", nativeClose);
+  const observer = new MutationObserver(() => dialog.setAttribute("aria-label", label()));
+  observer.observe(host.element, { childList: true, subtree: true, characterData: true });
+  return () => { stop(); observer.disconnect(); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", nativeClose); hide(); };
+}`;
+
+const POPOVER_CONTROLLER = String.raw`import { createAnchoredSurface, createOverlay } from "./overlay.js";
+export default function controller(host) {
+  let initialized = false;
+  let internal = false;
+  let anchor;
+  let placement;
+  let surface;
+  let overlay;
+  const hide = () => { overlay?.destroy(); overlay = undefined; surface?.hide(); };
+  const requestClose = (reason, trigger) => {
+    if (!internal) return;
+    if (typeof host.state.open !== "boolean") internal = false;
+    if (!internal) hide();
+    host.element.toggleAttribute("data-open", internal);
+    host.dispatch("close", { open: false, reason, trigger });
+  };
+  const apply = () => {
+    const controlled = typeof host.state.open === "boolean";
+    if (!initialized) internal = controlled ? host.state.open : Boolean(host.state.defaultOpen);
+    else if (controlled) internal = host.state.open;
+    const nextAnchor = host.state.for ? host.element.ownerDocument.getElementById(host.state.for) : null;
+    if (!surface || anchor !== nextAnchor || placement !== host.state.placement) {
+      surface?.destroy();
+      anchor = nextAnchor;
+      placement = host.state.placement;
+      surface = createAnchoredSurface(host.element, anchor, placement);
+    }
+    host.element.toggleAttribute("data-open", internal);
+    if (internal) {
+      surface.show();
+      if (!overlay) {
+        overlay = createOverlay(host.element, { relatedElements: anchor ? [anchor] : [], requestClose });
+        overlay.open();
+      }
+    } else hide();
+    initialized = true;
+  };
+  const stop = host.effect(apply);
+  return () => { stop(); hide(); surface?.destroy(); };
+}`;
+
 const CONTROLLERS: Readonly<Record<string, string>> = Object.freeze({
   "ui-input": FORM_VALUE_CONTROLLER,
   "ui-textarea": FORM_VALUE_CONTROLLER,
@@ -590,6 +759,9 @@ const CONTROLLERS: Readonly<Record<string, string>> = Object.freeze({
   "ui-avatar-group": AVATAR_GROUP_CONTROLLER,
   "ui-disclosure": DISCLOSURE_CONTROLLER,
   "ui-tabs": TABS_CONTROLLER,
+  "ui-affordance-scope": AFFORDANCE_CONTROLLER,
+  "ui-dialog": DIALOG_CONTROLLER,
+  "ui-popover": POPOVER_CONTROLLER,
 });
 
 export function migrateLoomaComponent(component: StencilComponentInventory): LoomaMigration {

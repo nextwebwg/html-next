@@ -1,8 +1,4 @@
-<template component="ui-affordance-scope" status="early" summary="HTML Next migration of UiAffordanceScope.">
-  <defs>
-    <prop name="nearRadius" type="number">Distance outside each registered affordance that reveals its near state.</prop>
-  </defs>
-  <div :data-near-radius="nearRadius">
-    <slot></slot>
-  </div>
+<template component="ui-affordance-scope" status="early" summary="A pointer-proximity coordination boundary." controller="./ui-affordance-scope.js">
+  <defs><prop name="nearRadius" type="number" default="16">Distance outside an affordance that activates its near state.</prop></defs>
+  <div class="affordance-scope" :data-near-radius="nearRadius"><slot></slot></div>
 </template>

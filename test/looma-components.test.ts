@@ -28,6 +28,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
     const controllerTags = [
       "ui-checkbox", "ui-input", "ui-textarea", "ui-select", "ui-radio", "ui-radio-group", "ui-switch",
       "ui-avatar", "ui-avatar-group", "ui-disclosure", "ui-tabs",
+      "ui-affordance-scope", "ui-dialog", "ui-popover", "ui-toast-region", "ui-tooltip",
     ];
     await build({
       stdin: {
@@ -210,6 +211,98 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
           ["select", { value: "tab-b", previousValue: "tab-a", trigger: "programmatic" }],
         ],
         runtimeErrors: [],
+      });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("coordinates native overlays, dismissal, notifications, and pointer proximity", { timeout: 15_000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await page.setContent(definitions + `
+        <button id="anchor">Anchor</button><ui-popover id="popover" for="anchor" default-open>Popover</ui-popover>
+        <button id="tip-anchor">Help</button><ui-tooltip id="tooltip" for="tip-anchor" show-delay="0">Helpful</ui-tooltip>
+        <ui-dialog id="dialog" default-open><h2 id="dialog-heading">Confirm</h2><button>Okay</button></ui-dialog>
+        <ui-toast-region id="toasts"><article id="toast" data-ui-toast><button id="dismiss" data-ui-toast-dismiss>Dismiss</button></article></ui-toast-region>
+        <ui-affordance-scope id="scope" near-radius="20"><button id="affordance" data-ui-affordance style="position:fixed;left:100px;top:100px;width:40px;height:40px">Action</button></ui-affordance-scope>
+      `);
+      await page.addScriptTag({ path: bundle });
+      await page.addScriptTag({ path: controllerBundle });
+      await page.evaluate(`(() => {
+        window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
+          const controller = window.LoomaControllers[definition.contract.tag];
+          if (controller == null) return;
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          return controller(window.HtmlRuntime.getComponentHost(root));
+        }});
+        const toasts = document.getElementById('toasts');
+        toasts.addEventListener('dismiss', event => document.getElementById(event.detail.id)?.remove());
+      })()`);
+      await page.waitForTimeout(20);
+      await page.evaluate(() => {
+        document.getElementById("tip-anchor")?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        document.getElementById("scope")?.dispatchEvent(new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+          clientX: 95,
+          clientY: 110,
+        }));
+      });
+      await page.waitForTimeout(20);
+      const before = await page.evaluate(() => ({
+        popoverHidden: (document.getElementById("popover") as HTMLElement).hidden,
+        tooltipHidden: (document.getElementById("tooltip") as HTMLElement).hidden,
+        describedBy: document.getElementById("tip-anchor")?.getAttribute("aria-describedby"),
+        dialogOpen: Boolean(document.querySelector("#dialog dialog")?.hasAttribute("open")),
+        dialogLabel: document.querySelector("#dialog dialog")?.getAttribute("aria-label"),
+        locked: document.documentElement.hasAttribute("data-ui-scroll-lock"),
+        toastOpen: document.getElementById("toasts")?.hasAttribute("data-open"),
+        near: document.getElementById("affordance")?.getAttribute("data-ui-proximity"),
+      }));
+      await page.evaluate(() => {
+        (document.getElementById("tooltip") as HTMLElement & { open?: boolean }).open = false;
+        (document.getElementById("dismiss") as HTMLButtonElement).click();
+      });
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(20);
+      await page.evaluate(() => document.body.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        composed: true,
+        pointerType: "mouse",
+      })));
+      await page.evaluate(() => document.body.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        composed: true,
+        pointerType: "mouse",
+      })));
+      await page.waitForTimeout(20);
+      const after = await page.evaluate(() => ({
+        popoverHidden: (document.getElementById("popover") as HTMLElement).hidden,
+        dialogOpen: Boolean(document.querySelector("#dialog dialog")?.hasAttribute("open")),
+        locked: document.documentElement.hasAttribute("data-ui-scroll-lock"),
+        toastPresent: document.getElementById("toast") !== null,
+        toastOpen: document.getElementById("toasts")?.hasAttribute("data-open"),
+        stack: (globalThis as unknown as { [key: symbol]: { stack?: Array<{ element?: Element }> } })[Symbol.for("nextwebwg.looma.overlays")]?.stack?.map((entry) => entry.element?.id),
+      }));
+      assert.deepEqual(before, {
+        popoverHidden: false,
+        tooltipHidden: false,
+        describedBy: "tooltip",
+        dialogOpen: true,
+        dialogLabel: "Confirm",
+        locked: true,
+        toastOpen: true,
+        near: "near",
+      });
+      assert.deepEqual(after, {
+        popoverHidden: true,
+        dialogOpen: false,
+        locked: false,
+        toastPresent: false,
+        toastOpen: false,
+        stack: [],
       });
     } finally {
       await browser.close();
