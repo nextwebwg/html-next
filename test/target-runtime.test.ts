@@ -69,23 +69,24 @@ describe("generated target runtime parity", { skip: !enabled }, () => {
       vanilla: `import { createDemoCounter } from "./vanilla/DemoCounter.js";
 const events = []; window.targetEvents = events;
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
-const component = createDemoCounter({ slots: { title: [title] } });
+const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 document.querySelector("main").append(component);`,
       react: `import React from "react";
 import { createRoot } from "react-dom/client";
 import { DemoCounter } from "./react/DemoCounter";
 const events = []; window.targetEvents = events;
-createRoot(document.querySelector("main")).render(<DemoCounter onCountChange={detail => events.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }} />);`,
+createRoot(document.querySelector("main")).render(<DemoCounter onCountChange={detail => events.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter>);`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 const events = []; window.targetEvents = events;
-createApp({ render: () => h(DemoCounter, { onCountChange: detail => events.push(detail) }, { title: () => h("h1", { slot: "title" }, "Title") }) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h(DemoCounter, { onCountChange: detail => events.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }) }).mount(document.querySelector("main"));`,
       svelte: `import { createRawSnippet, mount } from "svelte";
 import DemoCounter from "./svelte/DemoCounter";
 const events = []; window.targetEvents = events;
 const title = createRawSnippet(() => ({ render: () => '<h1 slot="title">Title</h1>' }));
-mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), slots: { title } } });`,
+const children = createRawSnippet(() => ({ render: () => 'Projected' }));
+mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), children, slots: { title } } });`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -136,6 +137,7 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
           return {
             root: root.localName,
             initialFallback: root.querySelector("strong")?.textContent,
+            projected: root.textContent?.includes("Projected"),
             title: root.querySelector("header")?.textContent,
             count: output.textContent,
             identity: output === before,
@@ -146,7 +148,8 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
         });
         assert.deepEqual(result, {
           root: "section",
-          initialFallback: "Fallback",
+          initialFallback: undefined,
+          projected: true,
           title: "Title",
           count: "1",
           identity: true,

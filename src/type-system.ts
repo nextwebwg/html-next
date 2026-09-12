@@ -20,7 +20,9 @@ export type TerminalTypeName =
   | "url-value"
   | "token-list"
   | "trusted-html"
-  | "trusted-script";
+  | "trusted-script"
+  | "function"
+  | "unknown";
 
 export interface TerminalType {
   readonly kind: "terminal";
@@ -94,7 +96,7 @@ export interface TrustedContentValue {
 const TERMINALS = new Set<TerminalTypeName>([
   "string", "boolean", "number", "integer", "null", "absent", "email", "url",
   "date", "time", "datetime-local", "month", "week", "color", "token", "ident",
-  "url-value", "token-list", "trusted-html", "trusted-script",
+  "url-value", "token-list", "trusted-html", "trusted-script", "function", "unknown",
 ]);
 
 export class TypeSyntaxError extends SyntaxError {
@@ -295,7 +297,8 @@ export function typeScriptType(type: TypeInput): string {
         time: "string", "datetime-local": "string", month: "string", week: "string",
         color: "string", token: "string", ident: "string", "url-value": "string",
         "token-list": "readonly string[]", "trusted-html": "TrustedHTML",
-        "trusted-script": "TrustedScript",
+        "trusted-script": "TrustedScript", "function": "(...args: readonly unknown[]) => unknown",
+        unknown: "unknown",
       };
       return values[node.name];
     }
@@ -444,6 +447,10 @@ function parseTerminal(value: unknown, name: TerminalTypeName, path: string): Ty
     case "trusted-script": return browserTrusted(value, name)
       ? { ok: true, value }
       : issue("untrustedValue", `Must be a ${name === "trusted-html" ? "TrustedHTML" : "TrustedScript"} value.`, path);
+    case "function": return typeof value === "function"
+      ? { ok: true, value }
+      : issue("typeMismatch", "Must be a function supplied through a property.", path);
+    case "unknown": return { ok: true, value };
   }
 }
 
@@ -519,6 +526,9 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   const parsed = parseTypedValue(value, type);
   if (!parsed.ok) throw new TypeError(parsed.issues.map((item) => `${item.path}: ${item.message}`).join("; "));
   const node = normalizeType(type);
+  if (node.kind === "terminal" && (node.name === "function" || node.name === "unknown")) {
+    throw new TypeError(`The ${node.name} type is property-only and cannot be serialized.`);
+  }
   if (node.kind === "list" || node.kind === "record" || node.kind === "object" ||
       (node.kind === "union" && typeof parsed.value === "object" && parsed.value !== null)) {
     return JSON.stringify(parsed.value);
@@ -527,6 +537,19 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   if (parsed.value === null) return "null";
   if (parsed.value === undefined) return "";
   return String(parsed.value);
+}
+
+/** Whether a boundary can contain values that are intentionally never represented by attributes. */
+export function isPropertyOnlyType(type: TypeInput): boolean {
+  const node = normalizeType(type);
+  if (node.kind === "terminal") {
+    return node.name === "function" || node.name === "unknown" || node.name === "trusted-html" || node.name === "trusted-script";
+  }
+  if (node.kind === "union") return node.members.some(isPropertyOnlyType);
+  if (node.kind === "list") return isPropertyOnlyType(node.item);
+  if (node.kind === "record") return isPropertyOnlyType(node.value);
+  if (node.kind === "object") return node.fields.some((field) => isPropertyOnlyType(field.type));
+  return false;
 }
 
 /** Explicitly brand an already-approved Trusted Types-compatible value for non-browser hosts. */

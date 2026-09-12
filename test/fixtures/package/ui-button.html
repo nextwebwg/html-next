@@ -1,0 +1,7 @@
+<template component="ui-button" status="early" summary="A Looma-shaped button.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+  </defs>
+  <button type="button" :disabled="disabled"><slot></slot></button>
+  <style>button { font: inherit; }</style>
+</template>

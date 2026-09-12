@@ -7,6 +7,8 @@ export {
 } from "./generate.js";
 export { parseComponent } from "./parser.js";
 export { parseSourceComponent } from "./source.js";
+export { assembleComponentPackage } from "./package.js";
+export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./graph.js";
 export {
   loadBrowserComponents,

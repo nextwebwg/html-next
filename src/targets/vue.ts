@@ -138,9 +138,13 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     "</script>",
     "",
     `<template>`,
-    `  <${polymorphic ? `component :is="props.as ?? '${template.name}'"` : template.name} v-bind="$attrs"${rootAttributes.length === 0 ? "" : ` ${rootAttributes.join(" ")}`}>`,
-    children === "" ? "" : `    ${children}`,
-    `  </${polymorphic ? "component" : template.name}>`,
+    ...(isVoidElement(template.name) && !polymorphic
+      ? [`  <${template.name} v-bind="$attrs"${rootAttributes.length === 0 ? "" : ` ${rootAttributes.join(" ")}`}>`]
+      : [
+        `  <${polymorphic ? `component :is="props.as ?? '${template.name}'"` : template.name} v-bind="$attrs"${rootAttributes.length === 0 ? "" : ` ${rootAttributes.join(" ")}`}>`,
+        children === "" ? "" : `    ${children}`,
+        `  </${polymorphic ? "component" : template.name}>`,
+      ]),
     `</template>`,
     "",
   ].filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n");

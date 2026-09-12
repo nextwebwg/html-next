@@ -154,9 +154,13 @@ export function generateReact(definition: ComponentDefinition, version: string):
     ...eventEffects,
     ...(polymorphic ? [`  const Root = (as ?? ${quote(template.name)}) as ElementType;`] : []),
     "  return (",
-    `    <${polymorphic ? "Root" : template.name} ${rootAttributes}>`,
-    children === "" ? "" : `      ${children}`,
-    `    </${polymorphic ? "Root" : template.name}>`,
+    ...(isVoidElement(template.name) && !polymorphic
+      ? [`    <${template.name} ${rootAttributes} />`]
+      : [
+        `    <${polymorphic ? "Root" : template.name} ${rootAttributes}>`,
+        children === "" ? "" : `      ${children}`,
+        `    </${polymorphic ? "Root" : template.name}>`,
+      ]),
     "  );",
     "}",
     "",

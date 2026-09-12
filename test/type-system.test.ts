@@ -91,6 +91,18 @@ describe("HTML Next type system", () => {
     assert.deepEqual(parseTypedValue(trusted, type), { ok: true, value: trusted });
   });
 
+  it("keeps callbacks and opaque package values property-only", () => {
+    const callback = () => undefined;
+    assert.deepEqual(parseTypedValue(callback, parseTypeExpression("function")), { ok: true, value: callback });
+    assert.deepEqual(parseTypedValue({ provider: callback }, parseTypeExpression("unknown")), {
+      ok: true,
+      value: { provider: callback },
+    });
+    assert.equal(typeScriptType(parseTypeExpression("function")), "(...args: readonly unknown[]) => unknown");
+    assert.throws(() => serializeTypedValue(callback, parseTypeExpression("function")), /property-only/);
+    assert.throws(() => serializeTypedValue({}, parseTypeExpression("unknown")), /property-only/);
+  });
+
   it("reports source positions for malformed type syntax", () => {
     assert.throws(() => parseTypeExpression("object({ a: list(string)"), /character/);
     assert.throws(() => parseTypeExpression("list()"), /Expected a type/);

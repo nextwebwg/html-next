@@ -113,6 +113,20 @@ describe("defineContract", () => {
     });
   });
 
+  it("requires callbacks and opaque values to target properties", () => {
+    const input = validContract();
+    input.props = {
+      provider: {
+        type: "function",
+        target: { property: "provider" },
+        description: "Loads values.",
+      },
+    };
+    assert.equal(defineFromButtonFile(input).props.provider?.target.property, "provider");
+    input.props.provider.target = { attribute: "provider" };
+    expectDiagnostic("HC017", () => defineFromButtonFile(input));
+  });
+
   it("rejects unknown fields at every schema object boundary", () => {
     expectDiagnostic("HC002", () =>
       defineFromButtonFile({ ...validContract(), typo: true }),

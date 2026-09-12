@@ -24,7 +24,7 @@ import {
   stampComponentRoot,
   transformComponentStyles,
 } from "./style.js";
-import { parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
+import { isPropertyOnlyType, parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
 import {
   manageElementValidity,
 } from "./validity.js";
@@ -40,6 +40,7 @@ import type {
   HandlerStep,
   SlotNode,
   TemplateNode,
+  TextNode,
 } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropContract, PropValue } from "./types.js";
@@ -111,6 +112,7 @@ interface DocumentRegistry {
 const registries = new WeakMap<Document, DocumentRegistry>();
 const contentOnly = new WeakSet<Element>();
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
+const frameworkProjectedNodes = new WeakMap<Element, readonly Node[]>();
 
 function registryFor(root: Document): DocumentRegistry {
   let registry = registries.get(root);
@@ -1086,7 +1088,8 @@ function installInstanceValidity(root: Element, instance: RuntimeInstance): void
 function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const props = instance.definition.contract.props;
   const attributeNames = new Map(
-    Object.keys(props).map((name) => [`data-${name.toLowerCase()}`, name]),
+    Object.entries(props).filter(([, prop]) => !isPropertyOnlyType(prop.type))
+      .map(([name]) => [`data-${name.toLowerCase()}`, name]),
   );
   const reflected = new Set<string>();
 
@@ -1097,6 +1100,7 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
       get: () => instance.scope.get(name),
       set: (input: unknown) => instance.scope.set(name, invocationValue(prop, input) as Value),
     });
+    if (isPropertyOnlyType(prop.type)) continue;
     const attributeName = `data-${name.toLowerCase()}`;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
@@ -1194,7 +1198,7 @@ export function lowerDocument(root: Document = document): number {
         : undefined;
       const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
       const children = hydration
-        ? Array.from(invocation.querySelectorAll("[data-slotted]"))
+        ? [...(frameworkProjectedNodes.get(invocation) ?? invocation.querySelectorAll("[data-slotted]"))]
         : Array.from(invocation.childNodes);
       const instance: RuntimeInstance = {
         definition,
@@ -1275,6 +1279,7 @@ export function lowerDocument(root: Document = document): number {
     invocation.context.committed = true;
     registry.instances.set(invocation.nativeRoot, invocation.definition);
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
+    frameworkProjectedNodes.delete(invocation.nativeRoot);
     installPublicProps(invocation.nativeRoot, invocation.instance);
     installPublicMethods(invocation.nativeRoot, invocation.instance);
     installInstanceValidity(invocation.nativeRoot, invocation.instance);
@@ -1286,6 +1291,37 @@ export function lowerDocument(root: Document = document): number {
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
+}
+
+/** Registers already parsed package definitions without manufacturing live `<template>` nodes. */
+export function registerComponentDefinitions(
+  definitions: readonly ComponentDefinition[],
+  root: Document = document,
+): void {
+  const registry = registryFor(root);
+  for (const definition of definitions) {
+    const existing = registry.definitions.get(definition.contract.tag);
+    if (existing !== undefined) {
+      if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
+        fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
+      }
+      continue;
+    }
+    registry.definitions.set(definition.contract.tag, {
+      definition,
+      decls: runtimeDeclarations(definition),
+      style: undefined,
+    });
+    if (definition.css !== "") {
+      const style = root.createElement("style");
+      style.dataset.htmlNextPackage = definition.contract.tag;
+      style.textContent = transformComponentStyles(definition.css, definition.contract.tag, {
+        mode: componentStyleMode(root),
+        rootElement: definition.template.name,
+      });
+      root.head.append(style);
+    }
+  }
 }
 
 /**
@@ -1312,20 +1348,47 @@ export function attachComponent(
 
   const instance = runtimeInstances.get(element);
   if (instance === undefined) {
-    const markFrameworkProjection = (parent: Element): void => {
-      for (const child of Array.from(parent.children)) {
-        const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
-        if (!lineage.includes(definition.contract.tag)) markProjectedRoot(child);
-        else markFrameworkProjection(child);
+    const projected: Node[] = [];
+    const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
+      const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
+        .map((child) => child.value);
+      let literalCursor = 0;
+      const authoredElements = authored.children.filter((child): child is ElementNode => child.kind === "element");
+      let elementCursor = 0;
+      for (const child of Array.from(parent.childNodes)) {
+        if (child instanceof Element) {
+          const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
+          if (!lineage.includes(definition.contract.tag)) {
+            markProjectedRoot(child);
+            projected.push(child);
+          } else {
+            while (
+              elementCursor < authoredElements.length &&
+              authoredElements[elementCursor]!.name !== child.localName
+            ) elementCursor += 1;
+            const authoredChild = authoredElements[elementCursor++];
+            if (authoredChild !== undefined) markFrameworkProjection(child, authoredChild);
+          }
+          continue;
+        }
+        if (child instanceof Text && child.data.trim() !== "") {
+          while (literalCursor < literalText.length && literalText[literalCursor] !== child.data) literalCursor += 1;
+          if (literalCursor < literalText.length) literalCursor += 1;
+          else projected.push(child);
+        }
       }
     };
-    markFrameworkProjection(element);
+    markFrameworkProjection(element, definition.template);
+    frameworkProjectedNodes.set(element, Object.freeze(projected));
     stampAuthoredElement(element, definition.contract.tag);
     stampComponentRoot(element, definition.contract.tag);
     for (const [name, prop] of Object.entries(definition.contract.props)) {
       const value = options.props?.[name] ?? prop.default;
       if (value !== undefined) {
-        element.setAttribute(`data-${name.toLowerCase()}`, serializeTypedValue(value, prop.type));
+        (element as unknown as Record<string, unknown>)[name] = value;
+        if (!isPropertyOnlyType(prop.type)) {
+          element.setAttribute(`data-${name.toLowerCase()}`, serializeTypedValue(value, prop.type));
+        }
       }
     }
     lowerDocument(root);

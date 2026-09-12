@@ -2,6 +2,7 @@ import { fail } from "./diagnostics.js";
 import { getDomInterface } from "./platform.js";
 import {
   formatType,
+  isPropertyOnlyType,
   isTypeNode,
   parseTypedValue,
   parseTypeExpression,
@@ -189,6 +190,9 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   }
 
   const target = parseTarget(object.target, source);
+  if ("attribute" in target && isPropertyOnlyType(type)) {
+    fail("HC017", `Prop \`${name}\` uses a property-only type and must target a DOM property.`, source);
+  }
   const description = requiredString(object.description, `props.${name}.description`, source);
   const normalized: {
     type: PropType;

@@ -75,6 +75,8 @@ object with one required and one optional field; and an open object with a requi
 | `token-list` | a space-separated string or string array of tokens | an ordered string array | tokens joined by one space |
 | `trusted-html` | a platform `TrustedHTML` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
 | `trusted-script` | a platform `TrustedScript` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
+| `function` | a JavaScript callable supplied through a property | the same callable | property-only; serialization is an error |
+| `unknown` | any JavaScript value supplied through a property | the same value | property-only; serialization is an error |
 
 The `email`, `url`, `date`, `time`, `datetime-local`, `month`, `week`, `number`, and `color`
 spaces intentionally follow HTML input value spaces. `multiple` changes an `email` boundary
@@ -84,6 +86,12 @@ from one address to a comma-separated ordered list. It does not change unrelated
 `<color>` grammar. `url` is an HTML absolute URL string; `url-value` is the serializable URL
 value used where a later URL-resolution step has a base. These distinctions prevent the phrase
 “web-native type” from hiding different parsers behind one name.
+
+`function` is the explicit callback or provider boundary. `unknown` is an escape hatch for a
+package type whose shape is owned by a separately published TypeScript contract. Both are
+property-only: a definition must bind them with `.property`, and tools must never encode them
+into markup. Authors should prefer a structural HTML Next type when the complete shape belongs
+to the component contract; `unknown` deliberately makes no validation claim.
 
 The CSS Working Group's [value-definition syntax](https://www.w3.org/TR/css-values-4/#value-defs),
 [component value types](https://www.w3.org/TR/css-values-4/#component-types), and
@@ -156,7 +164,8 @@ content is property-only. A serializer must reject an invalid value rather than 
 it.
 
 TypeScript projections are mechanical: strings and web string spaces project to `string`;
-numeric terminals to `number`; keywords to string literals; unions to TypeScript unions;
+numeric terminals to `number`; `function` to a callable of unknown arguments and result;
+`unknown` to `unknown`; keywords to string literals; unions to TypeScript unions;
 `list(T)` to `readonly T[]`; `record(T)` to `Readonly<Record<string, T>>`; and object shapes to
 readonly object properties. `null` and `absent` project to `null` and `undefined`. Trusted types
 project to their corresponding Trusted Types interfaces.

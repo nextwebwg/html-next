@@ -124,9 +124,13 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     ),
     "</script>",
     "",
-    `<${polymorphic ? "svelte:element this={as ?? " + quote(template.name) + "}" : template.name} ${rootAttributes.join(" ")}>`,
-    children === "" ? "" : `  ${children}`,
-    `</${polymorphic ? "svelte:element" : template.name}>`,
+    ...(isVoidElement(template.name) && !polymorphic
+      ? [`<${template.name} ${rootAttributes.join(" ")}>`]
+      : [
+        `<${polymorphic ? "svelte:element this={as ?? " + quote(template.name) + "}" : template.name} ${rootAttributes.join(" ")}>`,
+        children === "" ? "" : `  ${children}`,
+        `</${polymorphic ? "svelte:element" : template.name}>`,
+      ]),
     "",
   ].filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n");
 }
