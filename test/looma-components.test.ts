@@ -30,6 +30,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
       "ui-avatar", "ui-avatar-group", "ui-disclosure", "ui-tabs",
       "ui-affordance-scope", "ui-dialog", "ui-popover", "ui-toast-region", "ui-tooltip",
       "ui-menu", "ui-context-menu",
+      "ui-editable", "ui-tree", "ui-tree-item",
     ];
     await build({
       stdin: {
@@ -375,6 +376,78 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
           ["context", "open", { open: true, reason: "action", trigger: "pointer" }],
           ["context", "select", { value: "inspect", trigger: "programmatic" }],
           ["context", "close", { open: false, reason: "action", trigger: "programmatic" }],
+        ],
+      });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("supports editable focus transitions and accessible tree navigation", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(definitions + `
+        <ui-editable id="editable">
+          <button id="preview" slot="preview" data-ui-editable-trigger>Rename</button>
+          <input id="editor" slot="edit" value="Draft">
+        </ui-editable>
+        <ui-tree id="tree" label="Files">
+          <ui-tree-item id="parent" item-id="parent" label="Parent" container default-expanded sortable>
+            Parent
+            <ui-tree-item id="child" slot="children" item-id="child" label="Child">Child</ui-tree-item>
+          </ui-tree-item>
+          <ui-tree-item id="sibling" item-id="sibling" label="Sibling">Sibling</ui-tree-item>
+        </ui-tree>
+      `);
+      await page.addScriptTag({ path: bundle });
+      await page.addScriptTag({ path: controllerBundle });
+      const result = await page.evaluate(`(async () => {
+        const events = [];
+        for (const type of ['edit-change','expand']) document.addEventListener(type, event => events.push([type, event.detail]));
+        window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
+          const controller = window.LoomaControllers[definition.contract.tag];
+          if (controller == null) return;
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          return controller(window.HtmlRuntime.getComponentHost(root));
+        }});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const preview = document.getElementById('preview');
+        preview.click();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const editOpened = { focused: document.activeElement?.id, previewHidden: preview.closest('.editable__preview').hidden };
+        document.getElementById('editor').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const editClosed = { focused: document.activeElement?.id === 'preview', editorHidden: document.getElementById('editor').closest('.editable__editor').hidden };
+        const parent = document.getElementById('parent');
+        const child = document.getElementById('child');
+        parent.focus();
+        parent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
+        const treeMoved = document.activeElement?.id;
+        parent.querySelector('.tree-item__disclosure').click();
+        return {
+          editOpened,
+          editClosed,
+          tree: {
+            role: document.getElementById('tree').getAttribute('role'),
+            label: document.getElementById('tree').getAttribute('aria-label'),
+            parentLevel: parent.getAttribute('aria-level'),
+            childLevel: child.getAttribute('aria-level'),
+            moved: treeMoved,
+            expanded: parent.getAttribute('aria-expanded'),
+            childHidden: child.closest('.tree-item__children').hidden,
+          },
+          events,
+        };
+      })()`);
+      assert.deepEqual(result, {
+        editOpened: { focused: "editor", previewHidden: true },
+        editClosed: { focused: true, editorHidden: true },
+        tree: { role: "tree", label: "Files", parentLevel: "1", childLevel: "2", moved: "child", expanded: "false", childHidden: true },
+        events: [
+          ["edit-change", { edit: true, reason: "activate", trigger: "programmatic" }],
+          ["edit-change", { edit: false, reason: "escape", trigger: "keyboard" }],
+          ["expand", { id: "parent", expanded: false, trigger: "programmatic" }],
         ],
       });
     } finally {

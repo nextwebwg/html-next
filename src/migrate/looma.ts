@@ -236,6 +236,15 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <div class="tabs" :data-value="value" :data-default-value="defaultValue" :data-orientation="orientation"><slot></slot></div>
 </template>`,
+  "ui-editable": `<template component="ui-editable" status="early" summary="Swaps an explicit presentation trigger for a focused editing control." controller="./ui-editable.js">
+  <defs>
+    <prop name="edit" type="boolean?">Controlled edit state.</prop>
+    <prop name="defaultEdit" type="boolean" default="false">Initial uncontrolled edit state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <event name="edit-change" type="object({ edit: boolean, reason: activate | escape | light-dismiss | programmatic, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="editable" :data-edit="edit" :data-default-edit="defaultEdit" :data-disabled="disabled"><div $ref="preview" class="editable__preview"><slot name="preview"></slot></div><div $ref="editor" class="editable__editor"><slot name="edit"></slot></div></div>
+</template>`,
   "ui-affordance-scope": `<template component="ui-affordance-scope" status="early" summary="A pointer-proximity coordination boundary." controller="./ui-affordance-scope.js">
   <defs><prop name="nearRadius" type="number" default="16">Distance outside an affordance that activates its near state.</prop></defs>
   <div class="affordance-scope" :data-near-radius="nearRadius"><slot></slot></div>
@@ -283,6 +292,38 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
     <event name="close" type="object({ open: boolean, reason: action, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
   <div class="toast-region" role="region" aria-label="Notifications" aria-live="polite" :data-enabled="open"><slot></slot></div>
+</template>`,
+  "ui-tree": `<template component="ui-tree" status="early" summary="An accessible, keyboard-navigable and reorderable tree." controller="./ui-tree.js">
+  <defs>
+    <prop name="hoverExpandDelay" type="number" default="700">Delay before a drag target expands.</prop>
+    <prop name="label" type="string" default="Tree">Accessible tree label.</prop>
+    <prop name="maxDepth" type="number" default="0">Maximum resulting item depth; zero is unlimited.</prop>
+    <event name="reorder" type="object({ sourceId: string, targetId: string, position: before | inside | after, sourceType: string, targetType: string, sourceScope: string, targetScope: string, trigger: pointer })"></event>
+    <event name="reorder-rejected" type="object({ sourceId: string, targetId: string, position: before | inside | after, reason: descendant | incompatible | max-depth, trigger: pointer })"></event>
+  </defs>
+  <div class="tree" role="tree" :aria-label="label" :data-hover-expand-delay="hoverExpandDelay" :data-max-depth="maxDepth"><slot></slot></div>
+</template>`,
+  "ui-tree-item": `<template component="ui-tree-item" status="early" summary="An accessible tree row with disclosure and drag metadata." controller="./ui-tree-item.js">
+  <defs>
+    <prop name="accepts" type="string" default="">Comma-separated drag kinds accepted as children.</prop>
+    <prop name="container" type="boolean" default="false">Whether this item accepts and exposes children.</prop>
+    <prop name="defaultExpanded" type="boolean" default="false">Initial uncontrolled expansion.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="dragType" type="string" default="item">Application-defined drag kind.</prop>
+    <prop name="dropDepth" type="number?">Hierarchy depth override.</prop>
+    <prop name="dropScope" type="string" default="">Application-defined parent/list identity.</prop>
+    <prop name="expanded" type="boolean?">Controlled expansion state.</prop>
+    <prop name="itemId" type="string" default="">Stable application identifier.</prop>
+    <prop name="label" type="string" default="">Accessible item name.</prop>
+    <prop name="selected" type="boolean" default="false">Selection state.</prop>
+    <prop name="sortable" type="boolean" default="false">Whether pointer reordering is enabled.</prop>
+    <prop name="subtreeDepth" type="number?">Virtualized descendant-depth override.</prop>
+    <event name="expand" type="object({ id: string, expanded: boolean, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="tree-item" role="treeitem" :data-accepts="accepts" :data-container="container" :data-default-expanded="defaultExpanded" :data-disabled="disabled" :data-drag-type="dragType" :data-drop-depth="dropDepth" :data-drop-scope="dropScope" :data-expanded="expanded" :data-item-id="itemId" :data-label="label" :data-selected="selected" :data-sortable="sortable" :data-subtree-depth="subtreeDepth">
+    <div $ref="row" class="tree-item__row"><button $ref="drag" class="tree-item__drag" type="button">Drag</button><button $ref="disclosure" class="tree-item__disclosure" type="button">Toggle</button><span class="tree-item__leading"><slot name="leading"></slot></span><span class="tree-item__label"><slot></slot></span><span class="tree-item__actions"><slot name="actions"></slot></span></div>
+    <div $ref="children" class="tree-item__children" role="group"><slot name="children"></slot></div>
+  </div>
 </template>`,
 });
 

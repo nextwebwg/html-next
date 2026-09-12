@@ -1,23 +1,22 @@
-<template component="ui-tree-item" status="early" summary="HTML Next migration of UiTreeItem.">
+<template component="ui-tree-item" status="early" summary="An accessible tree row with disclosure and drag metadata." controller="./ui-tree-item.js">
   <defs>
-    <prop name="accepts" type="string" default="">Comma-separated drag kinds accepted as children. Empty accepts every kind.</prop>
-    <prop name="container" type="boolean" default="false">Whether this item accepts children and exposes disclosure behavior.</prop>
-    <prop name="defaultExpanded" type="boolean" default="false">Initial uncontrolled expansion value.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="dragType" type="string" default="item">Application-defined kind used to reject incompatible sibling drops.</prop>
-    <prop name="dropDepth" type="number">Application hierarchy depth override used for drop constraints. Defaults to structural nesting.</prop>
-    <prop name="dropScope" type="string" default="">Application-defined parent/list identity included with reorder events.</prop>
-    <prop name="expanded" type="boolean">Controlled expansion value. When omitted, `default-expanded` initializes uncontrolled state.</prop>
-    <prop name="itemId" type="string" default="">Stable application identifier emitted by tree interaction events.</prop>
-    <prop name="label" type="string" default="">Accessible name used by the disclosure and drag handle.</prop>
-    <prop name="selected" type="boolean" default="false">selected property.</prop>
-    <prop name="sortable" type="boolean" default="false">Whether this item participates in pointer drag and drop.</prop>
-    <prop name="subtreeDepth" type="number">Virtualized-tree descendant-depth override for the tree's max-depth drop constraint.</prop>
+    <prop name="accepts" type="string" default="">Comma-separated drag kinds accepted as children.</prop>
+    <prop name="container" type="boolean" default="false">Whether this item accepts and exposes children.</prop>
+    <prop name="defaultExpanded" type="boolean" default="false">Initial uncontrolled expansion.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="dragType" type="string" default="item">Application-defined drag kind.</prop>
+    <prop name="dropDepth" type="number?">Hierarchy depth override.</prop>
+    <prop name="dropScope" type="string" default="">Application-defined parent/list identity.</prop>
+    <prop name="expanded" type="boolean?">Controlled expansion state.</prop>
+    <prop name="itemId" type="string" default="">Stable application identifier.</prop>
+    <prop name="label" type="string" default="">Accessible item name.</prop>
+    <prop name="selected" type="boolean" default="false">Selection state.</prop>
+    <prop name="sortable" type="boolean" default="false">Whether pointer reordering is enabled.</prop>
+    <prop name="subtreeDepth" type="number?">Virtualized descendant-depth override.</prop>
+    <event name="expand" type="object({ id: string, expanded: boolean, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-accepts="accepts" :data-container="container" :data-default-expanded="defaultExpanded" :data-disabled="disabled" :data-drag-type="dragType" :data-drop-depth="dropDepth" :data-drop-scope="dropScope" :data-expanded="expanded" :data-item-id="itemId" :data-label="label" :data-selected="selected" :data-sortable="sortable" :data-subtree-depth="subtreeDepth">
-    <slot></slot>
-    <slot name="actions"></slot>
-    <slot name="children"></slot>
-    <slot name="leading"></slot>
+  <div class="tree-item" role="treeitem" :data-accepts="accepts" :data-container="container" :data-default-expanded="defaultExpanded" :data-disabled="disabled" :data-drag-type="dragType" :data-drop-depth="dropDepth" :data-drop-scope="dropScope" :data-expanded="expanded" :data-item-id="itemId" :data-label="label" :data-selected="selected" :data-sortable="sortable" :data-subtree-depth="subtreeDepth">
+    <div $ref="row" class="tree-item__row"><button $ref="drag" class="tree-item__drag" type="button">Drag</button><button $ref="disclosure" class="tree-item__disclosure" type="button">Toggle</button><span class="tree-item__leading"><slot name="leading"></slot></span><span class="tree-item__label"><slot></slot></span><span class="tree-item__actions"><slot name="actions"></slot></span></div>
+    <div $ref="children" class="tree-item__children" role="group"><slot name="children"></slot></div>
   </div>
 </template>

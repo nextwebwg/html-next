@@ -1,12 +1,9 @@
-<template component="ui-editable" status="early" summary="Swaps an explicit presentation trigger for a focused editing control.">
+<template component="ui-editable" status="early" summary="Swaps an explicit presentation trigger for a focused editing control." controller="./ui-editable.js">
   <defs>
-    <prop name="defaultEdit" type="boolean" default="false">defaultEdit property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="edit" type="boolean">Controlled edit state. Omit it to use defaultEdit and local interaction state.</prop>
-    <event name="edit-change" type="unknown"></event>
+    <prop name="edit" type="boolean?">Controlled edit state.</prop>
+    <prop name="defaultEdit" type="boolean" default="false">Initial uncontrolled edit state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <event name="edit-change" type="object({ edit: boolean, reason: activate | escape | light-dismiss | programmatic, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-default-edit="defaultEdit" :data-disabled="disabled" :data-edit="edit">
-    <slot name="edit"></slot>
-    <slot name="preview"></slot>
-  </div>
+  <div class="editable" :data-edit="edit" :data-default-edit="defaultEdit" :data-disabled="disabled"><div $ref="preview" class="editable__preview"><slot name="preview"></slot></div><div $ref="editor" class="editable__editor"><slot name="edit"></slot></div></div>
 </template>

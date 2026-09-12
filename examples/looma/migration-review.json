@@ -74,13 +74,8 @@
   },
   {
     "tag": "ui-editable",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-editable> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-floating-action-button",
@@ -192,22 +187,12 @@
   },
   {
     "tag": "ui-tree",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-tree> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-tree-item",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-tree-item> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   }
 ]
