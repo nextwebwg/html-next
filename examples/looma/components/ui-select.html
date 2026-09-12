@@ -1,0 +1,12 @@
+<template component="ui-select" status="early" summary="HTML Next migration of UiSelect.">
+  <defs>
+    <prop name="defaultValue" type="string">defaultValue property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="value" type="string">value property.</prop>
+  </defs>
+  <select :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-required="required" :data-value="value">
+    <slot></slot>
+  </select>
+</template>

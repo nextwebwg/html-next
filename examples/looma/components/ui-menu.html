@@ -1,0 +1,11 @@
+<template component="ui-menu" status="early" summary="HTML Next migration of UiMenu.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
+    <prop name="for" type="string">Id of the control that anchors this menu in the top layer.</prop>
+    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+    <prop name="placement" type="unknown" default="bottom-start">Preferred placement; Looma flips and shifts when space is constrained.</prop>
+  </defs>
+  <menu :data-default-open="defaultOpen" :data-for="for" :data-open="open" .placement="placement">
+    <slot></slot>
+  </menu>
+</template>

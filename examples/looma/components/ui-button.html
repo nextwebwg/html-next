@@ -1,0 +1,10 @@
+<template component="ui-button" status="early" summary="HTML Next migration of UiButton.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="size" type="string">size property.</prop>
+    <prop name="variant" type="'outline' | 'solid' | 'destructive' | 'ghost'" default="outline">variant property.</prop>
+  </defs>
+  <button :data-disabled="disabled" :data-size="size" :data-variant="variant">
+    <slot></slot>
+  </button>
+</template>

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-import type { StencilPackageInventory } from "../src/migrate/stencil.js";
+import { scaffoldStencilComponent, type StencilPackageInventory } from "../src/migrate/stencil.js";
+import { parseComponent } from "../src/parser.js";
 
 const inventoryUrl = new URL("./fixtures/looma/inventory.json", import.meta.url);
 
@@ -31,5 +32,14 @@ describe("checked-in Looma migration surface", () => {
     assert.ok(byTag.get("ui-dialog")!.capabilities.includes("overlay"));
     assert.ok(byTag.get("ui-tree")!.capabilities.includes("keyboard-focus"));
     assert.ok(byTag.get("ui-input")!.capabilities.includes("form-control"));
+  });
+
+  it("produces a parseable scaffold for every component without calling it converted", async () => {
+    const inventory = JSON.parse(await readFile(inventoryUrl, "utf8")) as StencilPackageInventory;
+    for (const component of inventory.components) {
+      const scaffold = scaffoldStencilComponent(component);
+      assert.equal(parseComponent(scaffold.source, `${component.tag}.html`).contract.tag, component.tag);
+      assert.ok(scaffold.diagnostics.some((diagnostic) => diagnostic.code === "HM001"));
+    }
   });
 });

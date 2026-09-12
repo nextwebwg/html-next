@@ -1,0 +1,13 @@
+<template component="ui-textarea" status="early" summary="HTML Next migration of UiTextarea.">
+  <defs>
+    <prop name="defaultValue" type="string" default="">defaultValue property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
+    <prop name="readOnly" type="boolean" default="false">readOnly property.</prop>
+    <prop name="rows" type="number" default="4">rows property.</prop>
+    <prop name="value" type="string">value property.</prop>
+  </defs>
+  <textarea :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-read-only="readOnly" :data-rows="rows" :data-value="value">
+    <slot></slot>
+  </textarea>
+</template>

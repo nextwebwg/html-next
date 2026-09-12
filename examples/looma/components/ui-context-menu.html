@@ -1,0 +1,11 @@
+<template component="ui-context-menu" status="early" summary="HTML Next migration of UiContextMenu.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">Opens the menu on first client render.</prop>
+    <prop name="for" type="string">Optional id of the region that should also respond to a context-menu gesture.</prop>
+    <prop name="open" type="boolean" default="false">Controls the menu when the consumer owns open state.</prop>
+  </defs>
+  <div :data-default-open="defaultOpen" :data-for="for" :data-open="open">
+    <slot></slot>
+    <slot name="trigger"></slot>
+  </div>
+</template>

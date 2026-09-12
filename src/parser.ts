@@ -283,6 +283,7 @@ function readDeclarations(
   const elements = group.childNodes.filter(isElement);
   const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
   const names = new Set<string>(formNames);
+  const eventNames = new Set<string>();
   for (const element of elements) {
     const kind = element.tagName;
     if (!allowed.has(kind)) {
@@ -290,6 +291,11 @@ function readDeclarations(
     }
     const name = attr(element, "name") ?? "";
     if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
+    if (kind === "event") {
+      if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
+      eventNames.add(name);
+      continue;
+    }
     if (names.has(name)) {
       fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
     }
@@ -538,7 +544,8 @@ function parseAttributes(
       if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
         fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
-      const name = resolveDomProperty(element.tagName, key);
+      const name = resolveDomProperty(element.tagName, key) ??
+        (prop !== undefined && "property" in prop.target ? prop.target.property : undefined);
       if (name === undefined) {
         fail("HP001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
       }

@@ -1,0 +1,10 @@
+<template component="ui-form-field" status="early" summary="HTML Next migration of UiFormField.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+  </defs>
+  <div :data-disabled="disabled" :data-invalid="invalid" :data-required="required">
+    <slot></slot>
+  </div>
+</template>

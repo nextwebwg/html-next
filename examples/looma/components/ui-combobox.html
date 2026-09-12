@@ -1,0 +1,38 @@
+<template component="ui-combobox" status="early" summary="A single editable field with contextual suggestions, optional help and field validation.">
+  <defs>
+    <prop name="clearable" type="boolean" default="false">clearable property.</prop>
+    <prop name="config" type="unknown">Immutable configuration; replace the object/context when dependencies change.</prop>
+    <prop name="defaultQuery" type="string" default="">defaultQuery property.</prop>
+    <prop name="defaultValue" type="string">defaultValue property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="disclosure" type="boolean" default="false">disclosure property.</prop>
+    <prop name="help" type="string" default="">Optional description shown by the connected question-mark button.</prop>
+    <prop name="label" type="string" default="">Accessible visible label, associated with the native text input.</prop>
+    <prop name="labelVisibility" type="'visible' | 'sr-only'" default="visible">Keep the native label accessible while allowing compact composed controls.</prop>
+    <prop name="name" type="string" default="">name property.</prop>
+    <prop name="placeholder" type="string" default="">placeholder property.</prop>
+    <prop name="query" type="string">Controlled raw editing text; independent of canonical selection.</prop>
+    <prop name="readOnly" type="boolean" default="false">readOnly property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="size" type="'sm' | 'md'" default="md">size property.</prop>
+    <prop name="value" type="string | null">Controlled canonical value. Undefined selects uncontrolled mode; null means no selection.</prop>
+    <event name="create-entry" type="unknown"></event>
+    <event name="dependency-invalidate" type="unknown"></event>
+    <event name="free-entry" type="unknown"></event>
+    <event name="options-change" type="list(unknown)"></event>
+    <event name="query-change" type="unknown"></event>
+    <event name="validation-change" type="unknown"></event>
+    <event name="value-change" type="unknown"></event>
+    <method name="focusInput" returns="promise(absent)"></method>
+    <method name="validate" returns="promise(unknown)"></method>
+  </defs>
+  <div :data-clearable="clearable" .config="config" :data-default-query="defaultQuery" :data-default-value="defaultValue" :data-disabled="disabled" :data-disclosure="disclosure" :data-help="help" :data-label="label" :data-label-visibility="labelVisibility" :data-name="name" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-size="size" :data-value="value">
+    <slot name="create"></slot>
+    <slot name="empty"></slot>
+    <slot name="error"></slot>
+    <slot name="footer"></slot>
+    <slot name="loading"></slot>
+    <!-- option-${...} requires reviewed data selection. -->
+    <slot name="start"></slot>
+  </div>
+</template>

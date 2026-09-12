@@ -70,6 +70,16 @@ describe("parseComponent", () => {
     );
   });
 
+  it("keeps external event names separate from value bindings", () => {
+    const definition = parseComponent(
+      `<template component="demo-example" status="early" summary="Event namespace.">` +
+        `<defs><prop name="open" type="boolean" default="false">Open.</prop>` +
+        `<event name="open" type="boolean"></event></defs>` +
+        `<button :data-open="open"></button></template>`,
+    );
+    assert.deepEqual(definition.declarations?.map((declaration) => declaration.kind), ["event"]);
+  });
+
   it("parses a primitive into normalized IR", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const definition = parseComponent(source, "x-button.html");

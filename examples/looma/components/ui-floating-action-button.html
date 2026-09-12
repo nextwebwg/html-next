@@ -1,0 +1,10 @@
+<template component="ui-floating-action-button" status="early" summary="HTML Next migration of UiFloatingActionButton.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="label" type="string" default="">label property.</prop>
+    <prop name="mobileOnly" type="boolean" default="false">mobileOnly property.</prop>
+  </defs>
+  <button :data-disabled="disabled" :data-label="label" :data-mobile-only="mobileOnly">
+    <slot></slot>
+  </button>
+</template>

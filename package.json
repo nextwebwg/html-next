@@ -22,6 +22,7 @@
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:looma": "tsx scripts/generate-looma-inventory.ts",
+    "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check",
     "check:spec": "node --import tsx --test test/spec.test.ts",

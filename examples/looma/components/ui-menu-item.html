@@ -1,0 +1,9 @@
+<template component="ui-menu-item" status="early" summary="HTML Next migration of UiMenuItem.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="value" type="string" default="">value property.</prop>
+  </defs>
+  <button :data-disabled="disabled" :data-value="value">
+    <slot></slot>
+  </button>
+</template>

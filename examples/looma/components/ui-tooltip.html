@@ -1,0 +1,16 @@
+<template component="ui-tooltip" status="early" summary="HTML Next migration of UiTooltip.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
+    <prop name="for" type="string" default="">for property.</prop>
+    <prop name="hideDelay" type="number" default="100">Pointer leave grace period in milliseconds.</prop>
+    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+    <prop name="placement" type="unknown" default="top-start">placement property.</prop>
+    <prop name="showDelay" type="number" default="500">Pointer hover intent delay in milliseconds. Keyboard focus is immediate.</prop>
+    <prop name="toggleOnClick" type="boolean" default="false">Click or tap pins the description; activate again to dismiss.</prop>
+    <event name="close" type="unknown"></event>
+    <event name="open" type="unknown"></event>
+  </defs>
+  <div :data-default-open="defaultOpen" :data-for="for" :data-hide-delay="hideDelay" :data-open="open" .placement="placement" :data-show-delay="showDelay" :data-toggle-on-click="toggleOnClick">
+    <slot></slot>
+  </div>
+</template>

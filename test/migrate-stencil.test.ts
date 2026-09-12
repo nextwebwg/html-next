@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractStencilInventory } from "../src/migrate/stencil.js";
+import { extractStencilInventory, scaffoldStencilComponent, stencilTypeToHtmlNext } from "../src/migrate/stencil.js";
 
 const fixtureRoot = new URL("./fixtures/stencil/", import.meta.url).pathname;
 
@@ -41,5 +41,21 @@ describe("Stencil migration inventory", () => {
         "keyboard-focus", "methods", "props", "slots", "styles",
       ],
     });
+  });
+
+  it("maps safe public types and reports reviewed work in generated scaffolds", async () => {
+    assert.equal(stencilTypeToHtmlNext("string | null | undefined"), "string | null | absent");
+    assert.equal(stencilTypeToHtmlNext("readonly Option[]"), "list(unknown)");
+    assert.equal(stencilTypeToHtmlNext("(value: string) => void"), "function");
+    const inventory = await extractStencilInventory({
+      root: fixtureRoot,
+      typesFile: `${fixtureRoot}/components.d.ts`,
+      manifestFile: `${fixtureRoot}/collection-manifest.json`,
+      facadePackageFile: `${fixtureRoot}/package.json`,
+    });
+    const scaffold = scaffoldStencilComponent(inventory.components[0]!);
+    assert.match(scaffold.source, /<template component="ui-example"/);
+    assert.match(scaffold.source, /type="unknown"/);
+    assert.deepEqual(scaffold.diagnostics.map((diagnostic) => diagnostic.code), ["HM001", "HM002"]);
   });
 });

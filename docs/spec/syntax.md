@@ -4,7 +4,7 @@
 
 A definition is one inert `template[component]` carrier. Its `component` value must be a valid autonomous custom-element name. A source may also contain `link[rel=component]` dependency edges. The carrier may declare `status`, `summary`, `controller`, one declaration region, one component root, and one scoped `style`.
 
-The declaration region may contain property, state, computed, data, handler, event, and public-method declarations. Names share a flat component scope unless a construct explicitly creates a local loop or `with` scope. Duplicate declarations and undeclared expression roots are errors.
+The declaration region may contain property, state, computed, data, handler, event, and public-method declarations. Value, handler, form, and public-method names share a flat component scope unless a construct explicitly creates a local loop or `with` scope. Event names occupy the external event namespace: duplicate event declarations are errors, but an event may intentionally share the conventional name of a property such as `open`. Undeclared expression roots are errors.
 
 ```html conforming
 <template component="x-counter" controller="./counter.js">

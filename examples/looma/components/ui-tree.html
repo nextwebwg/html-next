@@ -1,0 +1,10 @@
+<template component="ui-tree" status="early" summary="HTML Next migration of UiTree.">
+  <defs>
+    <prop name="hoverExpandDelay" type="number" default="700">hoverExpandDelay property.</prop>
+    <prop name="label" type="string" default="Tree">label property.</prop>
+    <prop name="maxDepth" type="number" default="0">Maximum resulting item depth accepted by pointer reordering. Zero is unlimited.</prop>
+  </defs>
+  <div :data-hover-expand-delay="hoverExpandDelay" :data-label="label" :data-max-depth="maxDepth">
+    <slot></slot>
+  </div>
+</template>

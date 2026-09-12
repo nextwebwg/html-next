@@ -1,0 +1,13 @@
+<template component="ui-search-result-row" status="early" summary="HTML Next migration of UiSearchResultRow.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="selected" type="boolean" default="false">selected property.</prop>
+  </defs>
+  <article :data-disabled="disabled" :data-selected="selected">
+    <slot name="excerpt"></slot>
+    <slot name="leading"></slot>
+    <slot name="meta"></slot>
+    <slot name="title"></slot>
+    <slot name="trailing"></slot>
+  </article>
+</template>

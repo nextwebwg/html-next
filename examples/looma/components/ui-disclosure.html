@@ -1,0 +1,10 @@
+<template component="ui-disclosure" status="early" summary="HTML Next migration of UiDisclosure.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+  </defs>
+  <details :data-default-open="defaultOpen" :data-disabled="disabled" :data-open="open">
+    <slot></slot>
+  </details>
+</template>

@@ -1,0 +1,8 @@
+<template component="ui-callout" status="early" summary="A static semantic message with a tone-specific icon.">
+  <defs>
+    <prop name="tone" type="unknown" default="info">tone property.</prop>
+  </defs>
+  <aside .tone="tone">
+    <slot></slot>
+  </aside>
+</template>

@@ -1,0 +1,12 @@
+<template component="ui-dialog" status="early" summary="HTML Next migration of UiDialog.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
+    <prop name="dismissible" type="boolean" default="true">dismissible property.</prop>
+    <prop name="label" type="string">Accessible name forwarded to the native dialog surface.</prop>
+    <prop name="modal" type="boolean" default="true">modal property.</prop>
+    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+  </defs>
+  <dialog :data-default-open="defaultOpen" :data-dismissible="dismissible" :data-label="label" :data-modal="modal" :data-open="open">
+    <slot></slot>
+  </dialog>
+</template>

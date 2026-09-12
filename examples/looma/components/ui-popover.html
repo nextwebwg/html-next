@@ -1,0 +1,11 @@
+<template component="ui-popover" status="early" summary="HTML Next migration of UiPopover.">
+  <defs>
+    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
+    <prop name="for" type="string">Optional id of the element this popover follows in the top layer.</prop>
+    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+    <prop name="placement" type="unknown" default="bottom-start">placement property.</prop>
+  </defs>
+  <div :data-default-open="defaultOpen" :data-for="for" :data-open="open" .placement="placement">
+    <slot></slot>
+  </div>
+</template>

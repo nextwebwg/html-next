@@ -57,6 +57,16 @@ export interface ExtractStencilOptions {
   readonly facadePackageFile?: string;
 }
 
+export interface StencilScaffoldDiagnostic {
+  readonly code: "HM001" | "HM002" | "HM003";
+  readonly message: string;
+}
+
+export interface StencilScaffold {
+  readonly source: string;
+  readonly diagnostics: readonly StencilScaffoldDiagnostic[];
+}
+
 interface PublicShape {
   readonly description: string;
   readonly props: readonly StencilPropInventory[];
@@ -269,5 +279,127 @@ export async function extractStencilInventory(options: ExtractStencilOptions): P
       exports: Object.freeze(Object.keys(facade.exports).sort()),
     }),
     components: Object.freeze(components.sort((left, right) => left.tag.localeCompare(right.tag))),
+  });
+}
+
+function kebabCase(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+function htmlEscape(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function trimOuter(value: string, prefix: string, suffix: string): string | undefined {
+  return value.startsWith(prefix) && value.endsWith(suffix)
+    ? value.slice(prefix.length, -suffix.length).trim()
+    : undefined;
+}
+
+/** Conservative TS-to-HTML-Next type projection; opaque named package types stay explicit. */
+export function stencilTypeToHtmlNext(source: string): string {
+  const value = source.trim();
+  if (value.includes("=>")) return "function";
+  if (value.includes("{") || value.includes("}")) return "unknown";
+  const readonlyList = trimOuter(value, "readonly ", "[]");
+  if (readonlyList !== undefined) return `list(${stencilTypeToHtmlNext(readonlyList)})`;
+  const list = trimOuter(value, "", "[]");
+  if (list !== undefined) return `list(${stencilTypeToHtmlNext(list)})`;
+  const array = trimOuter(value, "Array<", ">");
+  if (array !== undefined) return `list(${stencilTypeToHtmlNext(array)})`;
+  const union = value.split("|").map((part) => part.trim());
+  if (union.length > 1) {
+    return union.map((part) => part === "undefined" ? "absent" : stencilTypeToHtmlNext(part)).join(" | ");
+  }
+  if (["string", "boolean", "number", "null", "undefined", "void", "unknown"].includes(value)) {
+    return value === "undefined" || value === "void" ? "absent" : value;
+  }
+  if (/^(['"]).*\1$/.test(value)) return value;
+  if (value === "Function") return "function";
+  return "unknown";
+}
+
+function scaffoldRoot(tag: string): string {
+  if (["ui-button", "ui-floating-action-button", "ui-icon-button", "ui-switch"].includes(tag)) return "button";
+  if (tag === "ui-dialog") return "dialog";
+  if (tag === "ui-disclosure") return "details";
+  if (tag === "ui-select") return "select";
+  if (tag === "ui-textarea") return "textarea";
+  if (tag === "ui-menu") return "menu";
+  if (tag === "ui-menu-item") return "button";
+  if (tag === "ui-top-bar") return "header";
+  if (tag === "ui-search-result-row") return "article";
+  if (tag === "ui-callout") return "aside";
+  if (tag === "ui-badge" || tag === "ui-chip") return "span";
+  return "div";
+}
+
+function scalarDefault(prop: StencilPropInventory): string | undefined {
+  const value = prop.default?.trim();
+  if (value === undefined) return undefined;
+  if (/^(['"]).*\1$/.test(value)) return value.slice(1, -1);
+  if (/^(?:true|false|-?(?:\d+\.?\d*|\.\d+))$/.test(value)) return value;
+  return undefined;
+}
+
+/** Emits a parseable review scaffold without claiming that imperative TSX behavior was converted. */
+export function scaffoldStencilComponent(component: StencilComponentInventory): StencilScaffold {
+  const root = scaffoldRoot(component.tag);
+  const props = component.props.map((prop) => {
+    const type = stencilTypeToHtmlNext(prop.type);
+    const defaultValue = scalarDefault(prop);
+    const required = prop.required ? " required" : "";
+    const defaultAttribute = defaultValue === undefined ? "" : ` default="${htmlEscape(defaultValue)}"`;
+    return `    <prop name="${prop.name}" type="${htmlEscape(type)}"${required}${defaultAttribute}>${htmlEscape(prop.description || `${prop.name} property.`)}</prop>`;
+  });
+  const events = component.events.map((event) =>
+    `    <event name="${event.name}" type="${htmlEscape(stencilTypeToHtmlNext(event.detailType))}"></event>`
+  );
+  const methods = component.methods.map((method) =>
+    `    <method name="${method.name}" returns="${htmlEscape((() => {
+      const promised = /^Promise<(.*)>$/.exec(method.returns);
+      return promised === null
+        ? stencilTypeToHtmlNext(method.returns)
+        : `promise(${stencilTypeToHtmlNext(promised[1]!)})`;
+    })())}"></method>`
+  );
+  const attributes = component.props.map((prop) => {
+    const type = stencilTypeToHtmlNext(prop.type);
+    const propertyOnly = /(?:unknown|function)/.test(type);
+    return propertyOnly
+      ? `.${prop.name}="${prop.name}"`
+      : `:data-${kebabCase(prop.name)}="${prop.name}"`;
+  });
+  const slots = component.slots.map((slot) => {
+    if (slot.dynamic) return `    <!-- ${htmlEscape(slot.name ?? "data-derived slot")} requires reviewed data selection. -->`;
+    return `    <slot${slot.name === undefined ? "" : ` name="${htmlEscape(slot.name)}"`}></slot>`;
+  });
+  const diagnostics: StencilScaffoldDiagnostic[] = [{
+    code: "HM001",
+    message: `<${component.tag}> contains imperative Stencil behavior that requires a reviewed controller port.`,
+  }];
+  if (component.slots.some((slot) => slot.dynamic)) diagnostics.push({
+    code: "HM002",
+    message: `<${component.tag}> has data-derived slots whose selection expression must be ported.`,
+  });
+  if (component.capabilities.includes("property-input")) diagnostics.push({
+    code: "HM003",
+    message: `<${component.tag}> exposes opaque package-owned property types that retain their TypeScript contract.`,
+  });
+  return Object.freeze({
+    source: [
+      `<template component="${component.tag}" status="early" summary="${htmlEscape(component.description || `HTML Next migration of ${component.interfaceName}.`)}">`,
+      "  <defs>",
+      ...props,
+      ...events,
+      ...methods,
+      "  </defs>",
+      `  <${root}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`,
+      ...slots,
+      `  </${root}>`,
+      "</template>",
+      "",
+    ].join("\n"),
+    diagnostics: Object.freeze(diagnostics),
   });
 }

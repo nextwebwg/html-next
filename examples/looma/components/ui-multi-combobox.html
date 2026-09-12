@@ -1,0 +1,30 @@
+<template component="ui-multi-combobox" status="early" summary="A multi-value combobox with removable, customizable selected items.">
+  <defs>
+    <prop name="config" type="unknown">config property.</prop>
+    <prop name="defaultQuery" type="string" default="">defaultQuery property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="items" type="list(unknown)">items property.</prop>
+    <prop name="label" type="string" default="">label property.</prop>
+    <prop name="name" type="string" default="">name property.</prop>
+    <prop name="placeholder" type="string" default="">placeholder property.</prop>
+    <prop name="query" type="string">query property.</prop>
+    <prop name="readOnly" type="boolean" default="false">readOnly property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="tokenSeparators" type="list(string)">Characters that commit the current query and leave the input ready for the next item.</prop>
+    <event name="add-item" type="unknown"></event>
+    <event name="create-item" type="unknown"></event>
+    <event name="options-change" type="list(unknown)"></event>
+    <event name="query-change" type="unknown"></event>
+    <event name="remove-item" type="unknown"></event>
+    <method name="focusInput" returns="promise(absent)"></method>
+  </defs>
+  <div .config="config" :data-default-query="defaultQuery" :data-disabled="disabled" .items="items" :data-label="label" :data-name="name" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-token-separators="tokenSeparators">
+    <slot name="create"></slot>
+    <slot name="empty"></slot>
+    <slot name="error"></slot>
+    <slot name="footer"></slot>
+    <!-- item-${...} requires reviewed data selection. -->
+    <slot name="loading"></slot>
+    <!-- option-${...} requires reviewed data selection. -->
+  </div>
+</template>

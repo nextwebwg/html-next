@@ -1,0 +1,10 @@
+<template component="ui-tabs" status="early" summary="HTML Next migration of UiTabs.">
+  <defs>
+    <prop name="defaultValue" type="string" default="">defaultValue property.</prop>
+    <prop name="orientation" type="'horizontal' | 'vertical'" default="horizontal">orientation property.</prop>
+    <prop name="value" type="string">Controlled selected tab value. Omit it to use defaultValue and local interaction state.</prop>
+  </defs>
+  <div :data-default-value="defaultValue" :data-orientation="orientation" :data-value="value">
+    <slot></slot>
+  </div>
+</template>

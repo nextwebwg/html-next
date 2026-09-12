@@ -1,0 +1,13 @@
+<template component="ui-checkbox" status="early" summary="HTML Next migration of UiCheckbox.">
+  <defs>
+    <prop name="checked" type="boolean">Controlled checked state. Omit it to use defaultChecked and local interaction state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">defaultChecked property.</prop>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="indeterminate" type="boolean" default="false">indeterminate property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="value" type="string" default="on">value property.</prop>
+  </defs>
+  <div :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-indeterminate="indeterminate" :data-required="required" :data-value="value">
+    <slot></slot>
+  </div>
+</template>

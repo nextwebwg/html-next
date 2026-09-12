@@ -1,0 +1,8 @@
+<template component="ui-affordance-scope" status="early" summary="HTML Next migration of UiAffordanceScope.">
+  <defs>
+    <prop name="nearRadius" type="number">Distance outside each registered affordance that reveals its near state.</prop>
+  </defs>
+  <div :data-near-radius="nearRadius">
+    <slot></slot>
+  </div>
+</template>

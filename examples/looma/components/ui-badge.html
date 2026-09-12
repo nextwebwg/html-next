@@ -1,0 +1,9 @@
+<template component="ui-badge" status="early" summary="HTML Next migration of UiBadge.">
+  <defs>
+    <prop name="tone" type="string">tone property.</prop>
+    <prop name="variant" type="string">variant property.</prop>
+  </defs>
+  <span :data-tone="tone" :data-variant="variant">
+    <slot></slot>
+  </span>
+</template>

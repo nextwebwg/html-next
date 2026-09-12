@@ -1,0 +1,9 @@
+<template component="ui-avatar-group" status="early" summary="HTML Next migration of UiAvatarGroup.">
+  <defs>
+    <prop name="label" type="string" default="People">label property.</prop>
+    <prop name="max" type="number" default="5">max property.</prop>
+  </defs>
+  <div :data-label="label" :data-max="max">
+    <slot></slot>
+  </div>
+</template>

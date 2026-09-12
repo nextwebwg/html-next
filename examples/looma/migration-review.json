@@ -1,0 +1,358 @@
+[
+  {
+    "tag": "ui-affordance-scope",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-affordance-scope> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-avatar",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-avatar> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-avatar-group",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-avatar-group> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-badge",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-badge> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-button",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-button> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-callout",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-callout> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-checkbox",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-checkbox> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-chip",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-chip> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-combobox",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-combobox> contains imperative Stencil behavior that requires a reviewed controller port."
+      },
+      {
+        "code": "HM002",
+        "message": "<ui-combobox> has data-derived slots whose selection expression must be ported."
+      },
+      {
+        "code": "HM003",
+        "message": "<ui-combobox> exposes opaque package-owned property types that retain their TypeScript contract."
+      }
+    ]
+  },
+  {
+    "tag": "ui-context-menu",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-context-menu> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-dialog",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-dialog> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-disclosure",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-disclosure> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-editable",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-editable> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-floating-action-button",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-floating-action-button> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-form-field",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-form-field> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-icon-button",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-icon-button> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-input",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-input> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-menu",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-menu> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-menu-item",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-menu-item> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-multi-combobox",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-multi-combobox> contains imperative Stencil behavior that requires a reviewed controller port."
+      },
+      {
+        "code": "HM002",
+        "message": "<ui-multi-combobox> has data-derived slots whose selection expression must be ported."
+      },
+      {
+        "code": "HM003",
+        "message": "<ui-multi-combobox> exposes opaque package-owned property types that retain their TypeScript contract."
+      }
+    ]
+  },
+  {
+    "tag": "ui-popover",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-popover> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-radio",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-radio> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-radio-group",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-radio-group> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-search-result-row",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-search-result-row> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-search-shell",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-search-shell> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-select",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-select> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-switch",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-switch> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-tabs",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-tabs> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-textarea",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-textarea> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-toast-region",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-toast-region> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-tooltip",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-tooltip> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-top-bar",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-top-bar> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-tree",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-tree> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  },
+  {
+    "tag": "ui-tree-item",
+    "status": "scaffold",
+    "diagnostics": [
+      {
+        "code": "HM001",
+        "message": "<ui-tree-item> contains imperative Stencil behavior that requires a reviewed controller port."
+      }
+    ]
+  }
+]

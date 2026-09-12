@@ -1,0 +1,12 @@
+<template component="ui-radio-group" status="early" summary="HTML Next migration of UiRadioGroup.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
+    <prop name="name" type="string" default="">name property.</prop>
+    <prop name="orientation" type="'horizontal' | 'vertical'" default="horizontal">orientation property.</prop>
+    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="value" type="string" default="">value property.</prop>
+  </defs>
+  <div :data-disabled="disabled" :data-name="name" :data-orientation="orientation" :data-required="required" :data-value="value">
+    <slot></slot>
+  </div>
+</template>
