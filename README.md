@@ -5,16 +5,17 @@ reusable typed components, templates, control flow, data sources, and reactivity
 as HTML rather than framework-specific JavaScript. The proposals and their design record
 live in the [`nextwebwg/site`](https://github.com/nextwebwg/site) repository.
 
-**This repository is the polyfill and component bridge**: the reference implementation of
-those proposals, not the proposals themselves. It authors a native-root component once as
-literal, browser-parseable HTML, then generates Vanilla DOM, React, Vue, Svelte, CSS,
-machine-readable contracts, and API documentation, and lowers the same source directly in
-Chromium, Firefox, and WebKit without Custom Elements or `eval()`.
+**This repository is the polyfill and component bridge**: the implementation-pinned
+specification, browser implementation, and package converter for those proposals. It authors
+a component once as literal, browser-parseable HTML, can lower that graph in the browser, and
+generates inspectable Vanilla, React, Vue, Svelte, CSS, type, and package artifacts without
+`eval()`.
 
-> **Stage 0, early:** the proposals are exploratory and this implementation covers only the
-> component-generation slice. Syntax and generated output are not stable, and no npm package
-> has been published from this checkout. The intended public home is
-> `github.com/nextwebwg/html`.
+> **Stage 0, early:** syntax and generated output are not stable, and no npm package has been
+> published from this checkout. The current code still implements the original component
+> generation slice while work proceeds toward the complete required profile. Do not infer
+> implementation support from proposal prose: [`docs/spec/support.json`](./docs/spec/support.json)
+> is the machine-readable release contract and the conformance tests are the proof.
 
 ## Try it locally
 
@@ -184,24 +185,27 @@ Unsupported reserved syntax fails explicitly in the MVP; it is not silently emit
 literal HTML. The same is true for inline event-handler/framework-directive attributes
 and dynamic HTML-bearing property sinks, which need a future typed security contract.
 
-## Architecture and design record
+## Specification, architecture, and design record
 
-This repository is the reference **implementation**: the browser polyfill and the
-multi-target converter. The HTML Next language specification and its design record live in
-the Next Web Working Group site repository, [`nextwebwg/site`](https://github.com/nextwebwg/site):
+This repository owns the implementation-pinned normative modules used by its conformance
+suite:
 
-- [HTML Next working draft](https://github.com/nextwebwg/site/blob/main/index.html)
-- [Technical specification](https://github.com/nextwebwg/site/blob/main/docs/specification.md)
-- [Living design notebook](https://github.com/nextwebwg/site/blob/main/docs/design-notebook.md)
-- [Template expression proposal](https://github.com/nextwebwg/site/blob/main/docs/template-expressions.md)
-- [Static platform contract data](https://github.com/nextwebwg/site/blob/main/docs/platform-contract-data.md)
-- [Browser parser findings](https://github.com/nextwebwg/site/blob/main/docs/browser-findings.md)
-- [Liquid, Squarespace, Vue, Svelte, Mitosis, and other prior art](https://github.com/nextwebwg/site/blob/main/docs/prior-art.md)
+- [Reference specification](./docs/spec/index.md)
+- [Machine-readable support profile](./docs/spec/support.json)
+- [Style-scoping implementation note](./docs/style-scoping.md)
 
-This repository's own build and implementation notes remain here:
+The Next Web Working Group site publishes the Working Draft, explanations, examples, and
+design record at [`nextwebwg/site`](https://github.com/nextwebwg/site). Those pages motivate
+the proposal; this repository's spec fixes the exact behavior implemented by a release.
 
-- [Component-generation MVP plan](./docs/mvp-plan.md)
-- [Style scoping: implementation](./docs/style-scoping.md) — how the polyfill and converter realize the spec's scoping behaviour via CSS `@scope` and provenance-keyed attribute scoping
+- [HTML Next Working Draft](https://nextwebwg.org/html-next/)
+- [Components](https://nextwebwg.org/html-next/components)
+- [Types](https://nextwebwg.org/html-next/types)
+- [Validation](https://nextwebwg.org/html-next/validation)
+- [Security](https://nextwebwg.org/html-next/security)
+
+The [component-generation MVP plan](./docs/mvp-plan.md) remains as historical context. It is
+not the current language contract.
 
 ## Library independence
 

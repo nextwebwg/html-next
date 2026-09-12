@@ -19,6 +19,7 @@
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check",
+    "check:spec": "node --import tsx --test test/spec.test.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "test:browser": "HTMLNEXT_BROWSER_TEST=1 node --import tsx --test test/runtime.test.ts test/validity.test.ts",
     "typecheck": "tsc --noEmit"

@@ -27,13 +27,13 @@ The provenance signal already exists: every lowered element carries `data-compon
 space-separated token list, outermost invocation first (see the Components spec). That
 attribute is what the scoping keys off.
 
-## Boundary 1 — nested components: native `@scope` fits exactly
+## Boundary 1 — nested components: keep the root, limit at its children
 
 A component's CSS is wrapped in an `@scope` rule whose root is the component's root and
 whose lower limit is any nested component root:
 
 ```css
-@scope ([data-component~="x-card"]) to ([data-component]) {
+@scope ([data-component~="x-card"]) to ([data-component-root] > *, [data-slotted]) {
   article       { padding: 1rem; }
   h2            { margin: 0; }
   article > .lead { color: gray; }
@@ -41,15 +41,16 @@ whose lower limit is any nested component root:
 }
 ```
 
-This lands on the spec's rule for free, because of how `@scope` treats the limit:
+This lands on the spec's rule by placing the lower limit one level below a nested root:
 
 - **Scope root** — `[data-component~="x-card"]` matches this component's root(s). The root
   is always in scope (the start is never subject to the `to` limit), so its own
   `data-component` token does not terminate the scope.
-- **Scope-end (`to`) elements are _in_ scope; their descendants are _out_.** A nested
-  component root matches `[data-component]`, so it is the boundary: the parent can style it
-  as a **box** (`margin-left: auto` above), but nothing inside it matches. That is exactly
-  "the enclosing component reaches the nested root but not its internals."
+- **Scope-end (`to`) elements and their descendants are out of scope.** A nested component
+  root therefore cannot itself be the limit if the parent must style that root as a box.
+  Lowering marks component roots with `data-component-root`, and the limit matches each
+  root's children. The nested root remains in the parent's scope (`margin-left: auto`
+  above), while its authored descendants are excluded.
 
 Nesting composes: the nested component's own CSS is a separate `@scope` block rooted at its
 own `data-component`, so an `x-card` inside another `x-card` each get their own scope, and
@@ -76,7 +77,7 @@ never authored). The scope then excludes it, and because a projected node must b
 the marker is combined into the limit and also negated on the root selectors:
 
 ```css
-@scope ([data-component~="x-card"]) to ([data-component], [data-slotted]) {
+@scope ([data-component~="x-card"]) to ([data-component-root] > *, [data-slotted]) {
   /* generated selectors additionally carry :not([data-slotted]) on their
      subject so the marked projected root itself is not matched, only the
      component's own nodes are. */
@@ -85,8 +86,9 @@ the marker is combined into the limit and also negated on the root selectors:
 ```
 
 Rationale for the asymmetry with Boundary 1: a nested component root is a box the parent
-legitimately lays out, so "limit element in scope, descendants out" is correct. Projected
-content is not the component's at all, so both the marked root and its descendants are out.
+legitimately lays out, so the limit begins at its children. Projected content is not the
+component's at all, so its marked root is itself a limit and both it and its descendants
+are out.
 
 ## Inheritance is untouched
 
