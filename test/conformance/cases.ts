@@ -73,10 +73,13 @@ const successes: ConformanceCase[] = [
         attributes: [
           ["aria-label", "Save"],
           ["class", "cta"],
+          ["data-component", "x-btn"],
+          ["data-component-root", "x-btn"],
+          ["data-label", "Save"],
           ["id", "b"],
           ["type", "button"],
         ],
-        children: [{ tag: "strong", attributes: [], children: [{ text: "now" }] }],
+        children: [{ tag: "strong", attributes: [["data-slotted", ""]], children: [{ text: "now" }] }],
       },
     },
   },
@@ -105,7 +108,7 @@ const successes: ConformanceCase[] = [
         `const e = q('#b'); return { sum: e.getAttribute('data-sum'), ` +
         `hasFlag: e.hasAttribute('data-flag'), flag: e.getAttribute('data-flag'), ` +
         `kind: e.getAttribute('data-kind'), s: e.getAttribute('data-s') };`,
-      result: { sum: "6", hasFlag: true, flag: "", kind: "b", s: "hey" },
+      result: { sum: "6", hasFlag: true, flag: "true", kind: "b", s: "hey" },
     },
   },
   {
