@@ -25,7 +25,10 @@ async function assemble() {
       { source: `${fixture}/ui-button.html` },
       { source: `${fixture}/ui-overlay.html` },
     ],
-    passThrough: [{ source: `${fixture}/tokens.css`, target: "tokens.css" }],
+    passThrough: [
+      { source: `${fixture}/tokens.css`, target: "tokens.css" },
+      { source: `${fixture}/editor.js`, target: "editor/extensions/index.js", module: true },
+    ],
   });
   return { outDirectory, result };
 }
@@ -41,6 +44,8 @@ describe("component package assembler", () => {
     assert.ok(first.result.files.includes("components/ui-input.html"));
     assert.ok(first.result.files.includes("controllers/ui-overlay.js"));
     assert.ok(first.result.files.includes("controllers/overlay-helper.js"));
+    assert.ok(first.result.files.includes("vue/index.js"));
+    assert.ok(first.result.files.includes("editor/extensions/editor-helper.js"));
     assert.match(await readFile(`${first.outDirectory}/controllers/ui-overlay.js`, "utf8"), /\.\/overlay-helper\.js/);
     assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --looma-accent: rebeccapurple; }\n");
 
@@ -53,15 +58,20 @@ describe("component package assembler", () => {
       components: Array<{ tag: string; source: string }>;
       passThrough: string[];
       controllerModules: Array<{ path: string; dependencies: string[] }>;
+      passThroughModules: Array<{ path: string; dependencies: string[] }>;
     };
     assert.deepEqual(manifest.components.map((component) => component.tag), ["ui-button", "ui-input", "ui-overlay"]);
     assert.deepEqual(manifest.components.map((component) => component.source), [
       "./components/ui-button.html", "./components/ui-input.html", "./components/ui-overlay.html",
     ]);
-    assert.deepEqual(manifest.passThrough, ["tokens.css"]);
+    assert.deepEqual(manifest.passThrough, ["editor/extensions/index.js", "tokens.css"]);
     assert.deepEqual(manifest.controllerModules, [
       { path: "controllers/overlay-helper.js", dependencies: [] },
       { path: "controllers/ui-overlay.js", dependencies: ["./overlay-helper.js"] },
+    ]);
+    assert.deepEqual(manifest.passThroughModules, [
+      { path: "editor/extensions/editor-helper.js", dependencies: [] },
+      { path: "editor/extensions/index.js", dependencies: ["./editor-helper.js"] },
     ]);
   });
 

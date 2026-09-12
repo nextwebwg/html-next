@@ -5,6 +5,8 @@ export interface PackageComponentInput {
 export interface PackagePassThrough {
   readonly source: string;
   readonly target: string;
+  /** Follow and copy relative ESM dependencies without importing the module. */
+  readonly module?: boolean;
 }
 
 export interface ComponentPackageConfig {

@@ -143,6 +143,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   const controllers = new Map<string, string>();
   const moduleSources = new Map<string, string>();
   const moduleDependencies = new Map<string, readonly string[]>();
+  const passThroughModules = new Set<string>();
   const names = new Set<string>();
 
   for (const input of [...config.components].sort((left, right) => left.source.localeCompare(right.source))) {
@@ -176,7 +177,17 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
 
   for (const edge of config.passThrough ?? []) {
     if (files.has(edge.target)) throw new Error(`Package artifact collision at ${edge.target}.`);
-    files.set(edge.target, { copy: resolve(edge.source) });
+    if (edge.module) {
+      const priorModules = new Set(moduleSources.keys());
+      await addStaticModuleGraph(
+        resolve(edge.source),
+        edge.target,
+        files,
+        moduleSources,
+        moduleDependencies,
+      );
+      for (const path of moduleSources.keys()) if (!priorModules.has(path)) passThroughModules.add(path);
+    } else files.set(edge.target, { copy: resolve(edge.source) });
   }
   for (const [target, content] of Object.entries(targetIndexes(definitions))) {
     if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);
@@ -220,6 +231,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     })),
     passThrough: (config.passThrough ?? []).map((edge) => edge.target).sort(),
     controllerModules: [...moduleDependencies].sort(([left], [right]) => left.localeCompare(right))
+      .filter(([path]) => !passThroughModules.has(path))
+      .map(([path, dependencies]) => ({ path, dependencies })),
+    passThroughModules: [...moduleDependencies].sort(([left], [right]) => left.localeCompare(right))
+      .filter(([path]) => passThroughModules.has(path))
       .map(([path, dependencies]) => ({ path, dependencies })),
   }, null, 2)}\n`);
 
