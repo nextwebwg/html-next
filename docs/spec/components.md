@@ -6,6 +6,16 @@ Each definition produces one public root. A native root preserves the element's 
 
 An invocation lowers to the root itself. Framework targets must not add a semantic wrapper merely to host reactivity.
 
+## Dynamic browser discovery
+
+Inline `template[component]` definitions and component instances may be inserted after the browser runtime starts. The runtime observes additions to the application document, validates and registers new definitions in the same document-level registry, and lowers newly connected instances. An instance inserted before its definition remains available for lowering when that definition becomes available. Definitions remain registered after their inert carriers are consumed or removed; adding another definition for that tag is a duplicate, not a replacement operation.
+
+Mutation delivery batches discovery. The runtime must not interpret its own lowering mutations as new definitions or connect one instance twice. Registered custom elements retain precedence at the time of lowering. Moving an instance within the same document before a mutation batch is delivered preserves its connection; removal across batches disconnects it, and later reinsertion reconnects the same root.
+
+Discovery uses the same dependency resolver and trust rules as startup loading. It does not make inserted definition content executable or treat sanitized content as a definition source. See [Loading and security](loading-and-security.md).
+
+This observation is a browser-runtime responsibility. Ahead-of-time compilation discovers definitions from its input graph and emits target lifecycle integration; compiled/AOT components do not use `MutationObserver` for registration or instance discovery.
+
 ## Properties
 
 A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from attributes. Structured values and functions are property-only and never stringified into attributes. Changes made after connection participate in the same update batch as local state writes.

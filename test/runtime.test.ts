@@ -47,6 +47,170 @@ describe("browser runtime", { skip: !enabled }, () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} observes later definitions and instances with balanced connection cleanup`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main><aside></aside>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const events = [];
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(element, definition) {
+              events.push("connect:" + element.id + ":" + (definition.controller ?? "none"));
+              return () => events.push("dispose:" + element.id);
+            },
+            onError(error) { errors.push(error.diagnostic?.code ?? error.message); },
+          });
+          document.querySelector("main").innerHTML = '<demo-dynamic id="first">First</demo-dynamic>';
+          await tick();
+          const pending = document.querySelector("#first").localName;
+          const definition = document.createElement("template");
+          definition.setAttribute("component", "demo-dynamic");
+          definition.setAttribute("status", "early");
+          definition.setAttribute("summary", "Dynamic test component.");
+          definition.setAttribute("controller", "./dynamic.js");
+          definition.innerHTML = '<button><slot></slot></button><style id="once">button { color: red; }</style>';
+          document.body.append(definition);
+          await tick();
+          const first = document.querySelector("#first");
+          const lowered = first.localName;
+          document.querySelector("aside").append(first);
+          await tick();
+          const afterMove = [...events];
+          first.remove();
+          await tick();
+          document.querySelector("main").append(first);
+          await tick();
+          document.querySelector("main").insertAdjacentHTML("beforeend", '<demo-dynamic id="second">Second</demo-dynamic>');
+          await tick();
+          const second = document.querySelector("#second").localName;
+          const sameFirst = first === document.querySelector("#first");
+          stop(); stop();
+          document.body.insertAdjacentHTML("beforeend", '<demo-dynamic id="stopped"></demo-dynamic>');
+          await tick();
+          return { pending, lowered, second, sameFirst, afterMove, events, errors,
+            styles: document.querySelectorAll("#once").length,
+            stopped: document.querySelector("#stopped").localName };
+        })()`);
+        assert.deepEqual(result, {
+          pending: "demo-dynamic", lowered: "button", second: "button", sameFirst: true,
+          afterMove: ["connect:first:./dynamic.js"],
+          events: ["connect:first:./dynamic.js", "dispose:first", "connect:first:./dynamic.js",
+            "connect:second:./dynamic.js", "dispose:first", "dispose:second"],
+          errors: [], styles: 1, stopped: "demo-dynamic",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} can stop observation from a connection callback without leaking cleanup`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<template component="demo-stop" status="early" summary="Stop."><button></button></template>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const events = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(element) {
+              events.push("connect:" + element.id);
+              stop();
+              return () => events.push("dispose:" + element.id);
+            },
+          });
+          document.body.insertAdjacentHTML("beforeend", '<demo-stop id="one"></demo-stop><demo-stop id="two"></demo-stop>');
+          await new Promise(resolve => setTimeout(resolve, 0));
+          stop();
+          return events;
+        })()`);
+        assert.deepEqual(result, ["connect:one", "dispose:one"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} retains duplicate rules and custom-element precedence after discovery`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<template component="demo-retained" status="early" summary="Retained."><button></button></template>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onError(error) { errors.push(error.diagnostic.code); },
+          });
+          const duplicate = document.createElement("template");
+          duplicate.setAttribute("component", "demo-retained");
+          duplicate.setAttribute("status", "early");
+          duplicate.setAttribute("summary", "Duplicate.");
+          duplicate.innerHTML = "<span></span>";
+          document.body.append(duplicate);
+          await tick();
+          duplicate.remove();
+          customElements.define("demo-retained", class extends HTMLElement {});
+          document.body.insertAdjacentHTML("beforeend", '<demo-retained id="owned"></demo-retained>');
+          await tick();
+          const owned = document.querySelector("#owned");
+          stop();
+          return { errors, name: owned.localName,
+            nativeUpgrade: owned instanceof customElements.get("demo-retained") };
+        })()`);
+        assert.deepEqual(result, { errors: ["HR001"], name: "demo-retained", nativeUpgrade: true });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} never promotes dynamic inert or sanitized content into executable definitions`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<template component="demo-content" status="early" summary="Content."><defs><prop name="body" type="string">Content.</prop></defs><article $html="body"></article></template><template component="demo-safe" status="early" summary="Safe."><button></button></template>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onError(error) { errors.push(error.diagnostic.code); },
+          });
+          const invalid = document.createElement("template");
+          invalid.setAttribute("component", "demo-invalid");
+          invalid.innerHTML = '<defs><script>window.executed = true</script></defs><button></button>';
+          document.body.append(invalid);
+          await tick();
+          invalid.remove();
+          const external = document.createElement("template");
+          external.setAttribute("component", "demo-external");
+          external.setAttribute("src", "https://unmapped.example/definition.html");
+          document.body.append(external);
+          await tick();
+          external.remove();
+          const content = document.createElement("demo-content");
+          content.setAttribute("body", '<template component="demo-injected"><script>window.executed = true</script><button></button></template><demo-safe id="content-only"></demo-safe>');
+          document.body.append(content);
+          await tick();
+          const contentOnly = document.querySelector("#content-only");
+          document.body.append(contentOnly);
+          await tick();
+          stop();
+          return { errors, executed: window.executed ?? false,
+            definitions: document.querySelectorAll("template[component]").length,
+            contentName: contentOnly.localName };
+        })()`);
+        assert.deepEqual(result, {
+          errors: ["HT009", "HL001"], executed: false, definitions: 0, contentName: "demo-safe",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} preserves the document when a later invocation is invalid`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

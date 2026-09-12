@@ -8,6 +8,7 @@
     { "id": "HN-CMP-003", "title": "Default, named, fallback, and data-derived slots", "status": "required", "spec": "components.md", "owner": "Slots" },
     { "id": "HN-CMP-004", "title": "Typed events", "status": "required", "spec": "components.md", "owner": "Events" },
     { "id": "HN-CMP-005", "title": "Public controller methods", "status": "required", "spec": "components.md", "owner": "Public methods" },
+    { "id": "HN-CMP-006", "title": "Dynamic browser discovery", "status": "required", "spec": "components.md", "owner": "Dynamic browser discovery" },
     { "id": "HN-EXP-001", "title": "Pure expression values", "status": "required", "spec": "expressions.md", "owner": "Values and absence" },
     { "id": "HN-EXP-002", "title": "Operators and functions", "status": "required", "spec": "expressions.md", "owner": "Operators and functions" },
     { "id": "HN-EXP-003", "title": "Bindings and writable paths", "status": "required", "spec": "expressions.md", "owner": "Bindings" },

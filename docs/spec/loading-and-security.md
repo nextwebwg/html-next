@@ -15,6 +15,8 @@ The resolver canonicalizes and deduplicates component URLs, detects tag collisio
 
 Installed-package builds walk the same concrete HTML, controller, and static ESM edges ahead of time. They do not require a browser import map or an author-written registration manifest.
 
+Browser discovery remains active after startup. An inline carrier or component instance inserted later enters the same registration, duplicate detection, custom-element precedence, and demand-driven dependency process as initial document content. Discovery timing does not grant resolution authority: a new definition's downstream live/imported dependencies still use application-owned mappings and the established trust roots. A definition cannot introduce its own import map by being inserted later.
+
 ## Controller module protocol
 
 The `controller` attribute binds its owning component definition to one ES module. That module's default export must be a function accepting the component host. The component tag is already known from the owning `template[component]`; a controller module does not repeat it and does not call a registration API.
@@ -49,5 +51,7 @@ Applications that need containment must use a Worker for non-DOM computation or 
 ## Inert definitions
 
 Fetched component HTML is parsed into an inert document before registration. It must reject script elements, import maps, base elements, policy-changing metadata, inline event attributes, executable framework directives, unsafe dynamic sinks, and malformed parser-recovery shapes.
+
+The same grammar validation applies to newly inserted inline `template[component]` carriers before any of their authored nodes become live. Mutation observation is only a discovery mechanism, never permission to execute template content. Content-only subtrees produced by sanitization remain excluded from discovery during later mutation batches, including when their nodes are moved.
 
 Sanitized `$html` or CMS content is never scanned for component definitions. Safe HTML insertion and component registration are separate pipelines. Sanitization removes active markup and dangerous contextual values; Trusted Types may protect sinks but does not make malicious script trustworthy.

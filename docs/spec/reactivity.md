@@ -18,6 +18,8 @@ Controllers receive a host adapter for declared props, state, refs, named native
 
 The controller is the default export of the ES module named by the owning `template[component]`. The platform supplies the host when the instance connects; controller source does not import a platform library or register a tag.
 
+Browser mutation discovery applies this lifecycle to instances and inline definitions added after boot. Newly lowered or reconnected roots connect once; removed roots disconnect and dispose owned effects, listeners, timers, and pending work. A definition becoming available after its invocation must trigger the same lowering and connection sequence. The observer ignores its own completed work and preserves a connection for moves that remain inside the same document within one mutation batch. Generated/AOT targets express these transitions through their target lifecycle and do not install a discovery `MutationObserver`.
+
 Hydration adopts a provenance-compatible server tree. A repairable mismatch is reconciled only inside the component-authored range while projected nodes and compatible focused controls retain identity, live values, selection, and focus. When safe bounded repair cannot establish the expected structure, the server DOM remains inert, the controller does not run, and a diagnostic is reported.
 
 ## Controller host and effects

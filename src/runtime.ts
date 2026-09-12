@@ -45,6 +45,43 @@ interface PreparedInvocation {
   readonly nativeRoot: Element;
   readonly slotContainers: readonly Element[];
   readonly children: readonly Node[];
+  readonly definition: ComponentDefinition;
+}
+
+interface DocumentRegistry {
+  readonly definitions: Map<string, LiveDefinition>;
+  readonly instances: WeakMap<Element, ComponentDefinition>;
+}
+
+const registries = new WeakMap<Document, DocumentRegistry>();
+const contentOnly = new WeakSet<Element>();
+
+function registryFor(root: Document): DocumentRegistry {
+  let registry = registries.get(root);
+  if (registry === undefined) {
+    registry = { definitions: new Map(), instances: new WeakMap() };
+    registries.set(root, registry);
+  }
+  return registry;
+}
+
+/** Validate inert carrier content before moving any authored node into the document. */
+function validateDefinitionContent(container: ParentNode, source: string): void {
+  for (const element of Array.from(container.children)) {
+    if (["script", "base", "meta", "object", "embed"].includes(element.localName)) {
+      fail("HT009", `<${element.localName}> is not permitted in component definitions.`, source);
+    }
+    if (element.localName === "link") {
+      fail("HL001", "External definition dependencies require the application-owned graph resolver.", source);
+    }
+    for (const attribute of Array.from(element.attributes)) {
+      if (/^on(?!:)/i.test(attribute.name)) validateLiteralAttributeName(attribute.name, source);
+    }
+    validateDefinitionContent(
+      element.localName === "template" ? (element as HTMLTemplateElement).content : element,
+      source,
+    );
+  }
 }
 
 function significant(nodes: ArrayLike<Node>): Node[] {
@@ -327,6 +364,10 @@ function parseElement(
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
   const tag = wrapper.getAttribute("component") ?? "";
   const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
+  if (wrapper.hasAttribute("src")) {
+    fail("HL001", "External definitions require the application-owned graph resolver.", source);
+  }
+  validateDefinitionContent(wrapper.content, source);
 
   // A <template>'s children live in its inert content fragment.
   const content = Array.from(wrapper.content.childNodes);
@@ -382,6 +423,7 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
       contract,
       template: normalizedTemplate,
       css: style?.textContent?.trim() ?? "",
+      ...(wrapper.hasAttribute("controller") ? { controller: wrapper.getAttribute("controller")! } : {}),
     }),
   };
 }
@@ -459,7 +501,7 @@ function evalValue(expression: string, scope: Scope): Value {
 }
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href"]);
-const BLOCKED_HTML_ELEMENTS = new Set(["base", "embed", "iframe", "link", "meta", "object", "script", "style"]);
+const BLOCKED_HTML_ELEMENTS = new Set(["base", "embed", "iframe", "link", "meta", "object", "script", "style", "template"]);
 const BLOCKED_HTML_ATTRIBUTES = new Set(["srcdoc", "style"]);
 
 function hasExecutableUrl(value: string): boolean {
@@ -478,6 +520,7 @@ function sanitizedFragment(html: string, document: Document): DocumentFragment {
   const template = document.createElement("template");
   template.innerHTML = html;
   for (const element of Array.from(template.content.querySelectorAll("*"))) {
+    contentOnly.add(element);
     if (BLOCKED_HTML_ELEMENTS.has(element.localName)) {
       element.remove();
       continue;
@@ -713,15 +756,16 @@ function renderChildren(
 }
 
 /**
- * Performs one explicit lowering pass over the document's current HTML Next definitions
- * and invocations. It does not observe later mutations or register Custom Elements.
+ * Performs one explicit lowering pass, retaining definitions in a document registry for
+ * later passes. It does not observe mutations or register Custom Elements.
  */
 export function lowerDocument(root: Document = document): number {
+  const registry = registryFor(root);
   const wrappers = Array.from(
     root.querySelectorAll("template[component]"),
-  ) as HTMLTemplateElement[];
+  ).filter((element) => !contentOnly.has(element)) as HTMLTemplateElement[];
   const definitions = wrappers.map(parseDefinition);
-  const tags = new Set<string>();
+  const tags = new Set(registry.definitions.keys());
   for (const { definition } of definitions) {
     if (tags.has(definition.contract.tag)) {
       fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
@@ -730,11 +774,13 @@ export function lowerDocument(root: Document = document): number {
   }
 
   const prepared: PreparedInvocation[] = [];
-  for (const { definition, decls } of definitions) {
+  for (const { definition, decls } of [...registry.definitions.values(), ...definitions]) {
+    if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
     // A <template>'s content is inert, so querySelectorAll never returns definition-internal
     // markup; every match is a live invocation to lower.
     const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
     for (const invocation of invocations) {
+      if (contentOnly.has(invocation)) continue;
       const { scope, passThrough } = readInvocation(invocation, definition.contract, decls);
       const children = Array.from(invocation.childNodes);
       const slotContainers: Element[] = [];
@@ -747,11 +793,12 @@ export function lowerDocument(root: Document = document): number {
         passThrough,
       );
       const nativeRoot = rendered[0] as Element;
-      prepared.push({ invocation, nativeRoot, slotContainers, children });
+      prepared.push({ invocation, nativeRoot, slotContainers, children, definition });
     }
   }
 
   for (const live of definitions) {
+    registry.definitions.set(live.definition.contract.tag, live);
     if (live.style !== undefined) {
       live.style.textContent = rewriteValiditySelectors(live.style.textContent ?? "");
       live.wrapper.ownerDocument.head.append(live.style);
@@ -764,6 +811,72 @@ export function lowerDocument(root: Document = document): number {
       slotContainer.replaceChildren(...invocation.children);
     }
     invocation.invocation.replaceWith(invocation.nativeRoot);
+    registry.instances.set(invocation.nativeRoot, invocation.definition);
   }
   return prepared.length;
+}
+
+export interface DocumentObservationOptions {
+  /** Runtime lifecycle integration; the returned disposer runs on removal or stop. */
+  readonly onConnect?: (element: Element, definition: ComponentDefinition) => void | (() => void);
+  readonly onError?: (error: unknown) => void;
+}
+
+const documentObservers = new WeakMap<Document, () => void>();
+
+/**
+ * Discover inline definitions and instances added after boot. This browser-only entrypoint
+ * owns observation; explicit lowering and compiled/AOT targets do not install observers.
+ * Controller loading and its host are provided by runtime lifecycle integration, not by
+ * evaluating authored markup. Stop disconnects observation and disposes connected roots.
+ */
+export function observeDocument(
+  root: Document = document,
+  options: DocumentObservationOptions = {},
+): () => void {
+  if (documentObservers.has(root)) fail("HR003", "This document is already being observed.");
+  const registry = registryFor(root);
+  const connected = new Map<Element, void | (() => void)>();
+  const report = options.onError ?? ((error: unknown) => console.error(error));
+  let stopped = false;
+  const synchronize = (): void => {
+    if (stopped) return;
+    for (const [element, dispose] of connected) {
+      if (!root.contains(element)) {
+        connected.delete(element);
+        try { dispose?.(); } catch (error) { report(error); }
+      }
+    }
+    try { lowerDocument(root); } catch (error) { report(error); }
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (stopped) break;
+      const definition = registry.instances.get(element);
+      if (definition === undefined || connected.has(element) || !root.contains(element)) continue;
+      // Record first so callback mutations cannot connect an instance twice.
+      connected.set(element, undefined);
+      try {
+        const dispose = options.onConnect?.(element, definition);
+        if (stopped) dispose?.();
+        else connected.set(element, dispose);
+      }
+      catch (error) { report(error); }
+    }
+  };
+  const Observer = root.defaultView?.MutationObserver;
+  if (Observer === undefined) fail("HR003", "Document observation requires a browser MutationObserver.");
+  const observer = new Observer(synchronize);
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    observer.disconnect();
+    documentObservers.delete(root);
+    for (const dispose of connected.values()) {
+      try { dispose?.(); } catch (error) { report(error); }
+    }
+    connected.clear();
+  };
+  documentObservers.set(root, stop);
+  observer.observe(root, { childList: true, subtree: true });
+  synchronize();
+  return stop;
 }
