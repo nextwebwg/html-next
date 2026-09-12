@@ -1,30 +1,11 @@
-<template component="ui-multi-combobox" status="early" summary="A multi-value combobox with removable, customizable selected items.">
+<template component="ui-multi-combobox" status="early" summary="A native multi-value combobox with removable data-derived items." controller="./ui-multi-combobox.js">
   <defs>
-    <prop name="config" type="unknown">config property.</prop>
-    <prop name="defaultQuery" type="string" default="">defaultQuery property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="items" type="list(unknown)">items property.</prop>
-    <prop name="label" type="string" default="">label property.</prop>
-    <prop name="name" type="string" default="">name property.</prop>
-    <prop name="placeholder" type="string" default="">placeholder property.</prop>
-    <prop name="query" type="string">query property.</prop>
-    <prop name="readOnly" type="boolean" default="false">readOnly property.</prop>
-    <prop name="required" type="boolean" default="false">required property.</prop>
-    <prop name="tokenSeparators" type="list(string)">Characters that commit the current query and leave the input ready for the next item.</prop>
-    <event name="add-item" type="unknown"></event>
-    <event name="create-item" type="unknown"></event>
-    <event name="options-change" type="list(unknown)"></event>
-    <event name="query-change" type="unknown"></event>
-    <event name="remove-item" type="unknown"></event>
-    <method name="focusInput" returns="promise(absent)"></method>
+    <prop name="config" type="unknown">Options, provider, filtering, and creation policy.</prop><prop name="defaultQuery" type="string" default="">Initial uncontrolled query.</prop><prop name="disabled" type="boolean" default="false">Disabled state.</prop><prop name="items" type="list(unknown)">Selected canonical items.</prop><prop name="label" type="string" default="">Accessible label.</prop><prop name="name" type="string" default="">Native submitted field name.</prop><prop name="placeholder" type="string" default="">Input placeholder.</prop><prop name="query" type="string?">Controlled query.</prop><prop name="readOnly" type="boolean" default="false">Read-only state.</prop><prop name="required" type="boolean" default="false">At least one item is required.</prop><prop name="tokenSeparators" type="list(string)">Keys that commit the current query.</prop>
+    <state name="rows" :value="[]"></state><state name="raw" :value="''"></state><state name="loading" :value="false"></state><state name="lookupError" :value="''"></state><state name="canCreate" :value="false"></state>
+    <event name="add-item" type="object({ item: unknown, index: number, trigger: keyboard | pointer | programmatic })"></event><event name="create-item" type="object({ query: string, trigger: keyboard | pointer | programmatic })"></event><event name="options-change" type="list(unknown)"></event><event name="query-change" type="object({ query: string, display: string, trigger: keyboard | pointer | programmatic })"></event><event name="remove-item" type="object({ item: unknown, index: number, trigger: keyboard | pointer | programmatic })"></event><method name="focusInput" export="focusInput" returns="promise(absent)"></method>
   </defs>
-  <div .config="config" :data-default-query="defaultQuery" :data-disabled="disabled" .items="items" :data-label="label" :data-name="name" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-token-separators="tokenSeparators">
-    <slot name="create"></slot>
-    <slot name="empty"></slot>
-    <slot name="error"></slot>
-    <slot name="footer"></slot>
-    <!-- item-${...} requires reviewed data selection. -->
-    <slot name="loading"></slot>
-    <!-- option-${...} requires reviewed data selection. -->
+  <div class="multi-combobox" .config="config" .items="items" :data-default-query="defaultQuery" :data-disabled="disabled" :data-label="label" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-token-separators="tokenSeparators">
+    <label $ref="label" class="multi-combobox__label"><span $value="label"></span></label><div $ref="field" class="multi-combobox__field"><div class="multi-combobox__items" role="group"><button class="multi-combobox__item" type="button" $each="item, i of items" $key="item.id" :data-index="i" :data-value="item.value"><slot :name="format('item-%s', item.id)"><span $value="item.label"></span></slot></button></div><input $ref="input" type="text" role="combobox" aria-autocomplete="list" autocomplete="off"><input type="hidden" $each="item of items" $key="item.id" :name="name" :value="item.value"></div>
+    <div $ref="popup" class="multi-combobox__popup"><div role="listbox"><div class="multi-combobox__option" role="option" $each="row, i of rows" $key="row.id" :data-index="i" :aria-disabled="row.disabled"><slot :name="format('option-%s', row.id)"><span $value="row.label"></span></slot></div><div class="multi-combobox__option multi-combobox__create" role="option" $if="canCreate" :data-index="rows.length"><slot name="create"><span>Create “</span><span $value="raw"></span><span>”</span></slot></div></div><div $if="loading"><slot name="loading">Loading suggestions…</slot></div><div $if="lookupError"><slot name="error"><span $value="lookupError"></span></slot></div><div $if="not loading and not lookupError and rows.length = 0 and not canCreate"><slot name="empty">No suggestions.</slot></div><slot name="footer"></slot></div>
   </div>
 </template>

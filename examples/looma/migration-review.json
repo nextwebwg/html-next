@@ -41,21 +41,8 @@
   },
   {
     "tag": "ui-combobox",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-combobox> contains imperative Stencil behavior that requires a reviewed controller port."
-      },
-      {
-        "code": "HM002",
-        "message": "<ui-combobox> has data-derived slots whose selection expression must be ported."
-      },
-      {
-        "code": "HM003",
-        "message": "<ui-combobox> exposes opaque package-owned property types that retain their TypeScript contract."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-context-menu",
@@ -109,21 +96,8 @@
   },
   {
     "tag": "ui-multi-combobox",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-multi-combobox> contains imperative Stencil behavior that requires a reviewed controller port."
-      },
-      {
-        "code": "HM002",
-        "message": "<ui-multi-combobox> has data-derived slots whose selection expression must be ported."
-      },
-      {
-        "code": "HM003",
-        "message": "<ui-multi-combobox> exposes opaque package-owned property types that retain their TypeScript contract."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-popover",

@@ -245,6 +245,51 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <div class="editable" :data-edit="edit" :data-default-edit="defaultEdit" :data-disabled="disabled"><div $ref="preview" class="editable__preview"><slot name="preview"></slot></div><div $ref="editor" class="editable__editor"><slot name="edit"></slot></div></div>
 </template>`,
+  "ui-combobox": `<template component="ui-combobox" status="early" summary="A native editable field with async, data-derived suggestions and validation." controller="./ui-combobox.js">
+  <defs>
+    <prop name="clearable" type="boolean" default="false">Whether the selection may be cleared with an affordance.</prop>
+    <prop name="config" type="unknown">Options, provider, filtering, formatting, and validation policy.</prop>
+    <prop name="defaultQuery" type="string" default="">Initial uncontrolled editing text.</prop>
+    <prop name="defaultValue" type="string?">Initial uncontrolled canonical value.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="disclosure" type="boolean" default="false">Whether to show the full-set disclosure affordance.</prop>
+    <prop name="help" type="string" default="">Connected field help.</prop>
+    <prop name="label" type="string" default="">Visible and accessible label.</prop>
+    <prop name="labelVisibility" type="visible | sr-only" default="visible">Label presentation.</prop>
+    <prop name="name" type="string" default="">Native submitted field name.</prop>
+    <prop name="placeholder" type="string" default="">Native input placeholder.</prop>
+    <prop name="query" type="string?">Controlled raw editing text.</prop>
+    <prop name="readOnly" type="boolean" default="false">Read-only state.</prop>
+    <prop name="required" type="boolean" default="false">Native required constraint.</prop>
+    <prop name="size" type="sm | md" default="md">Control size.</prop>
+    <prop name="value" type="string?">Controlled canonical value.</prop>
+    <state name="rows" :value="[]"></state><state name="loading" :value="false"></state><state name="lookupError" :value="''"></state><state name="canCreate" :value="false"></state><state name="raw" :value="''"></state>
+    <event name="create-entry" type="object({ value: string?, query: string, option: unknown, kind: create, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="dependency-invalidate" type="unknown"></event>
+    <event name="free-entry" type="unknown"></event>
+    <event name="options-change" type="list(unknown)"></event>
+    <event name="query-change" type="object({ query: string, display: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="validation-change" type="object({ status: pristine | pending | valid | warning | error, touched: boolean, dirty: boolean, issues: list(unknown), output: unknown })"></event>
+    <event name="value-change" type="object({ value: string?, query: string, option: unknown, kind: selection | clear | free-entry | create | invalidation, trigger: keyboard | pointer | programmatic })"></event>
+    <method name="focusInput" export="focusInput" returns="promise(absent)"></method><method name="validate" export="validate" returns="promise(unknown)"></method>
+  </defs>
+  <div class="combobox" .config="config" :data-clearable="clearable" :data-default-query="defaultQuery" :data-default-value="defaultValue" :data-disabled="disabled" :data-disclosure="disclosure" :data-help="help" :data-label="label" :data-label-visibility="labelVisibility" :data-name="name" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-size="size" :data-value="value">
+    <label $ref="label" class="combobox__label"><span $value="label"></span></label><div $ref="field" class="combobox__field"><slot name="start"></slot><input $ref="input" type="text" role="combobox" aria-autocomplete="list" autocomplete="off"><button $ref="clear" class="combobox__clear" type="button">Clear</button><button $ref="disclosure" class="combobox__disclosure" type="button">Suggestions</button></div>
+    <div $ref="popup" class="combobox__popup"><div role="listbox" class="combobox__listbox"><div class="combobox__option" role="option" $each="row, i of rows" $key="row.id" :data-index="i" :aria-disabled="row.disabled"><slot :name="format('option-%s', row.id)"><span $value="row.label"></span></slot></div><div class="combobox__option combobox__create" role="option" $if="canCreate" :data-index="rows.length"><slot name="create"><span>Create “</span><span $value="raw"></span><span>”</span></slot></div></div><div class="combobox__message" $if="loading"><slot name="loading">Loading suggestions…</slot></div><div class="combobox__message" $if="lookupError"><slot name="error"><span $value="lookupError"></span></slot></div><div class="combobox__message" $if="not loading and not lookupError and rows.length = 0 and not canCreate"><slot name="empty">No suggestions.</slot></div><slot name="footer"></slot></div>
+    <div $ref="validation" class="combobox__validation" aria-live="polite"></div>
+  </div>
+</template>`,
+  "ui-multi-combobox": `<template component="ui-multi-combobox" status="early" summary="A native multi-value combobox with removable data-derived items." controller="./ui-multi-combobox.js">
+  <defs>
+    <prop name="config" type="unknown">Options, provider, filtering, and creation policy.</prop><prop name="defaultQuery" type="string" default="">Initial uncontrolled query.</prop><prop name="disabled" type="boolean" default="false">Disabled state.</prop><prop name="items" type="list(unknown)">Selected canonical items.</prop><prop name="label" type="string" default="">Accessible label.</prop><prop name="name" type="string" default="">Native submitted field name.</prop><prop name="placeholder" type="string" default="">Input placeholder.</prop><prop name="query" type="string?">Controlled query.</prop><prop name="readOnly" type="boolean" default="false">Read-only state.</prop><prop name="required" type="boolean" default="false">At least one item is required.</prop><prop name="tokenSeparators" type="list(string)">Keys that commit the current query.</prop>
+    <state name="rows" :value="[]"></state><state name="raw" :value="''"></state><state name="loading" :value="false"></state><state name="lookupError" :value="''"></state><state name="canCreate" :value="false"></state>
+    <event name="add-item" type="object({ item: unknown, index: number, trigger: keyboard | pointer | programmatic })"></event><event name="create-item" type="object({ query: string, trigger: keyboard | pointer | programmatic })"></event><event name="options-change" type="list(unknown)"></event><event name="query-change" type="object({ query: string, display: string, trigger: keyboard | pointer | programmatic })"></event><event name="remove-item" type="object({ item: unknown, index: number, trigger: keyboard | pointer | programmatic })"></event><method name="focusInput" export="focusInput" returns="promise(absent)"></method>
+  </defs>
+  <div class="multi-combobox" .config="config" .items="items" :data-default-query="defaultQuery" :data-disabled="disabled" :data-label="label" :data-placeholder="placeholder" :data-query="query" :data-read-only="readOnly" :data-required="required" :data-token-separators="tokenSeparators">
+    <label $ref="label" class="multi-combobox__label"><span $value="label"></span></label><div $ref="field" class="multi-combobox__field"><div class="multi-combobox__items" role="group"><button class="multi-combobox__item" type="button" $each="item, i of items" $key="item.id" :data-index="i" :data-value="item.value"><slot :name="format('item-%s', item.id)"><span $value="item.label"></span></slot></button></div><input $ref="input" type="text" role="combobox" aria-autocomplete="list" autocomplete="off"><input type="hidden" $each="item of items" $key="item.id" :name="name" :value="item.value"></div>
+    <div $ref="popup" class="multi-combobox__popup"><div role="listbox"><div class="multi-combobox__option" role="option" $each="row, i of rows" $key="row.id" :data-index="i" :aria-disabled="row.disabled"><slot :name="format('option-%s', row.id)"><span $value="row.label"></span></slot></div><div class="multi-combobox__option multi-combobox__create" role="option" $if="canCreate" :data-index="rows.length"><slot name="create"><span>Create “</span><span $value="raw"></span><span>”</span></slot></div></div><div $if="loading"><slot name="loading">Loading suggestions…</slot></div><div $if="lookupError"><slot name="error"><span $value="lookupError"></span></slot></div><div $if="not loading and not lookupError and rows.length = 0 and not canCreate"><slot name="empty">No suggestions.</slot></div><slot name="footer"></slot></div>
+  </div>
+</template>`,
   "ui-affordance-scope": `<template component="ui-affordance-scope" status="early" summary="A pointer-proximity coordination boundary." controller="./ui-affordance-scope.js">
   <defs><prop name="nearRadius" type="number" default="16">Distance outside an affordance that activates its near state.</prop></defs>
   <div class="affordance-scope" :data-near-radius="nearRadius"><slot></slot></div>

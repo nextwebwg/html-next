@@ -31,14 +31,15 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
       "ui-affordance-scope", "ui-dialog", "ui-popover", "ui-toast-region", "ui-tooltip",
       "ui-menu", "ui-context-menu",
       "ui-editable", "ui-tree", "ui-tree-item",
+      "ui-combobox", "ui-multi-combobox",
     ];
     await build({
       stdin: {
         contents: controllerTags.map((tag, index) =>
-          `import controller${index} from ${JSON.stringify(new URL(`${tag}.js`, components).pathname)};`,
-        ).join("\n") + `\nglobalThis.LoomaControllers = {${controllerTags.map((tag, index) =>
-          `${JSON.stringify(tag)}: controller${index}`,
-        ).join(",")}};`,
+          `import * as module${index} from ${JSON.stringify(new URL(`${tag}.js`, components).pathname)};`,
+        ).join("\n") + `\nglobalThis.LoomaModules = {${controllerTags.map((tag, index) =>
+          `${JSON.stringify(tag)}: module${index}`,
+        ).join(",")}};\nglobalThis.LoomaControllers = Object.fromEntries(Object.entries(globalThis.LoomaModules).map(([tag, module]) => [tag, module.default]));`,
         resolveDir: components.pathname,
       },
       bundle: true, format: "iife", outfile: controllerBundle, platform: "browser", target: ["es2022"],
@@ -75,7 +76,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
-          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(window.LoomaModules[definition.contract.tag]));
           return controller(window.HtmlRuntime.getComponentHost(root));
         }});
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -167,7 +168,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         window.HtmlRuntime.observeDocument(document, { onError(error) { runtimeErrors.push(error.message); }, onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
-          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(window.LoomaModules[definition.contract.tag]));
           return controller(window.HtmlRuntime.getComponentHost(root));
         }});
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -236,7 +237,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
-          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(window.LoomaModules[definition.contract.tag]));
           return controller(window.HtmlRuntime.getComponentHost(root));
         }});
         const toasts = document.getElementById('toasts');
@@ -336,7 +337,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
-          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(window.LoomaModules[definition.contract.tag]));
           return controller(window.HtmlRuntime.getComponentHost(root));
         }});
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -408,7 +409,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
-          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(window.LoomaModules[definition.contract.tag]));
           return controller(window.HtmlRuntime.getComponentHost(root));
         }});
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -448,6 +449,111 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
           ["edit-change", { edit: true, reason: "activate", trigger: "programmatic" }],
           ["edit-change", { edit: false, reason: "escape", trigger: "keyboard" }],
           ["expand", { id: "parent", expanded: false, trigger: "programmatic" }],
+        ],
+      });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("implements async native comboboxes, data-derived slots, methods, and validation", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(definitions + `
+        <ui-combobox id="combo" label="Country" name="country" clearable disclosure required>
+          <strong id="custom-us" slot="option-us">United States custom</strong>
+        </ui-combobox>
+        <ui-multi-combobox id="multi" label="People" name="people">
+          <strong id="custom-person" slot="item-person">Custom Person</strong>
+        </ui-multi-combobox>
+      `);
+      await page.evaluate(`(() => {
+        const combo = document.getElementById("combo");
+        combo.config = {
+          debounce: 0,
+          provider: async ({ query, signal }) => {
+            await Promise.resolve();
+            signal.throwIfAborted();
+            return [
+              { id: "us", value: "US", label: "United States" },
+              { id: "ca", value: "CA", label: "Canada" },
+            ].filter((row) => row.label.toLowerCase().includes(query.toLowerCase()));
+          },
+        };
+        const multi = document.getElementById("multi");
+        multi.items = [{ id: "person", value: "p1", label: "Person One" }];
+        multi.tokenSeparators = [","];
+        multi.config = { options: [{ id: "two", value: "p2", label: "Person Two" }], allowCreate: true };
+      })()`);
+      await page.addScriptTag({ path: bundle });
+      await page.addScriptTag({ path: controllerBundle });
+      const result = await page.evaluate(`(async () => {
+        const events = [];
+        for (const type of ['query-change','value-change','validation-change','add-item','remove-item','create-item']) {
+          document.addEventListener(type, event => events.push([event.target.id, type, event.detail]));
+        }
+        window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
+          const module = window.LoomaModules[definition.contract.tag];
+          if (module == null) return;
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve(module));
+          return module.default(window.HtmlRuntime.getComponentHost(root));
+        }});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const combo = document.getElementById('combo');
+        const comboInput = combo.querySelector('input[role=combobox]');
+        if (!comboInput) throw new Error(combo.outerHTML);
+        comboInput.value = 'uni';
+        comboInput.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: 'i' }));
+        await new Promise(resolve => setTimeout(resolve, 10));
+        const custom = document.getElementById('custom-us');
+        const customSame = combo.querySelector('#custom-us') === custom;
+        combo.querySelector('[role=option][data-index="0"]').click();
+        const valid = await combo.validate();
+        combo.querySelector('.combobox__clear').click();
+        const invalid = await combo.validate();
+        await combo.focusInput();
+
+        const multi = document.getElementById('multi');
+        const item = document.getElementById('custom-person');
+        const itemSame = multi.querySelector('#custom-person') === item;
+        const multiInput = multi.querySelector('input[role=combobox]');
+        multiInput.value = 'person';
+        multiInput.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        multi.querySelector('[role=option][data-index="0"]').click();
+        multi.querySelector('.multi-combobox__item').click();
+        await multi.focusInput();
+        return {
+          combo: {
+            customSame,
+            value: combo.value,
+            inputValue: comboInput.value,
+            validStatus: valid.status,
+            invalidStatus: invalid.status,
+            validationMessage: comboInput.validationMessage,
+            focused: document.activeElement === multiInput,
+          },
+          multi: { itemSame, hiddenValues: Array.from(multi.querySelectorAll('input[type=hidden]'), input => input.value) },
+          events: events.filter(([, type]) => type !== 'validation-change' && type !== 'query-change').map(([id, type, detail]) => [id, type, detail]),
+        };
+      })()`);
+      assert.deepEqual(result, {
+        combo: {
+          customSame: true,
+          value: undefined,
+          inputValue: "",
+          validStatus: "valid",
+          invalidStatus: "error",
+          validationMessage: "A value is required.",
+          focused: true,
+        },
+        multi: { itemSame: true, hiddenValues: ["p1"] },
+        events: [
+          ["combo", "value-change", { value: "US", query: "United States", option: { id: "us", value: "US", label: "United States" }, kind: "selection", trigger: "programmatic" }],
+          ["combo", "value-change", { value: null, query: "", option: null, kind: "clear", trigger: "pointer" }],
+          ["multi", "add-item", { item: { id: "two", value: "p2", label: "Person Two" }, index: 1, trigger: "programmatic" }],
+          ["multi", "remove-item", { item: { id: "person", value: "p1", label: "Person One" }, index: 0, trigger: "programmatic" }],
         ],
       });
     } finally {
