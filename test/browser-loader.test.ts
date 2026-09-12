@@ -44,7 +44,8 @@ describe("browser graph loader", { skip: !enabled }, () => {
           contentType: "text/html",
           body:
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
-            `<defs><state name="count" :value="1"></state></defs>` +
+            `<defs><state name="count" :value="1"></state>` +
+            `<method name="focusInput" export="focusInput" returns="promise(undefined)"></method></defs>` +
             `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
         });
       } else if (url.endsWith("/ui/app.js")) {
@@ -56,7 +57,7 @@ describe("browser graph loader", { skip: !enabled }, () => {
             ` host.refs.button.addEventListener("click", add);` +
             ` const stop = host.effect(() => { host.element.dataset.count = host.state.count; });` +
             ` return () => { stop(); host.refs.button.removeEventListener("click", add); };` +
-            `};`,
+            `}; export const focusInput = (host) => { host.refs.button.dataset.focused = "yes"; };`,
         });
       } else {
         await route.fulfill({
@@ -80,16 +81,18 @@ describe("browser graph loader", { skip: !enabled }, () => {
       const root = document.querySelector("#app")!;
       root.querySelector("button")!.click();
       await Promise.resolve();
+      await (root as Element & { focusInput(): Promise<void> }).focusInput();
       const value = {
         tag: root.localName,
         count: root.querySelector("output")!.textContent,
         effectCount: (root as HTMLElement).dataset.count,
+        methodCalled: (root.querySelector("button") as HTMLElement).dataset.focused,
       };
       started.stop();
       return value;
     });
     await page.close();
-    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2" });
+    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", methodCalled: "yes" });
   });
 
   it("keeps declarative output connected when a controller module is invalid", async () => {

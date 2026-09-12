@@ -3,14 +3,18 @@ import type { ComponentGraphNode } from "./graph.js";
 
 export type Controller = (host: unknown) => void | (() => void) | Promise<void | (() => void)>;
 export type ModuleImporter = (url: string) => Promise<unknown>;
+export interface ControllerModule {
+  readonly default: Controller;
+  readonly [name: string]: unknown;
+}
 
-const controllerModules = new Map<string, Promise<Controller>>();
+const controllerModules = new Map<string, Promise<ControllerModule>>();
 
 /** Loads and validates a declared controller through the host's native ESM loader. */
-export function loadController(
+export function loadControllerModule(
   node: ComponentGraphNode,
   importer: ModuleImporter = (url) => import(url),
-): Promise<Controller> {
+): Promise<ControllerModule> {
   const edge = node.controller;
   if (edge === undefined) {
     return Promise.reject(
@@ -24,7 +28,7 @@ export function loadController(
       if (typeof candidate !== "function") {
         fail("HJ002", `Controller module \`${edge.url}\` must default-export a function.`, node.url);
       }
-      return candidate as Controller;
+      return Object.freeze({ ...(module as Record<string, unknown>), default: candidate }) as ControllerModule;
     }).catch((error: unknown) => {
       if (error instanceof Error && "diagnostic" in error) throw error;
       fail(
@@ -36,6 +40,13 @@ export function loadController(
     controllerModules.set(edge.url, pending);
   }
   return pending;
+}
+
+export async function loadController(
+  node: ComponentGraphNode,
+  importer: ModuleImporter = (url) => import(url),
+): Promise<Controller> {
+  return (await loadControllerModule(node, importer)).default;
 }
 
 /** Test/runtime boundary for documents that need an isolated native-module cache view. */

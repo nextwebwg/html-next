@@ -17,7 +17,13 @@ export {
 export { loadNodeComponents } from "./node-loader.js";
 export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
-export { clearControllerCache, loadController } from "./controller.js";
+export {
+  clearControllerCache,
+  loadController,
+  loadControllerModule,
+  type Controller,
+  type ControllerModule,
+} from "./controller.js";
 export { buildFormRequest, enhanceForm } from "./forms.js";
 export { validateJsonSchema, type JsonSchema } from "./json-schema.js";
 export { DataResource, DataValidationError } from "./data.js";

@@ -1,4 +1,5 @@
 import { parseBrowserComponent } from "./browser-source.js";
+import type { ControllerModule } from "./controller.js";
 import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
 import { enhanceForm } from "./forms.js";
@@ -99,6 +100,7 @@ interface RuntimeInstance {
   readonly connectCallbacks: Set<() => void>;
   readonly disconnectCallbacks: Set<() => void>;
   connected: boolean;
+  controllerModule?: Promise<ControllerModule>;
 }
 
 interface DocumentRegistry {
@@ -1128,6 +1130,30 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
   connect();
 }
 
+function installPublicMethods(root: Element, instance: RuntimeInstance): void {
+  for (const declaration of instance.definition.declarations ?? []) {
+    if (declaration.kind !== "method") continue;
+    Object.defineProperty(root, declaration.name, {
+      configurable: true,
+      enumerable: false,
+      value: (...args: unknown[]) => {
+        if (instance.controllerModule === undefined) {
+          return Promise.reject(new TypeError(
+            `Controller method \`${declaration.name}\` is not ready for <${instance.definition.contract.tag}>.`,
+          ));
+        }
+        return instance.controllerModule.then((module) => {
+          const method = module[declaration.exportName];
+          if (typeof method !== "function") {
+            fail("HJ003", `Controller does not export method \`${declaration.exportName}\`.`);
+          }
+          return Reflect.apply(method, undefined, [getComponentHost(root), ...args]);
+        });
+      },
+    });
+  }
+}
+
 /**
  * Performs one explicit lowering pass, retaining definitions in a document registry for
  * later passes. It does not observe mutations or register Custom Elements.
@@ -1251,6 +1277,7 @@ export function lowerDocument(root: Document = document): number {
     registry.instances.set(invocation.nativeRoot, invocation.definition);
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
     installPublicProps(invocation.nativeRoot, invocation.instance);
+    installPublicMethods(invocation.nativeRoot, invocation.instance);
     installInstanceValidity(invocation.nativeRoot, invocation.instance);
     connectRuntimeInstance(invocation.instance);
   }
@@ -1338,6 +1365,16 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
   };
   return Object.freeze(host);
+}
+
+/** Supplies the already application-approved controller module to a lowered instance. */
+export function setControllerModule(
+  element: Element,
+  module: Promise<ControllerModule>,
+): void {
+  const instance = runtimeInstances.get(element);
+  if (instance === undefined) fail("HJ003", "A controller can attach only to a lowered component root.");
+  instance.controllerModule = module;
 }
 
 export interface DocumentObservationOptions {
