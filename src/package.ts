@@ -108,6 +108,33 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
   ].join("\n");
 }
 
+function publicName(definition: ComponentDefinition): string {
+  return definition.contract.name.replace(/^Ui(?=[A-Z])/, "");
+}
+
+function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Record<string, string>> {
+  const entries = [...definitions].sort((left, right) => left.contract.name.localeCompare(right.contract.name));
+  const exportsFor = (extension: string): string => entries.map((definition) =>
+    `export { default as ${publicName(definition)} } from ${JSON.stringify(`./${definition.contract.name}.${extension}`)};`
+  ).join("\n") + "\n";
+  return Object.freeze({
+    "vue/index.js": exportsFor("vue"),
+    "svelte/index.js": exportsFor("svelte"),
+    "react/index.js": entries.map((definition) =>
+      `export { ${definition.contract.name} as ${publicName(definition)} } from ${JSON.stringify(`./${definition.contract.name}.tsx`)};`
+    ).join("\n") + "\n",
+    "vanilla/index.js": entries.map((definition) =>
+      `export * from ${JSON.stringify(`./${definition.contract.name}.js`)};`
+    ).join("\n") + "\n",
+    "vue/index.d.ts": [
+      'import type { DefineComponent } from "vue";',
+      "export interface VueAdapterEventMap { [name: string]: unknown }",
+      ...entries.map((definition) => `export declare const ${publicName(definition)}: DefineComponent<Record<string, unknown>>;`),
+      "",
+    ].join("\n"),
+  });
+}
+
 /** Assembles generated components and explicit pass-through assets into one inspectable package. */
 export async function assembleComponentPackage(config: ComponentPackageConfig): Promise<AssembledPackage> {
   const root = resolve(config.outDirectory);
@@ -151,6 +178,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     if (files.has(edge.target)) throw new Error(`Package artifact collision at ${edge.target}.`);
     files.set(edge.target, { copy: resolve(edge.source) });
   }
+  for (const [target, content] of Object.entries(targetIndexes(definitions))) {
+    if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);
+    files.set(target, content);
+  }
   files.set("dist/index.js", packageEntry(definitions, controllers));
   files.set("dist/index.d.ts", [
     'import type { ComponentDefinition } from "@nextwebwg/html";',
@@ -167,6 +198,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     peerDependencies: { "@nextwebwg/html": "^0.0.0" },
     exports: config.exports ?? {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
+      "./react": "./react/index.js",
+      "./vue": { types: "./vue/index.d.ts", import: "./vue/index.js" },
+      "./svelte": "./svelte/index.js",
+      "./vanilla": "./vanilla/index.js",
       "./components/*": "./components/*",
       "./react/*": "./react/*",
       "./vue/*": "./vue/*",
