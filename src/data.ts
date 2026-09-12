@@ -9,6 +9,8 @@ export interface DataRequestOptions<T = unknown> {
   readonly source: string;
   readonly baseURL: string;
   readonly type?: string;
+  /** Inline parsed type/schema for the decoded response value. */
+  readonly schema?: TypeInput | string;
   readonly debounce?: number;
   readonly poll?: number;
   readonly fetch?: typeof fetch;
@@ -16,6 +18,13 @@ export interface DataRequestOptions<T = unknown> {
   readonly clearTimer?: (handle: unknown) => void;
   readonly validate?: (value: unknown) => T;
   readonly onState: (state: DataState<T>) => void;
+}
+
+export class DataValidationError extends TypeError {
+  constructor(readonly issues: readonly TypeIssue[]) {
+    super(issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
+    this.name = "DataValidationError";
+  }
 }
 
 function requestURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
@@ -94,7 +103,19 @@ export class DataResource<T = unknown> {
       );
       if (!response.ok) throw new TypeError(`Request failed with ${response.status}.`);
       const raw = previous.type === "text" ? await response.text() : await response.json();
-      const value = previous.validate === undefined ? raw as T : previous.validate(raw);
+      let value: T;
+      if (previous.validate !== undefined) {
+        value = previous.validate(raw);
+      } else if (previous.schema !== undefined) {
+        const schema = typeof previous.schema === "string"
+          ? parseTypeExpression(previous.schema)
+          : previous.schema;
+        const parsed = parseTypedValue(raw, schema);
+        if (!parsed.ok) throw new DataValidationError(parsed.issues);
+        value = parsed.value as T;
+      } else {
+        value = raw as T;
+      }
       if (!this.#connected || generation !== this.#generation) return;
       previous.onState({ pending: false, value, error: null, ok: true });
     } catch (error) {
@@ -108,3 +129,9 @@ export class DataResource<T = unknown> {
     }
   }
 }
+import {
+  parseTypedValue,
+  parseTypeExpression,
+  type TypeInput,
+  type TypeIssue,
+} from "./type-system.js";

@@ -19,16 +19,21 @@ export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
 export { clearControllerCache, loadController } from "./controller.js";
 export { buildFormRequest, enhanceForm } from "./forms.js";
-export { DataResource } from "./data.js";
+export { DataResource, DataValidationError } from "./data.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 export type * from "./graph.js";
 export type * from "./resolve.js";
 export { getDomInterface, resolveDomProperty } from "./platform.js";
 export {
   getElementValidity,
+  getElementValidityState,
   installValidityStyles,
+  manageElementValidity,
   readValue,
+  refreshElementValidity,
   setElementValidity,
+  setExternalValidity,
+  unmanageElementValidity,
   validateElement,
   validationMessage,
 } from "./validity.js";
@@ -41,5 +46,17 @@ export {
   type ValidityError,
   type ValidityReason,
 } from "./validate.js";
+export {
+  formatType,
+  isTypeNode,
+  normalizeType,
+  parseTypedValue,
+  parseTypeExpression,
+  serializeTypedValue,
+  trustedContent,
+  typeScriptType,
+  TypeSyntaxError,
+} from "./type-system.js";
+export type * from "./type-system.js";
 export type * from "./template.js";
 export type * from "./types.js";

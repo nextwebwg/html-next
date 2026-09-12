@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { DataResource, type DataState } from "../src/data.js";
+import { DataResource, DataValidationError, type DataState } from "../src/data.js";
 
 describe("declared data resource", () => {
   it("expands URI parameters, appends query values, and exposes state transitions", async () => {
@@ -60,5 +60,25 @@ describe("declared data resource", () => {
     resource.disconnect();
     assert.equal(callbacks.length, 0);
     assert.deepEqual(aborted, []);
+  });
+
+  it("validates decoded responses before publishing them", async () => {
+    const states: DataState[] = [];
+    const resource = new DataResource({
+      source: "/account",
+      baseURL: "https://api.example/",
+      schema: "object({ email: email, age: integer })",
+      fetch: async () => new Response(JSON.stringify({ email: "bad", age: 1.5 })),
+      onState: (state) => states.push(state),
+    });
+    resource.update({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const final = states.at(-1)!;
+    assert.equal(final.ok, false);
+    assert.equal(final.value, null);
+    assert.ok(final.error instanceof DataValidationError);
+    assert.deepEqual((final.error as DataValidationError).issues.map((issue) => issue.path), [
+      "$.email", "$.age",
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 import type { TemplateAttribute } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { resolveDomProperty } from "../platform.js";
+import { typeScriptType } from "../type-system.js";
 
 const NATIVE_BOOLEAN_ATTRIBUTES = new Set([
   "allowfullscreen",
@@ -39,7 +40,7 @@ export function propKey(name: string): string {
 }
 
 export function typeSource(type: PropType): string {
-  return typeof type === "object" ? type.enum.map(quote).join(" | ") : type;
+  return typeScriptType(type);
 }
 
 export function escapeHtml(value: string): string {

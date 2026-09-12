@@ -23,4 +23,13 @@ describe("rewriteValiditySelectors", () => {
 
     assert.equal(rewriteValiditySelectors(source), source);
   });
+
+  it("rewrites CSS nesting and selector functions without entering non-grouping at-rules", () => {
+    const source = `.field { color: black; &:has(input):invalid { color: red; } } @supports selector(:user-invalid) { .field:is(:valid, :user-invalid) { opacity: 1; } } @keyframes invalid { from { opacity: 0 } to { opacity: 1 } }`;
+    const rewritten = rewriteValiditySelectors(source);
+
+    assert.match(rewritten, /&:has\(input\):is\(:invalid, \[data-invalid\]\)/);
+    assert.match(rewritten, /\.field:is\(:is\(:valid, \[data-valid\]\), :is\(:user-invalid, \[data-user-invalid\]\)\)/);
+    assert.match(rewritten, /@keyframes invalid \{ from \{ opacity: 0 \} to \{ opacity: 1 \} \}/);
+  });
 });

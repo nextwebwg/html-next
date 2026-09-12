@@ -157,7 +157,7 @@ describe("defineContract", () => {
 
   it("rejects invalid types, defaults, required flags, and targets", () => {
     const cases: Array<[string, (input: ReturnType<typeof validContract>) => void]> = [
-      ["HC013", (input) => { input.props.variant.type = "date" as never; }],
+      ["HC013", (input) => { input.props.variant.type = "list(" as never; }],
       ["HC014", (input) => { input.props.variant.type = { enum: [] }; }],
       ["HC014", (input) => { input.props.variant.type = { enum: ["a", "a"] }; }],
       ["HC015", (input) => { input.props.variant.default = "missing"; }],

@@ -1,6 +1,7 @@
 import type { ComponentDefinition, ElementNode, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { getDomInterface } from "../platform.js";
+import { typeScriptType } from "../type-system.js";
 
 function js(value: string): string {
   return JSON.stringify(value);
@@ -11,8 +12,7 @@ function tsKey(name: string): string {
 }
 
 function tsType(type: PropType): string {
-  if (typeof type === "object") return type.enum.map(js).join(" | ");
-  return type;
+  return typeScriptType(type);
 }
 
 function optional(prop: PropContract): string {

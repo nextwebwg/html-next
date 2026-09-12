@@ -15,6 +15,11 @@ import {
 import { validateLiteralAttributeName } from "./language.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
+import { parseTypedValue } from "./type-system.js";
+import {
+  manageElementValidity,
+} from "./validity.js";
+import type { Constraint } from "./validate.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 import type {
   ComponentDefinition,
@@ -168,19 +173,14 @@ export function installComponentGraph(
   return installed;
 }
 
-function invocationValue(prop: PropContract, attributeValue: string): PropValue {
-  if (prop.type === "boolean") return true;
-  if (prop.type === "number") {
-    if (attributeValue.trim() === "") {
-      fail("HR002", "A number prop invocation value must not be empty.");
-    }
-    const value = Number(attributeValue);
-    if (!Number.isFinite(value)) {
-      fail("HR002", `\`${attributeValue}\` is not a finite number prop value.`);
-    }
-    return value;
+function invocationValue(prop: PropContract, input: unknown, attributePresent = false): PropValue {
+  const candidate = prop.type === "boolean" && attributePresent ? true : input;
+  const parsed = parseTypedValue(candidate, prop.type);
+  if (!parsed.ok) {
+    const detail = parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+    fail("HR002", `A prop invocation value does not satisfy its declared type. ${detail}`);
   }
-  return attributeValue;
+  return parsed.value as PropValue;
 }
 
 function readInvocation(
@@ -203,7 +203,13 @@ function readInvocation(
       passThrough.push(attribute);
       continue;
     }
-    values[propName] = invocationValue(contract.props[propName]!, attribute.value);
+    values[propName] = invocationValue(contract.props[propName]!, attribute.value, true);
+  }
+
+  for (const [name, prop] of Object.entries(contract.props)) {
+    if (values[name] !== undefined) continue;
+    const propertyValue = (invocation as unknown as Record<string, unknown>)[name];
+    if (propertyValue !== undefined) values[name] = invocationValue(prop, propertyValue);
   }
 
   const scope = new ReactiveScope();
@@ -212,7 +218,7 @@ function readInvocation(
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
     // The effective value seen by expressions: the passed value, else the default, else null.
-    scope.set(name, values[name] !== undefined ? values[name]! : prop.default ?? null);
+    scope.set(name, (values[name] !== undefined ? values[name]! : prop.default ?? null) as Value);
   }
 
   const declarations = definition.declarations ?? [];
@@ -246,6 +252,9 @@ function readInvocation(
       source: dataSource,
       baseURL: definitionBase,
       ...(data.type === undefined ? {} : { type: data.type }),
+      ...(data.schema === undefined || /^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(data.schema)
+        ? {}
+        : { schema: data.schema }),
       ...(data.debounce === undefined ? {} : { debounce: Number(data.debounce) }),
       ...(data.poll === undefined ? {} : { poll: Number(data.poll) }),
       onState: (state) => scope.set(data.name, state as unknown as Value),
@@ -839,6 +848,67 @@ function renderChildren(
   return out;
 }
 
+const VALIDITY_ATTRIBUTES = new Set([
+  "type", "required", "multiple", "min", "max", "minlength", "maxlength", "pattern", "step",
+]);
+
+function nativeValidatableElement(element: Element): boolean {
+  return "validity" in element && typeof (element as { checkValidity?: unknown }).checkValidity === "function";
+}
+
+function numberConstraint(element: Element, name: string): number | undefined {
+  const raw = element.getAttribute(name);
+  if (raw === null || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function constraintFromElement(element: Element): Constraint {
+  const type = element.getAttribute("type") ?? undefined;
+  const min = element.getAttribute("min") ?? undefined;
+  const max = element.getAttribute("max") ?? undefined;
+  const stepValue = element.getAttribute("step");
+  const step = stepValue === "any" ? "any" : numberConstraint(element, "step");
+  return {
+    ...(type === undefined ? {} : { type }),
+    ...(element.hasAttribute("required") ? { required: true } : {}),
+    ...(element.hasAttribute("multiple") ? { multiple: true } : {}),
+    ...(min === undefined ? {} : { min }),
+    ...(max === undefined ? {} : { max }),
+    ...(numberConstraint(element, "minlength") === undefined
+      ? {}
+      : { minLength: numberConstraint(element, "minlength")! }),
+    ...(numberConstraint(element, "maxlength") === undefined
+      ? {}
+      : { maxLength: numberConstraint(element, "maxlength")! }),
+    ...(element.getAttribute("pattern") === null ? {} : { pattern: element.getAttribute("pattern")! }),
+    ...(step === undefined ? {} : { step }),
+  };
+}
+
+function installInstanceValidity(root: Element, instance: RuntimeInstance): void {
+  let cleanups: Array<() => void> = [];
+  const connect = (): void => {
+    if (cleanups.length > 0) return;
+    const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+    for (const element of elements) {
+      const native = nativeValidatableElement(element);
+      const generalized = Array.from(element.attributes).some((attribute) =>
+        VALIDITY_ATTRIBUTES.has(attribute.name.toLowerCase()),
+      );
+      if (!native && !generalized) continue;
+      cleanups.push(manageElementValidity(element, native ? {} : constraintFromElement(element)));
+    }
+  };
+  const disconnect = (): void => {
+    for (const cleanup of cleanups) cleanup();
+    cleanups = [];
+  };
+  instance.connectCallbacks.add(connect);
+  instance.disconnectCallbacks.add(disconnect);
+  connect();
+}
+
 /**
  * Performs one explicit lowering pass, retaining definitions in a document registry for
  * later passes. It does not observe mutations or register Custom Elements.
@@ -913,6 +983,7 @@ export function lowerDocument(root: Document = document): number {
     invocation.invocation.replaceWith(invocation.nativeRoot);
     registry.instances.set(invocation.nativeRoot, invocation.definition);
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
+    installInstanceValidity(invocation.nativeRoot, invocation.instance);
   }
   return prepared.length;
 }

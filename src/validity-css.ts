@@ -140,7 +140,7 @@ function rewriteRuleList(css: string): string {
       const body = css.slice(index + 1, blockEnd);
       const atRule = /^\s*@([\w-]+)/.exec(prelude)?.[1]?.toLowerCase();
       const nextPrelude = atRule === undefined ? rewriteSelector(prelude) : prelude;
-      const nextBody = atRule !== undefined && GROUPING_AT_RULES.has(atRule)
+      const nextBody = atRule === undefined || GROUPING_AT_RULES.has(atRule)
         ? rewriteRuleList(body)
         : body;
       output += `${nextPrelude}{${nextBody}}`;

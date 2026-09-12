@@ -1,8 +1,12 @@
 import type { ComponentDefinition } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
+import { formatType } from "../type-system.js";
 
 function typeSource(type: PropType): string {
-  return typeof type === "object" ? type.enum.map((value) => `\`${value}\``).join(" \\| ") : `\`${type}\``;
+  if (typeof type === "object" && "enum" in type) {
+    return type.enum.map((value) => `\`${value}\``).join(" \\| ");
+  }
+  return `\`${formatType(type).replaceAll("|", "\\|")}\``;
 }
 
 function defaultSource(prop: PropContract): string {

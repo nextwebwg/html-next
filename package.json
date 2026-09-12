@@ -10,6 +10,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./runtime": "./dist/runtime.js",
+    "./validation": "./dist/validation.js",
     "./browser-loader": "./dist/browser-loader.js",
     "./node-loader": "./dist/node-loader.js"
   },

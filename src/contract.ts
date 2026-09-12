@@ -1,5 +1,13 @@
 import { fail } from "./diagnostics.js";
 import { getDomInterface } from "./platform.js";
+import {
+  formatType,
+  isTypeNode,
+  parseTypedValue,
+  parseTypeExpression,
+  serializeTypedValue,
+  type TypeNode,
+} from "./type-system.js";
 import type {
   ComponentContract,
   ContractStatus,
@@ -49,17 +57,25 @@ export function deriveName(tag: string): string {
  * (`string`/`number`/`boolean`) stays scalar; anything else is an enum whose members are
  * split on the CSS value-definition-syntax single bar `|` (Values and Units, "one of").
  */
-export function parseTypeAttribute(value: string): string | { enum: string[] } {
-  const members = value.split("|").map((member) => member.trim()).filter((member) => member !== "");
-  if (members.length === 1 && SCALAR_TYPES.has(members[0]!)) return members[0]!;
-  return { enum: members };
+export function parseTypeAttribute(value: string): PropType {
+  let parsed: TypeNode;
+  try {
+    parsed = parseTypeExpression(value);
+  } catch (error) {
+    fail("HC013", error instanceof Error ? error.message : "Invalid prop type expression.");
+  }
+  if (parsed.kind === "terminal" && SCALAR_TYPES.has(parsed.name)) return parsed.name as PropType;
+  if (parsed.kind === "keyword") return { enum: [parsed.value] };
+  if (parsed.kind === "union" && parsed.members.every((member) => member.kind === "keyword")) {
+    return { enum: parsed.members.map((member) => member.value) };
+  }
+  return parsed;
 }
 
 /** Coerces a `<prop default>` attribute string into a value of the declared type. */
-export function coerceDefault(type: string | { enum: string[] }, raw: string): unknown {
-  if (type === "number") return Number(raw);
-  if (type === "boolean") return raw === "true";
-  return raw;
+export function coerceDefault(type: PropType, raw: string): unknown {
+  const result = parseTypedValue(raw, type);
+  return result.ok ? result.value : raw;
 }
 
 function record(value: unknown, code: string, message: string, source?: string): UnknownRecord {
@@ -93,13 +109,23 @@ function requiredString(
 
 function parseType(value: unknown, source?: string): PropType {
   if (typeof value === "string") {
-    if (!SCALAR_TYPES.has(value)) {
-      fail("HC013", `Unsupported prop type \`${value}\`.`, source);
+    let parsed: TypeNode;
+    try {
+      parsed = parseTypeExpression(value);
+    } catch (error) {
+      fail("HC013", error instanceof Error ? error.message : `Unsupported prop type \`${value}\`.`, source);
     }
-    return value as PropType;
+    return parsed.kind === "terminal" && SCALAR_TYPES.has(parsed.name) ? parsed.name as PropType : parsed;
   }
 
   const object = record(value, "HC013", "A prop type must be a scalar name or enum object.", source);
+  if (isTypeNode(object)) {
+    try {
+      return parseTypeExpression(formatType(object));
+    } catch (error) {
+      fail("HC013", error instanceof Error ? error.message : "Invalid type node.", source);
+    }
+  }
   rejectUnknownFields(object, new Set(["enum"]), source);
   if (!Array.isArray(object.enum) || object.enum.length === 0) {
     fail("HC014", "An enum must contain at least one string member.", source);
@@ -143,10 +169,7 @@ function parseTarget(value: unknown, source?: string): PropTarget {
 }
 
 function accepts(type: PropType, value: unknown): value is PropValue {
-  if (typeof type === "object") {
-    return typeof value === "string" && type.enum.includes(value);
-  }
-  return typeof value === type && (type !== "number" || Number.isFinite(value));
+  return parseTypedValue(value, type).ok;
 }
 
 function parseProp(name: string, value: unknown, source?: string): PropContract {
@@ -260,14 +283,17 @@ export function serializePropTarget(
   if (!accepts(prop.type, value)) {
     fail("HC021", "A prop value does not satisfy its declared type.");
   }
+  const parsed = parseTypedValue(value, prop.type);
+  if (!parsed.ok) fail("HC021", "A prop value does not satisfy its declared type.");
+  const canonical = parsed.value as PropValue;
 
   if ("property" in prop.target) {
-    return { kind: "property", name: prop.target.property, value };
+    return { kind: "property", name: prop.target.property, value: canonical };
   }
-  if (typeof value === "boolean") {
-    return { kind: "attribute", name: prop.target.attribute, value: value ? "" : null };
+  if (typeof canonical === "boolean") {
+    return { kind: "attribute", name: prop.target.attribute, value: canonical ? "" : null };
   }
-  return { kind: "attribute", name: prop.target.attribute, value: String(value) };
+  return { kind: "attribute", name: prop.target.attribute, value: serializeTypedValue(canonical, prop.type) };
 }
 
 function deepFreeze<T>(value: T): T {
