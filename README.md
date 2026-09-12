@@ -140,6 +140,13 @@ package assembler emits Looma's current root, Vue, editor, extension, validation
 and CSS entry points. Knit-shaped SSR/hydration and LoadOps-shaped direct-registration
 consumers exercise the generated package.
 
+Build that compatibility package from a local Looma checkout with:
+
+```sh
+npm run generate:looma-assets -- --source ../looma
+npm run build:looma -- --source ../looma --out-dir generated-looma
+```
+
 ## Types and validation
 
 HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.
