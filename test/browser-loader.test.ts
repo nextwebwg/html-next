@@ -42,12 +42,21 @@ describe("browser graph loader", { skip: !enabled }, () => {
       if (url.endsWith("/ui/app.html")) {
         await route.fulfill({
           contentType: "text/html",
-          body: `<template component="x-app" status="early" summary="App." controller="./app.js"><main><span>ready</span></main></template>`,
+          body:
+            `<template component="x-app" status="early" summary="App." controller="./app.js">` +
+            `<defs><state name="count" :value="1"></state></defs>` +
+            `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
         });
       } else if (url.endsWith("/ui/app.js")) {
         await route.fulfill({
           contentType: "text/javascript",
-          body: `export default ({ element }) => { element.dataset.controlled = "true"; };`,
+          body:
+            `export default (host) => {` +
+            ` const add = () => { host.state.count += 1; };` +
+            ` host.refs.button.addEventListener("click", add);` +
+            ` const stop = host.effect(() => { host.element.dataset.count = host.state.count; });` +
+            ` return () => { stop(); host.refs.button.removeEventListener("click", add); };` +
+            `};`,
         });
       } else {
         await route.fulfill({
@@ -65,20 +74,22 @@ describe("browser graph loader", { skip: !enabled }, () => {
         HtmlNextLoader: { startBrowserComponents(): Promise<{ stop(): void }> };
       }).HtmlNextLoader;
       const started = await api.startBrowserComponents();
-      for (let attempt = 0; attempt < 50 && !document.querySelector("#app")?.hasAttribute("data-controlled"); attempt += 1) {
+      for (let attempt = 0; attempt < 50 && !document.querySelector("#app")?.hasAttribute("data-count"); attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       const root = document.querySelector("#app")!;
+      root.querySelector("button")!.click();
+      await Promise.resolve();
       const value = {
         tag: root.localName,
-        text: root.textContent,
-        controlled: (root as HTMLElement).dataset.controlled,
+        count: root.querySelector("output")!.textContent,
+        effectCount: (root as HTMLElement).dataset.count,
       };
       started.stop();
       return value;
     });
     await page.close();
-    assert.deepEqual(result, { tag: "main", text: "ready", controlled: "true" });
+    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2" });
   });
 
   it("keeps declarative output connected when a controller module is invalid", async () => {

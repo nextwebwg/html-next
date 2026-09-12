@@ -538,6 +538,11 @@ export function evaluate(src: string, scope: Scope): Value {
   return evalNode(compile(src), scope);
 }
 
+/** Evaluate a previously compiled expression without reparsing its source. */
+export function evaluateCompiled(expression: CompiledExpression | ExpressionNode, scope: Scope): Value {
+  return evalNode("ast" in expression ? expression.ast : expression, scope);
+}
+
 /** Escaped-text form (for `$value`): the absent value and null render as empty. */
 export function toText(value: Value): string {
   if (isAbsent(value)) return "";

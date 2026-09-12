@@ -2,7 +2,7 @@ import { buildComponentGraph, type ComponentGraph } from "./graph.js";
 import { ComponentRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, type ModuleImporter } from "./controller.js";
-import { installComponentGraph, observeDocument } from "./runtime.js";
+import { getComponentHost, installComponentGraph, observeDocument } from "./runtime.js";
 
 export interface BrowserLoaderOptions {
   readonly document?: Document;
@@ -89,7 +89,7 @@ export async function startBrowserComponents(
       let disconnected = false;
       let cleanup: void | (() => void);
       void loadController(node, options.importer)
-        .then((controller) => controller({ element }))
+        .then((controller) => controller(getComponentHost(element) ?? { element }))
         .then((result) => {
           if (typeof result !== "function") return;
           if (disconnected) result();

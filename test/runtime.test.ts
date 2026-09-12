@@ -417,7 +417,7 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
-    it(`${name} seeds state/computed/data and consumes on:/bind:/handlers (L1 one-shot)`, async () => {
+    it(`${name} updates state, computed values, and bindings through declarative handlers`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -440,28 +440,164 @@ describe("browser runtime", { skip: !enabled }, () => {
             `<x-counter id="c" start="5"></x-counter>`,
         );
         await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(() => {
+        const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector("#c");
-          return {
+          const snapshot = () => ({
             count: root.getAttribute("data-count"),
             doubled: root.getAttribute("data-doubled"),
             buttonText: root.querySelector("button").textContent,
-            buttonHasOnClick: root.querySelector("button").hasAttribute("on:click"),
             boundValue: root.querySelector("output").getAttribute("value"),
+          });
+          const initial = snapshot();
+          root.querySelector("button").click();
+          await Promise.resolve();
+          return {
+            initial,
+            after: snapshot(),
+            buttonHasOnClick: root.querySelector("button").hasAttribute("on:click"),
             pending: root.querySelector("i").textContent,
             spanHasOnConnect: root.querySelector("span").hasAttribute("on:connect"),
           };
         })()`);
         assert.deepEqual(result, {
-          count: "5", // state seeded from the start prop
-          doubled: "10", // computed evaluated once over state
-          buttonText: "5", // $value reads state
+          initial: { count: "5", doubled: "10", buttonText: "5", boundValue: "5" },
+          after: { count: "6", doubled: "12", buttonText: "6", boundValue: "6" },
           buttonHasOnClick: false, // on: consumed, never emitted
-          boundValue: "5", // bind: renders one-way at L1
           pending: "true", // data seeded in its pending shape
           spanHasOnConnect: false, // lifecycle consumed
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} writes text, checkbox, radio, select, and number controls back to state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-form" status="early" summary="Bindings.">` +
+            `<defs><state name="form" :value="{ text: 'a', checked: false, radio: false, choice: 'a', count: 1 }"></state></defs>` +
+            `<form>` +
+            `<input class="text" bind:value="form.text">` +
+            `<input class="check" type="checkbox" bind:checked="form.checked">` +
+            `<input class="radio" type="radio" bind:checked="form.radio">` +
+            `<select class="choice" bind:value="form.choice"><option value="a">A</option><option value="b">B</option></select>` +
+            `<input class="number" type="number" bind:value="form.count">` +
+            `<output class="result" $value="[form.text, form.checked, form.radio, form.choice, form.count]"></output>` +
+            `</form></template><x-form id="f"></x-form>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#f');
+          const text = root.querySelector('.text');
+          const check = root.querySelector('.check');
+          const radio = root.querySelector('.radio');
+          const choice = root.querySelector('.choice');
+          const number = root.querySelector('.number');
+          text.value = 'next'; text.dispatchEvent(new Event('input', { bubbles: true }));
+          check.checked = true; check.dispatchEvent(new Event('change', { bubbles: true }));
+          radio.checked = true; radio.dispatchEvent(new Event('change', { bubbles: true }));
+          choice.value = 'b'; choice.dispatchEvent(new Event('change', { bubbles: true }));
+          number.value = '7'; number.dispatchEvent(new Event('input', { bubbles: true }));
+          await Promise.resolve();
+          return root.querySelector('.result').textContent;
+        })()`);
+        assert.equal(result, "next true true b 7");
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} reactively updates structural ranges and preserves keyed node identity`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-structure" status="early" summary="Structure.">` +
+            `<defs>` +
+            `<state name="show" :value="true"></state>` +
+            `<state name="rows" :value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>` +
+            `<state name="mode" :value="'a'"></state>` +
+            `<state name="person" :value="{ name: 'Ada' }"></state>` +
+            `<handler name="change">` +
+            `<set name="show" :value="false"></set>` +
+            `<set name="rows" :value="[{ id: 2, label: 'B2' }, { id: 1, label: 'A' }]"></set>` +
+            `<set name="mode" :value="'b'"></set>` +
+            `<set name="person" :value="{ name: 'Grace' }"></set>` +
+            `</handler></defs>` +
+            `<main><button on:click="change">change</button>` +
+            `<i class="conditional" $if="show">shown</i>` +
+            `<ul><li $each="row of rows" $key="row.id" :data-id="row.id" $value="row.label"></li></ul>` +
+            `<div $match="mode as current"><span class="a" $when="current = 'a'">A</span><span class="b" $else>B</span></div>` +
+            `<p $with="person as current" class="person" $value="current.name"></p>` +
+            `</main></template><x-structure id="s"></x-structure>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#s');
+          const before = Array.from(root.querySelectorAll('li'));
+          root.querySelector('button').click();
+          await Promise.resolve();
+          const after = Array.from(root.querySelectorAll('li'));
+          return {
+            conditional: root.querySelector('.conditional') !== null,
+            rows: after.map((row) => [row.dataset.id, row.textContent]),
+            firstPreserved: after[0] === before[1],
+            secondPreserved: after[1] === before[0],
+            arm: root.querySelector('.b')?.textContent,
+            oldArmGone: root.querySelector('.a') === null,
+            person: root.querySelector('.person')?.textContent,
+          };
+        })()`);
+        assert.deepEqual(result, {
+          conditional: false,
+          rows: [["2", "B2"], ["1", "A"]],
+          firstPreserved: true,
+          secondPreserved: true,
+          arm: "B",
+          oldArmGone: true,
+          person: "Grace",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} runs declared data reads and updates their reactive state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://api.example/**", async (route) => {
+          const query = new URL(route.request().url()).searchParams.get("q");
+          await route.fulfill({
+            contentType: "application/json",
+            headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: `Result ${query}` }),
+          });
+        });
+        await page.setContent(
+          `<template component="x-data" status="early" summary="Data.">` +
+            `<defs><state name="query" :value="'hello'"></state>` +
+            `<data name="result" src="https://api.example/search" type="json">` +
+            `<param name="q" :value="query"></param></data></defs>` +
+            `<main><i class="pending" $value="result.pending"></i>` +
+            `<output class="label" $value="result.value.label"></output></main>` +
+            `</template><x-data id="data"></x-data>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+        });
+        await page.waitForFunction(() => document.querySelector("#data .label")?.textContent === "Result hello");
+        const result = await page.evaluate(() => ({
+          pending: document.querySelector("#data .pending")?.textContent,
+          label: document.querySelector("#data .label")?.textContent,
+        }));
+        assert.deepEqual(result, { pending: "false", label: "Result hello" });
       } finally {
         await browser.close();
       }

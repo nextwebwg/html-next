@@ -1,9 +1,11 @@
 import { parseBrowserComponent } from "./browser-source.js";
+import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
 import type { ComponentGraph } from "./graph.js";
 import {
   UndeclaredName,
   evaluate,
+  evaluateCompiled,
   toAttribute,
   toText,
   truthy,
@@ -11,14 +13,19 @@ import {
   type Value,
 } from "./expression.js";
 import { validateLiteralAttributeName } from "./language.js";
+import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 import type {
   ComponentDefinition,
+  DataDeclaration,
   DirectiveAttribute,
   ElementNode,
   Flow,
+  HandlerDeclaration,
+  HandlerStep,
   TemplateNode,
 } from "./template.js";
+import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropContract, PropValue } from "./types.js";
 
 /**
@@ -60,6 +67,18 @@ interface PreparedInvocation {
   readonly slotContainers: readonly Element[];
   readonly children: readonly Node[];
   readonly definition: ComponentDefinition;
+  readonly instance: RuntimeInstance;
+}
+
+interface RuntimeInstance {
+  element?: Element;
+  readonly definition: ComponentDefinition;
+  readonly scope: ReactiveScope;
+  readonly refs: Record<string, Element>;
+  readonly effects: ReactiveEffect[];
+  readonly connectCallbacks: Set<() => void>;
+  readonly disconnectCallbacks: Set<() => void>;
+  connected: boolean;
 }
 
 interface DocumentRegistry {
@@ -69,6 +88,7 @@ interface DocumentRegistry {
 
 const registries = new WeakMap<Document, DocumentRegistry>();
 const contentOnly = new WeakSet<Element>();
+const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
 
 function registryFor(root: Document): DocumentRegistry {
   let registry = registries.get(root);
@@ -164,12 +184,13 @@ function invocationValue(prop: PropContract, attributeValue: string): PropValue 
 
 function readInvocation(
   invocation: Element,
-  contract: ComponentContract,
-  decls: readonly Decl[],
+  definition: ComponentDefinition,
 ): {
-  readonly scope: Scope;
+  readonly scope: ReactiveScope;
   readonly passThrough: readonly Attr[];
+  readonly effects: ReactiveEffect[];
 } {
+  const contract = definition.contract;
   const names = new Map<string, string>();
   for (const name of Object.keys(contract.props)) names.set(name.toLowerCase(), name);
 
@@ -184,7 +205,7 @@ function readInvocation(
     values[propName] = invocationValue(contract.props[propName]!, attribute.value);
   }
 
-  const scope = new Map<string, Value>();
+  const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(contract.props)) {
     if (prop.required && values[name] === undefined) {
       fail("HC020", `Required prop \`${name}\` was not provided.`);
@@ -193,20 +214,59 @@ function readInvocation(
     scope.set(name, values[name] !== undefined ? values[name]! : prop.default ?? null);
   }
 
-  // Seed reactive declarations in document order, each evaluated against the scope so far
-  // (props, then earlier declarations). One-shot: `data` starts in its pending shape.
-  for (const decl of decls) {
-    if (decl.kind === "data") {
-      scope.set(decl.name, { pending: true, value: null, error: null, ok: false });
-    } else {
-      scope.set(decl.name, decl.expr !== undefined ? evalValue(decl.expr, scope) : null);
+  const declarations = definition.declarations ?? [];
+  for (const declaration of declarations) scope.set(declaration.name, null);
+  for (const declaration of declarations) {
+    if (declaration.kind === "data") {
+      scope.set(declaration.name, { pending: true, value: null, error: null, ok: false });
+    } else if (declaration.kind === "state") {
+      scope.set(
+        declaration.name,
+        declaration.expression === undefined ? null : evalValue(declaration.expression.source, scope),
+      );
     }
   }
-  return { scope, passThrough };
+  const effects: ReactiveEffect[] = [];
+  for (const declaration of declarations) {
+    if (declaration.kind !== "computed" || declaration.expression === undefined) continue;
+    effects.push(createEffect(scope.scheduler, () => {
+      scope.set(declaration.name, evalValue(declaration.expression!.source, scope));
+    }, 0));
+  }
+  const definitionBase = (() => {
+    try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
+    catch { return invocation.ownerDocument.baseURI; }
+  })();
+  for (const declaration of declarations) {
+    if (declaration.kind !== "data" || declaration.source === undefined) continue;
+    const data = declaration as DataDeclaration;
+    const dataSource = declaration.source;
+    const resource = new DataResource({
+      source: dataSource,
+      baseURL: definitionBase,
+      ...(data.type === undefined ? {} : { type: data.type }),
+      ...(data.debounce === undefined ? {} : { debounce: Number(data.debounce) }),
+      ...(data.poll === undefined ? {} : { poll: Number(data.poll) }),
+      onState: (state) => scope.set(data.name, state as unknown as Value),
+    });
+    effects.push(createEffect(scope.scheduler, () => {
+      const parameters = Object.fromEntries(
+        data.parameters.map((parameter) => [
+          parameter.name,
+          evaluateCompiled(parameter.expression, scope),
+        ]),
+      );
+      resource.update(parameters);
+      return () => resource.disconnect();
+    }, 0));
+  }
+  return { scope, passThrough, effects };
 }
 
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
+function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveScope;
 function layer(parent: Scope, locals: Record<string, Value>): Scope {
+  if (parent instanceof ReactiveScope) return parent.fork(Object.entries(locals));
   return new Map<string, Value>([...parent, ...Object.entries(locals)]);
 }
 
@@ -216,6 +276,150 @@ function evalValue(expression: string, scope: Scope): Value {
   } catch (error) {
     if (error instanceof UndeclaredName) fail("HB001", error.message);
     throw error;
+  }
+}
+
+interface RuntimeRenderContext {
+  readonly definition: ComponentDefinition;
+  readonly effects: ReactiveEffect[];
+  readonly refs: Record<string, Element>;
+}
+
+function ownEffect(
+  context: RuntimeRenderContext,
+  scope: ReactiveScope,
+  run: () => void | (() => void),
+  priority = 1,
+): void {
+  context.effects.push(createEffect(scope.scheduler, run, priority));
+}
+
+function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value): void {
+  const [root, ...segments] = path;
+  if (typeof root !== "string") return;
+  if (segments.length === 0) {
+    scope.set(root, value);
+    return;
+  }
+  let target = scope.get(root) as Record<PropertyKey, unknown> | undefined;
+  for (const segment of segments.slice(0, -1)) {
+    const key = typeof segment === "object" ? evaluateCompiled(segment.expression, scope) : segment;
+    if ((typeof key !== "string" && typeof key !== "number") || target == null) return;
+    target = target[key] as Record<PropertyKey, unknown> | undefined;
+  }
+  const last = segments.at(-1)!;
+  const key = typeof last === "object" ? evaluateCompiled(last.expression, scope) : last;
+  if ((typeof key === "string" || typeof key === "number") && target != null) target[key] = value;
+}
+
+function controlValue(element: Element): Value {
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "checkbox" || element.type === "radio") return element.checked;
+    if (element.type === "number" || element.type === "range") {
+      return Number.isNaN(element.valueAsNumber) ? null : element.valueAsNumber;
+    }
+    return element.value;
+  }
+  if (element instanceof HTMLSelectElement) {
+    return element.multiple
+      ? Array.from(element.selectedOptions, (option) => option.value)
+      : element.value;
+  }
+  if (element instanceof HTMLTextAreaElement) return element.value;
+  return (element as unknown as { value?: Value }).value ?? element.getAttribute("value");
+}
+
+function applyBoundControlValue(element: Element, name: string, value: Value): boolean {
+  const lowerName = name.toLowerCase();
+  if (lowerName === "checked" && element instanceof HTMLInputElement) {
+    element.checked = truthy(value);
+    return true;
+  }
+  if (lowerName === "value" && element instanceof HTMLSelectElement && element.multiple) {
+    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
+    for (const option of Array.from(element.options)) option.selected = selected.has(option.value);
+    return true;
+  }
+  if (
+    lowerName === "value" &&
+    (element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement)
+  ) {
+    element.value = value == null ? "" : String(value);
+    return true;
+  }
+  return false;
+}
+
+function runHandler(
+  declaration: HandlerDeclaration,
+  element: Element,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  for (const step of declaration.steps) {
+    if (step.guard !== undefined && !truthy(evaluateCompiled(step.guard, scope))) continue;
+    if (step.kind === "set") {
+      setWritablePath(scope, step.writablePath, evaluateCompiled(step.value, scope));
+    } else if (step.kind === "dispatch") {
+      element.dispatchEvent(new CustomEvent(step.event, {
+        detail: step.value === undefined ? undefined : evaluateCompiled(step.value, scope),
+        bubbles: true,
+        composed: true,
+      }));
+    } else {
+      const target = context.refs[step.target];
+      if (step.kind === "focus") (target as HTMLElement | undefined)?.focus();
+      else (target as HTMLInputElement | undefined)?.reportValidity?.();
+    }
+  }
+}
+
+function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
+  if (modifiers.includes("self") && event.target !== element) return false;
+  if (event instanceof KeyboardEvent) {
+    const keyFilters = modifiers.filter((modifier) =>
+      ["enter", "escape", "space", "tab", "up", "down", "left", "right"].includes(modifier),
+    );
+    const keyNames: Record<string, string> = {
+      enter: "Enter", escape: "Escape", space: " ", tab: "Tab",
+      up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
+    };
+    if (keyFilters.length > 0 && !keyFilters.some((filter) => event.key === keyNames[filter])) return false;
+  }
+  return true;
+}
+
+function bindEvents(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  const handlers = new Map(
+    (context.definition.declarations ?? [])
+      .filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler")
+      .map((declaration) => [declaration.name, declaration]),
+  );
+  for (const binding of node.events ?? []) {
+    const declaration = handlers.get(binding.handler)!;
+    const listener = (event: Event): void => {
+      if (!eventPasses(event, element, binding.modifiers)) return;
+      if (binding.modifiers.includes("prevent")) event.preventDefault();
+      if (binding.modifiers.includes("stop")) event.stopPropagation();
+      runHandler(declaration, element, scope, context);
+    };
+    ownEffect(context, scope, () => {
+      element.addEventListener(binding.name, listener, {
+        capture: binding.modifiers.includes("capture"),
+        passive: binding.modifiers.includes("passive"),
+        once: binding.modifiers.includes("once"),
+      });
+      return () => element.removeEventListener(binding.name, listener, {
+        capture: binding.modifiers.includes("capture"),
+      });
+    }, 2);
   }
 }
 
@@ -291,7 +495,7 @@ function compareValues(a: Value, b: Value): number {
 function shapeList(
   items: readonly Value[],
   flow: Extract<Flow, { kind: "each" }>,
-  scope: Scope,
+  scope: ReactiveScope,
 ): Value[] {
   let result = items.slice();
   if (flow.where !== undefined) {
@@ -325,7 +529,7 @@ function shapeList(
 }
 
 /** The scopes in which a node's body should render, per its structural directive. */
-function expandFlow(flow: Flow | undefined, scope: Scope): Scope[] {
+function expandFlow(flow: Flow | undefined, scope: ReactiveScope): ReactiveScope[] {
   if (flow === undefined) return [scope];
   switch (flow.kind) {
     case "if":
@@ -351,30 +555,184 @@ function expandFlow(flow: Flow | undefined, scope: Scope): Scope[] {
   }
 }
 
-function renderNode(
+function materialize(nodes: readonly Node[], document: Document): Node[] {
+  const fragment = document.createDocumentFragment();
+  fragment.append(...nodes);
+  return Array.from(fragment.childNodes);
+}
+
+function clearRange(start: Comment, end: Comment): void {
+  let current = start.nextSibling;
+  while (current !== null && current !== end) {
+    const next = current.nextSibling;
+    current.remove();
+    current = next;
+  }
+}
+
+function renderDynamicNode(
   node: ElementNode,
-  scope: Scope,
+  scope: ReactiveScope,
   slotChildren: readonly Node[],
   document: Document,
   slotContainers: Element[],
-  passThrough: readonly Attr[] = [],
+  passThrough: readonly Attr[],
+  context: RuntimeRenderContext,
 ): Node[] {
-  if (node.flow?.kind === "match") {
-    return renderMatch(node, scope, slotChildren, document, slotContainers);
+  if (node.flow?.kind === "each") {
+    return renderEachRegion(node, scope, slotChildren, document, slotContainers, passThrough, context);
+  }
+  const start = document.createComment("html-next:start");
+  const end = document.createComment("html-next:end");
+  const fragment = document.createDocumentFragment();
+  fragment.append(start, end);
+  let childEffects: ReactiveEffect[] = [];
+  ownEffect(context, scope, () => {
+    for (const effect of childEffects) effect.stop();
+    childEffects = [];
+    clearRange(start, end);
+    const effectsStart = context.effects.length;
+    let rendered: Node[] = [];
+    if (node.flow?.kind === "if") {
+      if (truthy(evalValue(node.flow.test, scope))) {
+        const { flow: _flow, ...body } = node;
+        rendered = renderInstance(body, scope, slotChildren, document, slotContainers, passThrough, context);
+      }
+    } else if (node.flow?.kind === "with") {
+      const local = scope.fork([[node.flow.alias, evalValue(node.flow.expr, scope)]]);
+      const { flow: _flow, ...body } = node;
+      rendered = renderInstance(body, local, slotChildren, document, slotContainers, passThrough, context);
+    } else if (node.flow?.kind === "match") {
+      rendered = renderMatch(node, scope, slotChildren, document, slotContainers, context);
+    }
+    childEffects = context.effects.slice(effectsStart);
+    end.before(...materialize(rendered, document));
+  });
+  return [fragment];
+}
+
+interface EachBlock {
+  readonly start: Comment;
+  readonly end: Comment;
+  readonly scope: ReactiveScope;
+  readonly effects: readonly ReactiveEffect[];
+}
+
+function moveBlockBefore(block: EachBlock, reference: Node): void {
+  const nodes: Node[] = [];
+  let current: Node | null = block.start;
+  while (current !== null) {
+    nodes.push(current);
+    if (current === block.end) break;
+    current = current.nextSibling;
+  }
+  const parent = reference.parentNode;
+  if (parent === null) return;
+  for (const node of nodes) parent.insertBefore(node, reference);
+}
+
+function removeBlock(block: EachBlock): void {
+  for (const effect of block.effects) effect.stop();
+  let current: Node | null = block.start;
+  while (current !== null) {
+    const next: Node | null = current.nextSibling;
+    current.parentNode?.removeChild(current);
+    if (current === block.end) break;
+    current = next;
+  }
+}
+
+function renderEachRegion(
+  node: ElementNode,
+  scope: ReactiveScope,
+  slotChildren: readonly Node[],
+  document: Document,
+  slotContainers: Element[],
+  passThrough: readonly Attr[],
+  context: RuntimeRenderContext,
+): Node[] {
+  const flow = node.flow as Extract<Flow, { kind: "each" }>;
+  const start = document.createComment("html-next:each-start");
+  const end = document.createComment("html-next:each-end");
+  const fragment = document.createDocumentFragment();
+  fragment.append(start, end);
+  let blocks = new Map<unknown, EachBlock>();
+  ownEffect(context, scope, () => {
+    const value = evalValue(flow.list, scope);
+    const items = Array.isArray(value) ? shapeList(value, flow, scope) : [];
+    const next = new Map<unknown, EachBlock>();
+    const { flow: _flow, ...body } = node;
+    items.forEach((item, index) => {
+      const locals: Record<string, Value> = {
+        [flow.item]: item,
+        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+      };
+      if (flow.index !== undefined) locals[flow.index] = index;
+      const probe = scope.fork(Object.entries(locals));
+      const key = flow.key === undefined ? index : evalValue(flow.key, probe);
+      if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
+      let block = blocks.get(key);
+      if (block === undefined) {
+        const local = scope.fork(Object.entries(locals));
+        const effectsStart = context.effects.length;
+        const rendered = materialize(
+          renderInstance(body, local, slotChildren, document, slotContainers, passThrough, context),
+          document,
+        );
+        const blockStart = document.createComment("html-next:item-start");
+        const blockEnd = document.createComment("html-next:item-end");
+        end.before(blockStart, ...rendered, blockEnd);
+        block = {
+          start: blockStart,
+          end: blockEnd,
+          scope: local,
+          effects: context.effects.slice(effectsStart),
+        };
+      } else {
+        block.scope.set(flow.item, item);
+        if (flow.index !== undefined) block.scope.set(flow.index, index);
+        block.scope.set("loop", locals.loop!);
+      }
+      next.set(key, block);
+      moveBlockBefore(block, end);
+    });
+    for (const [key, block] of blocks) if (!next.has(key)) removeBlock(block);
+    blocks = next;
+  });
+  return [fragment];
+}
+
+function renderNode(
+  node: ElementNode,
+  scope: ReactiveScope,
+  slotChildren: readonly Node[],
+  document: Document,
+  slotContainers: Element[],
+  passThrough: readonly Attr[],
+  context: RuntimeRenderContext,
+): Node[] {
+  if (
+    node.flow?.kind === "if" ||
+    node.flow?.kind === "each" ||
+    node.flow?.kind === "with" ||
+    node.flow?.kind === "match"
+  ) {
+    return renderDynamicNode(node, scope, slotChildren, document, slotContainers, passThrough, context);
   }
   const out: Node[] = [];
   for (const childScope of expandFlow(node.flow, scope)) {
-    out.push(...renderInstance(node, childScope, slotChildren, document, slotContainers, passThrough));
+    out.push(...renderInstance(node, childScope, slotChildren, document, slotContainers, passThrough, context));
   }
   return out;
 }
 
 function renderMatch(
   node: ElementNode,
-  scope: Scope,
+  scope: ReactiveScope,
   slotChildren: readonly Node[],
   document: Document,
   slotContainers: Element[],
+  context: RuntimeRenderContext,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "match" }>;
   const matchScope =
@@ -396,7 +754,7 @@ function renderMatch(
 
   // Render the winning arm, ignoring its own $when/$else marker.
   const { flow: _armFlow, ...armNode } = chosen;
-  const rendered = renderInstance(armNode, matchScope, slotChildren, document, slotContainers);
+  const rendered = renderInstance(armNode, matchScope, slotChildren, document, slotContainers, [], context);
   if (node.name === "template") return rendered;
 
   // $match on a real element wraps the winning arm in that element.
@@ -411,11 +769,12 @@ function renderMatch(
 /** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */
 function renderInstance(
   node: ElementNode,
-  scope: Scope,
+  scope: ReactiveScope,
   slotChildren: readonly Node[],
   document: Document,
   slotContainers: Element[],
-  passThrough: readonly Attr[] = [],
+  passThrough: readonly Attr[],
+  context: RuntimeRenderContext,
 ): Node[] {
   const contentDirective = node.attributes.find(
     (attribute): attribute is DirectiveAttribute => attribute.kind === "directive",
@@ -423,31 +782,62 @@ function renderInstance(
 
   // A <template> is a fragment carrier: it contributes no wrapper element to the output.
   if (node.name === "template") {
-    if (contentDirective !== undefined) return [inlineDirective(contentDirective, scope, document)];
-    return renderChildren(node.children, scope, slotChildren, document, slotContainers);
+    if (contentDirective !== undefined) {
+      const text = document.createTextNode("");
+      ownEffect(context, scope, () => {
+        const value = evalValue(contentDirective.expression, scope);
+        if (contentDirective.name === "value") text.data = toText(value);
+      });
+      return contentDirective.name === "value"
+        ? [text]
+        : [inlineDirective(contentDirective, scope, document)];
+    }
+    return renderChildren(node.children, scope, slotChildren, document, slotContainers, context);
   }
 
   const element = document.createElement(node.name);
+  if (node.ref !== undefined) context.refs[node.ref] = element;
   for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
     else if (attribute.kind === "attribute") {
-      const value = evalValue(attribute.expression, scope);
-      if (attribute.target === "class") {
-        element.classList.toggle(attribute.name, truthy(value));
-      } else if (attribute.target === "style") {
-        (element as HTMLElement).style.setProperty(attribute.name, toText(value));
-      } else {
-        setAttribute(element, attribute.name, toAttribute(value));
+      ownEffect(context, scope, () => {
+        const value = evalValue(attribute.expression, scope);
+        if (attribute.target === "class") {
+          element.classList.toggle(attribute.name, truthy(value));
+        } else if (attribute.target === "style") {
+          (element as HTMLElement).style.setProperty(attribute.name, toText(value));
+        } else if (attribute.twoWay === true && applyBoundControlValue(element, attribute.name, value)) {
+          // Native form-control properties carry the live value; no duplicate attribute write.
+        } else {
+          setAttribute(element, attribute.name, toAttribute(value));
+        }
+      });
+      if (attribute.twoWay === true && attribute.writablePath !== undefined) {
+        const eventName = element instanceof HTMLSelectElement ||
+          (element instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(element.type))
+          ? "change"
+          : "input";
+        const listener = (): void => {
+          if (element instanceof HTMLInputElement && element.type === "radio" && !element.checked) return;
+          setWritablePath(scope, attribute.writablePath!, controlValue(element));
+        };
+        ownEffect(context, scope, () => {
+          element.addEventListener(eventName, listener);
+          return () => element.removeEventListener(eventName, listener);
+        }, 2);
       }
     } else if (attribute.kind === "property") {
-      (element as unknown as Record<string, unknown>)[attribute.name] = evalValue(attribute.expression, scope);
+      ownEffect(context, scope, () => {
+        (element as unknown as Record<string, unknown>)[attribute.name] = evalValue(attribute.expression, scope);
+      });
     }
     // Content directives are handled below.
   }
 
   if (contentDirective !== undefined) {
-    applyContent(element, contentDirective, scope, document);
+    ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document));
+    bindEvents(element, node, scope, context);
     return [element];
   }
 
@@ -458,26 +848,28 @@ function renderInstance(
       slotContainers.push(element);
       element.append(...slotChildren);
     } else {
-      for (const rendered of renderNode(child, scope, slotChildren, document, slotContainers)) {
+      for (const rendered of renderNode(child, scope, slotChildren, document, slotContainers, [], context)) {
         element.append(rendered);
       }
     }
   }
+  bindEvents(element, node, scope, context);
   return [element];
 }
 
 function renderChildren(
   children: readonly TemplateNode[],
-  scope: Scope,
+  scope: ReactiveScope,
   slotChildren: readonly Node[],
   document: Document,
   slotContainers: Element[],
+  context: RuntimeRenderContext,
 ): Node[] {
   const out: Node[] = [];
   for (const child of children) {
     if (child.kind === "text") out.push(document.createTextNode(child.value));
     else if (child.kind !== "slot") {
-      out.push(...renderNode(child, scope, slotChildren, document, slotContainers));
+      out.push(...renderNode(child, scope, slotChildren, document, slotContainers, [], context));
     }
   }
   return out;
@@ -502,16 +894,30 @@ export function lowerDocument(root: Document = document): number {
   }
 
   const prepared: PreparedInvocation[] = [];
-  for (const { definition, decls } of [...registry.definitions.values(), ...definitions]) {
+  for (const { definition } of [...registry.definitions.values(), ...definitions]) {
     if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
     // A <template>'s content is inert, so querySelectorAll never returns definition-internal
     // markup; every match is a live invocation to lower.
     const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
     for (const invocation of invocations) {
       if (contentOnly.has(invocation)) continue;
-      const { scope, passThrough } = readInvocation(invocation, definition.contract, decls);
+      const { scope, passThrough, effects } = readInvocation(invocation, definition);
       const children = Array.from(invocation.childNodes);
       const slotContainers: Element[] = [];
+      const instance: RuntimeInstance = {
+        definition,
+        scope,
+        refs: {},
+        effects,
+        connectCallbacks: new Set(),
+        disconnectCallbacks: new Set(),
+        connected: true,
+      };
+      const context: RuntimeRenderContext = {
+        definition,
+        effects,
+        refs: instance.refs,
+      };
       const rendered = renderNode(
         definition.template,
         scope,
@@ -519,9 +925,11 @@ export function lowerDocument(root: Document = document): number {
         invocation.ownerDocument,
         slotContainers,
         passThrough,
+        context,
       );
       const nativeRoot = rendered[0] as Element;
-      prepared.push({ invocation, nativeRoot, slotContainers, children, definition });
+      instance.element = nativeRoot;
+      prepared.push({ invocation, nativeRoot, slotContainers, children, definition, instance });
     }
   }
 
@@ -540,8 +948,90 @@ export function lowerDocument(root: Document = document): number {
     }
     invocation.invocation.replaceWith(invocation.nativeRoot);
     registry.instances.set(invocation.nativeRoot, invocation.definition);
+    runtimeInstances.set(invocation.nativeRoot, invocation.instance);
   }
   return prepared.length;
+}
+
+export interface ComponentHost {
+  readonly element: Element;
+  readonly state: Record<string, unknown>;
+  readonly refs: Readonly<Record<string, Element>>;
+  readonly elements: Record<string, Element | RadioNodeList | undefined>;
+  effect(run: () => void | (() => void)): () => void;
+  on(event: string, listener: EventListener): () => void;
+  dispatch(event: string, detail?: unknown): boolean;
+}
+
+function connectRuntimeInstance(instance: RuntimeInstance): void {
+  if (instance.connected) return;
+  instance.connected = true;
+  for (const effect of instance.effects) effect.resume();
+  for (const callback of instance.connectCallbacks) callback();
+}
+
+function disconnectRuntimeInstance(instance: RuntimeInstance): void {
+  if (!instance.connected) return;
+  instance.connected = false;
+  for (const effect of instance.effects) effect.pause();
+  for (const callback of instance.disconnectCallbacks) callback();
+}
+
+/** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
+export function getComponentHost(element: Element): ComponentHost | undefined {
+  const instance = runtimeInstances.get(element);
+  if (instance === undefined) return undefined;
+  const writable = new Set(
+    (instance.definition.declarations ?? [])
+      .filter((declaration) => declaration.kind === "state")
+      .map((declaration) => declaration.name),
+  );
+  const state = new Proxy({}, {
+    get: (_target, key) => typeof key === "string" ? instance.scope.get(key) : undefined,
+    set: (_target, key, value) => {
+      if (typeof key !== "string" || !writable.has(key)) {
+        throw new TypeError(`Only declared state roots are writable; \`${String(key)}\` is read-only.`);
+      }
+      instance.scope.set(key, value as Value);
+      return true;
+    },
+    has: (_target, key) => typeof key === "string" && instance.scope.has(key),
+  });
+  const elements = new Proxy({}, {
+    get: (_target, key) => {
+      if (typeof key !== "string") return undefined;
+      const form = element instanceof HTMLFormElement ? element : element.querySelector("form");
+      return form?.elements.namedItem(key) ?? element.querySelector(`[name="${CSS.escape(key)}"]`) ?? undefined;
+    },
+  }) as Record<string, Element | RadioNodeList | undefined>;
+  const host: ComponentHost = {
+    element,
+    state,
+    refs: instance.refs,
+    elements,
+    effect(run) {
+      const effect = createEffect(instance.scope.scheduler, run, 2);
+      instance.effects.push(effect);
+      return () => effect.stop();
+    },
+    on(event, listener) {
+      if (event === "connect") {
+        instance.connectCallbacks.add(listener as () => void);
+        if (instance.connected) (listener as () => void)();
+        return () => instance.connectCallbacks.delete(listener as () => void);
+      }
+      if (event === "disconnect") {
+        instance.disconnectCallbacks.add(listener as () => void);
+        return () => instance.disconnectCallbacks.delete(listener as () => void);
+      }
+      element.addEventListener(event, listener);
+      return () => element.removeEventListener(event, listener);
+    },
+    dispatch(event, detail) {
+      return element.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }));
+    },
+  };
+  return Object.freeze(host);
 }
 
 export interface DocumentObservationOptions {
@@ -572,6 +1062,8 @@ export function observeDocument(
     for (const [element, dispose] of connected) {
       if (!root.contains(element)) {
         connected.delete(element);
+        const instance = runtimeInstances.get(element);
+        if (instance !== undefined) disconnectRuntimeInstance(instance);
         try { dispose?.(); } catch (error) { report(error); }
       }
     }
@@ -583,6 +1075,8 @@ export function observeDocument(
       // Record first so callback mutations cannot connect an instance twice.
       connected.set(element, undefined);
       try {
+        const instance = runtimeInstances.get(element);
+        if (instance !== undefined) connectRuntimeInstance(instance);
         const dispose = options.onConnect?.(element, definition);
         if (stopped) dispose?.();
         else connected.set(element, dispose);
@@ -600,6 +1094,10 @@ export function observeDocument(
     documentObservers.delete(root);
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
+    }
+    for (const element of connected.keys()) {
+      const instance = runtimeInstances.get(element);
+      if (instance !== undefined) disconnectRuntimeInstance(instance);
     }
     connected.clear();
   };
