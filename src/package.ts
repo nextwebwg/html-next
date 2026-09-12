@@ -1,5 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from "node:path";
+
+import ts from "typescript";
 
 import { generateComponent } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
@@ -23,6 +25,44 @@ function controllerTarget(definition: ComponentDefinition): string | undefined {
   if (definition.controller === undefined) return undefined;
   const extension = extname(definition.controller) || ".js";
   return `controllers/${definition.contract.tag}${extension}`;
+}
+
+async function addStaticModuleGraph(
+  source: string,
+  target: string,
+  files: Map<string, string | { readonly copy: string }>,
+  moduleSources: Map<string, string>,
+  moduleDependencies: Map<string, readonly string[]>,
+): Promise<void> {
+  const sourcePath = resolve(source);
+  const targetPath = normalize(target);
+  if (isAbsolute(targetPath) || targetPath === ".." || targetPath.startsWith(`..${sep}`)) {
+    throw new Error(`Controller module output escaped the package: ${target}.`);
+  }
+  const priorSource = moduleSources.get(targetPath);
+  if (priorSource !== undefined) {
+    if (priorSource !== sourcePath) throw new Error(`Package artifact collision at ${targetPath}.`);
+    return;
+  }
+  if (files.has(targetPath)) throw new Error(`Package artifact collision at ${targetPath}.`);
+
+  const sourceText = await readFile(sourcePath, "utf8");
+  moduleSources.set(targetPath, sourcePath);
+  files.set(targetPath, { copy: sourcePath });
+  const imports = ts.preProcessFile(sourceText, true, true).importedFiles.map((entry) => entry.fileName);
+  moduleDependencies.set(targetPath, Object.freeze([...imports].sort()));
+  for (const specifier of imports.filter((entry) => entry.startsWith("./") || entry.startsWith("../"))) {
+    if (specifier.includes("?") || specifier.includes("#")) {
+      throw new Error(`Controller module specifier must not contain a query or fragment: ${specifier}.`);
+    }
+    await addStaticModuleGraph(
+      resolve(dirname(sourcePath), specifier),
+      normalize(join(dirname(targetPath), specifier)),
+      files,
+      moduleSources,
+      moduleDependencies,
+    );
+  }
 }
 
 function generatedDefinition(definition: ComponentDefinition, controller: string | undefined): ComponentDefinition {
@@ -74,6 +114,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   const files = new Map<string, string | { readonly copy: string }>();
   const definitions: ComponentDefinition[] = [];
   const controllers = new Map<string, string>();
+  const moduleSources = new Map<string, string>();
+  const moduleDependencies = new Map<string, readonly string[]>();
   const names = new Set<string>();
 
   for (const input of [...config.components].sort((left, right) => left.source.localeCompare(right.source))) {
@@ -89,7 +131,13 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     definitions.push(controller === undefined ? definition : Object.freeze({ ...definition, controller: `./${controller}` }));
     if (controller !== undefined) {
       controllers.set(definition.contract.tag, controller);
-      files.set(controller, { copy: resolve(dirname(sourcePath), parsed.controller!) });
+      await addStaticModuleGraph(
+        resolve(dirname(sourcePath), parsed.controller!),
+        controller,
+        files,
+        moduleSources,
+        moduleDependencies,
+      );
     }
     const generated = generateComponent(generatedDefinition(definition, controller));
     for (const artifact of generated) {
@@ -136,6 +184,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
       controller: controllers.get(definition.contract.tag) ?? null,
     })),
     passThrough: (config.passThrough ?? []).map((edge) => edge.target).sort(),
+    controllerModules: [...moduleDependencies].sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, dependencies]) => ({ path, dependencies })),
   }, null, 2)}\n`);
 
   await mkdir(root, { recursive: true });

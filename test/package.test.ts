@@ -23,6 +23,7 @@ async function assemble() {
     components: [
       { source: `${fixture}/ui-input.html` },
       { source: `${fixture}/ui-button.html` },
+      { source: `${fixture}/ui-overlay.html` },
     ],
     passThrough: [{ source: `${fixture}/tokens.css`, target: "tokens.css" }],
   });
@@ -34,10 +35,13 @@ describe("component package assembler", () => {
     const first = await assemble();
     const second = await assemble();
     assert.deepEqual(first.result, second.result);
-    assert.deepEqual(first.result.components, ["ui-button", "ui-input"]);
+    assert.deepEqual(first.result.components, ["ui-button", "ui-input", "ui-overlay"]);
     assert.ok(first.result.files.includes("dist/index.js"));
     assert.ok(first.result.files.includes("vue/UiButton.vue"));
     assert.ok(first.result.files.includes("components/ui-input.html"));
+    assert.ok(first.result.files.includes("controllers/ui-overlay.js"));
+    assert.ok(first.result.files.includes("controllers/overlay-helper.js"));
+    assert.match(await readFile(`${first.outDirectory}/controllers/ui-overlay.js`, "utf8"), /\.\/overlay-helper\.js/);
     assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --looma-accent: rebeccapurple; }\n");
 
     const entry = await readFile(`${first.outDirectory}/dist/index.js`, "utf8");
@@ -48,12 +52,17 @@ describe("component package assembler", () => {
     const manifest = JSON.parse(await readFile(`${first.outDirectory}/html.manifest.json`, "utf8")) as {
       components: Array<{ tag: string; source: string }>;
       passThrough: string[];
+      controllerModules: Array<{ path: string; dependencies: string[] }>;
     };
-    assert.deepEqual(manifest.components.map((component) => component.tag), ["ui-button", "ui-input"]);
+    assert.deepEqual(manifest.components.map((component) => component.tag), ["ui-button", "ui-input", "ui-overlay"]);
     assert.deepEqual(manifest.components.map((component) => component.source), [
-      "./components/ui-button.html", "./components/ui-input.html",
+      "./components/ui-button.html", "./components/ui-input.html", "./components/ui-overlay.html",
     ]);
     assert.deepEqual(manifest.passThrough, ["tokens.css"]);
+    assert.deepEqual(manifest.controllerModules, [
+      { path: "controllers/overlay-helper.js", dependencies: [] },
+      { path: "controllers/ui-overlay.js", dependencies: ["./overlay-helper.js"] },
+    ]);
   });
 
   it("rejects output escapes and artifact collisions", async () => {
