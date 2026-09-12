@@ -1,218 +1,182 @@
-# HTML Next: polyfill &amp; component bridge
+# HTML Next reference implementation
 
-HTML Next is a set of **Stage 0 proposals** for a markup-first authoring layer over HTML:
-reusable typed components, templates, control flow, data sources, and reactivity expressed
-as HTML rather than framework-specific JavaScript. The proposals and their design record
-live in the [`nextwebwg/site`](https://github.com/nextwebwg/site) repository.
+`@nextwebwg/html` is the polyfill, compiler, and component bridge for the HTML Next
+Stage 0 proposals. A component is authored once as inert, browser-parseable HTML. The
+same definition can run directly in a browser or compile to native DOM, React, Vue,
+Svelte, CSS, types, and inspectable package artifacts.
 
-**This repository is the polyfill and component bridge**: the implementation-pinned
-specification, browser implementation, and package converter for those proposals. It authors
-a component once as literal, browser-parseable HTML, can lower that graph in the browser, and
-generates inspectable Vanilla, React, Vue, Svelte, CSS, type, and package artifacts without
-`eval()`.
+The proposal does not depend on this library. This package implements the current
+proposal while browsers do not yet provide it natively. The exact behavior implemented
+by this checkout is defined by the [reference specification](./docs/spec/index.md), its
+[support profile](./docs/spec/support.json), and the shared conformance tests.
 
-> **Stage 0, early:** syntax and generated output are not stable, and no npm package has been
-> published from this checkout. The current code still implements the original component
-> generation slice while work proceeds toward the complete required profile. Do not infer
-> implementation support from proposal prose: [`docs/spec/support.json`](./docs/spec/support.json)
-> is the machine-readable release contract and the conformance tests are the proof.
+> Stage 0: the syntax and generated package shape may change. No npm release has been
+> published from this checkout.
 
-## Try it locally
+## Install and verify
 
-HTML Next currently installs from this repository:
+This repository currently installs from source and requires Node 20.19 or newer:
 
 ```sh
 npm install
 npm run build
 npm test
 npm run test:browser
+npm run test:targets
+npm run test:looma
 ```
 
-Generate the included button example:
+Playwright's pinned Chromium, Firefox, and WebKit builds are required for the browser
+gates. Install them once with `npx playwright install chromium firefox webkit`.
 
-```sh
-npm run build:example
-```
+## Define a component
 
-The output is checked in under [`examples/generated`](./examples/generated) so the MVP
-can be inspected without running a framework project.
-
-## Author a component
-
-An MVP component is ordinary HTML: a `<template component>` carrier holding an optional
-`<props>` interface, one native template root, and optional CSS. Only what markup cannot
-already say is declared: a prop's type, default, requiredness, and description. Its
-target is inferred from where it is bound (`:attribute` or `.property`), and the native
-root is the template's own root element:
+The carrier declares the public interface, its optional controller, and one semantic
+root. The controller is an ordinary ES module with a default export; it is part of the
+component dependency graph, not a registration script.
 
 ```html
-<template component="x-button" status="early" summary="A themed native button.">
-  <props>
-    <prop name="variant" type="outline | solid | ghost" default="outline">Visual treatment.</prop>
-  </props>
+<template component="x-counter" controller="./counter.js"
+  status="early" summary="A native counter button.">
+  <defs>
+    <prop name="start" type="number" default="0">Initial count.</prop>
+    <state name="count" :value="start"></state>
+    <computed name="label" :value="format('Count: {0}', count)"></computed>
+  </defs>
 
-  <button data-x-button :data-variant="variant">
-    <slot></slot>
+  <button $ref="button" type="button">
+    <span $value="label"></span>
   </button>
 
   <style>
-    button[data-x-button] {
-      all: revert;
-      box-sizing: border-box;
-      display: inline-flex;
-    }
+    button { font: inherit; }
+    button:invalid { outline: 2px solid red; }
   </style>
 </template>
 ```
 
-The `<prop>` type grammar borrows from existing platform languages: scalar keywords
-(`string`, `number`, `boolean`) echo the CSS Values and Units data types `<number>` and
-`<string>`; the enum bar (`outline | solid | ghost`) is that spec's value-definition-syntax
-"exactly one of" combinator; `default` follows XML Schema's `default` attribute and
-`required` follows the HTML boolean attribute of the same name.
-
-The carrier is a native **inert** `<template>`: today's browsers parse it but neither
-render nor execute it, so a definition degrades to inert markup now and could be consumed
-natively if the shape were standardized: the path Declarative Shadow DOM took with
-`<template shadowrootmode>`. Inertness is the transition guarantee, not the end state.
-
-The converter reads that declaration directly into its internal representation. It does not
-emit a second, detached contract file; the HTML definition remains the single source of truth.
-
-Build one or more sources with:
-
-```sh
-npx html-next build components/button.html --out-dir generated
+```js
+// counter.js
+export default function controller(host) {
+  const increment = () => { host.state.count += 1; };
+  host.refs.button.addEventListener("click", increment);
+  return () => host.refs.button.removeEventListener("click", increment);
+}
 ```
 
-Until the package is published, run the source CLI from this checkout:
+Definitions may also use declarative handlers, structural directives, two-way bindings,
+named and data-derived slots, typed data sources, enhanced forms, and generalized
+validation. See the [specification modules](./docs/spec/index.md) for the complete syntax.
 
-```sh
-npx tsx src/cli.ts build components/button.html --out-dir generated
-```
+## Run a live component graph
 
-## Generated artifacts
-
-For the example above, one compiler call produces:
-
-| Output | Purpose |
-| --- | --- |
-| `vanilla/XButton.js` and `.d.ts` | Native DOM factory and public types |
-| `react/XButton.tsx` | React 19 component with native button props and direct `ref` |
-| `vue/XButton.vue` | Vue 3.5 SFC with typed props and controlled fallthrough attributes |
-| `svelte/XButton.svelte` | Svelte 5 runes component with native element props |
-| `styles/x-button.css` | Ordinary shared CSS against the native DOM |
-| `docs/x-button.md` | Generated consumer API page with release status |
-| `html.manifest.json` | Deterministic build inventory |
-
-Every framework projection renders the same native root. The component remains a real
-`<button>` with native form, focus, event, and accessibility behavior; there is no
-`<ui-button><button>…</button></ui-button>` wrapper.
-
-## Direct browser execution
-
-The browser runtime is an explicit one-shot interpreter for the same definition format.
-The `<template component>` carrier is inert, so no `display: none` is needed to hide it:
+The application chooses the trusted root entry. Each definition declares its relative
+component and controller dependencies, and the public browser loader follows that graph:
 
 ```html
-<!-- Include a <template component> definition, then invoke it. -->
-<x-button variant="solid">Save changes</x-button>
+<script type="importmap">
+{
+  "imports": {
+    "@example/components/": "https://cdn.example/components/"
+  }
+}
+</script>
+<link rel="component" href="@example/components/app.html">
+<x-app></x-app>
 
 <script type="module">
-  import { lowerDocument } from "./dist/runtime.js";
-  lowerDocument();
+  import { startBrowserComponents } from "@nextwebwg/html/browser-loader";
+  await startBrowserComponents();
 </script>
 ```
 
-`lowerDocument()` validates every definition and invocation before it changes the live
-document. It then replaces invocation hosts with native roots, passes through standard
-attributes, moves children into the default slot, and removes definition carriers. A
-failed pass leaves the source DOM available for correction and retry. The MVP does not
-observe later mutations; reactive browser execution is coming soon.
+For a live URL, the application's direct mapping is the trust decision. Relative HTML
+and controller edges must stay inside its canonical component root. Definitions are
+parsed as inert data and cannot add import maps, scripts, base URLs, or policy metadata.
+Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern
+their module graph, but ESM is not a sandbox.
 
-The runtime does not register Custom Elements. HTML Next language nodes and component
-invocations are input syntax that can be lowered to semantic native DOM.
+`startBrowserComponents()` observes the document. Definitions and component instances
+added later are registered and lowered, and reconnect/disconnect cleanup is balanced.
+Applications can call the lower-level loader and runtime APIs when they need explicit
+lifecycle control.
 
-## Property-name normalization
+The runnable [live graph example](./examples/poc/README.md) uses this public API; it no
+longer carries a separate demonstration runtime.
 
-HTML parsers lowercase attribute names, but DOM properties are case-sensitive. HTML Next
-generates a static platform manifest at library build time from pinned DOM declarations:
+## Inspect and build a graph
 
-```text
-authored .innerHTML → parsed .innerhtml → lookup key innerhtml → DOM property innerHTML
-```
-
-The runtime ships the generated lowercase-to-canonical maps. It does not inspect element
-prototype chains during normal execution. Both compiled and browser paths use the same
-lookup algorithm, and generation rejects case-insensitive collisions.
-
-Refresh and verify this data with:
+The CLI reads component HTML and static ESM imports without executing controllers:
 
 ```sh
-npm run generate:dom
-npm run check:generated
+html-next check components/app.html
+html-next inspect components/app.html
+html-next build components/app.html --out-dir generated
+html-next build components/app.html --out-dir generated --target vue --target styles
 ```
 
-## What the MVP supports
+Until the package is published, substitute `npx tsx src/cli.ts` for `html-next`.
+`inspect` reports component, controller, schema, and transitive module edges. `build`
+follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
+which is a build inventory—not a second component contract.
 
-- one component per HTML source file;
-- a declarative `<props>` interface with types inferred to a normalized contract;
-- string, boolean, number, and string-enum props;
-- prop defaults and required props;
-- a single native template root, inferred as the contract's native element;
-- prop targets inferred from `:attribute` and `.property` bindings;
-- literal attributes, `:attribute` bindings, and `.property` bindings;
-- one default slot;
-- native attribute pass-through;
-- deterministic framework, CSS, contract, and documentation output; and
-- one-shot browser lowering.
+Generated targets preserve the definition's native root; they do not add a component
+wrapper. The checked-in [button output](./examples/generated) demonstrates each target.
 
-## Coming soon
+## Migrate a Stencil package
 
-The intended language also includes:
+```sh
+html-next migrate stencil ../component-library --out-dir migration
+```
 
-- `<if>`, `<else-if>`, `<else>`, `<for>`, and explicit `<with>` scope;
-- `<value of="expression"></value>` rather than text interpolation;
-- `<state>`, `<computed>`, and declarative `<data>` sources;
-- `bind:name` two-way bindings;
-- a small pure expression language with no ambient JavaScript globals;
-- typed filters, richer web-native types, and typed content models;
-- component imports, named slots, composition, and behavior controllers;
-- reactive browser updates, SSR, and hydration; and
-- additional targets and restricted static output.
+Migration extracts public props, events, methods, slots, capabilities, and component CSS.
+It emits review-required HTML scaffolds and explicit diagnostics for behavior that needs
+a controller. It never labels arbitrary TypeScript behavior as automatically converted.
 
-Unsupported reserved syntax fails explicitly in the MVP; it is not silently emitted as
-literal HTML. The same is true for inline event-handler/framework-directive attributes
-and dynamic HTML-bearing property sinks, which need a future typed security contract.
+The checked-in [Looma corpus](./examples/looma) is the full reference workload: all 34
+public core components have reviewed definitions and behavioral tests, nine layout
+definitions are included, published CSS/theme/editor assets are preserved, and the
+package assembler emits Looma's current root, Vue, editor, extension, validation, layout,
+and CSS entry points. Knit-shaped SSR/hydration and LoadOps-shaped direct-registration
+consumers exercise the generated package.
 
-## Specification, architecture, and design record
+## Types and validation
 
-This repository owns the implementation-pinned normative modules used by its conformance
-suite:
+HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.
+It covers scalar, keyword, collection, structured, nullable, web-value, callback, opaque,
+and trusted-content forms, including source diagnostics and TypeScript projections.
+
+Validation reuses native controls and the Constraint Validation API whenever the browser
+provides them—including email, URL, number, date/time, range, length, pattern, required,
+and step behavior. Managed ordinary elements receive the same validity shape and invalid
+events. Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the
+runtime and generated CSS carry the compatibility rewrite for browsers that cannot apply
+those pseudo-classes to arbitrary elements.
+
+## Package and framework output
+
+The package assembler emits:
+
+- side-effect registration and concrete component HTML;
+- Vanilla, React, Vue, and Svelte components with native roots;
+- typed props, events, slots, property-only values, and exposed methods;
+- scoped component CSS and provenance markers;
+- controller and dependency graphs preserved as static modules; and
+- explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.
+
+Installed packages resolve through normal package exports and can be bundled without a
+browser import map. Live URLs and installed packages use the same component definitions;
+only application resolution and trust differ.
+
+## Repository map
 
 - [Reference specification](./docs/spec/index.md)
-- [Machine-readable support profile](./docs/spec/support.json)
-- [Style-scoping implementation note](./docs/style-scoping.md)
+- [Support profile](./docs/spec/support.json)
+- [Conformance corpus](./test/conformance/README.md)
+- [Style-scoping note](./docs/style-scoping.md)
+- [Looma migration corpus](./examples/looma)
+- [Historical component-generation plan](./docs/mvp-plan.md)
 
-The Next Web Working Group site publishes the Working Draft, explanations, examples, and
-design record at [`nextwebwg/site`](https://github.com/nextwebwg/site). Those pages motivate
-the proposal; this repository's spec fixes the exact behavior implemented by a release.
-
-- [HTML Next Working Draft](https://nextwebwg.org/html-next/)
-- [Components](https://nextwebwg.org/html-next/components)
-- [Types](https://nextwebwg.org/html-next/types)
-- [Validation](https://nextwebwg.org/html-next/validation)
-- [Security](https://nextwebwg.org/html-next/security)
-
-The [component-generation MVP plan](./docs/mvp-plan.md) remains as historical context. It is
-not the current language contract.
-
-## Library independence
-
-HTML Next is library-agnostic. Any demanding component library can become a conformance
-corpus for the generator while continuing to publish ordinary generated packages, and
-its consumers never have to adopt the experimental browser runtime.
-
-The `x-button` example uses a neutral native contract shape: semantic native elements, a
-`data-x-button` owned-element marker, and plain `data-variant`/`data-size` state
-attributes. It proves the generation architecture, not any particular design system.
+The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
+motivates the proposal. This repository remains library-agnostic: Looma is its demanding
+conformance corpus, not a source of language-specific rules.

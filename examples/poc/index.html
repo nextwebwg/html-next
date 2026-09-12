@@ -7,7 +7,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'sha256-Z1aGgHX6O7GnpgR/1kZah43Up7AyTnxkxxltoBQOefk='; style-src 'unsafe-inline'"
     />
-    <title>HTML Next — proof of concept</title>
+    <title>HTML Next — live component graph</title>
     <style>
       body { font: 16px/1.5 system-ui, sans-serif; margin: 2rem; color: #14181f; }
       button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
@@ -29,11 +29,7 @@
 
     <x-app title="HTML Next POC"></x-app>
 
-    <!-- The runtime: one ES module. -->
-    <script
-      type="module"
-      src="./poc.js"
-      integrity="sha384-W0j075C59Gkil+WjtzA9XbSkFNHIkbeBrWQHghKttHfDiqIk1XTRjtI5nvrUstZx"
-    ></script>
+    <!-- The example entry imports the public reference browser loader. -->
+    <script type="module" src="./poc.js"></script>
   </body>
 </html>

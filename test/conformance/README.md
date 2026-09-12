@@ -22,7 +22,7 @@ Components/props/slots, `:attr` and `bind:` bindings and attribute serialization
 `on:`/`on:connect`/`on:disconnect`, `$value`/`$html` output (including `$html` sanitization),
 value semantics (typed equality, numeric-only arithmetic, boolean `and`/`or`, truthiness, absent
 fault tolerance), control flow (`$if`, `$each` with `$where`/`$sort`/`$limit`/`loop`,
-`$match`/`$when`/`$else`, `$with`, structural `<template>`), one-shot reactive declarations
+`$match`/`$when`/`$else`, `$with`, structural `<template>`), live reactive declarations
 (`state`/`computed`/`data`), and a representative set of diagnostics using the real stable codes
 from `src/runtime.ts`.
 

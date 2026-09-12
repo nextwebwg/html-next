@@ -696,7 +696,7 @@ function parseElement(
   },
 ): ElementNode {
   if (isReservedElement(element.tagName)) {
-    fail("HT009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
+    fail("HT009", `<${element.tagName}> is reserved but not supported by this profile.`, source);
   }
   validateDefinitionElementName(element.tagName, source);
 

@@ -71,7 +71,7 @@ export function validateSimplePropExpression(
   source: string,
 ): string {
   if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(expression) || contract.props[expression] === undefined) {
-    fail("HT003", `\`${expression}\` is not a declared MVP prop expression.`, source);
+    fail("HT003", `\`${expression}\` is not a declared component expression.`, source);
   }
   return expression;
 }
@@ -88,7 +88,7 @@ export function validateLiteralAttributeName(
   ) {
     fail(
       "HT010",
-      `Literal attribute \`${name}\` uses target-framework directive syntax that is not supported by the MVP.`,
+      `Literal attribute \`${name}\` uses target-framework directive syntax that is not supported.`,
       source,
     );
   }
