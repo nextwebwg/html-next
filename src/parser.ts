@@ -6,6 +6,7 @@ import {
 
 import { coerceDefault, defineContract, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
+import { compileExpression } from "./expression.js";
 import {
   isReservedElement,
   validateLiteralAttributeName,
@@ -15,7 +16,9 @@ import {
 import { resolveDomProperty } from "./platform.js";
 import type {
   ComponentDefinition,
+  ComponentDeclaration,
   ElementNode,
+  SlotContract,
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
@@ -92,6 +95,7 @@ function readProps(
   group: Element | undefined,
   targets: Record<string, PropTarget>,
   source: string,
+  requireBinding = true,
 ): Record<string, unknown> {
   const props: Record<string, unknown> = {};
   if (group === undefined) return props;
@@ -104,10 +108,11 @@ function readProps(
     if (typeAttribute === undefined || typeAttribute === "") {
       fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
     }
-    const target = targets[name];
-    if (target === undefined) {
+    let target = targets[name];
+    if (target === undefined && requireBinding) {
       fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
     }
+    target ??= { attribute: name.toLowerCase() };
     const type = parseTypeAttribute(typeAttribute);
     const spec: Record<string, unknown> = { type, target, description: textContent(element).trim() };
     if (element.attrs.some((item) => item.name === "required")) spec.required = true;
@@ -116,6 +121,80 @@ function readProps(
     props[name] = spec;
   }
   return props;
+}
+
+function compileDeclarationExpression(value: string, source: string) {
+  try {
+    return compileExpression(value);
+  } catch {
+    fail("HT013", `Malformed expression \`${value}\`.`, source);
+  }
+}
+
+function readDeclarations(group: Element | undefined, source: string): ComponentDeclaration[] {
+  if (group === undefined) return [];
+  const declarations: ComponentDeclaration[] = [];
+  const names = new Set<string>();
+  for (const element of group.childNodes.filter(isElement)) {
+    const kind = element.tagName;
+    if (kind === "prop") {
+      const name = attr(element, "name") ?? "";
+      if (name !== "" && names.has(name)) {
+        fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
+      }
+      if (name !== "") names.add(name);
+      continue;
+    }
+    if (!new Set(["state", "computed", "data", "handler", "event", "method"]).has(kind)) {
+      fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
+    }
+    const name = attr(element, "name") ?? "";
+    if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
+    if (names.has(name)) {
+      fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
+    }
+    names.add(name);
+
+    if (kind === "state" || kind === "computed") {
+      const raw = kind === "state" ? attr(element, ":value") : attr(element, "from");
+      if (kind === "computed" && (raw === undefined || raw === "")) {
+        fail("HC013", `<computed name="${name}"> requires a \`from\` expression.`, source);
+      }
+      declarations.push({
+        kind,
+        name,
+        ...(raw === undefined ? {} : { expression: compileDeclarationExpression(raw, source) }),
+      });
+      continue;
+    }
+    if (kind === "data") {
+      const dataSource = attr(element, "src");
+      declarations.push({ kind, name, ...(dataSource === undefined ? {} : { source: dataSource }) });
+      continue;
+    }
+    if (kind === "event") {
+      declarations.push({
+        kind,
+        name,
+        type: attr(element, "type") ?? "object",
+        bubbles: attr(element, "bubbles") !== "false",
+        composed: attr(element, "composed") !== "false",
+        cancelable: attr(element, "cancelable") === "true",
+      });
+      continue;
+    }
+    if (kind === "method") {
+      declarations.push({
+        kind,
+        name,
+        exportName: attr(element, "export") ?? name,
+        returns: attr(element, "returns") ?? "undefined",
+      });
+      continue;
+    }
+    declarations.push({ kind: "handler", name, source: textContent(element).trim() });
+  }
+  return declarations;
 }
 
 function parseAttributes(
@@ -162,7 +241,7 @@ function parseElement(
   element: Element,
   contract: ComponentContract,
   source: string,
-  slotCount: { value: number },
+  slotState: { defaults: number; names: Set<string>; contracts: SlotContract[] },
 ): ElementNode {
   if (isReservedElement(element.tagName)) {
     fail("HT009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
@@ -178,14 +257,53 @@ function parseElement(
     }
     if (!isElement(child)) continue;
     if (child.tagName === "slot") {
-      slotCount.value += 1;
-      if (slotCount.value > 1 || child.attrs.length > 0 || significant(child.childNodes).length > 0) {
-        fail("HT008", "The MVP supports exactly one empty default slot.", source);
+      const name = attr(child, "name");
+      const nameExpression = attr(child, ":name");
+      if (name !== undefined && nameExpression !== undefined) {
+        fail("HT008", "A slot cannot declare both `name` and `:name`.", source);
       }
-      children.push({ kind: "slot" });
+      const unknown = child.attrs.filter((item) => item.name !== "name" && item.name !== ":name");
+      if (unknown.length > 0) fail("HT008", "A slot has an unsupported attribute.", source);
+      if (name === undefined && nameExpression === undefined) {
+        slotState.defaults += 1;
+        if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
+      }
+      if (name !== undefined) {
+        if (name === "" || slotState.names.has(name)) {
+          fail("HT008", `Slot name \`${name}\` is empty or duplicated.`, source);
+        }
+        slotState.names.add(name);
+      }
+      const fallback: TemplateNode[] = [];
+      for (const fallbackNode of child.childNodes) {
+        if (fallbackNode.nodeName === "#comment") continue;
+        if (isText(fallbackNode)) {
+          if (fallbackNode.value.trim() !== "") fallback.push({ kind: "text", value: fallbackNode.value });
+        } else if (isElement(fallbackNode)) {
+          fallback.push(parseElement(fallbackNode, contract, source, slotState));
+        }
+      }
+      const dynamic = nameExpression !== undefined;
+      slotState.contracts.push({
+        ...(name === undefined ? {} : { name }),
+        dynamic,
+        required: fallback.length === 0,
+      });
+      if (name === undefined && nameExpression === undefined && fallback.length === 0) {
+        children.push({ kind: "slot" });
+      } else {
+        children.push({
+          kind: "slot",
+          ...(name === undefined ? {} : { name }),
+          ...(nameExpression === undefined
+            ? {}
+            : { nameExpression: compileDeclarationExpression(nameExpression, source) }),
+          fallback: Object.freeze(fallback),
+        });
+      }
       continue;
     }
-    children.push(parseElement(child, contract, source, slotCount));
+    children.push(parseElement(child, contract, source, slotState));
   }
 
   if (
@@ -229,13 +347,14 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
   const contentElement = (name: string): Element[] =>
     content.filter((node): node is Element => isElement(node) && node.tagName === name);
   const propGroups = contentElement("props");
+  const defGroups = contentElement("defs");
   const styles = contentElement("style");
-  if (propGroups.length > 1 || styles.length > 1) {
-    fail("HS002", "A component has an optional <props> group, one markup root, and an optional <style>.", source);
+  if (propGroups.length + defGroups.length > 1 || styles.length > 1) {
+    fail("HS002", "A component has one optional declaration group, one markup root, and one optional <style>.", source);
   }
 
   // Everything that is not the props group or a style is the component markup.
-  const known = new Set<Element>([...propGroups, ...styles]);
+  const known = new Set<Element>([...propGroups, ...defGroups, ...styles]);
   const markup = significant(content).filter((node) => !known.has(node as Element));
   if (markup.length !== 1 || !isElement(markup[0]!)) {
     fail("HT001", "A component's markup must be exactly one element root.", source);
@@ -247,17 +366,23 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
     status: attr(wrapper, "status"),
     summary: attr(wrapper, "summary"),
     nativeElement: root.tagName,
-    props: readProps(propGroups[0], targets, source),
+    props: readProps(propGroups[0] ?? defGroups[0], targets, source, defGroups.length === 0),
   };
   const contract = defineContract(rawContract, { source, tag });
 
-  const slotCount = { value: 0 };
-  const template = parseElement(root, contract, source, slotCount);
+  const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[] };
+  const template = parseElement(root, contract, source, slotState);
+  const declarations = readDeclarations(defGroups[0], source);
+  const controller = attr(wrapper, "controller");
+  if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 
   return Object.freeze({
     source: Object.freeze({ file: source }),
     contract,
     template,
     css: styles.length === 0 ? "" : textContent(styles[0]!).trim(),
+    ...(controller === undefined ? {} : { controller }),
+    declarations: Object.freeze(declarations),
+    slots: Object.freeze(slotState.contracts),
   });
 }

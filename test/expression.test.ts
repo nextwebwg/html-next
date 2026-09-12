@@ -4,13 +4,44 @@ import { describe, it } from "node:test";
 import {
   ABSENT,
   UndeclaredName,
+  compileExpression,
   evaluate,
+  getWritablePath,
   toAttribute,
   toText,
   truthy,
   type Scope,
   type Value,
 } from "../src/expression.js";
+
+describe("expression: compilation", () => {
+  it("exposes a serializable AST and normalized static dependencies", () => {
+    const compiled = compileExpression(
+      "cart.items[0].name = selected.name and flags[mode]",
+    );
+
+    assert.equal(compiled.ast.kind, "binary");
+    assert.deepEqual(compiled.dependencies, [
+      "cart.items.0.name",
+      "flags",
+      "mode",
+      "selected.name",
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(compiled.ast)), compiled.ast);
+  });
+
+  it("accepts only state-rooted static paths as writable bindings", () => {
+    assert.deepEqual(getWritablePath("form.contacts[0].email", new Set(["form"])), [
+      "form",
+      "contacts",
+      0,
+      "email",
+    ]);
+    assert.equal(getWritablePath("props.value", new Set(["form"])), undefined);
+    assert.equal(getWritablePath("form.contacts[index]", new Set(["form"])), undefined);
+    assert.equal(getWritablePath("form.total + 1", new Set(["form"])), undefined);
+  });
+});
 
 function scope(entries: Record<string, Value>): Scope {
   return new Map(Object.entries(entries));

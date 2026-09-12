@@ -39,16 +39,26 @@ export class UndeclaredName extends Error {
 // AST
 // ---------------------------------------------------------------------------
 
-type Node =
+export type ExpressionNode =
   | { kind: "literal"; value: Value }
   | { kind: "id"; name: string }
-  | { kind: "member"; object: Node; key: string }
-  | { kind: "index"; object: Node; index: Node }
-  | { kind: "unary"; op: "not" | "-"; operand: Node }
-  | { kind: "binary"; op: string; left: Node; right: Node }
-  | { kind: "call"; fn: string; args: Node[] }
-  | { kind: "object"; pairs: { key: string; value: Node }[] }
-  | { kind: "array"; items: Node[] };
+  | { kind: "member"; object: ExpressionNode; key: string }
+  | { kind: "index"; object: ExpressionNode; index: ExpressionNode }
+  | { kind: "unary"; op: "not" | "-"; operand: ExpressionNode }
+  | { kind: "binary"; op: string; left: ExpressionNode; right: ExpressionNode }
+  | { kind: "call"; fn: string; args: ExpressionNode[] }
+  | { kind: "object"; pairs: { key: string; value: ExpressionNode }[] }
+  | { kind: "array"; items: ExpressionNode[] };
+
+type Node = ExpressionNode;
+
+export interface CompiledExpression {
+  readonly source: string;
+  readonly ast: ExpressionNode;
+  readonly dependencies: readonly string[];
+}
+
+export type WritablePath = readonly (string | number)[];
 
 const FUNCTIONS = new Set(["round", "clamp", "min", "max", "abs"]);
 
@@ -419,9 +429,86 @@ function compile(src: string): Node {
   return node;
 }
 
+function staticPath(node: ExpressionNode): (string | number)[] | undefined {
+  if (node.kind === "id") return [node.name];
+  if (node.kind === "member") {
+    const object = staticPath(node.object);
+    return object === undefined ? undefined : [...object, node.key];
+  }
+  if (node.kind === "index") {
+    const object = staticPath(node.object);
+    if (object === undefined || node.index.kind !== "literal") return undefined;
+    const key = node.index.value;
+    return typeof key === "string" || typeof key === "number"
+      ? [...object, key]
+      : undefined;
+  }
+  return undefined;
+}
+
+function collectDependencies(node: ExpressionNode, dependencies: Set<string>): void {
+  const path = staticPath(node);
+  if (path !== undefined) {
+    dependencies.add(path.join("."));
+    return;
+  }
+
+  switch (node.kind) {
+    case "literal":
+      return;
+    case "id":
+      dependencies.add(node.name);
+      return;
+    case "member":
+      collectDependencies(node.object, dependencies);
+      return;
+    case "index":
+      collectDependencies(node.object, dependencies);
+      collectDependencies(node.index, dependencies);
+      return;
+    case "unary":
+      collectDependencies(node.operand, dependencies);
+      return;
+    case "binary":
+      collectDependencies(node.left, dependencies);
+      collectDependencies(node.right, dependencies);
+      return;
+    case "call":
+      for (const argument of node.args) collectDependencies(argument, dependencies);
+      return;
+    case "object":
+      for (const pair of node.pairs) collectDependencies(pair.value, dependencies);
+      return;
+    case "array":
+      for (const item of node.items) collectDependencies(item, dependencies);
+  }
+}
+
+/** Compile an expression once for parsers, runtimes, and target generators. */
+export function compileExpression(source: string): CompiledExpression {
+  const ast = compile(source);
+  const dependencies = new Set<string>();
+  collectDependencies(ast, dependencies);
+  return Object.freeze({
+    source,
+    ast,
+    dependencies: Object.freeze([...dependencies].sort()),
+  });
+}
+
+/** Return a static writable path only when it is rooted in declared writable state. */
+export function getWritablePath(
+  source: string,
+  writableRoots: ReadonlySet<string>,
+): WritablePath | undefined {
+  const path = staticPath(compile(source));
+  if (path === undefined || !writableRoots.has(String(path[0]))) return undefined;
+  return Object.freeze(path);
+}
+
 /** Parse-check an expression (syntax only). Throws SyntaxError on malformed input. */
 export function checkExpression(src: string): void {
-  compile(src);
+  compileExpression(src);
 }
 
 /** Evaluate an expression against a scope. Throws only UndeclaredName (a compile error). */

@@ -27,6 +27,49 @@ function componentSource(
 }
 
 describe("parseComponent", () => {
+  it("normalizes the full component interface and named slot shapes", () => {
+    const definition = parseComponent(
+      `<template component="ui-combobox" status="early" summary="A composed field." controller="./combobox.js">` +
+        `<defs>` +
+        `<prop name="config" type="string">Property-only configuration.</prop>` +
+        `<state name="query" :value="''"></state>` +
+        `<computed name="empty" from="not query"></computed>` +
+        `<event name="value-change" type="string"></event>` +
+        `<method name="validate" returns="string" export="validate"></method>` +
+        `</defs>` +
+        `<div><slot name="start"><span>Start</span></slot><slot :name="query"></slot></div>` +
+        `</template>`,
+      "combobox.html",
+    );
+
+    assert.equal(definition.controller, "./combobox.js");
+    assert.deepEqual(definition.declarations!.map(({ kind, name }) => [kind, name]), [
+      ["state", "query"],
+      ["computed", "empty"],
+      ["event", "value-change"],
+      ["method", "validate"],
+    ]);
+    const state = definition.declarations![0];
+    const computed = definition.declarations![1];
+    assert.ok(state?.kind === "state");
+    assert.ok(computed?.kind === "computed");
+    assert.deepEqual(state.expression?.dependencies, []);
+    assert.deepEqual(computed.expression?.dependencies, ["query"]);
+    assert.deepEqual(definition.slots!.map(({ name, dynamic, required }) => ({ name, dynamic, required })), [
+      { name: "start", dynamic: false, required: false },
+      { name: undefined, dynamic: true, required: true },
+    ]);
+  });
+
+  it("rejects declaration collisions across the flat component scope", () => {
+    expectDiagnostic(
+      "HC020",
+      `<template component="demo-example" status="early" summary="Collision.">` +
+        `<defs><prop name="value" type="string">Value.</prop><state name="value"></state></defs>` +
+        `<button :data-value="value"></button></template>`,
+    );
+  });
+
   it("parses a primitive into normalized IR", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const definition = parseComponent(source, "x-button.html");

@@ -1,10 +1,61 @@
 import type { ComponentContract } from "./types.js";
+import type { CompiledExpression } from "./expression.js";
 
 export interface ComponentDefinition {
   readonly source: { readonly file: string };
   readonly contract: ComponentContract;
   readonly template: ElementNode;
   readonly css: string;
+  readonly controller?: string;
+  readonly declarations?: readonly ComponentDeclaration[];
+  readonly slots?: readonly SlotContract[];
+}
+
+export type ComponentDeclaration =
+  | ReactiveDeclaration
+  | EventDeclaration
+  | MethodDeclaration
+  | HandlerDeclaration
+  | DataDeclaration;
+
+export interface ReactiveDeclaration {
+  readonly kind: "state" | "computed";
+  readonly name: string;
+  readonly expression?: CompiledExpression;
+}
+
+export interface DataDeclaration {
+  readonly kind: "data";
+  readonly name: string;
+  readonly source?: string;
+}
+
+export interface EventDeclaration {
+  readonly kind: "event";
+  readonly name: string;
+  readonly type: string;
+  readonly bubbles: boolean;
+  readonly composed: boolean;
+  readonly cancelable: boolean;
+}
+
+export interface MethodDeclaration {
+  readonly kind: "method";
+  readonly name: string;
+  readonly exportName: string;
+  readonly returns: string;
+}
+
+export interface HandlerDeclaration {
+  readonly kind: "handler";
+  readonly name: string;
+  readonly source: string;
+}
+
+export interface SlotContract {
+  readonly name?: string;
+  readonly dynamic: boolean;
+  readonly required: boolean;
 }
 
 export type TemplateNode = ElementNode | TextNode | SlotNode;
@@ -42,6 +93,9 @@ export interface TextNode {
 
 export interface SlotNode {
   readonly kind: "slot";
+  readonly name?: string;
+  readonly nameExpression?: CompiledExpression;
+  readonly fallback?: readonly TemplateNode[];
 }
 
 export type TemplateAttribute =
@@ -75,4 +129,3 @@ export interface PropertyBinding {
   readonly name: string;
   readonly expression: string;
 }
-
