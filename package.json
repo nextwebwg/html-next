@@ -26,7 +26,7 @@
     "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
     "generate:looma-assets": "tsx scripts/generate-looma-assets.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
-    "check:generated": "tsx scripts/generate-dom-properties.ts --check",
+    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/generate-looma-scaffolds.ts --check",
     "check:spec": "node --import tsx --test test/spec.test.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "test:browser": "HTMLNEXT_BROWSER_TEST=1 node --import tsx --test test/runtime.test.ts test/validity.test.ts",
