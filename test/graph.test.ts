@@ -77,6 +77,34 @@ describe("component graph", () => {
     assert.equal(graph.nodes.get(`${root}b.html`)?.shadowedByCustomElement, true);
   });
 
+  it("records external schemas as inert, trust-bounded resource edges", async () => {
+    const fixtures = fetcher({
+      [`${root}profile.html`]:
+        `<template component="x-profile" status="early" summary="Profile.">` +
+        `<defs><data name="profile" src="./profile.json" schema="./profile.schema.json"></data></defs>` +
+        `<output $value="profile.pending"></output></template>`,
+    });
+    const graph = await buildComponentGraph(["@ui/profile.html"], {
+      resolver: resolver(),
+      fetchComponent: fixtures.fetchComponent,
+    });
+    assert.deepEqual(graph.nodes.get(`${root}profile.html`)?.resources, [{
+      kind: "schema",
+      specifier: "./profile.schema.json",
+      url: `${root}profile.schema.json`,
+    }]);
+
+    await expectDiagnostic("HL003", () => buildComponentGraph(["@ui/profile.html"], {
+      resolver: resolver(),
+      fetchComponent: fetcher({
+        [`${root}profile.html`]:
+          `<template component="x-profile" status="early" summary="Profile.">` +
+          `<defs><data name="profile" schema="../escape.schema.json"></data></defs>` +
+          `<output $value="profile.pending"></output></template>`,
+      }).fetchComponent,
+    }));
+  });
+
   it("rejects trust-root escapes before registration", async () => {
     await expectDiagnostic("HL003", () => buildComponentGraph(["@ui/app.html"], {
       resolver: resolver(),

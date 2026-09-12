@@ -19,6 +19,7 @@ export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
 export { clearControllerCache, loadController } from "./controller.js";
 export { buildFormRequest, enhanceForm } from "./forms.js";
+export { validateJsonSchema, type JsonSchema } from "./json-schema.js";
 export { DataResource, DataValidationError } from "./data.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 export type * from "./graph.js";

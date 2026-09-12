@@ -296,6 +296,9 @@ function readInvocation(
       ...(data.schema === undefined || /^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(data.schema)
         ? {}
         : { schema: data.schema }),
+      ...(data.schema !== undefined && /^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(data.schema)
+        ? { schemaURL: new URL(data.schema, definitionBase).href }
+        : {}),
       ...(data.debounce === undefined ? {} : { debounce: Number(data.debounce) }),
       ...(data.poll === undefined ? {} : { poll: Number(data.poll) }),
       onState: (state) => scope.set(data.name, state as unknown as Value),

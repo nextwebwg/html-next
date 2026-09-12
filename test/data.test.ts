@@ -81,4 +81,43 @@ describe("declared data resource", () => {
       "$.email", "$.age",
     ]);
   });
+
+  it("fetches and caches an external JSON Schema before publishing data", async () => {
+    const states: DataState[] = [];
+    const requests: string[] = [];
+    const resource = new DataResource({
+      source: "/profile",
+      baseURL: "https://api.example/",
+      schemaURL: "https://api.example/schemas/profile.json",
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.endsWith("profile.json")) {
+          return new Response(JSON.stringify({
+            type: "object",
+            required: ["email", "roles"],
+            properties: {
+              email: { type: "string", format: "email" },
+              roles: { type: "array", minItems: 1, items: { type: "string" } },
+            },
+            additionalProperties: false,
+          }));
+        }
+        return new Response(JSON.stringify({ email: "not-an-email", roles: [] }));
+      },
+      onState: (state) => states.push(state),
+    });
+    resource.update({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const first = states.at(-1)!;
+    assert.equal(first.ok, false);
+    assert.ok(first.error instanceof DataValidationError);
+    assert.deepEqual((first.error as DataValidationError).issues.map((item) => item.path), [
+      "$.email", "$.roles",
+    ]);
+
+    resource.update({ retry: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(requests.filter((url) => url.endsWith("profile.json")).length, 1);
+  });
 });

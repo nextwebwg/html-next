@@ -120,6 +120,29 @@ Paths begin at `$`, use `.name` for identifier keys, bracketed JSON strings for 
 zero-based brackets for list positions. For example, a bad second tag and absent account email
 produce `$.tags[1]` and `$.account.email`. Paths are stable across runtimes and generated targets.
 
+## External JSON Schema
+
+A `data` declaration may use `schema="<URL>"` instead of an inline HTML Next type expression.
+The URL is a statically discoverable dependency resolved relative to the component definition.
+The fetched resource must be a JSON boolean or object schema. It is cached after a successful
+load, applied before response data becomes observable, and reports `schemaMismatch` issues using
+the same paths as HTML Next structured types.
+
+The implemented baseline is the deterministic validation subset needed at component boundaries:
+`type`, `enum`, `const`, local JSON-Pointer `$ref`, `$defs`, `allOf`, `anyOf`, `oneOf`, `not`,
+`required`, `properties`, `additionalProperties`, `items`, string length and pattern, `email` and
+absolute-URL formats, numeric bounds and multiples, and array length and uniqueness. Annotation,
+vocabulary negotiation, remote `$ref`, unevaluated-member keywords, conditional schemas, and
+schema-driven mutation are not accepted as implied behavior. A tool must report those as outside
+the supported profile rather than claiming full JSON Schema conformance.
+
+```html conforming
+<data name="profile" src="/api/me" schema="./profile.schema.json"></data>
+```
+
+Expected outcome: the schema URL is visible in the component graph, fetched as inert JSON, and a
+response becomes `profile.value` only after it passes the supported schema constraints.
+
 ## Typed result and serialization
 
 Parsing returns either `{ ok: true, value }` or `{ ok: false, issues }`. Each issue has a stable
