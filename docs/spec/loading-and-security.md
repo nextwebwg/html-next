@@ -15,6 +15,21 @@ The resolver canonicalizes and deduplicates component URLs, detects tag collisio
 
 Installed-package builds walk the same concrete HTML, controller, and static ESM edges ahead of time. They do not require a browser import map or an author-written registration manifest.
 
+## Controller module protocol
+
+The `controller` attribute binds its owning component definition to one ES module. That module's default export must be a function accepting the component host. The component tag is already known from the owning `template[component]`; a controller module does not repeat it and does not call a registration API.
+
+```js conforming
+// chart.js
+export default function controller(host) {
+  host.effect(() => renderChart(host.refs.canvas, host.state.series));
+}
+```
+
+A native implementation resolves and imports the declared module, verifies that its default export is callable, and invokes it once for each connected instance. A polyfill performs the same steps. The author-facing module therefore has no dependency on the polyfill and remains the same source when the feature is implemented by browsers. A missing or non-callable default export reports a stable controller-module diagnostic and leaves the declarative component output intact and uncontrolled.
+
+Importing a controller module is idempotent under normal ESM semantics, while invoking its default export is per instance. Ahead-of-time targets may replace the dynamic load with a static default import and pass that function to their target-specific host adapter without changing the controller source.
+
 ## Live trust policy
 
 Live cross-origin use is an application opt-in. The top-level application maps a bare prefix to a versioned HTTPS root using an ordinary import map and directly links a concrete component entry. Component HTML dependencies must resolve within that mapped prefix after URL normalization and final-response redirects.

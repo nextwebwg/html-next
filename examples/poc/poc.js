@@ -5,8 +5,8 @@
 //  - definitions use a closed declarative grammar and may declare one controller module;
 //  - importing a root component trusts its declared dependency closure; CSP, CORS, and optional
 //    integrity remain the application-wide loading controls;
-//  - controllers load lazily as ES modules on first connect and self-register with
-//    defineController(tag, fn);
+//  - controllers load lazily as ES modules on first connect; the default export is
+//    bound to the definition that declared that module;
 //  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM);
 //  - lowered roots are torn down (effects + disconnect) when removed from the DOM;
 //  - author markup is sanitized on lowering (script / on* / javascript: / srcdoc dropped;
@@ -20,23 +20,14 @@
 const registry = new Map(); // tag -> { template }
 const controllers = new Map(); // tag -> fn
 const controllerRequests = new Map(); // tag -> controller URL from template[controller]
-const importing = new Set(); // controller URLs whose import() is in flight
+const controllerModules = new Map(); // controller URL -> Promise<default controller function>
 const loaded = new Set(); // definition URLs already fetched
 const whenDefinedResolvers = new Map();
 const applicationImports = new Map(); // snapshotted from the application document
 
 // ---------------------------------------------------------------------------
-// Registry — shaped like customElements
+// Definition registry — shaped like customElements
 // ---------------------------------------------------------------------------
-
-export function defineController(tag, fn) {
-  controllers.set(tag, fn);
-  // Upgrade: run the controller on already-lowered, not-yet-controlled instances,
-  // exactly like a late customElements.define upgrades existing elements.
-  document.querySelectorAll(`[data-component]`).forEach((root) => {
-    if (root.__tag === tag && !root.__controlled) connect(root);
-  });
-}
 
 export const components = {
   define(tag, template) {
@@ -49,7 +40,6 @@ export const components = {
     (whenDefinedResolvers.get(tag) || []).forEach((r) => r());
     whenDefinedResolvers.delete(tag);
   },
-  defineController,
   get: (tag) => registry.get(tag),
   whenDefined: (tag) =>
     registry.has(tag)
@@ -393,13 +383,31 @@ function connectOrLoad(root) {
     return;
   }
   const controllerURL = controllerRequests.get(tag);
-  if (!controllerURL || importing.has(controllerURL)) return;
-  importing.add(controllerURL);
-  // The module's own defineController() call registers + upgrades this instance (and siblings).
-  import(controllerURL).catch((error) => {
-    importing.delete(controllerURL);
-    console.error(`[html-next] controller ${controllerURL} failed to load:`, error);
-  });
+  if (!controllerURL) return;
+  let request = controllerModules.get(controllerURL);
+  if (!request) {
+    request = import(controllerURL).then((module) => {
+      if (typeof module.default !== "function") {
+        throw new TypeError(
+          `[html-next] controller ${controllerURL} must have a callable default export.`,
+        );
+      }
+      return module.default;
+    });
+    controllerModules.set(controllerURL, request);
+  }
+  request
+    .then((controller) => {
+      controllers.set(tag, controller);
+      // Import is once per URL; invocation is once per connected component instance.
+      document.querySelectorAll(`[data-component]`).forEach((candidate) => {
+        if (candidate.__tag === tag && !candidate.__controlled) connect(candidate);
+      });
+    })
+    .catch((error) => {
+      controllerModules.delete(controllerURL);
+      console.error(`[html-next] controller ${controllerURL} failed to load:`, error);
+    });
 }
 
 function disposeRoot(root) {

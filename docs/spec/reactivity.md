@@ -16,6 +16,8 @@ Named handlers contain an ordered set of declarative guard, state-write, validat
 
 Controllers receive a host adapter for declared props, state, refs, named native form controls, dispatch, effects, connection, and cleanup. `connect`, `disconnect`, and adopted/hydrated lifecycle hooks use that same adapter in browser and generated targets.
 
+The controller is the default export of the ES module named by the owning `template[component]`. The platform supplies the host when the instance connects; controller source does not import a platform library or register a tag.
+
 Hydration adopts a provenance-compatible server tree. A repairable mismatch is reconciled only inside the component-authored range while projected nodes and compatible focused controls retain identity, live values, selection, and focus. When safe bounded repair cannot establish the expected structure, the server DOM remains inert, the controller does not run, and a diagnostic is reported.
 
 ## Controller host and effects

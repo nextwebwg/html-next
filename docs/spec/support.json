@@ -17,6 +17,7 @@
     { "id": "HN-REA-005", "title": "Controller host effects", "status": "required", "spec": "reactivity.md", "owner": "Controller host and effects" },
     { "id": "HN-REA-004", "title": "Declared data and enhanced forms", "status": "required", "spec": "reactivity.md", "owner": "Data and forms" },
     { "id": "HN-LOD-001", "title": "Component dependency graph", "status": "required", "spec": "loading-and-security.md", "owner": "Dependency graph" },
+    { "id": "HN-LOD-004", "title": "Controller module protocol", "status": "required", "spec": "loading-and-security.md", "owner": "Controller module protocol" },
     { "id": "HN-LOD-002", "title": "Live application trust", "status": "required", "spec": "loading-and-security.md", "owner": "Live trust policy" },
     { "id": "HN-LOD-003", "title": "Controller authority", "status": "required", "spec": "loading-and-security.md", "owner": "Controller authority" },
     { "id": "HN-SEC-001", "title": "Inert definition parsing", "status": "required", "spec": "loading-and-security.md", "owner": "Inert definitions" },

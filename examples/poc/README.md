@@ -22,16 +22,16 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
 
 - **Definitions are inert data.** `components/*.html` contain a `<template component>` and
   declarations only — no `<script>`. Fetching one executes nothing.
-- **Registration is by tag, like custom elements.** A controller `.js` module makes an
-  explicit `defineController(tag, fn)` call (shaped like `customElements.define`); markup and
-  behavior join at the tag, neither referencing the other.
+- **The definition owns the controller edge.** A controller `.js` module default-exports one
+  function. The declaring `<template component controller>` supplies the component identity,
+  so the module needs no runtime import, registration call, or repeated tag string.
 - **The graph composes.** `index.html` resolves only the entry (`x-app`) via
   `<link rel="component">`; `app.html` declares its own deps (`x-counter`, `x-chart`), which
   are loaded transitively — like an ES-module graph.
 - **Controllers are ordinary component dependencies.** A definition names its one optional
   entry module on the carrier, for example
   `<template component="x-counter" controller="./counter.js">`. The runtime resolves that
-  specifier and imports it on first connect. Importing the root component trusts this transitive
+  specifier and imports its default export on first connect. Importing the root component trusts this transitive
   graph, just as importing an ES module trusts its imports; CSP, CORS, and application-owned
   import-map integrity remain the loading controls.
 - **Bare references use the application's import map.** `index.html` maps one ordinary

@@ -8,9 +8,11 @@ const read = (path: string) =>
 
 describe("proof-of-concept controller loading", () => {
   it("loads each definition's controller through the standard module graph", async () => {
-    const [counter, chart, runtime] = await Promise.all([
+    const [counter, chart, counterController, chartController, runtime] = await Promise.all([
       read("components/counter.html"),
       read("components/chart.html"),
+      read("components/counter.js"),
+      read("components/chart.js"),
       read("poc.js"),
     ]);
 
@@ -19,12 +21,21 @@ describe("proof-of-concept controller loading", () => {
     assert.match(runtime, /template\.getAttribute\("controller"\)/);
     assert.match(runtime, /resolveDependency\(controller, definitionURL\)/);
     assert.match(runtime, /import\(controllerURL\)/);
+    assert.match(runtime, /typeof module\.default !== "function"/);
+    assert.match(runtime, /controllers\.set\(tag, controller\)/);
+    assert.match(counterController, /export default function controller\(host\)/);
+    assert.match(chartController, /export default function controller\(host\)/);
+    assert.doesNotMatch(counterController, /from ["'][^"']*poc\.js["']/);
+    assert.doesNotMatch(chartController, /from ["'][^"']*poc\.js["']/);
+    assert.doesNotMatch(counterController, /defineController/);
+    assert.doesNotMatch(chartController, /defineController/);
     assert.match(runtime, /snapshotApplicationImports\(\)/);
     assert.match(runtime, /key\.endsWith\("\/"\) && specifier\.startsWith\(key\)/);
     assert.match(runtime, /script, base, meta\[http-equiv\]/);
     assert.doesNotMatch(runtime, /link\[rel="controller"\]/);
     assert.doesNotMatch(runtime, /html-next-controller/);
     assert.doesNotMatch(runtime, /controllerHints/);
+    assert.doesNotMatch(runtime, /function defineController/);
   });
 
   it("uses one application-owned package prefix without a per-controller manifest", async () => {
