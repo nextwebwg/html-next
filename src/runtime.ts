@@ -272,7 +272,12 @@ function readInvocation(
   }
 
   const declarations = definition.declarations ?? [];
-  for (const declaration of declarations) scope.set(declaration.name, null);
+  for (const declaration of declarations) {
+    if (
+      declaration.kind === "state" || declaration.kind === "computed" ||
+      declaration.kind === "data" || declaration.kind === "form"
+    ) scope.set(declaration.name, null);
+  }
   for (const declaration of declarations) {
     if (declaration.kind === "data") {
       scope.set(declaration.name, { pending: true, value: null, error: null, ok: false });

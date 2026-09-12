@@ -172,6 +172,48 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <label class="switch" role="switch" tabindex="0" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-required="required" :data-value="value"><input $ref="control" type="checkbox" aria-hidden="true" tabindex="-1"><slot></slot></label>
 </template>`,
+  "ui-avatar": `<template component="ui-avatar" status="early" summary="An image avatar with a generated text fallback." controller="./ui-avatar.js">
+  <defs>
+    <prop name="alt" type="string" default="">Alternative text.</prop>
+    <prop name="fallback" type="string" default="">Explicit fallback text.</prop>
+    <prop name="name" type="string" default="">Person name used for labeling and initials.</prop>
+    <prop name="src" type="string" default="">Image source resolved by the native image element.</prop>
+  </defs>
+  <div class="avatar" role="img" :data-alt="alt" :data-fallback="fallback" :data-name="name" :data-src="src"><img $ref="image" alt="" hidden aria-hidden="true"><span $ref="fallback" class="fallback" aria-hidden="false"></span></div>
+</template>`,
+  "ui-avatar-group": `<template component="ui-avatar-group" status="early" summary="A labeled avatar group with an overflow count." controller="./ui-avatar-group.js">
+  <defs>
+    <prop name="label" type="string" default="People">Accessible group label.</prop>
+    <prop name="max" type="number" default="5">Maximum visible avatars.</prop>
+  </defs>
+  <div class="avatar-group" role="group" :aria-label="label" :data-max="max"><slot></slot></div>
+</template>`,
+  "ui-menu-item": `<template component="ui-menu-item" status="early" summary="A native menu action.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="value" type="string" default="">Action value.</prop>
+  </defs>
+  <button class="menu-item" type="button" role="menuitem" :disabled="disabled" :data-value="value"><span class="menu-item__surface"><slot></slot></span></button>
+</template>`,
+  "ui-disclosure": `<template component="ui-disclosure" status="early" summary="A controlled or uncontrolled disclosure over projected trigger and content." controller="./ui-disclosure.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="disclosure" :data-open="open" :data-default-open="defaultOpen" :data-disabled="disabled"><slot></slot></div>
+</template>`,
+  "ui-tabs": `<template component="ui-tabs" status="early" summary="A controlled or uncontrolled projected tab set." controller="./ui-tabs.js">
+  <defs>
+    <prop name="value" type="string?">Controlled selected tab identifier.</prop>
+    <prop name="defaultValue" type="string" default="">Initial uncontrolled tab identifier.</prop>
+    <prop name="orientation" type="horizontal | vertical" default="horizontal">Keyboard navigation axis.</prop>
+    <event name="select" type="object({ value: string, previousValue?: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="tabs" :data-value="value" :data-default-value="defaultValue" :data-orientation="orientation"><slot></slot></div>
+</template>`,
 });
 
 const TRIGGER_OF = String.raw`function triggerOf(event) {
@@ -372,6 +414,170 @@ const RADIO_GROUP_CONTROLLER = String.raw`export default function controller(hos
   return () => { stop(); observer.disconnect(); host.element.removeEventListener("change", change); host.element.removeEventListener("keydown", keydown); };
 }`;
 
+const AVATAR_CONTROLLER = String.raw`function initials(value) {
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return "?";
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase();
+  return (tokens[0][0] + tokens[1][0]).toUpperCase();
+}
+
+export default function controller(host) {
+  const image = host.refs.image;
+  const fallback = host.refs.fallback;
+  let loaded = false;
+  let source;
+  const render = () => {
+    const label = host.state.alt || host.state.name || "Avatar";
+    host.element.setAttribute("aria-label", label);
+    fallback.textContent = host.state.fallback || initials(host.state.name || host.state.alt);
+    image.hidden = !loaded;
+    image.setAttribute("aria-hidden", String(!loaded));
+    fallback.hidden = loaded;
+    fallback.setAttribute("aria-hidden", String(loaded));
+    host.element.toggleAttribute("data-has-image", loaded);
+  };
+  const stop = host.effect(() => {
+    if (source !== host.state.src) {
+      source = host.state.src;
+      loaded = false;
+      image.src = source;
+    }
+    render();
+  });
+  const load = () => { loaded = true; render(); };
+  const error = () => { loaded = false; render(); };
+  image.addEventListener("load", load);
+  image.addEventListener("error", error);
+  return () => { stop(); image.removeEventListener("load", load); image.removeEventListener("error", error); };
+}`;
+
+const AVATAR_GROUP_CONTROLLER = String.raw`export default function controller(host) {
+  let overflow;
+  const apply = () => {
+    const children = Array.from(host.element.children).filter((child) => child !== overflow);
+    const limit = Math.max(0, Math.floor(host.state.max));
+    children.forEach((child, index) => { child.hidden = index >= limit; });
+    const count = Math.max(0, children.length - limit);
+    if (count === 0) { overflow?.remove(); overflow = undefined; return; }
+    overflow ||= host.element.ownerDocument.createElement("span");
+    overflow.className = "overflow";
+    overflow.setAttribute("role", "img");
+    overflow.setAttribute("data-ui-avatar-group-overflow", "");
+    overflow.setAttribute("aria-label", count + " more " + (count === 1 ? "person" : "people"));
+    overflow.textContent = "+" + count;
+    if (!overflow.isConnected) host.element.append(overflow);
+  };
+  const stop = host.effect(apply);
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) => [...record.addedNodes, ...record.removedNodes].some((node) => node !== overflow))) apply();
+  });
+  observer.observe(host.element, { childList: true });
+  return () => { stop(); observer.disconnect(); overflow?.remove(); };
+}`;
+
+const DISCLOSURE_CONTROLLER = String.raw`${TRIGGER_OF}
+let nextDisclosureId = 0;
+export default function controller(host) {
+  let trigger;
+  let content;
+  let initialized = false;
+  let internal = false;
+  const parts = () => {
+    trigger = host.element.querySelector('[data-ui-disclosure-trigger], button, [aria-controls]');
+    const controls = trigger?.getAttribute("aria-controls");
+    content = controls ? host.element.ownerDocument.getElementById(controls) :
+      Array.from(host.element.children).find((child) => child !== trigger);
+    if (trigger && content && !content.id) content.id = "disclosure-content-" + (++nextDisclosureId);
+    if (trigger && content) trigger.setAttribute("aria-controls", content.id);
+  };
+  const apply = () => {
+    parts();
+    const controlled = host.state.open !== undefined;
+    if (!initialized) internal = controlled ? Boolean(host.state.open) : Boolean(host.state.defaultOpen);
+    else if (controlled) internal = Boolean(host.state.open);
+    if (trigger) {
+      trigger.setAttribute("aria-expanded", String(internal));
+      if (trigger instanceof HTMLButtonElement) trigger.disabled = Boolean(host.state.disabled);
+      else trigger.setAttribute("aria-disabled", String(Boolean(host.state.disabled)));
+    }
+    if (content) content.hidden = !internal;
+    initialized = true;
+  };
+  const stop = host.effect(apply);
+  const toggle = (event) => {
+    if (!trigger?.contains(event.target)) return;
+    if (host.state.disabled) { event.preventDefault(); return; }
+    if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
+    if (event.type === "keydown") event.preventDefault();
+    const next = !internal;
+    if (host.state.open === undefined) internal = next;
+    apply();
+    host.dispatch(next ? "open" : "close", { open: next, reason: "action", trigger: triggerOf(event) });
+  };
+  host.element.addEventListener("click", toggle);
+  host.element.addEventListener("keydown", toggle);
+  const observer = new MutationObserver(apply);
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); host.element.removeEventListener("click", toggle); host.element.removeEventListener("keydown", toggle); };
+}`;
+
+const TABS_CONTROLLER = String.raw`${TRIGGER_OF}
+export default function controller(host) {
+  let initialized = false;
+  let internal = "";
+  const tabs = () => Array.from(host.element.querySelectorAll('[role="tab"]'));
+  const apply = () => {
+    const items = tabs();
+    const controlled = host.state.value !== undefined;
+    if (!initialized) internal = controlled ? host.state.value : host.state.defaultValue;
+    else if (controlled) internal = host.state.value;
+    if (!internal && items.length > 0) internal = items[0].id || items[0].getAttribute("aria-controls") || "";
+    items.forEach((tab) => {
+      const value = tab.id || tab.getAttribute("aria-controls") || "";
+      const selected = value === internal;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      const controls = tab.getAttribute("aria-controls");
+      const panel = controls && (host.element.querySelector("#" + CSS.escape(controls)) || host.element.ownerDocument.getElementById(controls));
+      if (panel) panel.hidden = !selected;
+    });
+    host.element.setAttribute("aria-orientation", host.state.orientation);
+    initialized = true;
+  };
+  const stop = host.effect(apply);
+  const choose = (tab, trigger) => {
+    const value = tab.id || tab.getAttribute("aria-controls") || "";
+    if (!value) return;
+    const previousValue = internal;
+    if (host.state.value === undefined) internal = value;
+    apply();
+    host.dispatch("select", { value, ...(previousValue ? { previousValue } : {}), trigger });
+  };
+  const click = (event) => {
+    const tab = event.target.closest?.('[role="tab"]');
+    if (tab && host.element.contains(tab)) choose(tab, triggerOf(event));
+  };
+  const keydown = (event) => {
+    const tab = event.target.closest?.('[role="tab"]');
+    if (!tab || !host.element.contains(tab)) return;
+    const items = tabs();
+    const vertical = host.state.orientation === "vertical";
+    const previous = vertical ? event.key === "ArrowUp" : event.key === "ArrowLeft";
+    const next = vertical ? event.key === "ArrowDown" : event.key === "ArrowRight";
+    if (!previous && !next) return;
+    event.preventDefault();
+    const at = items.indexOf(tab);
+    const index = previous ? (at - 1 + items.length) % items.length : (at + 1) % items.length;
+    choose(items[index], "keyboard");
+    items[index].focus();
+  };
+  host.element.addEventListener("click", click);
+  host.element.addEventListener("keydown", keydown);
+  const observer = new MutationObserver(apply);
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); host.element.removeEventListener("click", click); host.element.removeEventListener("keydown", keydown); };
+}`;
+
 const CONTROLLERS: Readonly<Record<string, string>> = Object.freeze({
   "ui-input": FORM_VALUE_CONTROLLER,
   "ui-textarea": FORM_VALUE_CONTROLLER,
@@ -380,6 +586,10 @@ const CONTROLLERS: Readonly<Record<string, string>> = Object.freeze({
   "ui-radio": TOGGLE_CONTROLLER,
   "ui-radio-group": RADIO_GROUP_CONTROLLER,
   "ui-switch": SWITCH_CONTROLLER,
+  "ui-avatar": AVATAR_CONTROLLER,
+  "ui-avatar-group": AVATAR_GROUP_CONTROLLER,
+  "ui-disclosure": DISCLOSURE_CONTROLLER,
+  "ui-tabs": TABS_CONTROLLER,
 });
 
 export function migrateLoomaComponent(component: StencilComponentInventory): LoomaMigration {

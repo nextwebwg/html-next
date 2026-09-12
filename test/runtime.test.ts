@@ -947,6 +947,27 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} keeps a prop value when a component event has the same name`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-openable" status="early" summary="Openable.">` +
+            `<defs><prop name="open" type="boolean?">Open state.</prop><event name="open" type="boolean"></event></defs>` +
+            `<section :data-open="open"></section></template><x-openable id="openable" open></x-openable>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          const root = document.getElementById("openable") as Element & { open?: boolean };
+          return { value: root.open, attribute: root.getAttribute("data-open") };
+        });
+        assert.deepEqual(result, { value: true, attribute: "true" });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} adopts compatible server DOM, repairs owned markup, and preserves live controls`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -11,23 +11,13 @@
   },
   {
     "tag": "ui-avatar",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-avatar> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-avatar-group",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-avatar-group> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-badge",
@@ -94,13 +84,8 @@
   },
   {
     "tag": "ui-disclosure",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-disclosure> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-editable",
@@ -144,13 +129,8 @@
   },
   {
     "tag": "ui-menu-item",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-menu-item> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-multi-combobox",
@@ -212,13 +192,8 @@
   },
   {
     "tag": "ui-tabs",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-tabs> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-textarea",

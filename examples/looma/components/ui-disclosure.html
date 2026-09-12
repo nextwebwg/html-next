@@ -1,10 +1,10 @@
-<template component="ui-disclosure" status="early" summary="HTML Next migration of UiDisclosure.">
+<template component="ui-disclosure" status="early" summary="A controlled or uncontrolled disclosure over projected trigger and content." controller="./ui-disclosure.js">
   <defs>
-    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <details :data-default-open="defaultOpen" :data-disabled="disabled" :data-open="open">
-    <slot></slot>
-  </details>
+  <div class="disclosure" :data-open="open" :data-default-open="defaultOpen" :data-disabled="disabled"><slot></slot></div>
 </template>

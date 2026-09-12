@@ -27,6 +27,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
     controllerBundle = join(directory, "controllers.js");
     const controllerTags = [
       "ui-checkbox", "ui-input", "ui-textarea", "ui-select", "ui-radio", "ui-radio-group", "ui-switch",
+      "ui-avatar", "ui-avatar-group", "ui-disclosure", "ui-tabs",
     ];
     await build({
       stdin: {
@@ -42,6 +43,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
     definitions = (await Promise.all([
       "ui-button", "ui-icon-button", "ui-callout", "ui-chip", "ui-badge",
       "ui-search-shell", "ui-search-result-row", "ui-top-bar", "ui-form-field",
+      "ui-menu-item",
       ...controllerTags,
     ].map((tag) => readFile(new URL(`${tag}.html`, components), "utf8")))).join("\n");
   });
@@ -132,6 +134,83 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
       assert.ok(result.details.some(([id, event, detail]) => id === "textarea" && event === "input" && detail.value === "notes"));
       assert.ok(result.details.some(([id, event, detail]) => id === "checkbox" && event === "change" && detail.checked === false));
       assert.ok(result.details.some(([id, event, detail]) => id === "group" && event === "select" && detail.value === "b"));
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("implements avatar fallback, disclosure, tabs, and dynamic group behavior", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(definitions + `
+        <ui-avatar id="avatar" name="Matthew Dean"></ui-avatar>
+        <ui-avatar-group id="avatars" max="2" label="Reviewers"><span id="person-a">A</span><span id="person-b">B</span><span id="person-c">C</span></ui-avatar-group>
+        <ui-menu-item id="menu-item" value="save">Save</ui-menu-item>
+        <ui-disclosure id="disclosure"><button id="disclosure-trigger">Details</button><div id="disclosure-content">Body</div></ui-disclosure>
+        <ui-tabs id="tabs">
+          <button role="tab" id="tab-a" aria-controls="panel-a">A</button>
+          <button role="tab" id="tab-b" aria-controls="panel-b">B</button>
+          <section role="tabpanel" id="panel-a">Panel A</section>
+          <section role="tabpanel" id="panel-b">Panel B</section>
+        </ui-tabs>
+      `);
+      await page.addScriptTag({ path: bundle });
+      await page.addScriptTag({ path: controllerBundle });
+      const result = await page.evaluate(`(async () => {
+        const projected = ['person-a','person-b','person-c','disclosure-trigger','disclosure-content','tab-a','tab-b','panel-a','panel-b']
+          .map(id => document.getElementById(id));
+        const runtimeErrors = [];
+        window.HtmlRuntime.observeDocument(document, { onError(error) { runtimeErrors.push(error.message); }, onConnect(root, definition) {
+          const controller = window.LoomaControllers[definition.contract.tag];
+          if (controller == null) return;
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          return controller(window.HtmlRuntime.getComponentHost(root));
+        }});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const avatar = document.getElementById('avatar');
+        const avatars = document.getElementById('avatars');
+        const disclosure = document.getElementById('disclosure');
+        const trigger = document.getElementById('disclosure-trigger');
+        const content = document.getElementById('disclosure-content');
+        const tabs = document.getElementById('tabs');
+        const events = [];
+        disclosure.addEventListener('open', event => events.push(['open', event.detail]));
+        tabs.addEventListener('select', event => events.push(['select', event.detail]));
+        const avatarFallback = { label: avatar.getAttribute('aria-label'), fallback: avatar.querySelector('.fallback')?.textContent, imageHidden: avatar.querySelector('img')?.hidden };
+        avatar.querySelector('img').dispatchEvent(new Event('load'));
+        avatar.alt = 'Profile image';
+        trigger.click();
+        document.getElementById('tab-b').click();
+        avatars.max = 1;
+        await Promise.resolve(); await Promise.resolve();
+        return {
+          same: projected.every(node => node === document.getElementById(node.id)),
+          avatar: { fallback: avatarFallback, loaded: { label: avatar.getAttribute('aria-label'), imageHidden: avatar.querySelector('img')?.hidden } },
+          group: { label: avatars.getAttribute('aria-label'), hidden: ['person-a','person-b','person-c'].map(id => document.getElementById(id).hidden), overflow: avatars.querySelector('[data-ui-avatar-group-overflow]')?.textContent },
+          menu: { root: document.getElementById('menu-item').localName, role: document.getElementById('menu-item').getAttribute('role'), value: document.getElementById('menu-item').getAttribute('data-value') },
+          disclosure: { expanded: trigger.getAttribute('aria-expanded'), hidden: content.hidden, controls: trigger.getAttribute('aria-controls') },
+          tabs: { a: document.getElementById('tab-a').getAttribute('aria-selected'), b: document.getElementById('tab-b').getAttribute('aria-selected'), panelA: document.getElementById('panel-a').hidden, panelB: document.getElementById('panel-b').hidden },
+          events, runtimeErrors,
+        };
+      })()`) as Record<string, unknown>;
+      assert.deepEqual(result, {
+        same: true,
+        avatar: {
+          fallback: { label: "Matthew Dean", fallback: "MD", imageHidden: true },
+          loaded: { label: "Profile image", imageHidden: false },
+        },
+        group: { label: "Reviewers", hidden: [false, true, true], overflow: "+2" },
+        menu: { root: "button", role: "menuitem", value: "save" },
+        disclosure: { expanded: "true", hidden: false, controls: "disclosure-content" },
+        tabs: { a: "false", b: "true", panelA: true, panelB: false },
+        events: [
+          ["open", { open: true, reason: "action", trigger: "programmatic" }],
+          ["select", { value: "tab-b", previousValue: "tab-a", trigger: "programmatic" }],
+        ],
+        runtimeErrors: [],
+      });
     } finally {
       await browser.close();
     }
