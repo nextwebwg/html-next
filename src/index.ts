@@ -8,6 +8,7 @@ export {
 export { parseComponent } from "./parser.js";
 export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
+export { assembleLoomaPackage } from "./migrate/looma-package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./graph.js";
 export {
@@ -53,6 +54,7 @@ export {
   PROJECTED_ROOT_ATTRIBUTE,
   componentStyleMode,
   transformComponentStyles,
+  transformGlobalStyles,
   transformValidityStyles,
 } from "./style.js";
 export type { ComponentStyleMode, ComponentStyleOptions } from "./style.js";

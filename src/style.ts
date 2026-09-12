@@ -396,6 +396,11 @@ export function transformComponentStyles(
   return `@scope ([${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]) to (:scope [${COMPONENT_ROOT_ATTRIBUTE}] > *, [${PROJECTED_ROOT_ATTRIBUTE}]) {\n${rules}\n}`;
 }
 
+/** Rewrites custom-element and validity selectors in application/global CSS without scoping them. */
+export function transformGlobalStyles(css: string): string {
+  return rewriteRuleList(css, undefined, undefined);
+}
+
 export function componentStyleMode(document: Document): ComponentStyleMode {
   return "CSSScopeRule" in (document.defaultView ?? {}) ? "scope" : "attribute";
 }
