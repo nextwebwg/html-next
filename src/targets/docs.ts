@@ -1,6 +1,7 @@
 import type { ComponentDefinition } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { formatType } from "../type-system.js";
+import { targetComponent } from "./backend.js";
 
 function typeSource(type: PropType): string {
   if (typeof type === "object" && "enum" in type) {
@@ -25,6 +26,7 @@ function cell(value: string): string {
 
 export function generateDocs(definition: ComponentDefinition, version: string): string {
   const { contract } = definition;
+  const target = targetComponent(definition);
   const props = Object.entries(contract.props);
   const rows = props.length === 0
     ? ["| — | — | — | — | — | This component has no declared props. |"]
@@ -52,6 +54,34 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     "",
     "Native attributes and framework-native event surfaces pass through to the native root. Declared prop targets and template-owned attributes take precedence.",
     "",
+    "## Slots",
+    "",
+    ...(target.slots.length === 0
+      ? ["This component has no projected-content slots."]
+      : target.slots.map((slot) =>
+        `- ${slot.name === undefined ? "Default slot" : `\`${slot.name}\``}: ${slot.required ? "required" : "optional"}${slot.dynamic ? "; selected from data at runtime" : ""}.`
+      )),
+    "",
+    "## Events",
+    "",
+    ...(target.events.length === 0
+      ? ["This component declares no custom events."]
+      : [
+        "| Event | Detail | Bubbles | Composed | Cancelable |",
+        "| --- | --- | --- | --- | --- |",
+        ...target.events.map((event) =>
+          `| \`${event.name}\` | \`${event.type}\` | ${event.bubbles ? "yes" : "no"} | ${event.composed ? "yes" : "no"} | ${event.cancelable ? "yes" : "no"} |`
+        ),
+      ]),
+    "",
+    "## Methods",
+    "",
+    ...(target.methods.length === 0
+      ? ["This component exposes no controller methods."]
+      : target.methods.map((method) =>
+        `- \`${method.name}()\` delegates to controller export \`${method.exportName}\` and returns \`${method.returns}\`.`
+      )),
+    "",
     "## Usage",
     "",
     "```html",
@@ -64,9 +94,9 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     `<${contract.name}>Button label</${contract.name}>`,
     "```",
     "",
-    "## Coming soon",
+    "## Runtime support",
     "",
-    "State, computed values, data sources, control flow, filters, and actions are Coming soon. Named slots, component composition, reactive browser updates, SSR, and hydration are also Coming soon.",
+    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} State, computed values, handlers, structural rendering, data, enhanced forms, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
     "",
   ].join("\n");
 }

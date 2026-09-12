@@ -1,7 +1,16 @@
-import type { TemplateAttribute } from "../template.js";
+import type { ComponentDefinition, TemplateAttribute } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { resolveDomProperty } from "../platform.js";
 import { typeScriptType } from "../type-system.js";
+
+const VOID_ELEMENTS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+  "source", "track", "wbr",
+]);
+
+export function isVoidElement(name: string): boolean {
+  return VOID_ELEMENTS.has(name);
+}
 
 const NATIVE_BOOLEAN_ATTRIBUTES = new Set([
   "allowfullscreen",
@@ -62,6 +71,10 @@ export function provenanceAttributes(tag: string, root = false): readonly string
     `data-component=${literalAttribute(tag)}`,
     ...(root ? [`data-component-root=${literalAttribute(tag)}`] : []),
   ];
+}
+
+export function serializedDefinition(definition: ComponentDefinition): string {
+  return JSON.stringify(definition);
 }
 
 function isBooleanAttributeBinding(

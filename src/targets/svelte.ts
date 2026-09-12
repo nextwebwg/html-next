@@ -2,12 +2,15 @@ import type { ComponentDefinition, TemplateNode } from "../template.js";
 import {
   escapeHtml,
   frameworkBindingExpression,
+  isVoidElement,
   literalAttribute,
   provenanceAttributes,
   propKey,
   quote,
+  serializedDefinition,
   typeSource,
 } from "./shared.js";
+import { targetComponent } from "./backend.js";
 
 function renderNode(
   node: TemplateNode,
@@ -16,11 +19,18 @@ function renderNode(
   depth: number,
 ): string {
   if (node.kind === "text") return escapeHtml(node.value);
-  if (node.kind === "slot") return "{@render children?.()}";
+  if (node.kind === "slot") {
+    const fallback = node.fallback?.map((child) => renderNode(child, aliases, definition, depth + 1)).join("\n") ?? "";
+    const render = node.name === undefined
+      ? "{@render children?.()}"
+      : `{@render slots?.[${quote(node.name)}]?.()}`;
+    return fallback === "" ? render : `{#if ${node.name === undefined ? "children" : `slots?.[${quote(node.name)}]`}}${render}{:else}${fallback}{/if}`;
+  }
   const indent = "  ".repeat(depth);
   const attributes = node.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
-    const value = aliases.get(attribute.expression)!;
+    if (attribute.kind === "directive") return "";
+    const value = aliases.get(attribute.expression) ?? "undefined";
     const expression = frameworkBindingExpression(
       attribute,
       definition.contract.props,
@@ -31,15 +41,18 @@ function renderNode(
     return `${attribute.name}={${expression}}`;
   });
   attributes.push(...provenanceAttributes(definition.contract.tag));
-  const open = `<${node.name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
+  const open = `<${node.name}${attributes.filter(Boolean).length === 0 ? "" : ` ${attributes.filter(Boolean).join(" ")}`}>`;
+  if (isVoidElement(node.name)) return open;
   const children = node.children.map((child) => renderNode(child, aliases, definition, depth + 1)).join("\n");
   return children === "" ? `${open}</${node.name}>` : `${open}\n${indent}  ${children}\n${indent}</${node.name}>`;
 }
 
 export function generateSvelte(definition: ComponentDefinition, version: string): string {
   const { contract, template } = definition;
-  const props = Object.entries(contract.props);
-  const aliases = new Map(props.map(([name], index) => [name, `prop${index}`]));
+  const target = targetComponent(definition);
+  const props = target.props.map(({ name, contract }) => [name, contract] as const);
+  const aliases = new Map(target.props.map(({ name, local }) => [name, local]));
+  const polymorphic = target.polymorphic;
   const nativeElement = quote(contract.nativeElement);
   const destructured = props.map(([name, prop], index) =>
     `${quote(name)}: prop${index}${"default" in prop ? ` = ${JSON.stringify(prop.default)}` : ""}`,
@@ -49,7 +62,8 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     ...provenanceAttributes(contract.tag, true),
     ...template.attributes.map((attribute) => {
       if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
-      const value = aliases.get(attribute.expression)!;
+      if (attribute.kind === "directive") return "";
+      const value = aliases.get(attribute.expression) ?? "undefined";
       const expression = frameworkBindingExpression(
         attribute,
         contract.props,
@@ -59,7 +73,9 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
       );
       return `${attribute.name}={${expression}}`;
     }),
-  ];
+    `use:htmlNext={{ ${props.map(([name], index) => `${quote(name)}: prop${index}`).join(", ")} }}`,
+    "bind:this={root}",
+  ].filter(Boolean);
   const children = template.children.map((child) => renderNode(child, aliases, definition, 0)).join("\n");
 
   return [
@@ -67,19 +83,50 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     '<script lang="ts">',
     '  import type { Snippet } from "svelte";',
     '  import type { SvelteHTMLElements } from "svelte/elements";',
+    '  import { attachComponent } from "@nextwebwg/html/runtime";',
+    '  import type { ComponentDefinition } from "@nextwebwg/html";',
+    ...(definition.controller === undefined ? [] : [`  import * as controller from ${quote(definition.controller)};`]),
     `  import "../styles/${contract.tag}.css";`,
     "",
     `  interface OwnProps {`,
     ...props.map(([name, prop]) => `    ${propKey(name)}${prop.required ? "" : "?"}: ${typeSource(prop.type)}${prop.required ? "" : " | null"};`),
+    ...target.events.map((event) =>
+      `    ${event.callbackName}?: (detail: ${event.detailType}, event: CustomEvent<${event.detailType}>) => void;`
+    ),
+    ...(polymorphic ? [`    as?: ${definition.root!.kind === "native" ? definition.root!.choices.map(quote).join(" | ") : "never"};`] : []),
+    "    slots?: Readonly<Record<string, Snippet>>;",
     "  }",
     `  type Props = Omit<SvelteHTMLElements[${nativeElement}], keyof OwnProps | "children"> & OwnProps & { children?: Snippet };`,
     "",
-    `  let { ${[...destructured, "children", "...nativeProps"].join(", ")} }: Props = $props();`,
+    `  let { ${[...destructured, ...target.events.map((event) => event.callbackName), ...(polymorphic ? ["as"] : []), "slots", "children", "...nativeProps"].join(", ")} }: Props = $props();`,
+    `  const definition = ${serializedDefinition(definition)} as unknown as ComponentDefinition;`,
+    "  let root: Element;",
+    "  function htmlNext(node: Element, props: Record<string, unknown>) {",
+    "    const detach = attachComponent(node, definition, { props,",
+    ...(definition.controller === undefined ? [] : ["      controller,"]),
+    "    });",
+    ...target.events.flatMap((event, index) => [
+      `    const listener${index} = (event: Event) => ${event.callbackName}?.((event as CustomEvent<${event.detailType}>).detail, event as CustomEvent<${event.detailType}>);`,
+      `    node.addEventListener(${quote(event.name)}, listener${index});`,
+    ]),
+    "    return {",
+    "      update(next: Record<string, unknown>) { Object.assign(node, next); },",
+    "      destroy() {",
+    ...target.events.map((event, index) =>
+      `        node.removeEventListener(${quote(event.name)}, listener${index});`
+    ),
+    "        detach();",
+    "      },",
+    "    };",
+    "  }",
+    ...target.methods.map((method) =>
+      `  export function ${method.name}(): ${method.returnType} { return (root as unknown as Record<string, () => ${method.returnType}>)[${quote(method.name)}](); }`
+    ),
     "</script>",
     "",
-    `<${template.name} ${rootAttributes.join(" ")}>`,
+    `<${polymorphic ? "svelte:element this={as ?? " + quote(template.name) + "}" : template.name} ${rootAttributes.join(" ")}>`,
     children === "" ? "" : `  ${children}`,
-    `</${template.name}>`,
+    `</${polymorphic ? "svelte:element" : template.name}>`,
     "",
   ].filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n");
 }

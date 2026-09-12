@@ -63,20 +63,20 @@ describe("generateComponent", () => {
     assert.ok(vanilla.indexOf("attributes") < vanilla.indexOf('setAttribute("data-x-button"'));
 
     const react = byPath.get("react/XButton.tsx")!;
-    assert.match(react, /ref\?: Ref<ComponentRef<"button">>/);
+    assert.match(react, /ref\?: Ref<XButtonHandle>/);
     assert.doesNotMatch(react, /forwardRef/);
-    assert.ok(react.indexOf("{...nativeProps}") < react.indexOf("data-x-button"));
+    assert.ok(react.lastIndexOf("{...nativeProps}") < react.lastIndexOf("data-x-button"));
 
     const vue = byPath.get("vue/XButton.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
     assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
-    assert.ok(vue.indexOf('v-bind="$attrs"') < vue.indexOf("data-x-button"));
+    assert.ok(vue.lastIndexOf('v-bind="$attrs"') < vue.lastIndexOf("data-x-button"));
 
     const svelte = byPath.get("svelte/XButton.svelte")!;
     assert.match(svelte, /from "svelte\/elements"/);
     assert.match(svelte, /Snippet/);
     assert.match(svelte, /\$props\(\)/);
-    assert.ok(svelte.indexOf("{...nativeProps}") < svelte.indexOf("data-x-button"));
+    assert.ok(svelte.lastIndexOf("{...nativeProps}") < svelte.lastIndexOf("data-x-button"));
 
     for (const content of [vanilla, react, vue, svelte]) {
       assert.doesNotMatch(content, /<x-button\b|createElement\("x-button"\)/);
@@ -92,8 +92,9 @@ describe("generateComponent", () => {
 
     const docs = byPath.get("docs/x-button.md")!;
     assert.match(docs.slice(0, 200), /Status: EARLY/);
-    assert.match(docs, /## Coming soon/);
-    assert.match(docs, /State, computed values, data sources, control flow, filters, and actions/);
+    assert.doesNotMatch(docs, /Coming soon/);
+    assert.match(docs, /## Runtime support/);
+    assert.match(docs, /State, computed values, handlers, structural rendering, data, enhanced forms/);
   });
 
   it("makes authored validity pseudo-classes work in generated CSS", () => {
@@ -136,9 +137,11 @@ describe("generateComponent", () => {
       generateComponent(parseComponent(audioSource())).map((artifact) => [artifact.path, artifact.content]),
     );
 
-    assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): HTMLAudioElement;/);
+    assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
+    assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
     assert.match(byPath.get("react/DemoPlayer.tsx")!, /ComponentPropsWithoutRef<"audio">/);
-    assert.match(byPath.get("react/DemoPlayer.tsx")!, /Ref<ComponentRef<"audio">>/);
+    assert.match(byPath.get("react/DemoPlayer.tsx")!, /type DemoPlayerHandle = ComponentRef<"audio">/);
+    assert.match(byPath.get("react/DemoPlayer.tsx")!, /ref\?: Ref<DemoPlayerHandle>/);
     assert.match(byPath.get("svelte/DemoPlayer.svelte")!, /SvelteHTMLElements\["audio"\]/);
   });
 });

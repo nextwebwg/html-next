@@ -258,8 +258,8 @@ function readInvocation(
     if (prop.required && values[name] === undefined) {
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
-    // The effective value seen by expressions: the passed value, else the default, else null.
-    scope.set(name, (values[name] !== undefined ? values[name]! : prop.default ?? null) as Value);
+    // The effective value seen by expressions: passed value, default, or first-class absence.
+    scope.set(name, (values[name] !== undefined ? values[name]! : prop.default) as Value);
   }
 
   const declarations = definition.declarations ?? [];
@@ -1081,7 +1081,6 @@ function installInstanceValidity(root: Element, instance: RuntimeInstance): void
   };
   instance.connectCallbacks.add(connect);
   instance.disconnectCallbacks.add(disconnect);
-  connect();
 }
 
 function installPublicProps(root: Element, instance: RuntimeInstance): void {
@@ -1102,7 +1101,8 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
       reflected.add(attributeName);
-      root.setAttribute(attributeName, serializeTypedValue(value, prop.type));
+      if (value === undefined) root.removeAttribute(attributeName);
+      else root.setAttribute(attributeName, serializeTypedValue(value, prop.type));
       queueMicrotask(() => reflected.delete(attributeName));
     }, 2));
   }
@@ -1127,7 +1127,6 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const disconnect = (): void => observer.disconnect();
   instance.connectCallbacks.add(connect);
   instance.disconnectCallbacks.add(disconnect);
-  connect();
 }
 
 function installPublicMethods(root: Element, instance: RuntimeInstance): void {
@@ -1282,6 +1281,79 @@ export function lowerDocument(root: Document = document): number {
     connectRuntimeInstance(invocation.instance);
   }
   return prepared.length;
+}
+
+export interface ComponentAttachmentOptions {
+  readonly props?: Readonly<Record<string, unknown>>;
+  readonly controller?: ControllerModule;
+}
+
+/**
+ * Framework-host adapter. The framework emits the declared native root and owns its outer
+ * lifetime; this function adopts that root into the same runtime used by live HTML.
+ */
+export function attachComponent(
+  element: Element,
+  definition: ComponentDefinition,
+  options: ComponentAttachmentOptions = {},
+): () => void {
+  const root = element.ownerDocument;
+  const registry = registryFor(root);
+  const existing = registry.definitions.get(definition.contract.tag);
+  if (existing === undefined) {
+    registry.definitions.set(definition.contract.tag, {
+      definition,
+      decls: runtimeDeclarations(definition),
+      style: undefined,
+    });
+  } else if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
+    fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
+  }
+
+  const instance = runtimeInstances.get(element);
+  if (instance === undefined) {
+    const markFrameworkProjection = (parent: Element): void => {
+      for (const child of Array.from(parent.children)) {
+        const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
+        if (!lineage.includes(definition.contract.tag)) markProjectedRoot(child);
+        else markFrameworkProjection(child);
+      }
+    };
+    markFrameworkProjection(element);
+    stampAuthoredElement(element, definition.contract.tag);
+    stampComponentRoot(element, definition.contract.tag);
+    for (const [name, prop] of Object.entries(definition.contract.props)) {
+      const value = options.props?.[name] ?? prop.default;
+      if (value !== undefined) {
+        element.setAttribute(`data-${name.toLowerCase()}`, serializeTypedValue(value, prop.type));
+      }
+    }
+    lowerDocument(root);
+  }
+
+  const attached = runtimeInstances.get(element);
+  if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
+  for (const [name, value] of Object.entries(options.props ?? {})) {
+    if (name in definition.contract.props) (element as unknown as Record<string, unknown>)[name] = value;
+  }
+
+  let controllerCleanup: void | (() => void);
+  let disposed = false;
+  if (options.controller !== undefined) {
+    const module = Promise.resolve(options.controller);
+    setControllerModule(element, module);
+    void Promise.resolve(options.controller.default(getComponentHost(element)!)).then((cleanup) => {
+      if (typeof cleanup !== "function") return;
+      if (disposed) cleanup();
+      else controllerCleanup = cleanup;
+    });
+  }
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    controllerCleanup?.();
+    disconnectRuntimeInstance(attached);
+  };
 }
 
 export interface ComponentHost {
