@@ -1,12 +1,12 @@
-<template component="ui-input" status="early" summary="HTML Next migration of UiInput.">
+<template component="ui-input" status="early" summary="A policy wrapper around a projected native input." controller="./ui-input.js">
   <defs>
-    <prop name="defaultValue" type="string" default="">defaultValue property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
-    <prop name="readOnly" type="boolean" default="false">readOnly property.</prop>
-    <prop name="value" type="string">value property.</prop>
+    <prop name="defaultValue" type="string" default="">Initial uncontrolled value.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="invalid" type="boolean" default="false">Application validity state.</prop>
+    <prop name="readOnly" type="boolean" default="false">Read-only state.</prop>
+    <prop name="value" type="string?">Controlled value; absence leaves the input uncontrolled.</prop>
+    <event name="input" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-read-only="readOnly" :data-value="value">
-    <slot></slot>
-  </div>
+  <div class="input" :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-readonly="readOnly" :data-value="value"><slot></slot></div>
 </template>

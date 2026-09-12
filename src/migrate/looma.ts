@@ -6,6 +6,7 @@ import {
 
 export interface LoomaMigration {
   readonly source: string;
+  readonly controller?: string;
   readonly status: "ported" | "scaffold";
   readonly diagnostics: readonly StencilScaffoldDiagnostic[];
 }
@@ -87,11 +88,308 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <fieldset :disabled="disabled" :data-label="label" :data-required="required"><legend $value="label"></legend><slot></slot></fieldset>
 </template>`,
+  "ui-input": `<template component="ui-input" status="early" summary="A policy wrapper around a projected native input." controller="./ui-input.js">
+  <defs>
+    <prop name="defaultValue" type="string" default="">Initial uncontrolled value.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="invalid" type="boolean" default="false">Application validity state.</prop>
+    <prop name="readOnly" type="boolean" default="false">Read-only state.</prop>
+    <prop name="value" type="string?">Controlled value; absence leaves the input uncontrolled.</prop>
+    <event name="input" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="input" :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-readonly="readOnly" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-textarea": `<template component="ui-textarea" status="early" summary="A policy wrapper around a projected native textarea." controller="./ui-textarea.js">
+  <defs>
+    <prop name="defaultValue" type="string" default="">Initial uncontrolled value.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="invalid" type="boolean" default="false">Application validity state.</prop>
+    <prop name="readOnly" type="boolean" default="false">Read-only state.</prop>
+    <prop name="rows" type="integer" default="4">Visible text rows.</prop>
+    <prop name="value" type="string?">Controlled value; absence leaves the textarea uncontrolled.</prop>
+    <event name="input" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="textarea" :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-readonly="readOnly" :data-rows="rows" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-select": `<template component="ui-select" status="early" summary="A policy wrapper around a projected native select." controller="./ui-select.js">
+  <defs>
+    <prop name="defaultValue" type="string?">Initial uncontrolled selection.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="invalid" type="boolean" default="false">Application validity state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string?">Controlled value; absence leaves the select uncontrolled.</prop>
+    <event name="input" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="select" :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-required="required" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-checkbox": `<template component="ui-checkbox" status="early" summary="A controlled or uncontrolled projected native checkbox." controller="./ui-checkbox.js">
+  <defs>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="indeterminate" type="boolean" default="false">Mixed state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="checkbox" role="checkbox" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-indeterminate="indeterminate" :data-required="required" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-radio": `<template component="ui-radio" status="early" summary="A controlled or uncontrolled projected native radio." controller="./ui-radio.js">
+  <defs>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="name" type="string" default="">Native radio group name.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="radio" role="radio" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-name="name" :data-required="required" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-radio-group": `<template component="ui-radio-group" status="early" summary="A keyboard-navigable group of projected ui-radio controls." controller="./ui-radio-group.js">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="name" type="string" default="">Native radio group name.</prop>
+    <prop name="orientation" type="horizontal | vertical" default="horizontal">Keyboard navigation axis.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="">Selected radio value.</prop>
+    <event name="select" type="object({ value: string, previousValue: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="radio-group" role="radiogroup" :data-disabled="disabled" :data-name="name" :data-orientation="orientation" :data-required="required" :data-value="value"><slot></slot></div>
+</template>`,
+  "ui-switch": `<template component="ui-switch" status="early" summary="A native checkbox presented as a switch." controller="./ui-switch.js">
+  <defs>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <label class="switch" role="switch" tabindex="0" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-required="required" :data-value="value"><input $ref="control" type="checkbox" aria-hidden="true" tabindex="-1"><slot></slot></label>
+</template>`,
+});
+
+const TRIGGER_OF = String.raw`function triggerOf(event) {
+  if (!event.isTrusted) return "programmatic";
+  return event instanceof KeyboardEvent ? "keyboard" : "pointer";
+}`;
+
+const FORM_VALUE_CONTROLLER = String.raw`${TRIGGER_OF}
+export default function controller(host) {
+  const tag = host.element.getAttribute("data-component-root") || "";
+  const kind = tag.includes("ui-textarea") ? "textarea" : tag.includes("ui-select") ? "select" : "input";
+  let control;
+  let initialized = false;
+  const find = () => host.element.querySelector(kind);
+  const sync = () => {
+    control = find();
+    if (!control) return;
+    const controlled = host.state.value !== undefined;
+    if (controlled) control.value = host.state.value;
+    else if (!initialized && host.state.defaultValue !== undefined) control.value = host.state.defaultValue;
+    if (kind !== "select") control.defaultValue = host.state.defaultValue || "";
+    control.disabled = Boolean(host.state.disabled);
+    if (kind === "textarea") {
+      control.readOnly = Boolean(host.state.readOnly);
+      control.rows = host.state.rows;
+    } else if (kind === "input") control.readOnly = Boolean(host.state.readOnly);
+    else control.required = Boolean(host.state.required);
+    control.setAttribute("aria-invalid", host.state.invalid ? "true" : "false");
+    host.element.toggleAttribute("data-invalid", Boolean(host.state.invalid));
+    initialized = true;
+  };
+  const stop = host.effect(sync);
+  const forward = (event) => {
+    if (event.target !== control) return;
+    const value = control.value;
+    event.stopPropagation();
+    host.dispatch(event.type, { value, trigger: triggerOf(event) });
+    if (host.state.value !== undefined) queueMicrotask(sync);
+  };
+  host.element.addEventListener("input", forward);
+  host.element.addEventListener("change", forward);
+  const containsControl = (node) => node.nodeType === Node.ELEMENT_NODE &&
+    (node.matches?.(kind) || node.querySelector?.(kind));
+  const observer = new MutationObserver((records) => {
+    if (!control?.isConnected || records.some((record) =>
+      [...record.addedNodes, ...record.removedNodes].some(containsControl))) sync();
+  });
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); host.element.removeEventListener("input", forward); host.element.removeEventListener("change", forward); };
+}`;
+
+const TOGGLE_CONTROLLER = String.raw`${TRIGGER_OF}
+export default function controller(host) {
+  const isRadio = (host.element.getAttribute("data-component-root") || "").includes("ui-radio");
+  const selector = isRadio ? 'input[type="radio"]' : 'input[type="checkbox"]';
+  let control;
+  let initialized = false;
+  let internal = false;
+  const find = () => host.element.querySelector(selector);
+  const sync = () => {
+    control = find();
+    if (!control) return;
+    const controlled = host.state.checked !== undefined;
+    if (!initialized) internal = controlled ? Boolean(host.state.checked) : Boolean(host.state.defaultChecked);
+    else if (controlled) internal = Boolean(host.state.checked);
+    control.checked = internal;
+    control.disabled = Boolean(host.state.disabled);
+    control.required = Boolean(host.state.required);
+    control.value = host.state.value;
+    if (isRadio) control.name = host.state.name;
+    else control.indeterminate = Boolean(host.state.indeterminate);
+    host.element.setAttribute("aria-checked", !isRadio && host.state.indeterminate ? "mixed" : String(internal));
+    host.element.setAttribute("aria-disabled", String(Boolean(host.state.disabled)));
+    host.element.toggleAttribute("data-disabled", Boolean(host.state.disabled));
+    initialized = true;
+  };
+  const stop = host.effect(sync);
+  const changed = (event) => {
+    if (event.target !== control || (isRadio && !control.checked)) return;
+    const checked = control.checked;
+    if (host.state.checked === undefined) internal = checked;
+    event.stopPropagation();
+    sync();
+    host.dispatch("change", { checked, value: host.state.value, trigger: triggerOf(event) });
+  };
+  host.element.addEventListener("change", changed);
+  const containsControl = (node) => node.nodeType === Node.ELEMENT_NODE &&
+    (node.matches?.(selector) || node.querySelector?.(selector));
+  const observer = new MutationObserver((records) => {
+    if (!control?.isConnected || records.some((record) =>
+      [...record.addedNodes, ...record.removedNodes].some(containsControl))) sync();
+  });
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); host.element.removeEventListener("change", changed); };
+}`;
+
+const SWITCH_CONTROLLER = String.raw`${TRIGGER_OF}
+export default function controller(host) {
+  const control = host.refs.control;
+  let initialized = false;
+  let internal = false;
+  const sync = () => {
+    const controlled = host.state.checked !== undefined;
+    if (!initialized) internal = controlled ? Boolean(host.state.checked) : Boolean(host.state.defaultChecked);
+    else if (controlled) internal = Boolean(host.state.checked);
+    control.checked = internal;
+    control.disabled = Boolean(host.state.disabled);
+    control.required = Boolean(host.state.required);
+    control.value = host.state.value;
+    host.element.setAttribute("aria-checked", String(internal));
+    host.element.setAttribute("aria-disabled", String(Boolean(host.state.disabled)));
+    host.element.tabIndex = host.state.disabled ? -1 : 0;
+    host.element.toggleAttribute("data-disabled", Boolean(host.state.disabled));
+    initialized = true;
+  };
+  const stop = host.effect(sync);
+  const changed = (event) => {
+    if (event.target !== control) return;
+    const checked = control.checked;
+    if (host.state.checked === undefined) internal = checked;
+    event.stopPropagation();
+    sync();
+    host.dispatch("change", { checked, value: host.state.value, trigger: triggerOf(event) });
+  };
+  const keydown = (event) => {
+    if (event.key !== " " || host.state.disabled) return;
+    event.preventDefault();
+    control.click();
+  };
+  host.element.addEventListener("change", changed);
+  host.element.addEventListener("keydown", keydown);
+  return () => { stop(); host.element.removeEventListener("change", changed); host.element.removeEventListener("keydown", keydown); };
+}`;
+
+const RADIO_GROUP_CONTROLLER = String.raw`export default function controller(host) {
+  let current = host.state.value || "";
+  let lastControlledValue = current;
+  const radios = () => Array.from(host.element.querySelectorAll('[data-component-root~="ui-radio"]'));
+  const native = (radio) => radio.querySelector('input[type="radio"]');
+  const apply = () => {
+    const items = radios();
+    const selected = items.findIndex((radio) => radio.value === current);
+    items.forEach((radio, index) => {
+      radio.checked = radio.value === current;
+      radio.name = host.state.name || host.element.id || "ui-radio-group";
+      radio.disabled = Boolean(host.state.disabled);
+      radio.required = Boolean(host.state.required);
+      const input = native(radio);
+      if (input) input.tabIndex = index === (selected < 0 ? 0 : selected) ? 0 : -1;
+    });
+    host.element.setAttribute("aria-orientation", host.state.orientation);
+    host.element.toggleAttribute("data-disabled", Boolean(host.state.disabled));
+  };
+  const stop = host.effect(() => {
+    const controlledValue = host.state.value || "";
+    if (controlledValue !== lastControlledValue) {
+      current = controlledValue;
+      lastControlledValue = controlledValue;
+    }
+    apply();
+  });
+  const select = (value, trigger) => {
+    if (!value || value === current || host.state.disabled) return;
+    const previousValue = current;
+    current = value;
+    apply();
+    host.dispatch("select", { value, previousValue, trigger });
+    host.dispatch("change", { checked: true, value, trigger });
+  };
+  const change = (event) => {
+    const radio = event.target.closest?.('[data-component-root~="ui-radio"]');
+    if (!radio || !host.element.contains(radio) || event.detail?.checked !== true) return;
+    event.stopPropagation();
+    select(radio.value, event.detail.trigger || "programmatic");
+  };
+  const keydown = (event) => {
+    const items = radios().filter((radio) => !radio.disabled);
+    if (items.length === 0) return;
+    const vertical = host.state.orientation === "vertical";
+    const previous = vertical ? event.key === "ArrowUp" : event.key === "ArrowLeft";
+    const next = vertical ? event.key === "ArrowDown" : event.key === "ArrowRight";
+    if (!previous && !next) return;
+    event.preventDefault();
+    const at = Math.max(0, items.findIndex((radio) => radio.value === current));
+    const index = previous ? (at - 1 + items.length) % items.length : (at + 1) % items.length;
+    select(items[index].value, "keyboard");
+    native(items[index])?.focus();
+  };
+  host.element.addEventListener("change", change);
+  host.element.addEventListener("keydown", keydown);
+  const containsRadio = (node) => node.nodeType === Node.ELEMENT_NODE &&
+    (node.matches?.('[data-component-root~="ui-radio"]') || node.querySelector?.('[data-component-root~="ui-radio"]'));
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) =>
+      [...record.addedNodes, ...record.removedNodes].some(containsRadio))) apply();
+  });
+  observer.observe(host.element, { childList: true, subtree: true });
+  return () => { stop(); observer.disconnect(); host.element.removeEventListener("change", change); host.element.removeEventListener("keydown", keydown); };
+}`;
+
+const CONTROLLERS: Readonly<Record<string, string>> = Object.freeze({
+  "ui-input": FORM_VALUE_CONTROLLER,
+  "ui-textarea": FORM_VALUE_CONTROLLER,
+  "ui-select": FORM_VALUE_CONTROLLER,
+  "ui-checkbox": TOGGLE_CONTROLLER,
+  "ui-radio": TOGGLE_CONTROLLER,
+  "ui-radio-group": RADIO_GROUP_CONTROLLER,
+  "ui-switch": SWITCH_CONTROLLER,
 });
 
 export function migrateLoomaComponent(component: StencilComponentInventory): LoomaMigration {
   const port = PORTS[component.tag];
-  if (port !== undefined) return Object.freeze({ source: `${port}\n`, status: "ported", diagnostics: Object.freeze([]) });
+  if (port !== undefined) return Object.freeze({
+    source: `${port}\n`,
+    ...(CONTROLLERS[component.tag] === undefined ? {} : { controller: `${CONTROLLERS[component.tag]}\n` }),
+    status: "ported",
+    diagnostics: Object.freeze([]),
+  });
   const scaffold = scaffoldStencilComponent(component);
   return Object.freeze({ source: scaffold.source, status: "scaffold", diagnostics: scaffold.diagnostics });
 }

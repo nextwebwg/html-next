@@ -1,13 +1,12 @@
-<template component="ui-radio" status="early" summary="HTML Next migration of UiRadio.">
+<template component="ui-radio" status="early" summary="A controlled or uncontrolled projected native radio." controller="./ui-radio.js">
   <defs>
-    <prop name="checked" type="boolean">Controlled checked state. Omit it to use defaultChecked and local interaction state.</prop>
-    <prop name="defaultChecked" type="boolean" default="false">defaultChecked property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="name" type="string" default="">name property.</prop>
-    <prop name="required" type="boolean" default="false">required property.</prop>
-    <prop name="value" type="string" default="on">value property.</prop>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="name" type="string" default="">Native radio group name.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-name="name" :data-required="required" :data-value="value">
-    <slot></slot>
-  </div>
+  <div class="radio" role="radio" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-name="name" :data-required="required" :data-value="value"><slot></slot></div>
 </template>

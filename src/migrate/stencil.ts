@@ -3,6 +3,8 @@ import { basename, dirname, join, relative } from "node:path";
 
 import ts from "typescript";
 
+import { kebabCase } from "../names.js";
+
 export interface StencilPropInventory {
   readonly name: string;
   readonly type: string;
@@ -280,10 +282,6 @@ export async function extractStencilInventory(options: ExtractStencilOptions): P
     }),
     components: Object.freeze(components.sort((left, right) => left.tag.localeCompare(right.tag))),
   });
-}
-
-function kebabCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 function htmlEscape(value: string): string {

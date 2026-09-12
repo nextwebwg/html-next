@@ -1,12 +1,12 @@
-<template component="ui-select" status="early" summary="HTML Next migration of UiSelect.">
+<template component="ui-select" status="early" summary="A policy wrapper around a projected native select." controller="./ui-select.js">
   <defs>
-    <prop name="defaultValue" type="string">defaultValue property.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
-    <prop name="required" type="boolean" default="false">required property.</prop>
-    <prop name="value" type="string">value property.</prop>
+    <prop name="defaultValue" type="string?">Initial uncontrolled selection.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="invalid" type="boolean" default="false">Application validity state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string?">Controlled value; absence leaves the select uncontrolled.</prop>
+    <event name="input" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <select :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-required="required" :data-value="value">
-    <slot></slot>
-  </select>
+  <div class="select" :data-default-value="defaultValue" :data-disabled="disabled" :data-invalid="invalid" :data-required="required" :data-value="value"><slot></slot></div>
 </template>

@@ -15,6 +15,7 @@ import {
   type Value,
 } from "./expression.js";
 import { validateLiteralAttributeName } from "./language.js";
+import { kebabCase } from "./names.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 import {
@@ -217,7 +218,13 @@ function readInvocation(
   const contract = definition.contract;
   const names = new Map<string, string>();
   for (const name of Object.keys(contract.props)) {
-    names.set(hydration ? `data-${name.toLowerCase()}` : name.toLowerCase(), name);
+    const attributeName = kebabCase(name);
+    names.set(hydration ? `data-${attributeName}` : attributeName, name);
+    // Adopt output emitted by pre-kebab-case versions without making that spelling
+    // part of the author-facing contract.
+    if (hydration && attributeName !== name.toLowerCase()) {
+      names.set(`data-${name.toLowerCase()}`, name);
+    }
   }
 
   const values: Record<string, PropValue | undefined> = {};
@@ -1089,7 +1096,7 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const props = instance.definition.contract.props;
   const attributeNames = new Map(
     Object.entries(props).filter(([, prop]) => !isPropertyOnlyType(prop.type))
-      .map(([name]) => [`data-${name.toLowerCase()}`, name]),
+      .map(([name]) => [`data-${kebabCase(name)}`, name]),
   );
   const reflected = new Set<string>();
 
@@ -1101,7 +1108,7 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
       set: (input: unknown) => instance.scope.set(name, invocationValue(prop, input) as Value),
     });
     if (isPropertyOnlyType(prop.type)) continue;
-    const attributeName = `data-${name.toLowerCase()}`;
+    const attributeName = `data-${kebabCase(name)}`;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
       reflected.add(attributeName);
@@ -1270,6 +1277,15 @@ export function lowerDocument(root: Document = document): number {
     live.wrapper!.remove();
   }
 
+  // A projected component invocation can be nested inside another invocation in the
+  // authored document. Commit ancestors first so their slot insertion moves the live
+  // invocation; the descendant can then replace itself at that new location. Definition
+  // discovery order must not decide whether nested authored components survive.
+  prepared.sort((left, right) => {
+    if (left.invocation.contains(right.invocation)) return -1;
+    if (right.invocation.contains(left.invocation)) return 1;
+    return 0;
+  });
   for (const invocation of prepared) {
     for (const insertion of invocation.context.slotInsertions) {
       for (const child of insertion.nodes) markProjectedRoot(child);
@@ -1387,7 +1403,7 @@ export function attachComponent(
       if (value !== undefined) {
         (element as unknown as Record<string, unknown>)[name] = value;
         if (!isPropertyOnlyType(prop.type)) {
-          element.setAttribute(`data-${name.toLowerCase()}`, serializeTypedValue(value, prop.type));
+          element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
         }
       }
     }

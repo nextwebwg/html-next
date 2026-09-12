@@ -46,13 +46,8 @@
   },
   {
     "tag": "ui-checkbox",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-checkbox> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-chip",
@@ -134,13 +129,8 @@
   },
   {
     "tag": "ui-input",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-input> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-menu",
@@ -192,23 +182,13 @@
   },
   {
     "tag": "ui-radio",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-radio> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-radio-group",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-radio-group> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-search-result-row",
@@ -222,23 +202,13 @@
   },
   {
     "tag": "ui-select",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-select> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-switch",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-switch> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-tabs",
@@ -252,13 +222,8 @@
   },
   {
     "tag": "ui-textarea",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-textarea> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-toast-region",

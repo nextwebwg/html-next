@@ -889,6 +889,64 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} maps camel-case public props to kebab-case HTML attributes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-camel" status="early" summary="Camel-case props.">` +
+            `<defs><prop name="defaultValue" type="string" default="fallback">Default value.</prop></defs>` +
+            `<output :data-default="defaultValue"></output></template>` +
+          `<x-camel id="camel" default-value="authored"></x-camel>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          const root = document.getElementById("camel") as Element & { defaultValue?: string };
+          return {
+            value: root.defaultValue,
+            rendered: root.getAttribute("data-default"),
+            reflected: root.getAttribute("data-default-value"),
+            legacyReflection: root.hasAttribute("data-defaultvalue"),
+          };
+        });
+        assert.deepEqual(result, {
+          value: "authored",
+          rendered: "authored",
+          reflected: "authored",
+          legacyReflection: false,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves nested projected invocations independent of definition order`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-nested-child" status="early" summary="Child."><button><slot></slot></button></template>` +
+          `<template component="x-nested-parent" status="early" summary="Parent."><section><slot></slot></section></template>` +
+          `<x-nested-parent id="parent"><x-nested-child id="child"><span id="label">Label</span></x-nested-child></x-nested-parent>`,
+        );
+        const label = await page.$("#label");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          return {
+            parent: document.getElementById("parent")?.localName,
+            child: document.getElementById("child")?.localName,
+            text: document.getElementById("child")?.textContent,
+          };
+        });
+        assert.deepEqual(result, { parent: "section", child: "button", text: "Label" });
+        assert.equal(await label?.evaluate((node) => node === document.getElementById("label")), true);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} adopts compatible server DOM, repairs owned markup, and preserves live controls`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -1,12 +1,12 @@
-<template component="ui-radio-group" status="early" summary="HTML Next migration of UiRadioGroup.">
+<template component="ui-radio-group" status="early" summary="A keyboard-navigable group of projected ui-radio controls." controller="./ui-radio-group.js">
   <defs>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="name" type="string" default="">name property.</prop>
-    <prop name="orientation" type="'horizontal' | 'vertical'" default="horizontal">orientation property.</prop>
-    <prop name="required" type="boolean" default="false">required property.</prop>
-    <prop name="value" type="string" default="">value property.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="name" type="string" default="">Native radio group name.</prop>
+    <prop name="orientation" type="horizontal | vertical" default="horizontal">Keyboard navigation axis.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="">Selected radio value.</prop>
+    <event name="select" type="object({ value: string, previousValue: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-disabled="disabled" :data-name="name" :data-orientation="orientation" :data-required="required" :data-value="value">
-    <slot></slot>
-  </div>
+  <div class="radio-group" role="radiogroup" :data-disabled="disabled" :data-name="name" :data-orientation="orientation" :data-required="required" :data-value="value"><slot></slot></div>
 </template>
