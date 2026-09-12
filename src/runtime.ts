@@ -14,6 +14,7 @@ import {
 } from "./expression.js";
 import { validateLiteralAttributeName } from "./language.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
+import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 import type {
   ComponentDefinition,
@@ -423,45 +424,8 @@ function bindEvents(
   }
 }
 
-const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href"]);
-const BLOCKED_HTML_ELEMENTS = new Set(["base", "embed", "iframe", "link", "meta", "object", "script", "style", "template"]);
-const BLOCKED_HTML_ATTRIBUTES = new Set(["srcdoc", "style"]);
-
-function hasExecutableUrl(value: string): boolean {
-  const normalized = value.replace(/[\u0000-\u0020\u007f]+/g, "");
-  return /^(?:data|javascript|vbscript):/i.test(normalized);
-}
-
-/**
- * `$html` sanitizes an ordinary string, dropping active embedding elements, inline `on*`
- * handlers, raw style/srcdoc sinks, and executable URLs. This is a conservative placeholder
- * for the HTML Sanitizer API
- * (`Element.setHTML`), which the reference library will lazy-load where the browser lacks it.
- * ponytail: minimal sanitizer; swap for the Sanitizer API polyfill when it lands.
- */
-function sanitizedFragment(html: string, document: Document): DocumentFragment {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  for (const element of Array.from(template.content.querySelectorAll("*"))) {
-    contentOnly.add(element);
-    if (BLOCKED_HTML_ELEMENTS.has(element.localName)) {
-      element.remove();
-      continue;
-    }
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith("on") || BLOCKED_HTML_ATTRIBUTES.has(name)) {
-        element.removeAttribute(attribute.name);
-      } else if (URL_ATTRIBUTES.has(name) && hasExecutableUrl(attribute.value)) {
-        element.removeAttribute(attribute.name);
-      }
-    }
-  }
-  return template.content;
-}
-
 function setAttribute(element: Element, name: string, value: string | null): void {
-  if (value === null || (URL_ATTRIBUTES.has(name.toLowerCase()) && hasExecutableUrl(value))) {
+  if (value === null || (isUrlAttribute(name) && hasExecutableUrl(value))) {
     element.removeAttribute(name);
   }
   else element.setAttribute(name, value);
@@ -476,14 +440,14 @@ function applyContent(
 ): void {
   const value = evalValue(directive.expression, scope);
   if (directive.name === "value") element.textContent = toText(value);
-  else element.replaceChildren(sanitizedFragment(toText(value), document));
+  else element.replaceChildren(sanitizeFragment(toText(value), document, (node) => contentOnly.add(node)));
 }
 
 /** A `<template $value>`/`<template $html>` produces inline nodes with no wrapper element. */
 function inlineDirective(directive: DirectiveAttribute, scope: Scope, document: Document): Node {
   const value = evalValue(directive.expression, scope);
   if (directive.name === "value") return document.createTextNode(toText(value));
-  return sanitizedFragment(toText(value), document);
+  return sanitizeFragment(toText(value), document, (node) => contentOnly.add(node));
 }
 
 function compareValues(a: Value, b: Value): number {
