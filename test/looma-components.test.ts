@@ -395,19 +395,19 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
           <button id="preview" slot="preview" data-ui-editable-trigger>Rename</button>
           <input id="editor" slot="edit" value="Draft">
         </ui-editable>
-        <ui-tree id="tree" label="Files">
+        <ui-tree id="tree" label="Files" max-depth="2">
           <ui-tree-item id="parent" item-id="parent" label="Parent" container default-expanded sortable>
             Parent
             <ui-tree-item id="child" slot="children" item-id="child" label="Child">Child</ui-tree-item>
           </ui-tree-item>
-          <ui-tree-item id="sibling" item-id="sibling" label="Sibling">Sibling</ui-tree-item>
+          <ui-tree-item id="sibling" item-id="sibling" label="Sibling" sortable>Sibling</ui-tree-item>
         </ui-tree>
       `);
       await page.addScriptTag({ path: bundle });
       await page.addScriptTag({ path: controllerBundle });
       const result = await page.evaluate(`(async () => {
         const events = [];
-        for (const type of ['edit-change','expand']) document.addEventListener(type, event => events.push([type, event.detail]));
+        for (const type of ['edit-change','expand','reorder-rejected']) document.addEventListener(type, event => events.push([type, event.detail]));
         window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
           const controller = window.LoomaControllers[definition.contract.tag];
           if (controller == null) return;
@@ -428,6 +428,14 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         parent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
         const treeMoved = document.activeElement?.id;
         parent.querySelector('.tree-item__disclosure').click();
+        parent.dropDepth = 2;
+        const sibling = document.getElementById('sibling');
+        const handle = sibling.querySelector('.tree-item__drag');
+        const transfer = new DataTransfer();
+        handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, composed: true, dataTransfer: transfer }));
+        const rowRect = parent.querySelector('.tree-item__row').getBoundingClientRect();
+        parent.dispatchEvent(new DragEvent('dragover', { bubbles: true, composed: true, dataTransfer: transfer, clientY: rowRect.top + rowRect.height / 2 }));
+        document.getElementById('tree').dispatchEvent(new DragEvent('dragend', { bubbles: true, composed: true, dataTransfer: transfer }));
         return {
           editOpened,
           editClosed,
@@ -451,6 +459,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
           ["edit-change", { edit: true, reason: "activate", trigger: "programmatic" }],
           ["edit-change", { edit: false, reason: "escape", trigger: "keyboard" }],
           ["expand", { id: "parent", expanded: false, trigger: "programmatic" }],
+          ["reorder-rejected", { sourceId: "sibling", targetId: "parent", position: "inside", reason: "max-depth", maxDepth: 2, resultingDepth: 3, trigger: "pointer" }],
         ],
       });
     } finally {

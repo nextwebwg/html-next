@@ -344,7 +344,7 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
     <prop name="label" type="string" default="Tree">Accessible tree label.</prop>
     <prop name="maxDepth" type="number" default="0">Maximum resulting item depth; zero is unlimited.</prop>
     <event name="reorder" type="object({ sourceId: string, targetId: string, position: before | inside | after, sourceType: string, targetType: string, sourceScope: string, targetScope: string, trigger: pointer })"></event>
-    <event name="reorder-rejected" type="object({ sourceId: string, targetId: string, position: before | inside | after, reason: descendant | incompatible | max-depth, trigger: pointer })"></event>
+    <event name="reorder-rejected" type="object({ sourceId: string, targetId: string, position: before | inside | after, reason: max-depth, maxDepth: number, resultingDepth: number, trigger: pointer })"></event>
   </defs>
   <div class="tree" role="tree" :aria-label="label" :data-hover-expand-delay="hoverExpandDelay" :data-max-depth="maxDepth"><slot></slot></div>
 </template>`,
