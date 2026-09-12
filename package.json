@@ -30,7 +30,7 @@
     "test": "node --import tsx --test test/*.test.ts",
     "test:browser": "HTMLNEXT_BROWSER_TEST=1 node --import tsx --test test/runtime.test.ts test/validity.test.ts",
     "test:targets": "HTMLNEXT_TARGET_TEST=1 node --import tsx --test test/targets.test.ts test/target-runtime.test.ts",
-    "test:looma": "HTMLNEXT_LOOMA_TEST=1 node --import tsx --test test/migrate-stencil.test.ts test/looma-inventory.test.ts test/looma-components.test.ts test/package.test.ts test/consumer-knit.test.ts test/consumer-loadops.test.ts",
+    "test:looma": "HTMLNEXT_LOOMA_TEST=1 node --import tsx --test test/migrate-stencil.test.ts test/looma-inventory.test.ts test/looma-css.test.ts test/looma-components.test.ts test/looma-layout.test.ts test/looma-package.test.ts test/package.test.ts test/consumer-knit.test.ts test/consumer-loadops.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

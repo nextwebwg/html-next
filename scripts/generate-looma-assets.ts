@@ -24,7 +24,7 @@ const definitions = new Map(await Promise.all(inventory.components.map(async (co
   }] as const;
 })));
 const copies = [
-  "tokens.css", "theme-light.css", "theme-dark.css", "theme-high-contrast.css", "layout.css", "editor.css",
+  "tokens.css", "theme-light.css", "theme-dark.css", "theme-high-contrast.css", "editor.css",
 ] as const;
 await mkdir(output, { recursive: true });
 const assets = new Map<string, string>(await Promise.all(copies.map(async (name) => [
@@ -34,6 +34,20 @@ const assets = new Map<string, string>(await Promise.all(copies.map(async (name)
 assets.set("styles.css", migrateLoomaStyles(
   await readFile(join(source, "packages/looma/styles.css"), "utf8"),
   loomaStyleRoots(inventory.components, definitions),
+));
+assets.set("layout.css", migrateLoomaStyles(
+  await readFile(join(source, "packages/looma/layout.css"), "utf8"),
+  [
+    { tag: "ui-stack", element: "div", classes: [], props: ["gap", "align", "justify"] },
+    { tag: "ui-inline", element: "div", classes: [], props: ["gap", "align", "justify", "wrap"] },
+    { tag: "ui-cluster", element: "div", classes: [], props: ["gap", "align", "justify"] },
+    { tag: "ui-grid", element: "div", classes: [], props: ["gap", "min"] },
+    { tag: "ui-center", element: "div", classes: [], props: ["measure", "gutters"] },
+    { tag: "ui-switcher", element: "div", classes: [], props: ["gap", "threshold", "align"] },
+    { tag: "ui-sidebar", element: "div", classes: ["sidebar"], props: ["gap", "side", "width", "align", "resizable"] },
+    { tag: "ui-reel", element: "div", classes: [], props: ["gap", "itemWidth", "snap"] },
+    { tag: "ui-separator", element: "hr", classes: [], props: ["orientation"] },
+  ],
 ));
 for (const [name, content] of assets) {
   const target = new URL(name, output);

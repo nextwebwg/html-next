@@ -206,7 +206,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     version: config.version,
     type: "module",
     sideEffects: ["./dist/index.js", "./*.css"],
-    peerDependencies: { "@nextwebwg/html": "^0.0.0" },
+    peerDependencies: { "@nextwebwg/html": "^0.0.0", ...config.peerDependencies },
+    ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
     exports: config.exports ?? {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
       "./react": "./react/index.js",

@@ -16,4 +16,6 @@ export interface ComponentPackageConfig {
   readonly components: readonly PackageComponentInput[];
   readonly passThrough?: readonly PackagePassThrough[];
   readonly exports?: Readonly<Record<string, unknown>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
 }
