@@ -1,0 +1,137 @@
+{
+  "bundles": [],
+  "exceptions": [
+    {
+      "controlId": "core.baseline",
+      "owner": "Next Web Working Group",
+      "reason": "The private repository has no selected open-source license yet; licensing must be an explicit owner decision before publication.",
+      "reviewDate": "2027-03-12",
+      "scope": "LICENSE"
+    }
+  ],
+  "freshness": {
+    "holds": [
+      {
+        "name": "@types/node",
+        "owner": "Next Web Working Group",
+        "reason": "Type declarations target the minimum supported Node LTS line.",
+        "reviewDate": "2027-01-31"
+      }
+    ]
+  },
+  "modules": [
+    "agents",
+    "core",
+    "cross-platform",
+    "freshness",
+    "generated-artifacts",
+    "github",
+    "public-api",
+    "typescript-node"
+  ],
+  "ownership": [
+    {
+      "mode": "local",
+      "path": ".gitattributes"
+    },
+    {
+      "mode": "local",
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "mode": "local",
+      "path": ".github/workflows/extended.yml"
+    },
+    {
+      "mode": "local",
+      "path": ".gitignore"
+    },
+    {
+      "mode": "local",
+      "path": "AGENTS.md"
+    },
+    {
+      "mode": "local",
+      "path": "README.md"
+    },
+    {
+      "mode": "local",
+      "path": "oxlint.json"
+    },
+    {
+      "mode": "local",
+      "path": "package.json"
+    },
+    {
+      "mode": "local",
+      "path": "pnpm-workspace.yaml"
+    },
+    {
+      "mode": "local",
+      "path": "tests/package.test.ts"
+    },
+    {
+      "mode": "local",
+      "path": "tsconfig.json"
+    },
+    {
+      "mode": "local",
+      "path": "vitest.config.ts"
+    },
+    {
+      "mode": "managed",
+      "path": ".github/dependabot.yml"
+    },
+    {
+      "mode": "managed",
+      "path": ".threadlabs.lock.json"
+    },
+    {
+      "mode": "managed",
+      "path": "CLAUDE.md"
+    },
+    {
+      "mode": "managed",
+      "path": "threadlabs.config.json"
+    },
+    {
+      "mode": "unmanaged",
+      "path": ".github/workflows/release.yml"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "LICENSE"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "scripts/release.mjs"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "src/index.ts"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "tests/index.test.ts"
+    },
+    {
+      "mode": "unmanaged",
+      "path": "tsconfig.build.json"
+    }
+  ],
+  "release": {
+    "strategy": "independent-monorepo"
+  },
+  "schemaVersion": "1.0",
+  "settings": {
+    "description": "Reference implementations for HTML Next proposals.",
+    "licenseHolder": "Next Web Working Group",
+    "licenseYear": 2026,
+    "projectName": "html-next"
+  },
+  "standardVersion": "1.0.0"
+}

@@ -1,33 +1,38 @@
-# HTML Next reference implementation
+# HTML Next implementations
 
-`@nextwebwg/html` is the polyfill, compiler, and component bridge for the HTML Next
-Stage 0 proposals. A component is authored once as inert, browser-parseable HTML. The
-same definition can run directly in a browser or compile to native DOM, React, Vue,
-Svelte, CSS, types, and inspectable package artifacts.
+This pnpm monorepo holds proposal-specific reference implementations for HTML Next.
+Each proposal owns an independently versioned package under `packages/`; shared policy
+and verification live at the repository root.
 
-The proposal does not depend on this library. This package implements the current
-proposal while browsers do not yet provide it natively. The exact behavior implemented
-by this checkout is defined by the [reference specification](./docs/spec/index.md), its
-[support profile](./docs/spec/support.json), and the shared conformance tests.
+| Package | Proposal | Current scope |
+| --- | --- | --- |
+| [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Browser runtime, compiler, validation, migration, and framework/package generation |
 
-> Stage 0: the syntax and generated package shape may change. No npm release has been
-> published from this checkout.
+The Declarative HTML Components package authors a component once as inert,
+browser-parseable HTML. The same definition can run directly in a browser or compile to
+native DOM, React, Vue, Svelte, CSS, types, and inspectable package artifacts. Its exact
+behavior is defined by the package's [reference specification](./packages/declarative-components/docs/spec/index.md),
+[support profile](./packages/declarative-components/docs/spec/support.json), and conformance tests.
+
+> Stage 0: the syntax and generated package shape may change. The repository and its
+> packages remain private until the project selects an open-source license and publication
+> policy.
 
 ## Install and verify
 
-This repository currently installs from source and requires Node 20.19 or newer:
+Use Node 22 or Node 24 and pnpm through Corepack:
 
 ```sh
-npm install
-npm run build
-npm test
-npm run test:browser
-npm run test:targets
-npm run test:looma
+corepack pnpm install --frozen-lockfile
+corepack pnpm verify:pr
+corepack pnpm test:browser
+corepack pnpm test:targets
+corepack pnpm test:looma
+corepack pnpm test:consumer
 ```
 
 Playwright's pinned Chromium, Firefox, and WebKit builds are required for the browser
-gates. Install them once with `npx playwright install chromium firefox webkit`.
+gates. Install them once with `corepack pnpm exec playwright install chromium firefox webkit`.
 
 ## Define a component
 
@@ -66,7 +71,8 @@ export default function controller(host) {
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
 named and data-derived slots, typed data sources, enhanced forms, and generalized
-validation. See the [specification modules](./docs/spec/index.md) for the complete syntax.
+validation. See the [specification modules](./packages/declarative-components/docs/spec/index.md)
+for the complete syntax.
 
 ## Run a live component graph
 
@@ -85,7 +91,7 @@ component and controller dependencies, and the public browser loader follows tha
 <x-app></x-app>
 
 <script type="module">
-  import { startBrowserComponents } from "@nextwebwg/html/browser-loader";
+  import { startBrowserComponents } from "@nextwebwg/declarative-components/browser-loader";
   await startBrowserComponents();
 </script>
 ```
@@ -101,8 +107,8 @@ added later are registered and lowered, and reconnect/disconnect cleanup is bala
 Applications can call the lower-level loader and runtime APIs when they need explicit
 lifecycle control.
 
-The runnable [live graph example](./examples/poc/README.md) uses this public API; it no
-longer carries a separate demonstration runtime.
+The runnable [live graph example](./packages/declarative-components/examples/poc/README.md)
+uses this public API.
 
 ## Inspect and build a graph
 
@@ -115,13 +121,15 @@ html-next build components/app.html --out-dir generated
 html-next build components/app.html --out-dir generated --target vue --target styles
 ```
 
-Until the package is published, substitute `npx tsx src/cli.ts` for `html-next`.
+Until the package is published, substitute
+`corepack pnpm exec tsx packages/declarative-components/src/cli.ts` for `html-next`.
 `inspect` reports component, controller, schema, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
 
 Generated targets preserve the definition's native root; they do not add a component
-wrapper. The checked-in [button output](./examples/generated) demonstrates each target.
+wrapper. The checked-in [button output](./packages/declarative-components/examples/generated)
+demonstrates each target.
 
 ## Migrate a Stencil package
 
@@ -133,7 +141,8 @@ Migration extracts public props, events, methods, slots, capabilities, and compo
 It emits review-required HTML scaffolds and explicit diagnostics for behavior that needs
 a controller. It never labels arbitrary TypeScript behavior as automatically converted.
 
-The checked-in [Looma corpus](./examples/looma) is the full reference workload: all 34
+The checked-in [Looma corpus](./packages/declarative-components/examples/looma) is the full
+reference workload: all 34
 public core components have reviewed definitions and behavioral tests, nine layout
 definitions are included, published CSS/theme/editor assets are preserved, and the
 package assembler emits Looma's current root, Vue, editor, extension, validation, layout,
@@ -143,8 +152,8 @@ consumers exercise the generated package.
 Build that compatibility package from a local Looma checkout with:
 
 ```sh
-npm run generate:looma-assets -- --source ../looma
-npm run build:looma -- --source ../looma --out-dir generated-looma
+corepack pnpm generate:looma-assets -- --source ../looma
+corepack pnpm build:looma -- --source ../looma --out-dir generated-looma
 ```
 
 ## Types and validation
@@ -177,12 +186,12 @@ only application resolution and trust differ.
 
 ## Repository map
 
-- [Reference specification](./docs/spec/index.md)
-- [Support profile](./docs/spec/support.json)
-- [Conformance corpus](./test/conformance/README.md)
-- [Style-scoping note](./docs/style-scoping.md)
-- [Looma migration corpus](./examples/looma)
-- [Historical component-generation plan](./docs/mvp-plan.md)
+- [Reference specification](./packages/declarative-components/docs/spec/index.md)
+- [Support profile](./packages/declarative-components/docs/spec/support.json)
+- [Conformance corpus](./packages/declarative-components/tests/conformance/README.md)
+- [Style-scoping note](./packages/declarative-components/docs/style-scoping.md)
+- [Looma migration corpus](./packages/declarative-components/examples/looma)
+- [Historical component-generation plan](./packages/declarative-components/docs/mvp-plan.md)
 
 The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
 motivates the proposal. This repository remains library-agnostic: Looma is its demanding

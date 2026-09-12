@@ -1,0 +1,4 @@
+* text=auto eol=lf
+packages/*/dist/** linguist-generated=true
+packages/*/examples/generated/** linguist-generated=true
+*.lock linguist-generated=true

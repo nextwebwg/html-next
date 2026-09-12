@@ -1,61 +1,42 @@
 {
-  "name": "@nextwebwg/html",
+  "name": "@nextwebwg/html-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Polyfill and component bridge for the HTML Next proposals.",
+  "description": "Reference implementations for HTML Next proposals.",
   "type": "module",
-  "bin": {
-    "html-next": "./dist/cli.js"
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.13 <23 || >=24 <25"
   },
-  "exports": {
-    ".": "./dist/index.js",
-    "./runtime": "./dist/runtime.js",
-    "./validation": "./dist/validation.js",
-    "./browser-loader": {
-      "types": "./dist/browser-loader.d.ts",
-      "import": "./dist/browser-loader.bundle.js"
-    },
-    "./node-loader": "./dist/node-loader.js"
-  },
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
-    "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
-    "build:looma": "tsx scripts/build-looma-package.ts",
-    "generate:dom": "tsx scripts/generate-dom-properties.ts",
-    "generate:looma": "tsx scripts/generate-looma-inventory.ts",
-    "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
-    "generate:looma-assets": "tsx scripts/generate-looma-assets.ts",
-    "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
-    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/generate-looma-scaffolds.ts --check && tsx scripts/check-example-generated.ts",
-    "check:spec": "node --import tsx --test test/spec.test.ts",
-    "test": "node --import tsx --test test/*.test.ts",
-    "test:browser": "HTMLNEXT_BROWSER_TEST=1 node --import tsx --test test/browser-loader.test.ts test/conformance.test.ts test/forms.test.ts test/runtime.test.ts test/source-adapters.test.ts test/validity.test.ts",
-    "test:targets": "HTMLNEXT_TARGET_TEST=1 node --import tsx --test test/targets.test.ts test/target-runtime.test.ts",
-    "test:looma": "HTMLNEXT_LOOMA_TEST=1 node --import tsx --test test/migrate-stencil.test.ts test/looma-inventory.test.ts test/looma-css.test.ts test/looma-components.test.ts test/looma-layout.test.ts test/looma-package.test.ts test/package.test.ts test/consumer-knit.test.ts test/consumer-loadops.test.ts",
-    "test:consumer": "npm run build && HTMLNEXT_CONSUMER_TEST=1 node --import tsx --test test/consumer-package.test.ts",
-    "typecheck": "tsc --noEmit"
+    "build": "pnpm --recursive --if-present build",
+    "build:example": "pnpm --filter @nextwebwg/declarative-components build:example",
+    "build:looma": "pnpm --filter @nextwebwg/declarative-components build:looma",
+    "check:generated": "pnpm --filter @nextwebwg/declarative-components check:generated",
+    "check:spec": "vitest run --config vitest.config.ts packages/declarative-components/tests/spec.test.ts",
+    "clean": "pnpm --recursive --if-present clean",
+    "generate:dom": "pnpm --filter @nextwebwg/declarative-components generate:dom",
+    "generate:looma": "pnpm --filter @nextwebwg/declarative-components generate:looma",
+    "generate:looma-assets": "pnpm --filter @nextwebwg/declarative-components generate:looma-assets",
+    "generate:looma-scaffolds": "pnpm --filter @nextwebwg/declarative-components generate:looma-scaffolds",
+    "generate:snapshots": "pnpm --filter @nextwebwg/declarative-components generate:snapshots",
+    "lint": "oxlint --deny-warnings .",
+    "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:consumer": "pnpm build && vitest run --config vitest.consumer.config.ts",
+    "test:looma": "vitest run --config vitest.looma.config.ts",
+    "test:package": "vitest run --config vitest.config.ts tests/package.test.ts",
+    "test:targets": "vitest run --config vitest.targets.config.ts",
+    "typecheck": "tsc -p tsconfig.json && pnpm --recursive --if-present typecheck",
+    "verify:inner": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:generated",
+    "verify:pr": "pnpm verify:inner && pnpm build && pnpm test:package",
+    "verify:extended": "pnpm verify:pr && pnpm test:browser && pnpm test:targets && pnpm test:looma && pnpm test:consumer"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vue/compiler-sfc": "~3.5.42",
-    "esbuild": "~0.25.12",
-    "playwright": "~1.63.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "svelte": "~5.57.0",
-    "tsx": "^4.23.13",
-    "typescript": "5.9.3",
-    "vue": "3.5.42"
-  },
-  "engines": {
-    "node": ">=20.19"
-  },
-  "dependencies": {
-    "parse5": "~8.0.1"
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
