@@ -120,6 +120,11 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate('p.name *= "get-p"', s), true);
     assert.equal(evaluate('p.name ^= "x"', s), false);
   });
+
+  it("formats dynamic slot names with the standard format function", () => {
+    assert.equal(evaluate("format('row-%s-%s', 'alpha', 2)", s), "row-alpha-2");
+    assert.equal(evaluate("format(1, 'alpha')", s), ABSENT);
+  });
   it("ordered comparison and precedence", () => {
     assert.equal(evaluate("(2 + 3) * 2 > 9", scope({})), true);
     assert.equal(evaluate("2 + 3 * 2", scope({})), 8);

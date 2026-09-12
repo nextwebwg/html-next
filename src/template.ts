@@ -28,7 +28,8 @@ export type ComponentDeclaration =
   | EventDeclaration
   | MethodDeclaration
   | HandlerDeclaration
-  | DataDeclaration;
+  | DataDeclaration
+  | FormDeclaration;
 
 export interface ReactiveDeclaration {
   readonly kind: "state" | "computed";
@@ -51,6 +52,13 @@ export interface DataDeclaration {
 export interface DataParameter {
   readonly name: string;
   readonly expression: CompiledExpression;
+}
+
+export interface FormDeclaration {
+  readonly kind: "form";
+  readonly name: string;
+  readonly source: string;
+  readonly parameters: readonly DataParameter[];
 }
 
 export interface EventDeclaration {

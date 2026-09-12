@@ -64,7 +64,7 @@ export type WritablePathSegment =
   | { readonly kind: "index"; readonly expression: ExpressionNode };
 export type WritablePath = readonly WritablePathSegment[];
 
-const FUNCTIONS = new Set(["round", "clamp", "min", "max", "abs"]);
+const FUNCTIONS = new Set(["round", "clamp", "min", "max", "abs", "format"]);
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -403,6 +403,12 @@ function evalBinary(op: string, leftNode: Node, rightNode: Node, scope: Scope): 
 }
 
 function evalCall(fn: string, args: Value[]): Value {
+  if (fn === "format") {
+    const [pattern, ...values] = args;
+    if (typeof pattern !== "string") return ABSENT;
+    let index = 0;
+    return pattern.replace(/%s/g, () => index < values.length ? toText(values[index++]!) : "%s");
+  }
   const numbers = args.map(asNumber);
   if (numbers.some((n) => n === ABSENT)) return ABSENT;
   const values = numbers as number[];

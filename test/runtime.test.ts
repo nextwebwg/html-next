@@ -135,6 +135,40 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} runs declarative lifecycle handlers again after reconnect`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-life" status="early" summary="Lifecycle.">` +
+            `<defs><state name="count" :value="0"></state>` +
+            `<handler name="connected"><set name="count" :value="count + 1"></set></handler>` +
+            `<handler name="disconnected"><set name="count" :value="count + 10"></set></handler></defs>` +
+            `<section on:connect="connected" on:disconnect="disconnected"><output $value="count"></output></section>` +
+            `</template><x-life id="life"></x-life><aside></aside>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const stop = window.HtmlRuntime.observeDocument();
+          await tick();
+          const root = document.querySelector('#life');
+          const initial = root.textContent;
+          root.remove();
+          await tick();
+          document.querySelector('aside').append(root);
+          await tick();
+          await Promise.resolve();
+          const reconnected = root.textContent;
+          stop();
+          return { initial, reconnected };
+        })()`);
+        assert.deepEqual(result, { initial: "1", reconnected: "12" });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} retains duplicate rules and custom-element precedence after discovery`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -605,6 +639,52 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} enhances declared forms while preserving native request semantics`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const requests: Array<{ url: string; body: string | null }> = [];
+        await page.route("https://example.test/api/**", async (route) => {
+          requests.push({ url: route.request().url(), body: route.request().postData() });
+          await route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({ saved: true }),
+          });
+        });
+        await page.setContent(
+          `<base href="https://example.test/"><template component="x-editor" status="early" summary="Editor.">` +
+            `<defs><state name="post" :value="{ id: '42', title: 'Draft', tags: ['web', 'next'] }"></state>` +
+            `<state name="complete" :value="false"></state>` +
+            `<handler name="saved"><set name="complete" :value="true"></set></handler></defs>` +
+            `<form name="save" method="post" enctype="application/x-www-form-urlencoded" src="/api/posts/{id}" on:success="saved">` +
+            `<param name="id" :value="post.id"></param><param name="tags" :value="post.tags"></param>` +
+            `<input name="title" required bind:value="post.title"><button name="intent" value="publish">Save</button>` +
+            `<output class="pending" $value="save.pending"></output><output class="complete" $value="complete"></output>` +
+            `</form></template><x-editor id="editor"></x-editor>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+          const form = document.querySelector("#editor") as HTMLFormElement;
+          form.requestSubmit(form.querySelector("button"));
+        });
+        await page.waitForFunction(() => document.querySelector("#editor .complete")?.textContent === "true");
+        const result = await page.evaluate(() => ({
+          pending: document.querySelector("#editor .pending")?.textContent,
+          complete: document.querySelector("#editor .complete")?.textContent,
+          paramCount: document.querySelectorAll("#editor param").length,
+          srcPresent: document.querySelector("#editor")?.hasAttribute("src"),
+        }));
+        assert.deepEqual(result, { pending: "false", complete: "true", paramCount: 0, srcPresent: false });
+        assert.deepEqual(requests, [{
+          url: "https://example.test/api/posts/42",
+          body: "title=Draft&intent=publish&tags=web&tags=next",
+        }]);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} scopes component styles by authored provenance`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -724,6 +804,157 @@ describe("browser runtime", { skip: !enabled }, () => {
             primaryStyles: 1,
           },
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} projects named, fallback, and data-selected slots and reconciles public props`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-panel" status="early" summary="Panel.">` +
+            `<defs><prop name="rows" type="list(object({ id: string }))">Rows.</prop><prop name="label" type="string" default="Panel">Label.</prop></defs>` +
+            `<section as="section | article"><header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
+            `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
+            `<ul><li $each="row of rows" $key="row.id"><slot :name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul></section>` +
+          `</template>` +
+          `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
+          `<x-panel id="empty"></x-panel>`,
+        );
+        await page.evaluate(() => {
+          const filled = document.querySelector("#filled") as Element & { rows?: unknown };
+          const empty = document.querySelector("#empty") as Element & { rows?: unknown };
+          filled.rows = [{ id: "a" }, { id: "b" }];
+          empty.rows = [];
+        });
+        await page.addScriptTag({ path: bundlePath });
+
+        const result = await page.evaluate(`(async () => {
+          const title = document.querySelector('#title-node');
+          const body = document.querySelector('#body-node');
+          const row = document.querySelector('#row-node');
+          window.HtmlRuntime.lowerDocument();
+          const filled = document.querySelector('#filled');
+          const empty = document.querySelector('#empty');
+          const initial = {
+            root: filled.localName,
+            label: filled.querySelector('.label').textContent,
+            titleSame: filled.querySelector('#title-node') === title,
+            bodySame: filled.querySelector('#body-node') === body,
+            rowSame: filled.querySelector('#row-node') === row,
+            projected: [title, body, row].map(node => node.hasAttribute('data-slotted')),
+            rows: Array.from(filled.querySelectorAll('li'), item => item.textContent),
+            fallbacks: [
+              empty.querySelector('.title-fallback')?.textContent,
+              empty.querySelector('.body-fallback')?.textContent,
+            ],
+          };
+          filled.label = 'Updated';
+          filled.rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+          await Promise.resolve();
+          await Promise.resolve();
+          return {
+            initial,
+            updated: {
+              label: filled.querySelector('.label').textContent,
+              rows: Array.from(filled.querySelectorAll('li'), item => item.textContent),
+              reflectedLabel: filled.getAttribute('data-label'),
+              reflectedRows: filled.getAttribute('data-rows'),
+            },
+          };
+        })()`);
+
+        assert.deepEqual(result, {
+          initial: {
+            root: "article",
+            label: "Initial",
+            titleSame: true,
+            bodySame: true,
+            rowSame: true,
+            projected: [true, true, true],
+            rows: ["A", "b"],
+            fallbacks: ["Untitled", "Empty"],
+          },
+          updated: {
+            label: "Updated",
+            rows: ["A", "b", "c"],
+            reflectedLabel: "Updated",
+            reflectedRows: '[{"id":"a"},{"id":"b"},{"id":"c"}]',
+          },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} adopts compatible server DOM, repairs owned markup, and preserves live controls`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-hydrated" status="early" summary="Hydration.">` +
+            `<defs><prop name="label" type="string" default="Default">Label.</prop></defs>` +
+            `<article><h2 $value="label"></h2><input .value="label"><slot></slot></article></template>` +
+          `<article id="server" data-component="x-hydrated" data-component-root="x-hydrated" data-label="Server">` +
+            `<h3 data-component="x-hydrated">stale</h3>` +
+            `<input data-component="x-hydrated" value="server"><em id="projected" data-slotted>Projected</em>` +
+          `</article>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const root = document.querySelector('#server');
+          const input = root.querySelector('input');
+          const projected = root.querySelector('#projected');
+          input.value = 'user edit';
+          input.focus();
+          input.setSelectionRange(2, 6);
+          const lowered = window.HtmlRuntime.lowerDocument();
+          const initial = {
+            lowered,
+            rootSame: document.querySelector('#server') === root,
+            inputSame: root.querySelector('input') === input,
+            projectedSame: root.querySelector('#projected') === projected,
+            heading: root.querySelector('h2')?.textContent,
+            staleGone: root.querySelector('h3') === null,
+            value: input.value,
+            focused: document.activeElement === input,
+            selection: [input.selectionStart, input.selectionEnd],
+          };
+          root.label = 'Next';
+          await Promise.resolve();
+          return { initial, updated: { heading: root.querySelector('h2').textContent, value: input.value } };
+        })()`);
+        assert.deepEqual(result, {
+          initial: {
+            lowered: 1,
+            rootSame: true,
+            inputSame: true,
+            projectedSame: true,
+            heading: "Server",
+            staleGone: true,
+            value: "user edit",
+            focused: true,
+            selection: [2, 6],
+          },
+          updated: { heading: "Next", value: "Next" },
+        });
+
+        const unsafe = await browser.newPage();
+        await unsafe.setContent(
+          `<template component="x-safe-root" status="early" summary="Safe root."><article>Expected</article></template>` +
+          `<section id="unsafe" data-component="x-safe-root" data-component-root="x-safe-root">Untouched</section>`,
+        );
+        await unsafe.addScriptTag({ path: bundlePath });
+        const rejected = await unsafe.evaluate(`(() => {
+          const root = document.querySelector('#unsafe');
+          try { window.HtmlRuntime.lowerDocument(); }
+          catch (error) { return { code: error.diagnostic.code, same: document.querySelector('#unsafe') === root, text: root.textContent }; }
+          return { code: 'none', same: false, text: '' };
+        })()`);
+        assert.deepEqual(rejected, { code: "HR005", same: true, text: "Untouched" });
+        await unsafe.close();
       } finally {
         await browser.close();
       }
@@ -857,6 +1088,7 @@ describe("browser runtime", { skip: !enabled }, () => {
               ["class", "cta"],
               ["data-component", "x-button"],
               ["data-component-root", "x-button"],
+              ["data-disabled", "false"],
               ["data-size", "lg"],
               ["data-trace", "runtime"],
               ["data-variant", "outline"],
@@ -880,6 +1112,7 @@ describe("browser runtime", { skip: !enabled }, () => {
             attributes: [
               ["data-component", "x-button"],
               ["data-component-root", "x-button"],
+              ["data-disabled", "true"],
               ["data-size", "md"],
               ["data-variant", "solid"],
               ["data-x-button", ""],
@@ -895,6 +1128,7 @@ describe("browser runtime", { skip: !enabled }, () => {
             attributes: [
               ["data-component", "x-status"],
               ["data-component-root", "x-status"],
+              ["data-message", "Ready"],
               ["id", "status"],
             ],
             children: [{ text: "Ready" }],

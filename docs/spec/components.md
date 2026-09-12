@@ -18,11 +18,11 @@ This observation is a browser-runtime responsibility. Ahead-of-time compilation 
 
 ## Properties
 
-A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from attributes. Structured values and functions are property-only and never stringified into attributes. Changes made after connection participate in the same update batch as local state writes.
+A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from invocation attributes. Structured values and functions are property-only inputs. Changes made through the lowered root's public property participate in the same update batch as local state writes.
 
 A controlled property is authoritative while present. Its paired `default-*` value initializes local state only when the controlled property is absent. User interaction updates local state and dispatches the declared change event; it does not mutate an externally controlled property.
 
-Reflected values serialize through the type's canonical serializer. Absence removes the reflected attribute. Reflection must not create an attribute/property feedback loop.
+Every effective public value is reflected on the lowered root as `data-<lowercase-name>` so server output can reconstruct the instance scope. Values, including structured values, use the type's canonical serializer at this reflection boundary; this does not turn structured invocation attributes into an authoring syntax. External writes to a reflected attribute are parsed through the declared type and enter the same scheduler. Absence removes the reflected attribute. Property-to-attribute reflection must not create a feedback loop.
 
 ## Slots
 
@@ -34,12 +34,14 @@ Framework adapters may expose a scoped slot as a function and project each retur
 <template component="x-result-list">
   <defs><prop name="rows" type="list(object)"></prop></defs>
   <ul>
-    <for each="row in rows" key="row.id">
-      <li><slot :name="format('row-%s', row.id)">Unnamed result</slot></li>
-    </for>
+    <li $each="row of rows" $key="row.id">
+      <slot :name="format('row-%s', row.id)">Unnamed result</slot>
+    </li>
   </ul>
 </template>
 ```
+
+Expected outcome: each row selects consumer content carrying the corresponding `slot="row-…"`; a missing row projection renders `Unnamed result`, and keyed updates retain the identity of projected nodes.
 
 ## Events
 

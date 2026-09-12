@@ -20,6 +20,7 @@ import type {
   ElementNode,
   EventBinding,
   Flow,
+  FormDeclaration,
   HandlerStep,
   SlotContract,
   TemplateAttribute,
@@ -80,6 +81,11 @@ const RAW_SINKS = new Set(["innerhtml", "outerhtml", "textcontent", "innertext",
 const EACH_RE = /^\s*([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*)\s*)?\bof\b\s*(.+)$/;
 const AS_RE = /^\s*(.+?)\s+\bas\b\s+([A-Za-z_$][\w$]*)\s*$/;
 const EVENT_PART_RE = /^[a-z][a-z0-9-]*$/;
+const EVENT_MODIFIERS = new Set([
+  "prevent", "stop", "self", "once", "passive", "capture",
+  "left", "middle", "right", "ctrl", "shift", "alt", "meta", "exact",
+  "enter", "escape", "space", "tab", "up", "down", "left", "right",
+]);
 const NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$-]*$/;
 
 interface ParseScope {
@@ -271,11 +277,12 @@ function readDeclarations(
   group: Element | undefined,
   contract: ComponentContract,
   source: string,
+  formNames: ReadonlySet<string> = new Set(),
 ): ComponentDeclaration[] {
   if (group === undefined) return [];
   const elements = group.childNodes.filter(isElement);
   const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
-  const names = new Set<string>();
+  const names = new Set<string>(formNames);
   for (const element of elements) {
     const kind = element.tagName;
     if (!allowed.has(kind)) {
@@ -399,6 +406,50 @@ function readDeclarations(
   return declarations;
 }
 
+function enhancedForms(root: Element, source: string): Element[] {
+  const forms: Element[] = [];
+  const visit = (element: Element): void => {
+    if (element.tagName === "form" && attr(element, "src") !== undefined) forms.push(element);
+    for (const child of element.childNodes) if (isElement(child)) visit(child);
+  };
+  visit(root);
+  const names = new Set<string>();
+  for (const form of forms) {
+    const name = attr(form, "name") ?? "";
+    if (!NAME_RE.test(name)) fail("HC025", "An enhanced form requires a valid `name`.", source);
+    if (names.has(name)) fail("HC020", `Enhanced form \`${name}\` is duplicated.`, source);
+    names.add(name);
+  }
+  return forms;
+}
+
+function readFormDeclarations(
+  forms: readonly Element[],
+  scope: ParseScope,
+  source: string,
+): FormDeclaration[] {
+  return forms.map((form) => {
+    const name = attr(form, "name")!;
+    const formSource = attr(form, "src")!;
+    if (formSource === "") fail("HC025", `Enhanced form \`${name}\` requires a non-empty \`src\`.`, source);
+    const parameters = directElements(form, "param").map((parameter) => {
+      const parameterName = attr(parameter, "name") ?? "";
+      const expressionSource = attr(parameter, ":value");
+      if (!NAME_RE.test(parameterName) || expressionSource === undefined) {
+        fail("HC025", "A form <param> requires a valid `name` and a `:value` expression.", source);
+      }
+      return Object.freeze({
+        name: parameterName,
+        expression: compileScopedExpression(expressionSource, scope, source),
+      });
+    });
+    if (new Set(parameters.map((parameter) => parameter.name)).size !== parameters.length) {
+      fail("HC025", `Enhanced form \`${name}\` repeats a parameter name.`, source);
+    }
+    return { kind: "form", name, source: formSource, parameters: Object.freeze(parameters) };
+  });
+}
+
 function parseAttributes(
   element: Element,
   contract: ComponentContract,
@@ -411,6 +462,7 @@ function parseAttributes(
         !FLOW_NAMES.has(attribute.name) &&
         attribute.name !== "$ref" &&
         attribute.name !== "as" &&
+        !(element.tagName === "form" && attribute.name === "src") &&
         !attribute.name.startsWith("on:"),
     )
     .map((attribute) => {
@@ -508,6 +560,12 @@ function parseEvents(element: Element, scope: ParseScope, source: string): Event
     }
     if (new Set(modifiers).size !== modifiers.length) {
       fail("HT010", `\`${attribute.name}\` repeats an event modifier.`, source);
+    }
+    if (modifiers.some((modifier) => !EVENT_MODIFIERS.has(modifier))) {
+      fail("HT010", `\`${attribute.name}\` contains an unsupported event modifier.`, source);
+    }
+    if (modifiers.includes("passive") && modifiers.includes("prevent")) {
+      fail("HT010", `\`${attribute.name}\` cannot combine passive and prevent.`, source);
     }
     if (!scope.handlers.has(attribute.value)) {
       fail("HT010", `Event binding \`${attribute.name}\` names undeclared handler \`${attribute.value}\`.`, source);
@@ -657,6 +715,9 @@ function parseElement(
       continue;
     }
     if (!isElement(child)) continue;
+    if (element.tagName === "form" && attr(element, "src") !== undefined && child.tagName === "param") {
+      continue;
+    }
     if (child.tagName === "slot") {
       const name = attr(child, "name");
       const nameExpression = attr(child, ":name");
@@ -813,10 +874,24 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
   };
   const contract = defineContract(rawContract, { source, tag });
 
-  const declarations = readDeclarations(defGroups[0], contract, source);
+  const forms = enhancedForms(root, source);
+  const formNames = new Set(forms.map((form) => attr(form, "name")!));
+  const declarations = readDeclarations(defGroups[0], contract, source, formNames);
+  const declaredEvents = new Set(
+    declarations.filter((declaration) => declaration.kind === "event").map((declaration) => declaration.name),
+  );
+  for (const declaration of declarations) {
+    if (declaration.kind !== "handler") continue;
+    for (const step of declaration.steps) {
+      if (step.kind === "dispatch" && !declaredEvents.has(step.event)) {
+        fail("HC023", `Handler \`${declaration.name}\` dispatches undeclared component event \`${step.event}\`.`, source);
+      }
+    }
+  }
   const rootsInScope = new Set([
     ...Object.keys(contract.props),
     ...declarations.map((declaration) => declaration.name),
+    ...formNames,
   ]);
   const scope: ParseScope = {
     roots: rootsInScope,
@@ -839,6 +914,7 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
       validateCompiledExpression(declaration.expression, scope, source);
     }
   }
+  declarations.push(...readFormDeclarations(forms, scope, source));
   const slotState = {
     defaults: 0,
     names: new Set<string>(),

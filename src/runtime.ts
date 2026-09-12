@@ -1,6 +1,7 @@
 import { parseBrowserComponent } from "./browser-source.js";
 import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
+import { enhanceForm } from "./forms.js";
 import type { ComponentGraph } from "./graph.js";
 import {
   UndeclaredName,
@@ -22,7 +23,7 @@ import {
   stampComponentRoot,
   transformComponentStyles,
 } from "./style.js";
-import { parseTypedValue } from "./type-system.js";
+import { parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
 import {
   manageElementValidity,
 } from "./validity.js";
@@ -33,8 +34,10 @@ import type {
   DirectiveAttribute,
   ElementNode,
   Flow,
+  FormDeclaration,
   HandlerDeclaration,
   HandlerStep,
+  SlotNode,
   TemplateNode,
 } from "./template.js";
 import type { WritablePath } from "./expression.js";
@@ -76,10 +79,15 @@ function runtimeDeclarations(definition: ComponentDefinition): Decl[] {
 interface PreparedInvocation {
   readonly invocation: Element;
   readonly nativeRoot: Element;
-  readonly slotContainers: readonly Comment[];
-  readonly children: readonly Node[];
+  readonly context: RuntimeRenderContext;
   readonly definition: ComponentDefinition;
   readonly instance: RuntimeInstance;
+  readonly replace: boolean;
+}
+
+interface SlotInsertion {
+  readonly anchor: Comment;
+  readonly nodes: readonly Node[];
 }
 
 interface RuntimeInstance {
@@ -195,24 +203,46 @@ function invocationValue(prop: PropContract, input: unknown, attributePresent = 
 function readInvocation(
   invocation: Element,
   definition: ComponentDefinition,
+  hydration = false,
 ): {
   readonly scope: ReactiveScope;
   readonly passThrough: readonly Attr[];
   readonly effects: ReactiveEffect[];
+  readonly rootName: string;
 } {
   const contract = definition.contract;
   const names = new Map<string, string>();
-  for (const name of Object.keys(contract.props)) names.set(name.toLowerCase(), name);
+  for (const name of Object.keys(contract.props)) {
+    names.set(hydration ? `data-${name.toLowerCase()}` : name.toLowerCase(), name);
+  }
 
   const values: Record<string, PropValue | undefined> = {};
   const passThrough: Attr[] = [];
+  let requestedRoot: string | undefined;
   for (const attribute of Array.from(invocation.attributes)) {
-    const propName = names.get(attribute.name.toLowerCase());
-    if (propName === undefined) {
-      passThrough.push(attribute);
+    if (attribute.name.toLowerCase() === "as" && definition.root?.kind === "native") {
+      requestedRoot = attribute.value.toLowerCase();
       continue;
     }
-    values[propName] = invocationValue(contract.props[propName]!, attribute.value, true);
+    const propName = names.get(attribute.name.toLowerCase());
+    if (propName === undefined) {
+      if (!hydration) passThrough.push(attribute);
+      continue;
+    }
+    values[propName] = invocationValue(contract.props[propName]!, attribute.value, !hydration);
+  }
+
+  const rootName = definition.root?.kind === "native"
+    ? hydration ? invocation.localName : requestedRoot ?? definition.root.element
+    : definition.template.name;
+  if (
+    definition.root?.kind === "native" &&
+    !definition.root.choices.includes(rootName)
+  ) {
+    fail(
+      hydration ? "HR005" : "HR002",
+      `<${contract.tag}> cannot use root <${rootName}>; expected one of ${definition.root.choices.join(", ")}.`,
+    );
   }
 
   for (const [name, prop] of Object.entries(contract.props)) {
@@ -235,6 +265,8 @@ function readInvocation(
   for (const declaration of declarations) {
     if (declaration.kind === "data") {
       scope.set(declaration.name, { pending: true, value: null, error: null, ok: false });
+    } else if (declaration.kind === "form") {
+      scope.set(declaration.name, { pending: false, value: null, error: null, ok: false });
     } else if (declaration.kind === "state") {
       scope.set(
         declaration.name,
@@ -279,7 +311,7 @@ function readInvocation(
       return () => resource.disconnect();
     }, 0));
   }
-  return { scope, passThrough, effects };
+  return { scope, passThrough, effects, rootName };
 }
 
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
@@ -302,6 +334,13 @@ interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   readonly effects: ReactiveEffect[];
   readonly refs: Record<string, Element>;
+  readonly connectCallbacks: Set<() => void>;
+  readonly disconnectCallbacks: Set<() => void>;
+  root?: Element;
+  readonly projectedNodes: readonly Node[];
+  readonly slotInsertions: SlotInsertion[];
+  readonly rootName: string;
+  committed: boolean;
 }
 
 function ownEffect(
@@ -382,10 +421,19 @@ function runHandler(
     if (step.kind === "set") {
       setWritablePath(scope, step.writablePath, evaluateCompiled(step.value, scope));
     } else if (step.kind === "dispatch") {
-      element.dispatchEvent(new CustomEvent(step.event, {
-        detail: step.value === undefined ? undefined : evaluateCompiled(step.value, scope),
-        bubbles: true,
-        composed: true,
+      const declaration = (context.definition.declarations ?? []).find(
+        (candidate) => candidate.kind === "event" && candidate.name === step.event,
+      );
+      const detail = step.value === undefined ? undefined : evaluateCompiled(step.value, scope);
+      if (declaration?.kind === "event" && detail !== undefined) {
+        const parsed = parseTypedValue(detail, parseTypeExpression(declaration.type));
+        if (!parsed.ok) fail("HR002", `Event \`${step.event}\` detail does not satisfy its declared type.`);
+      }
+      (context.root ?? element).dispatchEvent(new CustomEvent(step.event, {
+        detail,
+        bubbles: declaration?.kind === "event" ? declaration.bubbles : true,
+        composed: declaration?.kind === "event" ? declaration.composed : true,
+        cancelable: declaration?.kind === "event" ? declaration.cancelable : false,
       }));
     } else {
       const target = context.refs[step.target];
@@ -397,6 +445,19 @@ function runHandler(
 
 function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
   if (modifiers.includes("self") && event.target !== element) return false;
+  if (event instanceof MouseEvent) {
+    const buttonFilters = modifiers.filter((modifier) => ["left", "middle", "right"].includes(modifier));
+    const buttons: Record<string, number> = { left: 0, middle: 1, right: 2 };
+    if (buttonFilters.length > 0 && !buttonFilters.some((filter) => event.button === buttons[filter])) return false;
+  }
+  const systemKeys = ["ctrl", "shift", "alt", "meta"] as const;
+  for (const key of systemKeys) {
+    if (modifiers.includes(key) && !(event as unknown as Record<string, boolean>)[`${key}Key`]) return false;
+  }
+  if (
+    modifiers.includes("exact") &&
+    systemKeys.some((key) => !modifiers.includes(key) && (event as unknown as Record<string, boolean>)[`${key}Key`])
+  ) return false;
   if (event instanceof KeyboardEvent) {
     const keyFilters = modifiers.filter((modifier) =>
       ["enter", "escape", "space", "tab", "up", "down", "left", "right"].includes(modifier),
@@ -429,6 +490,13 @@ function bindEvents(
       if (binding.modifiers.includes("stop")) event.stopPropagation();
       runHandler(declaration, element, scope, context);
     };
+    if (binding.name === "connect" || binding.name === "disconnect") {
+      const callbacks = binding.name === "connect"
+        ? context.connectCallbacks
+        : context.disconnectCallbacks;
+      callbacks.add(() => listener(new Event(binding.name)));
+      continue;
+    }
     ownEffect(context, scope, () => {
       element.addEventListener(binding.name, listener, {
         capture: binding.modifiers.includes("capture"),
@@ -440,6 +508,34 @@ function bindEvents(
       });
     }, 2);
   }
+}
+
+function bindEnhancedForm(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  if (!(element instanceof HTMLFormElement) || node.name !== "form") return;
+  const name = node.attributes.find(
+    (attribute) => attribute.kind === "literal" && attribute.name === "name",
+  );
+  if (name?.kind !== "literal") return;
+  const declaration = (context.definition.declarations ?? []).find(
+    (candidate): candidate is FormDeclaration =>
+      candidate.kind === "form" && candidate.name === name.value,
+  );
+  if (declaration === undefined) return;
+  ownEffect(context, scope, () => enhanceForm(element, {
+    source: declaration.source,
+    parameters: () => Object.fromEntries(
+      declaration.parameters.map((parameter) => [
+        parameter.name,
+        evaluateCompiled(parameter.expression, scope),
+      ]),
+    ),
+    onState: (state) => scope.set(declaration.name, state as unknown as Value),
+  }), 2);
 }
 
 function setAttribute(element: Element, name: string, value: string | null): void {
@@ -556,12 +652,11 @@ function renderDynamicNode(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
   if (node.flow?.kind === "each") {
-    return renderEachRegion(node, scope, document, slotContainers, passThrough, context);
+    return renderEachRegion(node, scope, document, passThrough, context);
   }
   const start = document.createComment("html-next:start");
   const end = document.createComment("html-next:end");
@@ -577,14 +672,14 @@ function renderDynamicNode(
     if (node.flow?.kind === "if") {
       if (truthy(evalValue(node.flow.test, scope))) {
         const { flow: _flow, ...body } = node;
-        rendered = renderInstance(body, scope, document, slotContainers, passThrough, context);
+        rendered = renderInstance(body, scope, document, passThrough, context);
       }
     } else if (node.flow?.kind === "with") {
       const local = scope.fork([[node.flow.alias, evalValue(node.flow.expr, scope)]]);
       const { flow: _flow, ...body } = node;
-      rendered = renderInstance(body, local, document, slotContainers, passThrough, context);
+      rendered = renderInstance(body, local, document, passThrough, context);
     } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(node, scope, document, slotContainers, context);
+      rendered = renderMatch(node, scope, document, context);
     }
     childEffects = context.effects.slice(effectsStart);
     end.before(...materialize(rendered, document));
@@ -627,7 +722,6 @@ function renderEachRegion(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
@@ -656,7 +750,7 @@ function renderEachRegion(
         const local = scope.fork(Object.entries(locals));
         const effectsStart = context.effects.length;
         const rendered = materialize(
-          renderInstance(body, local, document, slotContainers, passThrough, context),
+          renderInstance(body, local, document, passThrough, context),
           document,
         );
         const blockStart = document.createComment("html-next:item-start");
@@ -686,9 +780,9 @@ function renderNode(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   if (
     node.flow?.kind === "if" ||
@@ -696,11 +790,11 @@ function renderNode(
     node.flow?.kind === "with" ||
     node.flow?.kind === "match"
   ) {
-    return renderDynamicNode(node, scope, document, slotContainers, passThrough, context);
+    return renderDynamicNode(node, scope, document, passThrough, context);
   }
   const out: Node[] = [];
   for (const childScope of expandFlow(node.flow, scope)) {
-    out.push(...renderInstance(node, childScope, document, slotContainers, passThrough, context));
+    out.push(...renderInstance(node, childScope, document, passThrough, context, candidate));
   }
   return out;
 }
@@ -709,7 +803,6 @@ function renderMatch(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   context: RuntimeRenderContext,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "match" }>;
@@ -732,7 +825,7 @@ function renderMatch(
 
   // Render the winning arm, ignoring its own $when/$else marker.
   const { flow: _armFlow, ...armNode } = chosen;
-  const rendered = renderInstance(armNode, matchScope, document, slotContainers, [], context);
+  const rendered = renderInstance(armNode, matchScope, document, [], context);
   if (node.name === "template") return rendered;
 
   // $match on a real element wraps the winning arm in that element.
@@ -750,9 +843,9 @@ function renderInstance(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   const contentDirective = node.attributes.find(
     (attribute): attribute is DirectiveAttribute => attribute.kind === "directive",
@@ -770,10 +863,26 @@ function renderInstance(
         ? [text]
         : [inlineDirective(contentDirective, scope, document)];
     }
-    return renderChildren(node.children, scope, document, slotContainers, context);
+    return renderChildren(node.children, scope, document, context);
   }
 
-  const element = document.createElement(node.name);
+  const elementName = node === context.definition.template ? context.rootName : node.name;
+  const adopted = candidate instanceof Element && candidate.localName === elementName;
+  const element = adopted ? candidate : document.createElement(elementName);
+  if (node === context.definition.template) context.root = element;
+  const existingChildren = adopted ? Array.from(element.childNodes) : [];
+  const controlState = adopted && (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement
+  ) ? {
+      value: element.value,
+      focused: element.ownerDocument.activeElement === element,
+      ...(element instanceof HTMLInputElement ? { checked: element.checked } : {}),
+      ...(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+        ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
+        : {}),
+    } : undefined;
   if (node.ref !== undefined) context.refs[node.ref] = element;
   for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
@@ -820,20 +929,41 @@ function renderInstance(
     return [element];
   }
 
+  const renderedChildren: Node[] = [];
+  let cursor = 0;
   for (const child of node.children) {
-    if (child.kind === "text") {
-      element.append(document.createTextNode(child.value));
-    } else if (child.kind === "slot") {
-      const anchor = document.createComment("html-next-slot");
-      slotContainers.push(anchor);
-      element.append(anchor);
-    } else {
-      for (const rendered of renderNode(child, scope, document, slotContainers, [], context)) {
-        element.append(rendered);
+    const rendered = renderTemplateNode(child, scope, document, context, existingChildren[cursor]);
+    renderedChildren.push(...rendered);
+    cursor += rendered.length;
+  }
+  if (adopted) {
+    for (let index = 0; index < renderedChildren.length; index += 1) {
+      const expected = renderedChildren[index]!;
+      if (element.childNodes[index] !== expected) {
+        element.insertBefore(expected, element.childNodes[index] ?? null);
       }
+    }
+    while (element.childNodes.length > renderedChildren.length) element.lastChild!.remove();
+  } else {
+    element.append(...renderedChildren);
+  }
+  if (controlState !== undefined) {
+    (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
+    if (element instanceof HTMLInputElement && "checked" in controlState) {
+      element.checked = controlState.checked;
+    }
+    if (
+      (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+      "selectionStart" in controlState &&
+      typeof controlState.selectionStart === "number" &&
+      typeof controlState.selectionEnd === "number"
+    ) {
+      if (controlState.focused) element.focus({ preventScroll: true });
+      element.setSelectionRange(controlState.selectionStart, controlState.selectionEnd);
     }
   }
   bindEvents(element, node, scope, context);
+  bindEnhancedForm(element, node, scope, context);
   return [element];
 }
 
@@ -841,17 +971,51 @@ function renderChildren(
   children: readonly TemplateNode[],
   scope: ReactiveScope,
   document: Document,
-  slotContainers: Comment[],
   context: RuntimeRenderContext,
 ): Node[] {
   const out: Node[] = [];
-  for (const child of children) {
-    if (child.kind === "text") out.push(document.createTextNode(child.value));
-    else if (child.kind !== "slot") {
-      out.push(...renderNode(child, scope, document, slotContainers, [], context));
-    }
-  }
+  for (const child of children) out.push(...renderTemplateNode(child, scope, document, context));
   return out;
+}
+
+function projectedSlotName(node: Node): string {
+  return node instanceof Element ? node.getAttribute("slot") ?? "" : "";
+}
+
+function renderSlot(
+  node: SlotNode,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+): Node[] {
+  const name = node.nameExpression === undefined
+    ? node.name ?? ""
+    : toText(evaluateCompiled(node.nameExpression, scope));
+  const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate) === name);
+  if (assigned.length === 0) return renderChildren(node.fallback ?? [], scope, document, context);
+  if (context.committed) {
+    for (const candidate of assigned) markProjectedRoot(candidate);
+    return [...assigned];
+  }
+  const anchor = document.createComment(`html-next:slot:${name}`);
+  context.slotInsertions.push({ anchor, nodes: assigned });
+  return [anchor];
+}
+
+function renderTemplateNode(
+  node: TemplateNode,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  candidate?: Node,
+): Node[] {
+  if (node.kind === "text") {
+    const text = candidate instanceof Text ? candidate : document.createTextNode("");
+    text.data = node.value;
+    return [text];
+  }
+  if (node.kind === "slot") return renderSlot(node, scope, document, context);
+  return renderNode(node, scope, document, [], context, candidate);
 }
 
 const VALIDITY_ATTRIBUTES = new Set([
@@ -915,6 +1079,52 @@ function installInstanceValidity(root: Element, instance: RuntimeInstance): void
   connect();
 }
 
+function installPublicProps(root: Element, instance: RuntimeInstance): void {
+  const props = instance.definition.contract.props;
+  const attributeNames = new Map(
+    Object.keys(props).map((name) => [`data-${name.toLowerCase()}`, name]),
+  );
+  const reflected = new Set<string>();
+
+  for (const [name, prop] of Object.entries(props)) {
+    Object.defineProperty(root, name, {
+      configurable: true,
+      enumerable: true,
+      get: () => instance.scope.get(name),
+      set: (input: unknown) => instance.scope.set(name, invocationValue(prop, input) as Value),
+    });
+    const attributeName = `data-${name.toLowerCase()}`;
+    instance.effects.push(createEffect(instance.scope.scheduler, () => {
+      const value = instance.scope.get(name);
+      reflected.add(attributeName);
+      root.setAttribute(attributeName, serializeTypedValue(value, prop.type));
+      queueMicrotask(() => reflected.delete(attributeName));
+    }, 2));
+  }
+
+  const Observer = root.ownerDocument.defaultView?.MutationObserver;
+  if (Observer === undefined || attributeNames.size === 0) return;
+  const observer = new Observer((records) => {
+    for (const record of records) {
+      const attributeName = record.attributeName;
+      if (attributeName === null || reflected.has(attributeName)) continue;
+      const name = attributeNames.get(attributeName);
+      if (name === undefined) continue;
+      const prop = props[name]!;
+      const value = root.getAttribute(attributeName);
+      instance.scope.set(name, invocationValue(prop, value ?? undefined, value !== null) as Value);
+    }
+  });
+  const connect = (): void => observer.observe(root, {
+    attributes: true,
+    attributeFilter: [...attributeNames.keys()],
+  });
+  const disconnect = (): void => observer.disconnect();
+  instance.connectCallbacks.add(connect);
+  instance.disconnectCallbacks.add(disconnect);
+  connect();
+}
+
 /**
  * Performs one explicit lowering pass, retaining definitions in a document registry for
  * later passes. It does not observe mutations or register Custom Elements.
@@ -938,12 +1148,26 @@ export function lowerDocument(root: Document = document): number {
     if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
     // A <template>'s content is inert, so querySelectorAll never returns definition-internal
     // markup; every match is a live invocation to lower.
-    const invocations = Array.from(root.querySelectorAll(definition.contract.tag));
-    for (const invocation of invocations) {
+    const invocations = Array.from(root.querySelectorAll(definition.contract.tag)).map(
+      (invocation) => ({ invocation, hydration: false }),
+    );
+    const hydrationRoots = Array.from(
+      root.querySelectorAll(`[data-component-root~="${definition.contract.tag}"]`),
+    ).filter((element) => !runtimeInstances.has(element)).map(
+      (invocation) => ({ invocation, hydration: true }),
+    );
+    for (const { invocation, hydration } of [...invocations, ...hydrationRoots]) {
       if (contentOnly.has(invocation)) continue;
-      const { scope, passThrough, effects } = readInvocation(invocation, definition);
-      const children = Array.from(invocation.childNodes);
-      const slotContainers: Comment[] = [];
+      const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
+        ? invocation.ownerDocument.activeElement
+        : null;
+      const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
+        ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
+        : undefined;
+      const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
+      const children = hydration
+        ? Array.from(invocation.querySelectorAll("[data-slotted]"))
+        : Array.from(invocation.childNodes);
       const instance: RuntimeInstance = {
         definition,
         scope,
@@ -951,25 +1175,50 @@ export function lowerDocument(root: Document = document): number {
         effects,
         connectCallbacks: new Set(),
         disconnectCallbacks: new Set(),
-        connected: true,
+        connected: false,
       };
       const context: RuntimeRenderContext = {
         definition,
         effects,
         refs: instance.refs,
+        connectCallbacks: instance.connectCallbacks,
+        disconnectCallbacks: instance.disconnectCallbacks,
+        projectedNodes: children,
+        slotInsertions: [],
+        rootName,
+        committed: hydration,
       };
       const rendered = renderNode(
         definition.template,
         scope,
         invocation.ownerDocument,
-        slotContainers,
         passThrough,
         context,
+        hydration ? invocation : undefined,
       );
       const nativeRoot = rendered[0] as Element;
+      if (hydration && nativeRoot !== invocation) {
+        fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
+      }
+      if (focusedControl instanceof HTMLElement) {
+        focusedControl.focus({ preventScroll: true });
+        if (
+          focusedSelection !== undefined &&
+          (focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement) &&
+          typeof focusedSelection[0] === "number" &&
+          typeof focusedSelection[1] === "number"
+        ) focusedControl.setSelectionRange(focusedSelection[0], focusedSelection[1]);
+      }
       stampComponentRoot(nativeRoot, definition.contract.tag);
       instance.element = nativeRoot;
-      prepared.push({ invocation, nativeRoot, slotContainers, children, definition, instance });
+      prepared.push({
+        invocation,
+        nativeRoot,
+        context,
+        definition,
+        instance,
+        replace: !hydration,
+      });
     }
   }
 
@@ -990,14 +1239,17 @@ export function lowerDocument(root: Document = document): number {
   }
 
   for (const invocation of prepared) {
-    for (const child of invocation.children) markProjectedRoot(child);
-    for (const slotContainer of invocation.slotContainers) {
-      slotContainer.replaceWith(...invocation.children);
+    for (const insertion of invocation.context.slotInsertions) {
+      for (const child of insertion.nodes) markProjectedRoot(child);
+      insertion.anchor.replaceWith(...insertion.nodes);
     }
-    invocation.invocation.replaceWith(invocation.nativeRoot);
+    if (invocation.replace) invocation.invocation.replaceWith(invocation.nativeRoot);
+    invocation.context.committed = true;
     registry.instances.set(invocation.nativeRoot, invocation.definition);
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
+    installPublicProps(invocation.nativeRoot, invocation.instance);
     installInstanceValidity(invocation.nativeRoot, invocation.instance);
+    connectRuntimeInstance(invocation.instance);
   }
   return prepared.length;
 }
@@ -1017,13 +1269,15 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
   for (const callback of instance.connectCallbacks) callback();
+  instance.element?.dispatchEvent(new Event("connect"));
 }
 
 function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   if (!instance.connected) return;
+  instance.element?.dispatchEvent(new Event("disconnect"));
+  for (const callback of instance.disconnectCallbacks) callback();
   instance.connected = false;
   for (const effect of instance.effects) effect.pause();
-  for (const callback of instance.disconnectCallbacks) callback();
 }
 
 /** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
