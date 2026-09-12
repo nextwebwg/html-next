@@ -1,5 +1,6 @@
 import { parseBrowserComponent } from "./browser-source.js";
 import { fail } from "./diagnostics.js";
+import type { ComponentGraph } from "./graph.js";
 import {
   UndeclaredName,
   evaluate,
@@ -32,10 +33,25 @@ interface Decl {
 }
 
 interface LiveDefinition {
-  readonly wrapper: Element;
+  readonly wrapper?: Element;
   readonly style: HTMLStyleElement | undefined;
   readonly definition: ComponentDefinition;
   readonly decls: readonly Decl[];
+}
+
+function runtimeDeclarations(definition: ComponentDefinition): Decl[] {
+  return (definition.declarations ?? []).flatMap((declaration) => {
+    if (declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "data") {
+      return [];
+    }
+    return [{
+      kind: declaration.kind,
+      name: declaration.name,
+      ...(declaration.kind === "data" || declaration.expression === undefined
+        ? {}
+        : { expr: declaration.expression.source }),
+    }];
+  });
 }
 
 interface PreparedInvocation {
@@ -95,25 +111,40 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
   const style = Array.from(wrapper.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style",
   );
-  const decls: Decl[] = (definition.declarations ?? []).flatMap((declaration) => {
-    if (declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "data") {
-      return [];
-    }
-    return [{
-      kind: declaration.kind,
-      name: declaration.name,
-      ...(declaration.kind === "data" || declaration.expression === undefined
-        ? {}
-        : { expr: declaration.expression.source }),
-    }];
-  });
 
   return {
     wrapper,
     style,
-    decls,
+    decls: runtimeDeclarations(definition),
     definition,
   };
+}
+
+/** Installs an already validated external/package graph without reparsing or executing it. */
+export function installComponentGraph(
+  graph: ComponentGraph,
+  root: Document = document,
+): number {
+  const registry = registryFor(root);
+  let installed = 0;
+  for (const node of graph.nodes.values()) {
+    if (node.shadowedByCustomElement) continue;
+    const tag = node.definition.contract.tag;
+    if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
+    const style = node.definition.css === "" ? undefined : root.createElement("style");
+    if (style !== undefined) {
+      style.textContent = rewriteValiditySelectors(node.definition.css);
+      style.dataset.htmlNextComponent = tag;
+      root.head.append(style);
+    }
+    registry.definitions.set(tag, {
+      definition: node.definition,
+      decls: runtimeDeclarations(node.definition),
+      style,
+    });
+    installed += 1;
+  }
+  return installed;
 }
 
 function invocationValue(prop: PropContract, attributeValue: string): PropValue {
@@ -498,9 +529,9 @@ export function lowerDocument(root: Document = document): number {
     registry.definitions.set(live.definition.contract.tag, live);
     if (live.style !== undefined) {
       live.style.textContent = rewriteValiditySelectors(live.style.textContent ?? "");
-      live.wrapper.ownerDocument.head.append(live.style);
+      live.wrapper!.ownerDocument.head.append(live.style);
     }
-    live.wrapper.remove();
+    live.wrapper!.remove();
   }
 
   for (const invocation of prepared) {

@@ -7,6 +7,19 @@ export {
 } from "./generate.js";
 export { parseComponent } from "./parser.js";
 export { parseSourceComponent } from "./source.js";
+export { buildComponentGraph, parseComponentResource } from "./graph.js";
+export {
+  loadBrowserComponents,
+  loadDocumentComponents,
+  documentComponentRoots,
+  startBrowserComponents,
+} from "./browser-loader.js";
+export { loadNodeComponents } from "./node-loader.js";
+export { ComponentRegistry } from "./registry.js";
+export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
+export { clearControllerCache, loadController } from "./controller.js";
+export type * from "./graph.js";
+export type * from "./resolve.js";
 export { getDomInterface, resolveDomProperty } from "./platform.js";
 export {
   getElementValidity,
