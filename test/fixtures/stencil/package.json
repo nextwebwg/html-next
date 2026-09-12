@@ -1,0 +1,5 @@
+{
+  "name": "@example/components",
+  "version": "1.2.3",
+  "exports": { ".": "./index.js", "./styles.css": "./styles.css" }
+}
