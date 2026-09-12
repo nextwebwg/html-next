@@ -1,10 +1,8 @@
-<template component="ui-floating-action-button" status="early" summary="HTML Next migration of UiFloatingActionButton.">
+<template component="ui-floating-action-button" status="early" summary="A floating native action button.">
   <defs>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="label" type="string" default="">label property.</prop>
-    <prop name="mobileOnly" type="boolean" default="false">mobileOnly property.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="label" type="string" default="">Accessible label.</prop>
+    <prop name="mobileOnly" type="boolean" default="false">Mobile-only presentation.</prop>
   </defs>
-  <button :data-disabled="disabled" :data-label="label" :data-mobile-only="mobileOnly">
-    <slot></slot>
-  </button>
+  <button type="button" :disabled="disabled" :aria-label="label" :data-mobile-only="mobileOnly"><slot></slot></button>
 </template>

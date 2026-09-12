@@ -1,10 +1,8 @@
-<template component="ui-form-field" status="early" summary="HTML Next migration of UiFormField.">
+<template component="ui-form-field" status="early" summary="A semantic field grouping surface.">
   <defs>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="invalid" type="boolean" default="false">invalid property.</prop>
-    <prop name="required" type="boolean" default="false">required property.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="label" type="string" default="">Field label.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
   </defs>
-  <div :data-disabled="disabled" :data-invalid="invalid" :data-required="required">
-    <slot></slot>
-  </div>
+  <fieldset :disabled="disabled" :data-label="label" :data-required="required"><legend $value="label"></legend><slot></slot></fieldset>
 </template>

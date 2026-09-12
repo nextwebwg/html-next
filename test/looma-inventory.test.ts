@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import { scaffoldStencilComponent, type StencilPackageInventory } from "../src/migrate/stencil.js";
+import { LOOMA_PORTED_TAGS, migrateLoomaComponent } from "../src/migrate/looma.js";
 import { parseComponent } from "../src/parser.js";
 
 const inventoryUrl = new URL("./fixtures/looma/inventory.json", import.meta.url);
@@ -40,6 +41,16 @@ describe("checked-in Looma migration surface", () => {
       const scaffold = scaffoldStencilComponent(component);
       assert.equal(parseComponent(scaffold.source, `${component.tag}.html`).contract.tag, component.tag);
       assert.ok(scaffold.diagnostics.some((diagnostic) => diagnostic.code === "HM001"));
+    }
+  });
+
+  it("keeps reviewed ports distinct from migration scaffolds", async () => {
+    const inventory = JSON.parse(await readFile(inventoryUrl, "utf8")) as StencilPackageInventory;
+    const migrations = inventory.components.map(migrateLoomaComponent);
+    assert.equal(migrations.filter((migration) => migration.status === "ported").length, LOOMA_PORTED_TAGS.length);
+    for (const [index, migration] of migrations.entries()) {
+      parseComponent(migration.source, inventory.components[index]!.tag);
+      assert.equal(migration.diagnostics.length === 0, migration.status === "ported");
     }
   });
 });

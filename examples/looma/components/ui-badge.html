@@ -1,9 +1,7 @@
-<template component="ui-badge" status="early" summary="HTML Next migration of UiBadge.">
+<template component="ui-badge" status="early" summary="A compact status label.">
   <defs>
-    <prop name="tone" type="string">tone property.</prop>
-    <prop name="variant" type="string">variant property.</prop>
+    <prop name="tone" type="string">Tone token.</prop>
+    <prop name="variant" type="string">Variant token.</prop>
   </defs>
-  <span :data-tone="tone" :data-variant="variant">
-    <slot></slot>
-  </span>
+  <span class="badge__surface" :data-tone="tone" :data-variant="variant"><slot></slot></span>
 </template>

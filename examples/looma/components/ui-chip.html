@@ -1,9 +1,7 @@
-<template component="ui-chip" status="early" summary="A compact, non-interactive metadata label.">
+<template component="ui-chip" status="early" summary="A compact non-interactive metadata label.">
   <defs>
-    <prop name="appearance" type="'tag' | 'pill'" default="tag">`tag` has a square leading edge and an angled trailing edge; `pill` is fully rounded.</prop>
-    <prop name="size" type="'xs' | 'sm'" default="xs">Compact typography size.</prop>
+    <prop name="appearance" type="tag | pill" default="tag">Visual shape.</prop>
+    <prop name="size" type="xs | sm" default="xs">Compact typography size.</prop>
   </defs>
-  <span :data-appearance="appearance" :data-size="size">
-    <slot></slot>
-  </span>
+  <span class="chip__surface" :data-appearance="appearance" :data-size="size"><span class="chip__label"><slot></slot></span></span>
 </template>

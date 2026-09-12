@@ -1,12 +1,10 @@
-<template component="ui-icon-button" status="early" summary="HTML Next migration of UiIconButton.">
+<template component="ui-icon-button" status="early" summary="An icon-only native button.">
   <defs>
-    <prop name="anticipatory" type="boolean" default="false">Reveals this control through a surrounding ui-affordance-scope.</prop>
-    <prop name="disabled" type="boolean" default="false">disabled property.</prop>
-    <prop name="label" type="string" default="">label property.</prop>
-    <prop name="size" type="'sm' | 'md' | 'lg'" default="md">size property.</prop>
-    <prop name="variant" type="'ghost' | 'outline' | 'solid'" default="ghost">variant property.</prop>
+    <prop name="anticipatory" type="boolean" default="false">Affordance visibility.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="label" type="string" default="">Accessible label.</prop>
+    <prop name="size" type="sm | md | lg" default="md">Control size.</prop>
+    <prop name="variant" type="ghost | outline | solid" default="ghost">Visual treatment.</prop>
   </defs>
-  <button :data-anticipatory="anticipatory" :data-disabled="disabled" :data-label="label" :data-size="size" :data-variant="variant">
-    <slot></slot>
-  </button>
+  <button type="button" :disabled="disabled" :aria-label="label" :data-anticipatory="anticipatory" :data-size="size" :data-variant="variant"><slot></slot></button>
 </template>
