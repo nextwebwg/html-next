@@ -11,14 +11,17 @@
     ".": "./dist/index.js",
     "./runtime": "./dist/runtime.js",
     "./validation": "./dist/validation.js",
-    "./browser-loader": "./dist/browser-loader.js",
+    "./browser-loader": {
+      "types": "./dist/browser-loader.d.ts",
+      "import": "./dist/browser-loader.bundle.js"
+    },
     "./node-loader": "./dist/node-loader.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "build:looma": "tsx scripts/build-looma-package.ts",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",

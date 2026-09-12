@@ -15,15 +15,15 @@ describe("live component graph example", () => {
       read("poc.js"),
     ]);
 
-    assert.match(counter, /<template component="x-counter" controller="\.\/counter\.js">/);
-    assert.match(chart, /<template component="x-chart" controller="\.\/chart\.js">/);
+    assert.match(counter, /<template component="x-counter" controller="\.\/counter\.js"/);
+    assert.match(chart, /<template component="x-chart" controller="\.\/chart\.js"/);
     assert.match(counterController, /export default function controller\(host\)/);
     assert.match(chartController, /export default function controller\(host\)/);
     assert.doesNotMatch(counterController, /from ["'][^"']*poc\.js["']/);
     assert.doesNotMatch(chartController, /from ["'][^"']*poc\.js["']/);
     assert.doesNotMatch(counterController, /defineController/);
     assert.doesNotMatch(chartController, /defineController/);
-    assert.match(entry, /import \{ startBrowserComponents \} from "\.\.\/\.\.\/dist\/browser-loader\.js"/);
+    assert.match(entry, /import \{ startBrowserComponents \} from "\.\.\/\.\.\/dist\/browser-loader\.bundle\.js"/);
     assert.match(entry, /await startBrowserComponents\(document/);
     assert.doesNotMatch(entry, /function (?:loadDefinition|lowerElement|reactive)\b/);
   });

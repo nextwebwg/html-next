@@ -97,7 +97,7 @@ export { typed, Button, Dialog, FormField, Menu, SearchShell, EditorToolbar, Loo
     const files = new Set(report[0]!.files.map((file) => file.path));
     for (const path of [
       "dist/index.js", "dist/index.d.ts", "dist/runtime.js", "dist/runtime.d.ts",
-      "dist/browser-loader.js", "dist/browser-loader.d.ts", "dist/node-loader.js",
+      "dist/browser-loader.js", "dist/browser-loader.bundle.js", "dist/browser-loader.d.ts", "dist/node-loader.js",
       "dist/validation.js", "dist/cli.js",
     ]) {
       assert.ok(files.has(path), `npm pack omitted ${path}`);

@@ -1,7 +1,7 @@
 <!-- x-counter: local state, and a controller that wires the click. -->
-<template component="x-counter" controller="./counter.js">
+<template component="x-counter" controller="./counter.js" status="early" summary="A controller-driven counter button.">
   <defs>
-    <prop name="start" type="number" default="0"></prop>
+    <prop name="start" type="number" default="0">Initial count.</prop>
     <state name="count" :value="start"></state>
   </defs>
   <button $ref="btn" type="button">count: <span $value="count"></span></button>
