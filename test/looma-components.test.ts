@@ -29,6 +29,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
       "ui-checkbox", "ui-input", "ui-textarea", "ui-select", "ui-radio", "ui-radio-group", "ui-switch",
       "ui-avatar", "ui-avatar-group", "ui-disclosure", "ui-tabs",
       "ui-affordance-scope", "ui-dialog", "ui-popover", "ui-toast-region", "ui-tooltip",
+      "ui-menu", "ui-context-menu",
     ];
     await build({
       stdin: {
@@ -303,6 +304,78 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         toastPresent: false,
         toastOpen: false,
         stack: [],
+      });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("supports anchored and point-positioned menu selection with keyboard focus", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(definitions + `
+        <button id="menu-anchor">Open</button>
+        <ui-menu id="menu" for="menu-anchor" default-open>
+          <ui-menu-item id="menu-a" value="a">A</ui-menu-item>
+          <ui-menu-item id="menu-b" value="b">B</ui-menu-item>
+        </ui-menu>
+        <ui-context-menu id="context">
+          <button id="context-trigger" slot="trigger">More</button>
+          <ui-menu-item id="context-a" value="inspect">Inspect</ui-menu-item>
+        </ui-context-menu>
+      `);
+      await page.addScriptTag({ path: bundle });
+      await page.addScriptTag({ path: controllerBundle });
+      const result = await page.evaluate(`(async () => {
+        const events = [];
+        for (const type of ['open','close','select']) document.addEventListener(type, event => {
+          if (event.target?.id === 'menu' || event.target?.id === 'context') events.push([event.target.id, type, event.detail]);
+        });
+        window.HtmlRuntime.observeDocument(document, { onConnect(root, definition) {
+          const controller = window.LoomaControllers[definition.contract.tag];
+          if (controller == null) return;
+          window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
+          return controller(window.HtmlRuntime.getComponentHost(root));
+        }});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const menu = document.getElementById('menu');
+        const anchor = document.getElementById('menu-anchor');
+        const initial = { hidden: menu.hidden, expanded: anchor.getAttribute('aria-expanded'), hasPopup: anchor.getAttribute('aria-haspopup') };
+        document.getElementById('menu-b').click();
+        const context = document.getElementById('context');
+        document.getElementById('context-trigger').dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, composed: true, clientX: 140, clientY: 90,
+        }));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const opened = {
+          hidden: context.querySelector('[data-context-menu-surface]').hidden,
+          left: context.querySelector('[data-context-menu-surface]').style.left,
+          focused: document.activeElement?.id,
+        };
+        document.getElementById('context-a').click();
+        await Promise.resolve();
+        return {
+          initial,
+          selected: { menuHidden: menu.hidden, anchorExpanded: anchor.getAttribute('aria-expanded') },
+          opened,
+          contextHidden: context.querySelector('[data-context-menu-surface]').hidden,
+          events,
+        };
+      })()`);
+      assert.deepEqual(result, {
+        initial: { hidden: false, expanded: "true", hasPopup: "menu" },
+        selected: { menuHidden: true, anchorExpanded: "false" },
+        opened: { hidden: false, left: "140px", focused: "context-a" },
+        contextHidden: true,
+        events: [
+          ["menu", "select", { value: "b", trigger: "programmatic" }],
+          ["menu", "close", { open: false, reason: "action", trigger: "programmatic" }],
+          ["context", "open", { open: true, reason: "action", trigger: "pointer" }],
+          ["context", "select", { value: "inspect", trigger: "programmatic" }],
+          ["context", "close", { open: false, reason: "action", trigger: "programmatic" }],
+        ],
       });
     } finally {
       await browser.close();

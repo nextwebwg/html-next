@@ -1,11 +1,11 @@
-<template component="ui-context-menu" status="early" summary="HTML Next migration of UiContextMenu.">
+<template component="ui-context-menu" status="early" summary="A point-positioned contextual menu." controller="./ui-context-menu.js">
   <defs>
-    <prop name="defaultOpen" type="boolean" default="false">Opens the menu on first client render.</prop>
-    <prop name="for" type="string">Optional id of the region that should also respond to a context-menu gesture.</prop>
-    <prop name="open" type="boolean" default="false">Controls the menu when the consumer owns open state.</prop>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="for" type="string?">Id of the context target.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="select" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <div :data-default-open="defaultOpen" :data-for="for" :data-open="open">
-    <slot></slot>
-    <slot name="trigger"></slot>
-  </div>
+  <div class="context-menu" :data-open="open" :data-default-open="defaultOpen" :data-for="for"><slot name="trigger"></slot><div $ref="surface" class="context-menu__surface" data-context-menu-surface role="menu" aria-orientation="vertical"><slot></slot></div></div>
 </template>

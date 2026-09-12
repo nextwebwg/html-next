@@ -11,7 +11,7 @@ export default function controller(host) {
     if (!internal) return;
     if (typeof host.state.open !== "boolean") internal = false;
     if (!internal) hide();
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     host.dispatch("close", { open: false, reason, trigger });
   };
   const apply = () => {
@@ -25,7 +25,7 @@ export default function controller(host) {
       placement = host.state.placement;
       surface = createAnchoredSurface(host.element, anchor, placement);
     }
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     if (internal) {
       surface.show();
       if (!overlay) {

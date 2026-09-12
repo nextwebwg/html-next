@@ -59,13 +59,8 @@
   },
   {
     "tag": "ui-context-menu",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-context-menu> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-dialog",
@@ -109,13 +104,8 @@
   },
   {
     "tag": "ui-menu",
-    "status": "scaffold",
-    "diagnostics": [
-      {
-        "code": "HM001",
-        "message": "<ui-menu> contains imperative Stencil behavior that requires a reviewed controller port."
-      }
-    ]
+    "status": "ported",
+    "diagnostics": []
   },
   {
     "tag": "ui-menu-item",

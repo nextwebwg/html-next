@@ -195,6 +195,28 @@ const PORTS: Readonly<Record<string, string>> = Object.freeze({
   </defs>
   <button class="menu-item" type="button" role="menuitem" :disabled="disabled" :data-value="value"><span class="menu-item__surface"><slot></slot></span></button>
 </template>`,
+  "ui-menu": `<template component="ui-menu" status="early" summary="An anchored menu of native actions." controller="./ui-menu.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="for" type="string?">Id of the anchor element.</prop>
+    <prop name="placement" type="bottom-start | bottom-end | top-start | top-end" default="bottom-start">Preferred anchored placement.</prop>
+    <event name="select" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="menu__surface" role="menu" aria-orientation="vertical" :data-open="open" :data-default-open="defaultOpen" :data-for="for" :data-placement="placement"><slot></slot></div>
+</template>`,
+  "ui-context-menu": `<template component="ui-context-menu" status="early" summary="A point-positioned contextual menu." controller="./ui-context-menu.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="for" type="string?">Id of the context target.</prop>
+    <event name="open" type="object({ open: boolean, reason: action | programmatic, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="select" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="context-menu" :data-open="open" :data-default-open="defaultOpen" :data-for="for"><slot name="trigger"></slot><div $ref="surface" class="context-menu__surface" data-context-menu-surface role="menu" aria-orientation="vertical"><slot></slot></div></div>
+</template>`,
   "ui-disclosure": `<template component="ui-disclosure" status="early" summary="A controlled or uncontrolled disclosure over projected trigger and content." controller="./ui-disclosure.js">
   <defs>
     <prop name="open" type="boolean?">Controlled open state.</prop>
@@ -665,7 +687,7 @@ export default function controller(host) {
     if (!internal || !host.state.dismissible) return;
     if (typeof host.state.open !== "boolean") internal = false;
     if (!internal) hide();
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     host.dispatch("close", { open: false, reason, trigger });
   };
   const apply = () => {
@@ -673,7 +695,7 @@ export default function controller(host) {
     if (!initialized) internal = controlled ? host.state.open : Boolean(host.state.defaultOpen);
     else if (controlled) internal = host.state.open;
     dialog.setAttribute("aria-label", label());
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     const nextMode = host.state.modal ? "modal" : "modeless";
     if (shown && mode !== nextMode) hide();
     if (internal && !shown) {
@@ -719,7 +741,7 @@ export default function controller(host) {
     if (!internal) return;
     if (typeof host.state.open !== "boolean") internal = false;
     if (!internal) hide();
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     host.dispatch("close", { open: false, reason, trigger });
   };
   const apply = () => {
@@ -733,7 +755,7 @@ export default function controller(host) {
       placement = host.state.placement;
       surface = createAnchoredSurface(host.element, anchor, placement);
     }
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     if (internal) {
       surface.show();
       if (!overlay) {

@@ -1,11 +1,11 @@
-<template component="ui-menu" status="early" summary="HTML Next migration of UiMenu.">
+<template component="ui-menu" status="early" summary="An anchored menu of native actions." controller="./ui-menu.js">
   <defs>
-    <prop name="defaultOpen" type="boolean" default="false">defaultOpen property.</prop>
-    <prop name="for" type="string">Id of the control that anchors this menu in the top layer.</prop>
-    <prop name="open" type="boolean">Controlled open state. Omit it to use defaultOpen and local interaction state.</prop>
-    <prop name="placement" type="unknown" default="bottom-start">Preferred placement; Looma flips and shifts when space is constrained.</prop>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="for" type="string?">Id of the anchor element.</prop>
+    <prop name="placement" type="bottom-start | bottom-end | top-start | top-end" default="bottom-start">Preferred anchored placement.</prop>
+    <event name="select" type="object({ value: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
   </defs>
-  <menu :data-default-open="defaultOpen" :data-for="for" :data-open="open" .placement="placement">
-    <slot></slot>
-  </menu>
+  <div class="menu__surface" role="menu" aria-orientation="vertical" :data-open="open" :data-default-open="defaultOpen" :data-for="for" :data-placement="placement"><slot></slot></div>
 </template>

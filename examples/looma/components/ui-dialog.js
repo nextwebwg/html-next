@@ -25,7 +25,7 @@ export default function controller(host) {
     if (!internal || !host.state.dismissible) return;
     if (typeof host.state.open !== "boolean") internal = false;
     if (!internal) hide();
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     host.dispatch("close", { open: false, reason, trigger });
   };
   const apply = () => {
@@ -33,7 +33,7 @@ export default function controller(host) {
     if (!initialized) internal = controlled ? host.state.open : Boolean(host.state.defaultOpen);
     else if (controlled) internal = host.state.open;
     dialog.setAttribute("aria-label", label());
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     const nextMode = host.state.modal ? "modal" : "modeless";
     if (shown && mode !== nextMode) hide();
     if (internal && !shown) {

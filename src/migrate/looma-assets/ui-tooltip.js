@@ -19,7 +19,7 @@ export default function controller(host) {
   };
   const render = () => {
     host.element.hidden = !internal;
-    host.element.toggleAttribute("data-open", internal);
+    host.element.setAttribute("data-state", internal ? "open" : "closed");
     if (!internal) {
       overlay?.destroy();
       overlay = undefined;
