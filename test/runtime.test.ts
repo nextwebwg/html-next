@@ -429,6 +429,7 @@ describe("browser runtime", { skip: !enabled }, () => {
             `<computed name="doubled" from="count * 2"></computed>` +
             `<data name="feed"></data>` +
             `<handler name="inc"><set name="count" :value="count + 1"></set></handler>` +
+            `<handler name="ready"></handler>` +
             `</defs>` +
             `<div :data-count="count" :data-doubled="doubled">` +
             `<button on:click="inc" $value="count"></button>` +

@@ -58,7 +58,11 @@ export interface CompiledExpression {
   readonly dependencies: readonly string[];
 }
 
-export type WritablePath = readonly (string | number)[];
+export type WritablePathSegment =
+  | string
+  | number
+  | { readonly kind: "index"; readonly expression: ExpressionNode };
+export type WritablePath = readonly WritablePathSegment[];
 
 const FUNCTIONS = new Set(["round", "clamp", "min", "max", "abs"]);
 
@@ -446,6 +450,24 @@ function staticPath(node: ExpressionNode): (string | number)[] | undefined {
   return undefined;
 }
 
+function writablePath(node: ExpressionNode): WritablePathSegment[] | undefined {
+  if (node.kind === "id") return [node.name];
+  if (node.kind === "member") {
+    const object = writablePath(node.object);
+    return object === undefined ? undefined : [...object, node.key];
+  }
+  if (node.kind === "index") {
+    const object = writablePath(node.object);
+    if (object === undefined) return undefined;
+    if (node.index.kind === "literal") {
+      const key = node.index.value;
+      if (typeof key === "string" || typeof key === "number") return [...object, key];
+    }
+    return [...object, Object.freeze({ kind: "index", expression: node.index })];
+  }
+  return undefined;
+}
+
 function collectDependencies(node: ExpressionNode, dependencies: Set<string>): void {
   const path = staticPath(node);
   if (path !== undefined) {
@@ -501,7 +523,7 @@ export function getWritablePath(
   source: string,
   writableRoots: ReadonlySet<string>,
 ): WritablePath | undefined {
-  const path = staticPath(compile(source));
+  const path = writablePath(compile(source));
   if (path === undefined || !writableRoots.has(String(path[0]))) return undefined;
   return Object.freeze(path);
 }

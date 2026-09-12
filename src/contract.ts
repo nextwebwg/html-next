@@ -196,8 +196,12 @@ export function defineContract(
   }
   const summary = requiredString(object.summary, "summary", source);
   const nativeElement = requiredString(object.nativeElement, "nativeElement", source);
-  if (!/^[a-z][a-z0-9-]*$/.test(nativeElement) || getDomInterface(nativeElement) === undefined) {
-    fail("HC008", "`nativeElement` must be a lowercase HTML element name.", source);
+  if (
+    !/^[a-z][a-z0-9-]*$/.test(nativeElement) ||
+    (getDomInterface(nativeElement) === undefined &&
+      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(nativeElement))
+  ) {
+    fail("HC008", "`nativeElement` must be a lowercase HTML element or component tag.", source);
   }
 
   const rawProps = record(object.props, "HC009", "`props` must be an object.", source);

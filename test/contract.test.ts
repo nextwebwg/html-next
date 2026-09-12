@@ -145,7 +145,7 @@ describe("defineContract", () => {
       defineFromButtonFile({ ...validContract(), nativeElement: "bad element" }),
     );
     expectDiagnostic("HC008", () =>
-      defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
+      defineFromButtonFile({ ...validContract(), nativeElement: "notanativeelement" }),
     );
 
     const invalidProp = validContract();

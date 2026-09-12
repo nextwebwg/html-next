@@ -30,7 +30,7 @@ describe("expression: compilation", () => {
     assert.deepEqual(JSON.parse(JSON.stringify(compiled.ast)), compiled.ast);
   });
 
-  it("accepts only state-rooted static paths as writable bindings", () => {
+  it("accepts only state-rooted access paths as writable bindings", () => {
     assert.deepEqual(getWritablePath("form.contacts[0].email", new Set(["form"])), [
       "form",
       "contacts",
@@ -38,7 +38,11 @@ describe("expression: compilation", () => {
       "email",
     ]);
     assert.equal(getWritablePath("props.value", new Set(["form"])), undefined);
-    assert.equal(getWritablePath("form.contacts[index]", new Set(["form"])), undefined);
+    assert.deepEqual(getWritablePath("form.contacts[index]", new Set(["form"])), [
+      "form",
+      "contacts",
+      { kind: "index", expression: { kind: "id", name: "index" } },
+    ]);
     assert.equal(getWritablePath("form.total + 1", new Set(["form"])), undefined);
   });
 });

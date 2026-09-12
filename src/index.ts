@@ -6,6 +6,7 @@ export {
   type GeneratedArtifact,
 } from "./generate.js";
 export { parseComponent } from "./parser.js";
+export { parseSourceComponent } from "./source.js";
 export { getDomInterface, resolveDomProperty } from "./platform.js";
 export {
   getElementValidity,

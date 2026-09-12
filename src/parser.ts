@@ -6,18 +6,21 @@ import {
 
 import { coerceDefault, defineContract, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
-import { compileExpression } from "./expression.js";
+import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import {
   isReservedElement,
+  validateDefinitionElementName,
   validateLiteralAttributeName,
   validateMvpDomProperty,
-  validateSimplePropExpression,
 } from "./language.js";
-import { resolveDomProperty } from "./platform.js";
+import { getDomInterface, resolveDomProperty } from "./platform.js";
 import type {
   ComponentDefinition,
   ComponentDeclaration,
   ElementNode,
+  EventBinding,
+  Flow,
+  HandlerStep,
   SlotContract,
   TemplateAttribute,
   TemplateNode,
@@ -61,6 +64,60 @@ function directElements(element: Element, name: string): Element[] {
   );
 }
 
+const FLOW_NAMES = new Set([
+  "$if",
+  "$each",
+  "$where",
+  "$sort",
+  "$limit",
+  "$key",
+  "$with",
+  "$match",
+  "$when",
+  "$else",
+]);
+const RAW_SINKS = new Set(["innerhtml", "outerhtml", "textcontent", "innertext", "srcdoc"]);
+const EACH_RE = /^\s*([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*)\s*)?\bof\b\s*(.+)$/;
+const AS_RE = /^\s*(.+?)\s+\bas\b\s+([A-Za-z_$][\w$]*)\s*$/;
+const EVENT_PART_RE = /^[a-z][a-z0-9-]*$/;
+const NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$-]*$/;
+
+interface ParseScope {
+  readonly roots: ReadonlySet<string>;
+  readonly writableRoots: ReadonlySet<string>;
+  readonly handlers: ReadonlySet<string>;
+}
+
+function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseScope {
+  return {
+    ...scope,
+    roots: new Set([...scope.roots, ...roots.filter((root): root is string => root !== undefined)]),
+  };
+}
+
+function compileScopedExpression(
+  value: string,
+  scope: ParseScope,
+  source: string,
+): CompiledExpression {
+  const expression = compileDeclarationExpression(value, source);
+  validateCompiledExpression(expression, scope, source);
+  return expression;
+}
+
+function validateCompiledExpression(
+  expression: CompiledExpression,
+  scope: ParseScope,
+  source: string,
+): void {
+  for (const dependency of expression.dependencies) {
+    const root = dependency.split(".", 1)[0]!;
+    if (!scope.roots.has(root)) {
+      fail("HT003", `Expression root \`${root}\` is not declared in this scope.`, source);
+    }
+  }
+}
+
 /**
  * A prop's target is defined by where it is bound in the markup, not restated: a
  * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property.
@@ -77,10 +134,14 @@ function collectTargets(root: Element, source: string): Record<string, PropTarge
   const visit = (element: Element): void => {
     for (const attribute of element.attrs) {
       if (attribute.name.startsWith(":")) {
-        record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
+        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
+          record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
+        }
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
-        record(attribute.value, { property: resolveDomProperty(element.tagName, key) ?? key });
+        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
+          record(attribute.value, { property: resolveDomProperty(element.tagName, key) ?? key });
+        }
       }
     }
     for (const child of element.childNodes) {
@@ -131,21 +192,93 @@ function compileDeclarationExpression(value: string, source: string) {
   }
 }
 
-function readDeclarations(group: Element | undefined, source: string): ComponentDeclaration[] {
-  if (group === undefined) return [];
-  const declarations: ComponentDeclaration[] = [];
-  const names = new Set<string>();
-  for (const element of group.childNodes.filter(isElement)) {
-    const kind = element.tagName;
-    if (kind === "prop") {
-      const name = attr(element, "name") ?? "";
-      if (name !== "" && names.has(name)) {
-        fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
+function readHandlerSteps(
+  handler: Element,
+  scope: ParseScope,
+  source: string,
+): HandlerStep[] {
+  const steps: HandlerStep[] = [];
+  for (const step of significant(handler.childNodes)) {
+    if (!isElement(step)) fail("HC023", "Handler bodies contain declarative step elements only.", source);
+    const guardSource = attr(step, "$if");
+    const guard =
+      guardSource === undefined ? undefined : compileScopedExpression(guardSource, scope, source);
+    if (step.tagName === "set") {
+      const path = attr(step, "name") ?? "";
+      const expressionSource = attr(step, ":value");
+      const literal = attr(step, "value");
+      if (path === "" || (expressionSource === undefined) === (literal === undefined)) {
+        fail("HC023", "A <set> requires `name` and exactly one of `value` or `:value`.", source);
       }
-      if (name !== "") names.add(name);
+      compileScopedExpression(path, scope, source);
+      const writablePath = getWritablePath(path, scope.writableRoots);
+      if (writablePath === undefined) {
+        fail("HT005", `Handler write \`${path}\` is not rooted in declared state.`, source);
+      }
+      steps.push({
+        kind: "set",
+        path,
+        writablePath,
+        value: compileScopedExpression(
+          expressionSource ?? JSON.stringify(literal),
+          scope,
+          source,
+        ),
+        ...(guard === undefined ? {} : { guard }),
+      });
       continue;
     }
-    if (!new Set(["state", "computed", "data", "handler", "event", "method"]).has(kind)) {
+    if (step.tagName === "dispatch") {
+      const event = attr(step, "event") ?? "";
+      if (!EVENT_PART_RE.test(event)) {
+        fail("HC023", "A <dispatch> requires a valid `event` name.", source);
+      }
+      const expressionSource = attr(step, ":value");
+      const literal = attr(step, "value");
+      if (expressionSource !== undefined && literal !== undefined) {
+        fail("HC023", "A <dispatch> may declare only one of `value` or `:value`.", source);
+      }
+      const value =
+        expressionSource === undefined && literal === undefined
+          ? undefined
+          : compileScopedExpression(expressionSource ?? JSON.stringify(literal), scope, source);
+      steps.push({
+        kind: "dispatch",
+        event,
+        ...(value === undefined ? {} : { value }),
+        ...(guard === undefined ? {} : { guard }),
+      });
+      continue;
+    }
+    if (step.tagName === "validate" || step.tagName === "focus") {
+      const target = attr(step, "target") ?? attr(step, "ref") ?? attr(step, "name") ?? "";
+      if (!NAME_RE.test(target)) {
+        fail("HC023", `<${step.tagName}> requires a valid target reference.`, source);
+      }
+      steps.push({
+        kind: step.tagName,
+        target,
+        ...(guard === undefined ? {} : { guard }),
+      });
+      continue;
+    }
+    fail("HC023", `<${step.tagName}> is not a recognized handler step.`, source);
+  }
+  return steps;
+}
+
+function readDeclarations(
+  group: Element | undefined,
+  contract: ComponentContract,
+  source: string,
+): ComponentDeclaration[] {
+  if (group === undefined) return [];
+  const elements = group.childNodes.filter(isElement);
+  const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
+  const names = new Set<string>();
+  for (const element of elements) {
+    const kind = element.tagName;
+    if (!allowed.has(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
     const name = attr(element, "name") ?? "";
@@ -154,22 +287,87 @@ function readDeclarations(group: Element | undefined, source: string): Component
       fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
     }
     names.add(name);
+  }
 
-    if (kind === "state" || kind === "computed") {
-      const raw = kind === "state" ? attr(element, ":value") : attr(element, "from");
-      if (kind === "computed" && (raw === undefined || raw === "")) {
+  const scope: ParseScope = {
+    roots: new Set([...Object.keys(contract.props), ...names]),
+    writableRoots: new Set(
+      elements
+        .filter((element) => element.tagName === "state")
+        .map((element) => attr(element, "name")!),
+    ),
+    handlers: new Set(
+      elements
+        .filter((element) => element.tagName === "handler")
+        .map((element) => attr(element, "name")!),
+    ),
+  };
+  const declarations: ComponentDeclaration[] = [];
+  for (const element of elements) {
+    const kind = element.tagName;
+    if (kind === "prop") continue;
+    const name = attr(element, "name")!;
+
+    if (kind === "state") {
+      const expressionSource = attr(element, ":value");
+      const literal = attr(element, "value");
+      if (expressionSource !== undefined && literal !== undefined) {
+        fail("HC013", `<state name="${name}"> may declare only one of \`value\` or \`:value\`.`, source);
+      }
+      const expression =
+        expressionSource === undefined && literal === undefined
+          ? undefined
+          : compileScopedExpression(expressionSource ?? JSON.stringify(literal), scope, source);
+      declarations.push({
+        kind,
+        name,
+        ...(literal === undefined ? {} : { value: literal }),
+        ...(expression === undefined ? {} : { expression }),
+      });
+      continue;
+    }
+    if (kind === "computed") {
+      const expressionSource = attr(element, "from");
+      if (expressionSource === undefined || expressionSource === "") {
         fail("HC013", `<computed name="${name}"> requires a \`from\` expression.`, source);
       }
       declarations.push({
         kind,
         name,
-        ...(raw === undefined ? {} : { expression: compileDeclarationExpression(raw, source) }),
+        expression: compileScopedExpression(expressionSource, scope, source),
       });
       continue;
     }
     if (kind === "data") {
       const dataSource = attr(element, "src");
-      declarations.push({ kind, name, ...(dataSource === undefined ? {} : { source: dataSource }) });
+      const dataType = attr(element, "type");
+      const dataSchema = attr(element, "schema");
+      const dataDebounce = attr(element, "debounce");
+      const dataPoll = attr(element, "poll");
+      const parameters = directElements(element, "param").map((parameter) => {
+        const parameterName = attr(parameter, "name") ?? "";
+        const expressionSource = attr(parameter, ":value");
+        if (!NAME_RE.test(parameterName) || expressionSource === undefined) {
+          fail("HC024", "A data <param> requires a valid `name` and a `:value` expression.", source);
+        }
+        return Object.freeze({
+          name: parameterName,
+          expression: compileScopedExpression(expressionSource, scope, source),
+        });
+      });
+      if (new Set(parameters.map((parameter) => parameter.name)).size !== parameters.length) {
+        fail("HC024", `Data source \`${name}\` repeats a parameter name.`, source);
+      }
+      declarations.push({
+        kind,
+        name,
+        ...(dataSource === undefined ? {} : { source: dataSource }),
+        ...(dataType === undefined ? {} : { type: dataType }),
+        ...(dataSchema === undefined ? {} : { schema: dataSchema }),
+        ...(dataDebounce === undefined ? {} : { debounce: dataDebounce }),
+        ...(dataPoll === undefined ? {} : { poll: dataPoll }),
+        parameters: Object.freeze(parameters),
+      });
       continue;
     }
     if (kind === "event") {
@@ -192,7 +390,11 @@ function readDeclarations(group: Element | undefined, source: string): Component
       });
       continue;
     }
-    declarations.push({ kind: "handler", name, source: textContent(element).trim() });
+    declarations.push({
+      kind: "handler",
+      name,
+      steps: Object.freeze(readHandlerSteps(element, scope, source)),
+    });
   }
   return declarations;
 }
@@ -200,56 +402,255 @@ function readDeclarations(group: Element | undefined, source: string): Component
 function parseAttributes(
   element: Element,
   contract: ComponentContract,
+  scope: ParseScope,
   source: string,
 ): TemplateAttribute[] {
-  return element.attrs.map((attribute) => {
+  return element.attrs
+    .filter(
+      (attribute) =>
+        !FLOW_NAMES.has(attribute.name) &&
+        attribute.name !== "$ref" &&
+        attribute.name !== "as" &&
+        !attribute.name.startsWith("on:"),
+    )
+    .map((attribute) => {
     if (attribute.name.startsWith("bind:")) {
-      fail("HT005", "Two-way bindings are reserved but not supported by the component MVP.", source);
+      const name = attribute.name.slice("bind:".length).toLowerCase();
+      if (name === "" || RAW_SINKS.has(name)) {
+        fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
+      }
+      const expressionPlan = compileScopedExpression(attribute.value, scope, source);
+      const writablePath = getWritablePath(attribute.value, scope.writableRoots);
+      if (writablePath === undefined) {
+        fail("HT005", `\`${attribute.value}\` is not a writable state-rooted path.`, source);
+      }
+      return {
+        kind: "attribute",
+        name,
+        expression: attribute.value,
+        expressionPlan,
+        twoWay: true,
+        writablePath,
+      };
+    }
+
+    if (attribute.name.startsWith("class:") || attribute.name.startsWith("style:")) {
+      const target = attribute.name.startsWith("class:") ? "class" : "style";
+      const name = attribute.name.slice(target.length + 1);
+      const valid =
+        target === "class"
+          ? name !== "" && !/\s/.test(name)
+          : /^(?:--[a-z0-9_-]+|[a-z][a-z0-9-]*)$/.test(name);
+      if (!valid) {
+        fail("HT020", `\`${attribute.name}\` does not name a valid ${target} binding target.`, source);
+      }
+      return {
+        kind: "attribute",
+        name,
+        expression: attribute.value,
+        expressionPlan: compileScopedExpression(attribute.value, scope, source),
+        target,
+      };
+    }
+
+    if (attribute.name.startsWith("$")) {
+      const name = attribute.name.slice(1).toLowerCase();
+      if (name !== "value" && name !== "html") {
+        fail("HT012", `\`$${name}\` is not a known content directive.`, source);
+      }
+      return {
+        kind: "directive",
+        name,
+        expression: attribute.value,
+        expressionPlan: compileScopedExpression(attribute.value, scope, source),
+      };
     }
 
     if (attribute.name.startsWith(":")) {
       const name = attribute.name.slice(1).toLowerCase();
-      const expression = validateSimplePropExpression(attribute.value, contract, source);
-      const target = contract.props[expression]!.target;
-      if (!("attribute" in target) || target.attribute !== name) {
-        fail("HT004", `Binding \`:${name}\` does not match prop \`${expression}\`'s target.`, source);
+      if (RAW_SINKS.has(name)) {
+        fail("HT007", `\`:${name}\` cannot bind a raw content sink.`, source);
       }
-      return { kind: "attribute", name, expression };
+      const expressionPlan = compileScopedExpression(attribute.value, scope, source);
+      const prop = contract.props[attribute.value];
+      if (prop !== undefined && (!("attribute" in prop.target) || prop.target.attribute !== name)) {
+        fail("HT004", `Binding \`:${name}\` does not match prop \`${attribute.value}\`'s target.`, source);
+      }
+      return { kind: "attribute", name, expression: attribute.value, expressionPlan };
     }
 
     if (attribute.name.startsWith(".")) {
       const key = attribute.name.slice(1).toLowerCase();
-      const expression = validateSimplePropExpression(attribute.value, contract, source);
-      const target = contract.props[expression]!.target;
-      if (!("property" in target) || target.property.toLowerCase() !== key) {
-        fail("HT004", `Property binding \`.${key}\` does not match prop \`${expression}\`'s target.`, source);
+      const expressionPlan = compileScopedExpression(attribute.value, scope, source);
+      const prop = contract.props[attribute.value];
+      if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
+        fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
       const name = resolveDomProperty(element.tagName, key);
       if (name === undefined) {
         fail("HP001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
       }
       validateMvpDomProperty(name, source);
-      return { kind: "property", key, name, expression };
+      return { kind: "property", key, name, expression: attribute.value, expressionPlan };
     }
 
-    validateLiteralAttributeName(attribute.name, source);
+    validateLiteralAttributeName(attribute.name, source, attribute.value);
     return { kind: "literal", name: attribute.name, value: attribute.value };
   });
+}
+
+function parseEvents(element: Element, scope: ParseScope, source: string): EventBinding[] {
+  const events: EventBinding[] = [];
+  for (const attribute of element.attrs.filter((item) => item.name.startsWith("on:"))) {
+    const [name = "", ...modifiers] = attribute.name.slice("on:".length).split(".");
+    if (!EVENT_PART_RE.test(name) || modifiers.some((modifier) => !EVENT_PART_RE.test(modifier))) {
+      fail("HT010", `\`${attribute.name}\` is not a valid declarative event binding.`, source);
+    }
+    if (new Set(modifiers).size !== modifiers.length) {
+      fail("HT010", `\`${attribute.name}\` repeats an event modifier.`, source);
+    }
+    if (!scope.handlers.has(attribute.value)) {
+      fail("HT010", `Event binding \`${attribute.name}\` names undeclared handler \`${attribute.value}\`.`, source);
+    }
+    events.push({ name, handler: attribute.value, modifiers: Object.freeze(modifiers) });
+  }
+  return events;
+}
+
+function parseRef(element: Element, refs: Set<string>, source: string): string | undefined {
+  const name = attr(element, "$ref");
+  if (name === undefined) return undefined;
+  if (!NAME_RE.test(name)) fail("HT019", "`$ref` requires a valid non-empty name.", source);
+  if (refs.has(name)) fail("HT019", `Reference \`${name}\` is duplicated.`, source);
+  refs.add(name);
+  return name;
+}
+
+function extractFlow(element: Element, scope: ParseScope, source: string): Flow | undefined {
+  const has = (name: string): boolean => attr(element, name) !== undefined;
+  const value = (name: string): string => attr(element, name) ?? "";
+  const structural = ["$if", "$each", "$with", "$match", "$when", "$else"].filter(has);
+  if (structural.length > 1) {
+    fail("HT014", `An element carries one structural directive; found ${structural.join(", ")}.`, source);
+  }
+  const eachModifiers = ["$where", "$sort", "$limit", "$key"].filter(has);
+  if (!has("$each") && eachModifiers.length > 0) {
+    fail("HT014", `${eachModifiers.join(", ")} may only modify \`$each\`.`, source);
+  }
+
+  if (has("$if")) {
+    const test = value("$if");
+    return { kind: "if", test, testPlan: compileScopedExpression(test, scope, source) };
+  }
+  if (has("$with")) {
+    const match = AS_RE.exec(value("$with"));
+    if (match === null) fail("HT015", "`$with` must be written `expr as name`.", source);
+    return {
+      kind: "with",
+      expr: match[1]!,
+      expressionPlan: compileScopedExpression(match[1]!, scope, source),
+      alias: match[2]!,
+    };
+  }
+  if (has("$each")) {
+    const match = EACH_RE.exec(value("$each"));
+    if (match === null) {
+      fail("HT016", "`$each` must be written `item of items` (optionally `item, i of items`).", source);
+    }
+    const item = match[1]!;
+    const index = match[2];
+    if (scope.roots.has(item) || (index !== undefined && scope.roots.has(index))) {
+      fail("HC020", "Loop locals may not collide with an existing scope name.", source);
+    }
+    const localScope = withRoots(scope, item, index, "loop");
+    const result: {
+      kind: "each";
+      item: string;
+      index?: string;
+      list: string;
+      listPlan?: CompiledExpression;
+      where?: string;
+      wherePlan?: CompiledExpression;
+      sort?: string;
+      limit?: string;
+      limitPlan?: CompiledExpression;
+      key?: string;
+      keyPlan?: CompiledExpression;
+    } = {
+      kind: "each",
+      item,
+      ...(index === undefined ? {} : { index }),
+      list: match[3]!,
+      listPlan: compileScopedExpression(match[3]!, scope, source),
+    };
+    if (has("$where")) {
+      result.where = value("$where");
+      result.wherePlan = compileScopedExpression(result.where, localScope, source);
+    }
+    if (has("$sort")) result.sort = value("$sort");
+    if (has("$limit")) {
+      result.limit = value("$limit");
+      result.limitPlan = compileScopedExpression(result.limit, localScope, source);
+    }
+    if (has("$key")) {
+      result.key = value("$key");
+      result.keyPlan = compileScopedExpression(result.key, localScope, source);
+    }
+    return result;
+  }
+  if (has("$match")) {
+    const raw = value("$match").trim();
+    if (raw === "") return { kind: "match" };
+    const match = AS_RE.exec(raw);
+    if (match === null) fail("HT017", "`$match` scope must be written `expr as name`.", source);
+    return {
+      kind: "match",
+      expr: match[1]!,
+      expressionPlan: compileScopedExpression(match[1]!, scope, source),
+      alias: match[2]!,
+    };
+  }
+  if (has("$when")) {
+    const test = value("$when");
+    return { kind: "when", test, testPlan: compileScopedExpression(test, scope, source) };
+  }
+  if (has("$else")) return { kind: "else" };
+  return undefined;
 }
 
 function parseElement(
   element: Element,
   contract: ComponentContract,
+  scope: ParseScope,
   source: string,
-  slotState: { defaults: number; names: Set<string>; contracts: SlotContract[] },
+  slotState: {
+    defaults: number;
+    names: Set<string>;
+    contracts: SlotContract[];
+    refs: Set<string>;
+  },
 ): ElementNode {
   if (isReservedElement(element.tagName)) {
     fail("HT009", `<${element.tagName}> is reserved but not supported by the component MVP.`, source);
   }
+  validateDefinitionElementName(element.tagName, source);
 
-  const attributes = parseAttributes(element, contract, source);
+  const flow = extractFlow(element, scope, source);
+  const nodeScope =
+    flow?.kind === "each"
+      ? withRoots(scope, flow.item, flow.index, "loop")
+      : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
+        ? withRoots(scope, flow.alias)
+        : scope;
+  const attributes = parseAttributes(element, contract, nodeScope, source);
+  const events = parseEvents(element, nodeScope, source);
+  const ref = parseRef(element, slotState.refs, source);
   const children: TemplateNode[] = [];
-  for (const child of element.childNodes) {
+  const childNodes =
+    element.tagName === "template" && "content" in element
+      ? (element as Template).content.childNodes
+      : element.childNodes;
+  for (const child of childNodes) {
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
       if (child.value.trim() !== "") children.push({ kind: "text", value: child.value });
@@ -280,7 +681,7 @@ function parseElement(
         if (isText(fallbackNode)) {
           if (fallbackNode.value.trim() !== "") fallback.push({ kind: "text", value: fallbackNode.value });
         } else if (isElement(fallbackNode)) {
-          fallback.push(parseElement(fallbackNode, contract, source, slotState));
+          fallback.push(parseElement(fallbackNode, contract, nodeScope, source, slotState));
         }
       }
       const dynamic = nameExpression !== undefined;
@@ -297,25 +698,50 @@ function parseElement(
           ...(name === undefined ? {} : { name }),
           ...(nameExpression === undefined
             ? {}
-            : { nameExpression: compileDeclarationExpression(nameExpression, source) }),
+            : { nameExpression: compileScopedExpression(nameExpression, nodeScope, source) }),
           fallback: Object.freeze(fallback),
         });
       }
       continue;
     }
-    children.push(parseElement(child, contract, source, slotState));
+    children.push(parseElement(child, contract, nodeScope, source, slotState));
   }
 
+  if (attributes.some((binding) => binding.kind === "directive") && children.length > 0) {
+    fail("HT006", "A content directive cannot coexist with children.", source);
+  }
   if (
-    attributes.some(
-      (binding) => binding.kind === "property" && binding.name === "textContent",
-    ) &&
+    attributes.some((binding) => binding.kind === "property" && binding.name === "textContent") &&
     children.length > 0
   ) {
     fail("HT006", "A content-replacing property binding cannot coexist with children.", source);
   }
 
-  return { kind: "element", name: element.tagName, attributes, children };
+  if (flow?.kind === "match") {
+    const arms = children.filter((node): node is ElementNode => node.kind === "element");
+    let elseSeen = false;
+    arms.forEach((arm, index) => {
+      if (arm.flow?.kind === "when") {
+        if (elseSeen) fail("HT018", "A `$when` arm may not follow `$else`.", source);
+      } else if (arm.flow?.kind === "else") {
+        if (elseSeen) fail("HT018", "A `$match` has at most one `$else`.", source);
+        elseSeen = true;
+        if (index !== arms.length - 1) fail("HT018", "`$else` must be the last arm.", source);
+      } else {
+        fail("HT018", "Every direct child of a `$match` must be a `$when` or `$else` arm.", source);
+      }
+    });
+  }
+
+  return {
+    kind: "element",
+    name: element.tagName,
+    attributes,
+    children,
+    ...(flow === undefined ? {} : { flow }),
+    ...(events.length === 0 ? {} : { events: Object.freeze(events) }),
+    ...(ref === undefined ? {} : { ref }),
+  };
 }
 
 export function parseComponent(sourceText: string, source = "<source>"): ComponentDefinition {
@@ -360,6 +786,23 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
     fail("HT001", "A component's markup must be exactly one element root.", source);
   }
   const root = markup[0] as Element;
+  const rootChoices = (attr(root, "as") ?? root.tagName)
+    .split("|")
+    .map((choice) => choice.trim())
+    .filter((choice) => choice !== "");
+  const delegatedRoot = getDomInterface(root.tagName) === undefined;
+  if (delegatedRoot && attr(root, "as") !== undefined) {
+    fail("HT021", "A delegated component root cannot also declare native `as` choices.", source);
+  }
+  if (
+    !delegatedRoot &&
+    (rootChoices.length === 0 ||
+      !rootChoices.includes(root.tagName) ||
+      new Set(rootChoices).size !== rootChoices.length ||
+      rootChoices.some((choice) => getDomInterface(choice) === undefined))
+  ) {
+    fail("HT021", "A polymorphic root must list unique native choices including its markup root.", source);
+  }
 
   const targets = collectTargets(root, source);
   const rawContract = {
@@ -370,9 +813,39 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
   };
   const contract = defineContract(rawContract, { source, tag });
 
-  const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[] };
-  const template = parseElement(root, contract, source, slotState);
-  const declarations = readDeclarations(defGroups[0], source);
+  const declarations = readDeclarations(defGroups[0], contract, source);
+  const rootsInScope = new Set([
+    ...Object.keys(contract.props),
+    ...declarations.map((declaration) => declaration.name),
+  ]);
+  const scope: ParseScope = {
+    roots: rootsInScope,
+    writableRoots: new Set(
+      declarations
+        .filter((declaration) => declaration.kind === "state")
+        .map((declaration) => declaration.name),
+    ),
+    handlers: new Set(
+      declarations
+        .filter((declaration) => declaration.kind === "handler")
+        .map((declaration) => declaration.name),
+    ),
+  };
+  for (const declaration of declarations) {
+    if (
+      (declaration.kind === "state" || declaration.kind === "computed") &&
+      declaration.expression !== undefined
+    ) {
+      validateCompiledExpression(declaration.expression, scope, source);
+    }
+  }
+  const slotState = {
+    defaults: 0,
+    names: new Set<string>(),
+    contracts: [] as SlotContract[],
+    refs: new Set<string>(),
+  };
+  const template = parseElement(root, contract, scope, source, slotState);
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 
@@ -384,5 +857,12 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
     ...(controller === undefined ? {} : { controller }),
     declarations: Object.freeze(declarations),
     slots: Object.freeze(slotState.contracts),
+    root: delegatedRoot
+      ? Object.freeze({ kind: "component" as const, tag: root.tagName })
+      : Object.freeze({
+          kind: "native" as const,
+          element: root.tagName,
+          choices: Object.freeze(rootChoices),
+        }),
   });
 }

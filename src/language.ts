@@ -29,8 +29,40 @@ const UNSAFE_DOM_PROPERTY_NAMES = new Set([
   "srcdoc",
 ]);
 
+const UNSAFE_DEFINITION_ELEMENTS = new Set([
+  "base",
+  "embed",
+  "link",
+  "meta",
+  "object",
+  "script",
+  "style",
+]);
+
+const URL_ATTRIBUTES = new Set([
+  "action",
+  "data",
+  "formaction",
+  "href",
+  "poster",
+  "src",
+  "xlink:href",
+]);
+
+function hasExecutableUrl(value: string): boolean {
+  const normalized = value.replace(/[\u0000-\u0020\u007f]+/g, "");
+  return /^(?:data|javascript|vbscript):/i.test(normalized);
+}
+
 export function isReservedElement(name: string): boolean {
   return RESERVED_ELEMENTS.has(name);
+}
+
+export function validateDefinitionElementName(name: string, source: string): string {
+  if (UNSAFE_DEFINITION_ELEMENTS.has(name.toLowerCase())) {
+    fail("HT009", `<${name}> is not permitted in rendered component markup.`, source);
+  }
+  return name;
 }
 
 export function validateSimplePropExpression(
@@ -44,7 +76,11 @@ export function validateSimplePropExpression(
   return expression;
 }
 
-export function validateLiteralAttributeName(name: string, source: string): string {
+export function validateLiteralAttributeName(
+  name: string,
+  source: string,
+  value = "",
+): string {
   const lowerName = name.toLowerCase();
   if (
     lowerName.startsWith("on") ||
@@ -55,6 +91,12 @@ export function validateLiteralAttributeName(name: string, source: string): stri
       `Literal attribute \`${name}\` uses target-framework directive syntax that is not supported by the MVP.`,
       source,
     );
+  }
+  if (lowerName === "srcdoc") {
+    fail("HT007", "Literal `srcdoc` is not permitted in a component definition.", source);
+  }
+  if (URL_ATTRIBUTES.has(lowerName) && hasExecutableUrl(value)) {
+    fail("HT007", `Literal \`${name}\` contains an executable URL.`, source);
   }
   return name;
 }
