@@ -1,8 +1,5 @@
-<!-- x-counter: local state, and a controller that wires the click. The definition is
-     data: it names the controller it requests, but importing this file cannot execute it. -->
-<link rel="controller" href="./counter.js" />
-
-<template component="x-counter">
+<!-- x-counter: local state, and a controller that wires the click. -->
+<template component="x-counter" controller="./counter.js">
   <defs>
     <prop name="start" type="number" default="0"></prop>
     <state name="count" :value="start"></state>

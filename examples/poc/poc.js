@@ -2,11 +2,11 @@
 //
 // It demonstrates the REGISTRATION + LOADING + WIRING model, not the full spec:
 //  - components register by tag in a customElements-shaped registry;
-//  - definitions are inert .html data; a definition may name the controller it requests,
-//    but importing the definition cannot execute it;
-//  - the application authorizes controller URLs through conventional names in its import map;
-//    approved controllers
-//    load lazily via import() on first connect and self-register with defineController(tag, fn);
+//  - definitions use a closed declarative grammar and may declare one controller module;
+//  - importing a root component trusts its declared dependency closure; CSP, CORS, and optional
+//    integrity remain the application-wide loading controls;
+//  - controllers load lazily as ES modules on first connect and self-register with
+//    defineController(tag, fn);
 //  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM);
 //  - lowered roots are torn down (effects + disconnect) when removed from the DOM;
 //  - author markup is sanitized on lowering (script / on* / javascript: / srcdoc dropped;
@@ -19,10 +19,11 @@
 
 const registry = new Map(); // tag -> { template }
 const controllers = new Map(); // tag -> fn
-const controllerRequests = new Map(); // tag -> resolved URL requested by <link rel="controller">
-const importing = new Set(); // canonical controller specifiers whose import() is in flight
+const controllerRequests = new Map(); // tag -> controller URL from template[controller]
+const importing = new Set(); // controller URLs whose import() is in flight
 const loaded = new Set(); // definition URLs already fetched
 const whenDefinedResolvers = new Map();
+const applicationImports = new Map(); // snapshotted from the application document
 
 // ---------------------------------------------------------------------------
 // Registry — shaped like customElements
@@ -180,26 +181,60 @@ function sanitize(root) {
 // Loading definitions (transitive, like an ES-module graph)
 // ---------------------------------------------------------------------------
 
-async function loadDefinition(url) {
+const URL_LIKE = /^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/|\.\.?\/)/;
+
+function snapshotApplicationImports() {
+  document.querySelectorAll('script[type="importmap"]').forEach((script) => {
+    const imports = JSON.parse(script.textContent).imports || {};
+    Object.entries(imports).forEach(([key, value]) => applicationImports.set(key, value));
+  });
+}
+
+function resolveDependency(specifier, baseURL) {
+  if (URL_LIKE.test(specifier)) return new URL(specifier, baseURL).href;
+  // Polyfill bridge: browsers apply import maps to module imports, but do not expose the
+  // full resolver for new resource types. Match an exact key or the longest mapped prefix.
+  const exact = applicationImports.get(specifier);
+  if (exact) return new URL(exact, document.baseURI).href;
+  const prefix = [...applicationImports.keys()]
+    .filter((key) => key.endsWith("/") && specifier.startsWith(key))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!prefix) throw new TypeError(`[html-next] Unmapped bare specifier: ${specifier}`);
+  const target = applicationImports.get(prefix);
+  return new URL(`${target}${specifier.slice(prefix.length)}`, document.baseURI).href;
+}
+
+function assertInertDefinition(doc, template, url) {
+  const forbidden = "script, base, meta[http-equiv]";
+  if (doc.querySelector(forbidden) || template.content.querySelector(forbidden)) {
+    throw new Error(`[html-next] ${url} contains executable or document-policy markup.`);
+  }
+}
+
+async function loadDefinition(specifier, baseURL = location.href) {
+  const url = resolveDependency(specifier, baseURL);
   if (loaded.has(url)) return; // dedup by URL: safe for diamonds (B,C -> D) and cycles (A <-> B)
   loaded.add(url);
   const res = await fetch(url);
+  if (!res.ok) throw new Error(`[html-next] ${url} failed with ${res.status}.`);
+  const definitionURL = res.url;
   const doc = new DOMParser().parseFromString(await res.text(), "text/html");
 
   const template = doc.querySelector("template[component]");
   if (!template) return;
+  assertInertDefinition(doc, template, definitionURL);
   const tag = template.getAttribute("component");
 
-  const controllerLink = doc.querySelector('link[rel="controller"][href]');
-  if (controllerLink) {
-    controllerRequests.set(tag, new URL(controllerLink.getAttribute("href"), url).href);
+  const controller = template.getAttribute("controller");
+  if (controller) {
+    controllerRequests.set(tag, resolveDependency(controller, definitionURL));
   }
   components.define(tag, template);
 
-  const deps = [...doc.querySelectorAll('link[rel="component"]')].map(
-    (l) => new URL(l.getAttribute("href"), url).href,
+  const deps = [...doc.querySelectorAll('link[rel="component"]')].map((link) =>
+    loadDefinition(link.getAttribute("href"), definitionURL),
   );
-  await Promise.all(deps.map(loadDefinition));
+  await Promise.all(deps);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,32 +392,14 @@ function connectOrLoad(root) {
     connect(root);
     return;
   }
-  const requested = controllerRequests.get(tag);
-  if (!requested) return;
-  const specifier = `html-next-controller/${tag}`;
-  if (importing.has(specifier)) return;
-  let approved;
-  try {
-    // Resolution consults the application's import map but fetches and executes nothing.
-    approved = import.meta.resolve(specifier);
-  } catch {
-    console.error(
-      `[html-next] <${tag}> requested ${requested}, but the application did not approve ${specifier}.`,
-    );
-    return;
-  }
-  if (requested !== approved) {
-    console.error(
-      `[html-next] <${tag}> requested ${requested}, but the application approved ${approved}; refusing to execute either.`,
-    );
-    return;
-  }
-  importing.add(specifier);
+  const controllerURL = controllerRequests.get(tag);
+  if (!controllerURL || importing.has(controllerURL)) return;
+  importing.add(controllerURL);
   // The module's own defineController() call registers + upgrades this instance (and siblings).
-  // Import the approved name, never the component-provided string.
-  import(specifier).catch((err) =>
-    console.error(`[html-next] approved controller ${specifier} failed to load:`, err),
-  );
+  import(controllerURL).catch((error) => {
+    importing.delete(controllerURL);
+    console.error(`[html-next] controller ${controllerURL} failed to load:`, error);
+  });
 }
 
 function disposeRoot(root) {
@@ -411,12 +428,13 @@ new MutationObserver((records) => {
 // ---------------------------------------------------------------------------
 
 async function boot() {
+  snapshotApplicationImports();
   document.querySelectorAll("template[component]").forEach((tpl) => {
     components.define(tpl.getAttribute("component"), tpl);
   });
   const links = [...document.querySelectorAll('link[rel="component"]')];
   await Promise.all(
-    links.map((l) => loadDefinition(new URL(l.getAttribute("href"), location.href).href)),
+    links.map((link) => loadDefinition(link.getAttribute("href"))),
   );
   lowerAll(document.body);
 }
