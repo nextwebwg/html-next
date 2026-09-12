@@ -16,6 +16,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
   let bundle = "";
   let controllerBundle = "";
   let definitions = "";
+  let compatibilityStyles = "";
 
   before(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-looma-components-"));
@@ -50,6 +51,7 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
       "ui-menu-item",
       ...controllerTags,
     ].map((tag) => readFile(new URL(`${tag}.html`, components), "utf8")))).join("\n");
+    compatibilityStyles = await readFile(new URL("../examples/looma/package-assets/styles.css", import.meta.url), "utf8");
   });
 
   it("preserves native form controls and controlled or default state", async () => {
@@ -607,6 +609,24 @@ describe("reviewed Looma HTML Next components", { skip: !enabled }, () => {
         selected: "",
         fieldLegend: "Email",
       });
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("applies migrated Looma CSS to lowered native roots", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`<style>${compatibilityStyles}</style>${definitions}<ui-button id="styled" variant="solid">Save</ui-button>`);
+      await page.addScriptTag({ path: bundle });
+      const result = await page.evaluate(() => {
+        (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+        const button = document.getElementById("styled")!;
+        const style = getComputedStyle(button);
+        return { tag: button.localName, minBlockSize: style.minBlockSize, display: style.display, variant: button.getAttribute("data-variant") };
+      });
+      assert.deepEqual(result, { tag: "button", minBlockSize: "40px", display: "inline-flex", variant: "solid" });
     } finally {
       await browser.close();
     }
