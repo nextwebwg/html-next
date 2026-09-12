@@ -3,6 +3,7 @@ import {
   escapeHtml,
   frameworkBindingExpression,
   literalAttribute,
+  provenanceAttributes,
   propKey,
   quote,
   typeSource,
@@ -29,6 +30,7 @@ function renderNode(
     );
     return `${attribute.name}={${expression}}`;
   });
+  attributes.push(...provenanceAttributes(definition.contract.tag));
   const open = `<${node.name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   const children = node.children.map((child) => renderNode(child, aliases, definition, depth + 1)).join("\n");
   return children === "" ? `${open}</${node.name}>` : `${open}\n${indent}  ${children}\n${indent}</${node.name}>`;
@@ -44,6 +46,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
   );
   const rootAttributes = [
     "{...nativeProps}",
+    ...provenanceAttributes(contract.tag, true),
     ...template.attributes.map((attribute) => {
       if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
       const value = aliases.get(attribute.expression)!;

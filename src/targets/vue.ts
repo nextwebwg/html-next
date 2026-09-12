@@ -3,6 +3,7 @@ import {
   escapeHtml,
   frameworkBindingExpression,
   literalAttribute,
+  provenanceAttributes,
   propKey,
   quote,
   typeSource,
@@ -32,6 +33,7 @@ function renderNode(
     );
     return `:${attribute.name}=${quote(expression)}`;
   });
+  attributes.push(...provenanceAttributes(definition.contract.tag));
   const open = `<${node.name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   const children = node.children.map((child) => renderNode(child, definition, depth + 1)).join("\n");
   return children === "" ? `${open}</${node.name}>` : `${open}\n${indent}  ${children}\n${indent}</${node.name}>`;
@@ -49,7 +51,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const declaration = defaults.length === 0
     ? `const props = ${define};`
     : `const props = withDefaults(${define}, {\n${defaults.map(([name, prop]) => `  ${propKey(name)}: ${JSON.stringify(prop.default)},`).join("\n")}\n});`;
-  const rootAttributes = template.attributes.map((attribute) => {
+  const rootAttributes = [...provenanceAttributes(contract.tag, true), ...template.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
     const value = access(attribute.expression);
     const expression = frameworkBindingExpression(
@@ -60,7 +62,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
       "''",
     );
     return `:${attribute.name}=${quote(expression)}`;
-  });
+  })];
   const children = template.children.map((child) => renderNode(child, definition, 1)).join("\n");
 
   return [

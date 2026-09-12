@@ -30,6 +30,7 @@ function renderNode(
   parent: string,
   props: Readonly<Record<string, PropContract>>,
   valueCounter: { value: number },
+  owner: string,
 ): void {
   if (node.kind === "text") {
     lines.push(`  ${parent}.append(${js(node.value)});`);
@@ -43,7 +44,8 @@ function renderNode(
   const variable = `element${counter.value++}`;
   lines.push(`  const ${variable} = document.createElement(${js(node.name)});`);
   renderAttributes(node, variable, lines, props, valueCounter, "  ");
-  for (const child of node.children) renderNode(child, lines, counter, variable, props, valueCounter);
+  lines.push(`  ${variable}.setAttribute("data-component", ${js(owner)});`);
+  for (const child of node.children) renderNode(child, lines, counter, variable, props, valueCounter, owner);
   lines.push(`  ${parent}.append(${variable});`);
 }
 
@@ -97,8 +99,14 @@ export function generateVanilla(
   ];
   const valueCounter = { value: 0 };
   renderAttributes(template, "element", lines, contract.props, valueCounter, "  ");
+  lines.push(
+    `  element.setAttribute("data-component", ${js(contract.tag)});`,
+    `  element.setAttribute("data-component-root", ${js(contract.tag)});`,
+  );
   const counter = { value: 0 };
-  for (const child of template.children) renderNode(child, lines, counter, "element", contract.props, valueCounter);
+  for (const child of template.children) {
+    renderNode(child, lines, counter, "element", contract.props, valueCounter, contract.tag);
+  }
   lines.push("  return element;", "}", "");
 
   const domType = getDomInterface(contract.nativeElement) ?? "HTMLElement";

@@ -15,12 +15,18 @@ import {
 import { validateLiteralAttributeName } from "./language.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
+import {
+  componentStyleMode,
+  markProjectedRoot,
+  stampAuthoredElement,
+  stampComponentRoot,
+  transformComponentStyles,
+} from "./style.js";
 import { parseTypedValue } from "./type-system.js";
 import {
   manageElementValidity,
 } from "./validity.js";
 import type { Constraint } from "./validate.js";
-import { rewriteValiditySelectors } from "./validity-css.js";
 import type {
   ComponentDefinition,
   DataDeclaration,
@@ -70,7 +76,7 @@ function runtimeDeclarations(definition: ComponentDefinition): Decl[] {
 interface PreparedInvocation {
   readonly invocation: Element;
   readonly nativeRoot: Element;
-  readonly slotContainers: readonly Element[];
+  readonly slotContainers: readonly Comment[];
   readonly children: readonly Node[];
   readonly definition: ComponentDefinition;
   readonly instance: RuntimeInstance;
@@ -159,7 +165,10 @@ export function installComponentGraph(
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
     const style = node.definition.css === "" ? undefined : root.createElement("style");
     if (style !== undefined) {
-      style.textContent = rewriteValiditySelectors(node.definition.css);
+      style.textContent = transformComponentStyles(node.definition.css, tag, {
+        mode: componentStyleMode(root),
+        rootElement: node.definition.template.name,
+      });
       style.dataset.htmlNextComponent = tag;
       root.head.append(style);
     }
@@ -546,14 +555,13 @@ function clearRange(start: Comment, end: Comment): void {
 function renderDynamicNode(
   node: ElementNode,
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
   if (node.flow?.kind === "each") {
-    return renderEachRegion(node, scope, slotChildren, document, slotContainers, passThrough, context);
+    return renderEachRegion(node, scope, document, slotContainers, passThrough, context);
   }
   const start = document.createComment("html-next:start");
   const end = document.createComment("html-next:end");
@@ -569,14 +577,14 @@ function renderDynamicNode(
     if (node.flow?.kind === "if") {
       if (truthy(evalValue(node.flow.test, scope))) {
         const { flow: _flow, ...body } = node;
-        rendered = renderInstance(body, scope, slotChildren, document, slotContainers, passThrough, context);
+        rendered = renderInstance(body, scope, document, slotContainers, passThrough, context);
       }
     } else if (node.flow?.kind === "with") {
       const local = scope.fork([[node.flow.alias, evalValue(node.flow.expr, scope)]]);
       const { flow: _flow, ...body } = node;
-      rendered = renderInstance(body, local, slotChildren, document, slotContainers, passThrough, context);
+      rendered = renderInstance(body, local, document, slotContainers, passThrough, context);
     } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(node, scope, slotChildren, document, slotContainers, context);
+      rendered = renderMatch(node, scope, document, slotContainers, context);
     }
     childEffects = context.effects.slice(effectsStart);
     end.before(...materialize(rendered, document));
@@ -618,9 +626,8 @@ function removeBlock(block: EachBlock): void {
 function renderEachRegion(
   node: ElementNode,
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
@@ -649,7 +656,7 @@ function renderEachRegion(
         const local = scope.fork(Object.entries(locals));
         const effectsStart = context.effects.length;
         const rendered = materialize(
-          renderInstance(body, local, slotChildren, document, slotContainers, passThrough, context),
+          renderInstance(body, local, document, slotContainers, passThrough, context),
           document,
         );
         const blockStart = document.createComment("html-next:item-start");
@@ -678,9 +685,8 @@ function renderEachRegion(
 function renderNode(
   node: ElementNode,
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
@@ -690,11 +696,11 @@ function renderNode(
     node.flow?.kind === "with" ||
     node.flow?.kind === "match"
   ) {
-    return renderDynamicNode(node, scope, slotChildren, document, slotContainers, passThrough, context);
+    return renderDynamicNode(node, scope, document, slotContainers, passThrough, context);
   }
   const out: Node[] = [];
   for (const childScope of expandFlow(node.flow, scope)) {
-    out.push(...renderInstance(node, childScope, slotChildren, document, slotContainers, passThrough, context));
+    out.push(...renderInstance(node, childScope, document, slotContainers, passThrough, context));
   }
   return out;
 }
@@ -702,9 +708,8 @@ function renderNode(
 function renderMatch(
   node: ElementNode,
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   context: RuntimeRenderContext,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "match" }>;
@@ -727,7 +732,7 @@ function renderMatch(
 
   // Render the winning arm, ignoring its own $when/$else marker.
   const { flow: _armFlow, ...armNode } = chosen;
-  const rendered = renderInstance(armNode, matchScope, slotChildren, document, slotContainers, [], context);
+  const rendered = renderInstance(armNode, matchScope, document, slotContainers, [], context);
   if (node.name === "template") return rendered;
 
   // $match on a real element wraps the winning arm in that element.
@@ -736,6 +741,7 @@ function renderMatch(
     if (attribute.kind === "literal") wrapper.setAttribute(attribute.name, attribute.value);
   }
   wrapper.append(...rendered);
+  stampAuthoredElement(wrapper, context.definition.contract.tag);
   return [wrapper];
 }
 
@@ -743,9 +749,8 @@ function renderMatch(
 function renderInstance(
   node: ElementNode,
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   passThrough: readonly Attr[],
   context: RuntimeRenderContext,
 ): Node[] {
@@ -765,7 +770,7 @@ function renderInstance(
         ? [text]
         : [inlineDirective(contentDirective, scope, document)];
     }
-    return renderChildren(node.children, scope, slotChildren, document, slotContainers, context);
+    return renderChildren(node.children, scope, document, slotContainers, context);
   }
 
   const element = document.createElement(node.name);
@@ -807,6 +812,7 @@ function renderInstance(
     }
     // Content directives are handled below.
   }
+  stampAuthoredElement(element, context.definition.contract.tag);
 
   if (contentDirective !== undefined) {
     ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document));
@@ -818,10 +824,11 @@ function renderInstance(
     if (child.kind === "text") {
       element.append(document.createTextNode(child.value));
     } else if (child.kind === "slot") {
-      slotContainers.push(element);
-      element.append(...slotChildren);
+      const anchor = document.createComment("html-next-slot");
+      slotContainers.push(anchor);
+      element.append(anchor);
     } else {
-      for (const rendered of renderNode(child, scope, slotChildren, document, slotContainers, [], context)) {
+      for (const rendered of renderNode(child, scope, document, slotContainers, [], context)) {
         element.append(rendered);
       }
     }
@@ -833,16 +840,15 @@ function renderInstance(
 function renderChildren(
   children: readonly TemplateNode[],
   scope: ReactiveScope,
-  slotChildren: readonly Node[],
   document: Document,
-  slotContainers: Element[],
+  slotContainers: Comment[],
   context: RuntimeRenderContext,
 ): Node[] {
   const out: Node[] = [];
   for (const child of children) {
     if (child.kind === "text") out.push(document.createTextNode(child.value));
     else if (child.kind !== "slot") {
-      out.push(...renderNode(child, scope, slotChildren, document, slotContainers, [], context));
+      out.push(...renderNode(child, scope, document, slotContainers, [], context));
     }
   }
   return out;
@@ -937,7 +943,7 @@ export function lowerDocument(root: Document = document): number {
       if (contentOnly.has(invocation)) continue;
       const { scope, passThrough, effects } = readInvocation(invocation, definition);
       const children = Array.from(invocation.childNodes);
-      const slotContainers: Element[] = [];
+      const slotContainers: Comment[] = [];
       const instance: RuntimeInstance = {
         definition,
         scope,
@@ -955,13 +961,13 @@ export function lowerDocument(root: Document = document): number {
       const rendered = renderNode(
         definition.template,
         scope,
-        children.map((child) => child.cloneNode(true)),
         invocation.ownerDocument,
         slotContainers,
         passThrough,
         context,
       );
       const nativeRoot = rendered[0] as Element;
+      stampComponentRoot(nativeRoot, definition.contract.tag);
       instance.element = nativeRoot;
       prepared.push({ invocation, nativeRoot, slotContainers, children, definition, instance });
     }
@@ -970,15 +976,23 @@ export function lowerDocument(root: Document = document): number {
   for (const live of definitions) {
     registry.definitions.set(live.definition.contract.tag, live);
     if (live.style !== undefined) {
-      live.style.textContent = rewriteValiditySelectors(live.style.textContent ?? "");
+      live.style.textContent = transformComponentStyles(
+        live.style.textContent ?? "",
+        live.definition.contract.tag,
+        {
+          mode: componentStyleMode(live.wrapper!.ownerDocument),
+          rootElement: live.definition.template.name,
+        },
+      );
       live.wrapper!.ownerDocument.head.append(live.style);
     }
     live.wrapper!.remove();
   }
 
   for (const invocation of prepared) {
+    for (const child of invocation.children) markProjectedRoot(child);
     for (const slotContainer of invocation.slotContainers) {
-      slotContainer.replaceChildren(...invocation.children);
+      slotContainer.replaceWith(...invocation.children);
     }
     invocation.invocation.replaceWith(invocation.nativeRoot);
     registry.instances.set(invocation.nativeRoot, invocation.definition);

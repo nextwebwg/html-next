@@ -7,6 +7,8 @@ import { after, before, describe, it } from "node:test";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
+import { transformComponentStyles } from "../src/style.js";
+
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
 const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
@@ -603,6 +605,200 @@ describe("browser runtime", { skip: !enabled }, () => {
       }
     });
 
+    it(`${name} scopes component styles by authored provenance`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<style>.projected { background-color: rgb(240, 240, 0); }</style>` +
+          `<template component="x-inner" status="early" summary="Inner component.">` +
+            `<section class="inner"><div class="inside"><div class="own"><span class="marker"></span></div><slot></slot></div></section>` +
+            `<style>:scope { border-top: 3px solid rgb(1, 2, 3); } .inside { background-color: rgb(0, 120, 0); } .projected, .deep { background-color: rgb(0, 0, 200); } @media all { .inside:has(.own > .marker) { padding-top: 9px; } }</style>` +
+          `</template>` +
+          `<template component="x-outer" status="early" summary="Outer component.">` +
+            `<article><div class="own" required><span class="marker"></span><i class="leaf"></i></div><x-inner class="nested"><em class="projected"><b class="deep">Projected</b></em></x-inner></article>` +
+            `<style>:scope { color: rgb(12, 34, 56); --inherited-token: inherited; } .own { --bare: yes; } article .leaf { --descendant: yes; } article > .own { --child: yes; } .own + x-inner { margin-left: 13px; } :scope:has(.own > .marker) { padding-left: 11px; } .inside { background-color: rgb(200, 0, 0); } @media all { .own:invalid { border-left: 7px solid rgb(90, 0, 0); } }</style>` +
+          `</template>` +
+          `<template component="x-base" status="early" summary="Base component.">` +
+            `<button><slot></slot></button><style id="base-style">:scope { border-right: 4px solid rgb(1, 2, 3); }</style>` +
+          `</template>` +
+          `<template component="x-primary" status="early" summary="Delegated component.">` +
+            `<x-base><slot></slot></x-base><style id="primary-style">:scope { padding-right: 6px; }</style>` +
+          `</template>` +
+          `<x-outer id="outer"></x-outer><x-primary id="delegated">Label</x-primary>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { observeDocument(): () => void } })
+            .HtmlRuntime.observeDocument();
+        });
+        await page.waitForFunction(() => document.querySelector("#outer > section.inner") !== null);
+        await page.waitForFunction(() => document.querySelector("#delegated")?.localName === "button");
+
+        const result = await page.evaluate(`(() => {
+          const outer = document.querySelector("#outer");
+          const own = outer.querySelector(":scope > .own");
+          const leaf = own.querySelector(".leaf");
+          const nested = outer.querySelector(":scope > section.inner");
+          const inside = nested.querySelector(".inside");
+          const projected = inside.querySelector(".projected");
+          const deep = projected.querySelector(".deep");
+          const delegated = document.querySelector("#delegated");
+          const value = (element, property) =>
+            getComputedStyle(element).getPropertyValue(property).trim();
+          return {
+            outer: {
+              padding: value(outer, "padding-left"),
+              color: value(outer, "color"),
+              provenance: outer.getAttribute("data-component"),
+              roots: outer.getAttribute("data-component-root"),
+            },
+            own: {
+              bare: value(own, "--bare"),
+              child: value(own, "--child"),
+              invalidBorder: value(own, "border-left-width"),
+            },
+            leaf: value(leaf, "--descendant"),
+            nested: {
+              margin: value(nested, "margin-left"),
+              border: value(nested, "border-top-width"),
+              provenance: nested.getAttribute("data-component"),
+              roots: nested.getAttribute("data-component-root"),
+            },
+            inside: {
+              background: value(inside, "background-color"),
+              padding: value(inside, "padding-top"),
+              color: value(inside, "color"),
+            },
+            projected: {
+              background: value(projected, "background-color"),
+              marker: projected.hasAttribute("data-slotted"),
+              color: value(projected, "color"),
+            },
+            deepBackground: value(deep, "background-color"),
+            delegated: {
+              element: delegated.localName,
+              border: value(delegated, "border-right-width"),
+              padding: value(delegated, "padding-right"),
+              provenance: delegated.getAttribute("data-component"),
+              roots: delegated.getAttribute("data-component-root"),
+              baseStyles: document.querySelectorAll("#base-style").length,
+              primaryStyles: document.querySelectorAll("#primary-style").length,
+            },
+          };
+        })()`);
+
+        assert.deepEqual(result, {
+          outer: {
+            padding: "11px",
+            color: "rgb(12, 34, 56)",
+            provenance: "x-outer",
+            roots: "x-outer",
+          },
+          own: { bare: "yes", child: "yes", invalidBorder: "7px" },
+          leaf: "yes",
+          nested: {
+            margin: "13px",
+            border: "3px",
+            provenance: "x-outer x-inner",
+            roots: "x-inner",
+          },
+          inside: {
+            background: "rgb(0, 120, 0)",
+            padding: "9px",
+            color: "rgb(12, 34, 56)",
+          },
+          projected: {
+            background: "rgb(240, 240, 0)",
+            marker: true,
+            color: "rgb(12, 34, 56)",
+          },
+          deepBackground: "rgba(0, 0, 0, 0)",
+          delegated: {
+            element: "button",
+            border: "4px",
+            padding: "6px",
+            provenance: "x-primary x-base",
+            roots: "x-primary x-base",
+            baseStyles: 1,
+            primaryStyles: 1,
+          },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} renders native-scope and fallback CSS equivalently`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const rules = [
+          "div { color: rgb(21, 43, 65); }",
+          ".own { --bare: yes; }",
+          "div > .own { --child: yes; }",
+          "div .leaf { --descendant: yes; }",
+          ".own + x-child { margin-left: 13px; }",
+          "div:has(.own > .leaf:invalid) { padding-left: 11px; }",
+          "@media all { .leaf:invalid { border-left: 7px solid rgb(90, 0, 0); } }",
+          ".inside, .projected { background-color: rgb(200, 0, 0); }",
+        ].join("\n");
+        const nativeCss = transformComponentStyles(rules, "x-native", {
+          mode: "scope",
+          rootElement: "div",
+        });
+        const fallbackCss = transformComponentStyles(rules, "x-fallback", {
+          mode: "attribute",
+          rootElement: "div",
+        });
+        const tree = (owner: string): string =>
+          `<div class="card" data-component="${owner}" data-component-root="${owner}">` +
+            `<p class="own" data-component="${owner}"><i class="leaf" data-invalid data-component="${owner}"></i></p>` +
+            `<section data-component="${owner} x-child" data-component-root="x-child">` +
+              `<span class="inside" data-component="x-child"></span>` +
+              `<em class="projected" data-slotted><b class="deep"></b></em>` +
+            `</section>` +
+          `</div>`;
+        await page.setContent(
+          `<style>${nativeCss}\n${fallbackCss}</style>` + tree("x-native") + tree("x-fallback"),
+        );
+
+        const result = await page.evaluate(`(() => {
+          const snapshot = (owner) => {
+            const root = document.querySelector('[data-component-root="' + owner + '"]');
+            const own = root.querySelector('.own');
+            const leaf = root.querySelector('.leaf');
+            const nested = root.querySelector('[data-component-root="x-child"]');
+            const inside = root.querySelector('.inside');
+            const projected = root.querySelector('.projected');
+            const value = (element, property) => getComputedStyle(element).getPropertyValue(property).trim();
+            return {
+              root: [value(root, 'color'), value(root, 'padding-left')],
+              own: [value(own, '--bare'), value(own, '--child')],
+              leaf: [value(leaf, '--descendant'), value(leaf, 'border-left-width')],
+              nested: value(nested, 'margin-left'),
+              inside: [value(inside, 'background-color'), value(inside, 'color')],
+              projected: [value(projected, 'background-color'), value(projected, 'color')],
+            };
+          };
+          return { supported: 'CSSScopeRule' in window, native: snapshot('x-native'), fallback: snapshot('x-fallback') };
+        })()`) as { supported: boolean; native: unknown; fallback: unknown };
+
+        assert.equal(result.supported, true);
+        assert.deepEqual(result.native, result.fallback);
+        assert.deepEqual(result.native, {
+          root: ["rgb(21, 43, 65)", "11px"],
+          own: ["yes", "yes"],
+          leaf: ["yes", "7px"],
+          nested: "13px",
+          inside: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
+          projected: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} lowers definitions to equivalent native DOM`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -659,6 +855,8 @@ describe("browser runtime", { skip: !enabled }, () => {
             attributes: [
               ["aria-label", "Save changes"],
               ["class", "cta"],
+              ["data-component", "x-button"],
+              ["data-component-root", "x-button"],
               ["data-size", "lg"],
               ["data-trace", "runtime"],
               ["data-variant", "outline"],
@@ -671,7 +869,7 @@ describe("browser runtime", { skip: !enabled }, () => {
               {
                 namespace: "http://www.w3.org/1999/xhtml",
                 tag: "strong",
-                attributes: [["id", "kept-child"]],
+                attributes: [["data-slotted", ""], ["id", "kept-child"]],
                 children: [{ text: "now" }],
               },
             ],
@@ -680,6 +878,8 @@ describe("browser runtime", { skip: !enabled }, () => {
             namespace: "http://www.w3.org/1999/xhtml",
             tag: "button",
             attributes: [
+              ["data-component", "x-button"],
+              ["data-component-root", "x-button"],
               ["data-size", "md"],
               ["data-variant", "solid"],
               ["data-x-button", ""],
@@ -692,7 +892,11 @@ describe("browser runtime", { skip: !enabled }, () => {
           status: {
             namespace: "http://www.w3.org/1999/xhtml",
             tag: "output",
-            attributes: [["id", "status"]],
+            attributes: [
+              ["data-component", "x-status"],
+              ["data-component-root", "x-status"],
+              ["id", "status"],
+            ],
             children: [{ text: "Ready" }],
           },
           primaryDisabled: false,

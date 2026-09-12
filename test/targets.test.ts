@@ -87,4 +87,25 @@ describe("official target compilers", () => {
       assert.ok(compileSvelte(source, { filename, generate: "client" }).js.code.length > 0);
     }
   });
+
+  it("emits provenance-scoped CSS and matching target markers", async () => {
+    const artifacts = generated(componentSource(
+      "demo-card",
+      "",
+      `<article><div class="body"><x-badge></x-badge></div></article><style>.body, x-badge { color: red; }</style>`,
+    ));
+    const css = artifacts.get("styles/demo-card.css")!;
+
+    assert.match(css, /\.body:where\(\[data-component~="demo-card"\]\)/);
+    assert.match(css, /data-component-root~="x-badge"[\s\S]*data-component~="demo-card"/);
+    for (const path of [
+      "vanilla/DemoCard.js",
+      "react/DemoCard.tsx",
+      "vue/DemoCard.vue",
+      "svelte/DemoCard.svelte",
+    ]) {
+      assert.match(artifacts.get(path)!, /data-component/);
+      assert.match(artifacts.get(path)!, /data-component-root/);
+    }
+  });
 });

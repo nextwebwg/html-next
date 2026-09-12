@@ -39,6 +39,15 @@ export {
 } from "./validity.js";
 export { rewriteValiditySelectors } from "./validity-css.js";
 export {
+  COMPONENT_PROVENANCE_ATTRIBUTE,
+  COMPONENT_ROOT_ATTRIBUTE,
+  PROJECTED_ROOT_ATTRIBUTE,
+  componentStyleMode,
+  transformComponentStyles,
+  transformValidityStyles,
+} from "./style.js";
+export type { ComponentStyleMode, ComponentStyleOptions } from "./style.js";
+export {
   NATIVE_FLAG,
   validate,
   type Constraint,
