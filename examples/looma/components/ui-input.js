@@ -13,8 +13,16 @@ export default function controller(host) {
     if (!control) return;
     const controlled = host.state.value !== undefined;
     if (controlled) control.value = host.state.value;
-    else if (!initialized && host.state.defaultValue !== undefined) control.value = host.state.defaultValue;
-    if (kind !== "select") control.defaultValue = host.state.defaultValue || "";
+    if (kind !== "select") {
+      // The projected native control owns its current value when the wrapper is
+      // uncontrolled. Updating defaultValue can also reset value on a pristine
+      // input, so preserve the browser-owned value while syncing form-reset state.
+      const currentValue = control.value;
+      control.defaultValue = host.state.defaultValue || "";
+      if (!controlled) control.value = currentValue;
+    } else if (!initialized && host.state.defaultValue !== undefined) {
+      control.value = host.state.defaultValue;
+    }
     control.disabled = Boolean(host.state.disabled);
     if (kind === "textarea") {
       control.readOnly = Boolean(host.state.readOnly);
