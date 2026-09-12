@@ -28,8 +28,12 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
 - **The graph composes.** `index.html` resolves only the entry (`x-app`) via
   `<link rel="component">`; `app.html` declares its own deps (`x-counter`, `x-chart`), which
   are loaded transitively — like an ES-module graph.
-- **Controllers load lazily.** Each definition carries `<link rel="controller">`; the runtime
-  `import()`s it only when an instance first connects.
+- **Controller requests do not authorize code.** A definition names the controller it requests
+  with `<link rel="controller" href>`, keeping the component self-describing. The application
+  separately maps `html-next-controller/<tag>` to its approved URL. The runtime compares both
+  resolved URLs and imports the application-owned name only on an exact match. An absent or
+  different mapping executes nothing. The example's generated import-map `integrity` entries
+  also pin its production bytes; authors should not maintain those hashes by hand.
 - **Controllers drive state, not the DOM.** The counter's controller sets `host.state.count`;
   the runtime reflects it to the `<span>`. The chart's controller owns its own canvas subtree.
 - **Lowers to real native DOM.** The output is `<main>`/`<button>`/`<figure>` with a
@@ -58,6 +62,10 @@ through a `$ref`. Both components load their JavaScript lazily, on first connect
   cleanup) — enough to show "drive state → DOM updates," not the full reactive semantics.
 - **No SSR** — so the no-JS baseline is not demonstrated here: remove `poc.js` and the page
   is blank, because that baseline is an SSR guarantee, not a client-only one.
+- Controller modules are ordinary same-realm JavaScript, not sandboxes. Separating a definition's
+  request from the application's mapping prevents a transitive definition from granting itself
+  code execution; once the application
+  approves a module, that module and its dependencies have normal page-script authority.
 - No `on:`/`<handler>` declarative events (the counter wires its click in the controller),
   no form association, no scoped slots, no hydration/adopt-in-place.
 - The sanitizer is conservative, not the full HTML Sanitizer API.

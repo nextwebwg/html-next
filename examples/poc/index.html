@@ -18,7 +18,27 @@
 
     <x-app title="HTML Next POC"></x-app>
 
+    <!-- Components name requested URLs; only these application-owned conventional mappings
+         authorize them. Removing either entry leaves that declarative baseline in place. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "html-next-controller/x-counter": "./components/counter.js",
+          "html-next-controller/x-chart": "./components/chart.js"
+        },
+        "integrity": {
+          "./components/counter.js": "sha384-JQF49jq2SyPmL5AL6gjhEiYcUiyixYJG+6eD0yV0ZJ1dGQWmwaiOEwedbs87yEpp",
+          "./components/chart.js": "sha384-h97yek1GYuPpkiFR4SbvQDVwiUZkpdL3fouhE5VdNg+orrMmeK3mSTSsNTKh2ja5",
+          "./poc.js": "sha384-8v9HxTgO33z7AMIYI/17UJ2buOFvmi69TLWWBUbGzRVOrCvLzeSW1KDaw+pncOiq"
+        }
+      }
+    </script>
+
     <!-- The runtime: one ES module. -->
-    <script type="module" src="./poc.js"></script>
+    <script
+      type="module"
+      src="./poc.js"
+      integrity="sha384-8v9HxTgO33z7AMIYI/17UJ2buOFvmi69TLWWBUbGzRVOrCvLzeSW1KDaw+pncOiq"
+    ></script>
   </body>
 </html>

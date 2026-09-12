@@ -2,9 +2,11 @@
 //
 // It demonstrates the REGISTRATION + LOADING + WIRING model, not the full spec:
 //  - components register by tag in a customElements-shaped registry;
-//  - definitions are inert .html data; controllers are .js modules that self-register
-//    with an explicit defineController(tag, fn) call;
-//  - controllers load lazily via import() on first connect;
+//  - definitions are inert .html data; a definition may name the controller it requests,
+//    but importing the definition cannot execute it;
+//  - the application authorizes controller URLs through conventional names in its import map;
+//    approved controllers
+//    load lazily via import() on first connect and self-register with defineController(tag, fn);
 //  - a tiny reactive state lets a controller drive the DOM (drive state, not the DOM);
 //  - lowered roots are torn down (effects + disconnect) when removed from the DOM;
 //  - author markup is sanitized on lowering (script / on* / javascript: / srcdoc dropped;
@@ -17,8 +19,8 @@
 
 const registry = new Map(); // tag -> { template }
 const controllers = new Map(); // tag -> fn
-const controllerHints = new Map(); // tag -> module URL (from <link rel="controller">)
-const importing = new Set(); // controller URLs whose import() is in flight
+const controllerRequests = new Map(); // tag -> resolved URL requested by <link rel="controller">
+const importing = new Set(); // canonical controller specifiers whose import() is in flight
 const loaded = new Set(); // definition URLs already fetched
 const whenDefinedResolvers = new Map();
 
@@ -188,9 +190,9 @@ async function loadDefinition(url) {
   if (!template) return;
   const tag = template.getAttribute("component");
 
-  const controllerLink = doc.querySelector('link[rel="controller"]');
+  const controllerLink = doc.querySelector('link[rel="controller"][href]');
   if (controllerLink) {
-    controllerHints.set(tag, new URL(controllerLink.getAttribute("href"), url).href);
+    controllerRequests.set(tag, new URL(controllerLink.getAttribute("href"), url).href);
   }
   components.define(tag, template);
 
@@ -355,11 +357,32 @@ function connectOrLoad(root) {
     connect(root);
     return;
   }
-  const url = controllerHints.get(tag);
-  if (!url || importing.has(url)) return;
-  importing.add(url);
+  const requested = controllerRequests.get(tag);
+  if (!requested) return;
+  const specifier = `html-next-controller/${tag}`;
+  if (importing.has(specifier)) return;
+  let approved;
+  try {
+    // Resolution consults the application's import map but fetches and executes nothing.
+    approved = import.meta.resolve(specifier);
+  } catch {
+    console.error(
+      `[html-next] <${tag}> requested ${requested}, but the application did not approve ${specifier}.`,
+    );
+    return;
+  }
+  if (requested !== approved) {
+    console.error(
+      `[html-next] <${tag}> requested ${requested}, but the application approved ${approved}; refusing to execute either.`,
+    );
+    return;
+  }
+  importing.add(specifier);
   // The module's own defineController() call registers + upgrades this instance (and siblings).
-  import(url).catch((err) => console.error(`[html-next] controller ${url} failed to load:`, err));
+  // Import the approved name, never the component-provided string.
+  import(specifier).catch((err) =>
+    console.error(`[html-next] approved controller ${specifier} failed to load:`, err),
+  );
 }
 
 function disposeRoot(root) {
