@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import ts from "typescript";
@@ -13,7 +13,7 @@ import {
 } from "./generate.js";
 import { parseComponent } from "./parser.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
-import { extractStencilInventory, scaffoldStencilComponent } from "./migrate/stencil.js";
+import { extractStencilInventory, scaffoldStencilComponent, type ExtractStencilOptions } from "./migrate/stencil.js";
 
 export type BuildTarget = "docs" | "react" | "styles" | "svelte" | "vanilla" | "vue";
 
@@ -132,6 +132,7 @@ export async function buildComponents(
   const selected = new Set(options.targets ?? ["docs", "react", "styles", "svelte", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
   const controllerModules = new Set<string>();
+  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const entry = fileURLToPath(node.url);
@@ -157,8 +158,8 @@ export async function buildComponents(
       name: definition.contract.name,
       tag: definition.contract.tag,
       artifacts: generated.map((artifact) => artifact.path),
-      dependencies: node.dependencies.map((dependency) => fileURLToPath(dependency)),
-      controller: node.controller === undefined ? null : fileURLToPath(node.controller.url),
+      dependencies: node.dependencies.map(displayPath),
+      controller: node.controller === undefined ? null : displayPath(node.controller.url),
     });
   }
 
@@ -184,21 +185,33 @@ export async function buildComponents(
   return manifest;
 }
 
-export async function migrateStencilPackage(source: string, outDirectory: string): Promise<void> {
-  const inventory = await extractStencilInventory({ root: resolve(source) });
-  await mkdir(resolve(outDirectory), { recursive: true });
+export async function migrateStencilPackage(
+  source: string,
+  outDirectory: string,
+  inventoryFiles: Omit<ExtractStencilOptions, "root"> = {},
+): Promise<void> {
+  const sourceRoot = resolve(source);
+  const outputRoot = resolve(outDirectory);
+  const inventory = await extractStencilInventory({ root: sourceRoot, ...inventoryFiles });
+  await mkdir(outputRoot, { recursive: true });
   await Promise.all(inventory.components.map(async (component) => {
     const scaffold = scaffoldStencilComponent(component);
-    await writeFile(resolve(outDirectory, `${component.tag}.html`), scaffold.source, "utf8");
-    await writeFile(resolve(outDirectory, `${component.tag}.migration.json`), `${JSON.stringify({
+    const styles = component.styles.map((style) => `styles/${component.tag}/${basename(style)}`);
+    await Promise.all(component.styles.map(async (style, index) => {
+      const target = resolve(outputRoot, styles[index]!);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(resolve(sourceRoot, style), target);
+    }));
+    await writeFile(resolve(outputRoot, `${component.tag}.html`), scaffold.source, "utf8");
+    await writeFile(resolve(outputRoot, `${component.tag}.migration.json`), `${JSON.stringify({
       tag: component.tag,
       status: "review-required",
       diagnostics: scaffold.diagnostics,
-      styles: component.styles,
+      styles,
       capabilities: component.capabilities,
     }, null, 2)}\n`, "utf8");
   }));
-  await writeFile(resolve(outDirectory, "inventory.json"), `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
+  await writeFile(resolve(outputRoot, "inventory.json"), `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
 }
 
 function usage(): string {
