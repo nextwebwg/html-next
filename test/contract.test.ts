@@ -208,6 +208,7 @@ describe("defineContract", () => {
     assert.ok(Object.isFrozen(contract.props.variant?.type));
     assert.ok(
       typeof contract.props.variant?.type === "object" &&
+        "enum" in contract.props.variant.type &&
         Object.isFrozen(contract.props.variant.type.enum),
     );
 
