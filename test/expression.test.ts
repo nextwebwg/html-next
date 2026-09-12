@@ -4,13 +4,48 @@ import { describe, it } from "node:test";
 import {
   ABSENT,
   UndeclaredName,
+  compileExpression,
   evaluate,
+  getWritablePath,
   toAttribute,
   toText,
   truthy,
   type Scope,
   type Value,
 } from "../src/expression.js";
+
+describe("expression: compilation", () => {
+  it("exposes a serializable AST and normalized static dependencies", () => {
+    const compiled = compileExpression(
+      "cart.items[0].name = selected.name and flags[mode]",
+    );
+
+    assert.equal(compiled.ast.kind, "binary");
+    assert.deepEqual(compiled.dependencies, [
+      "cart.items.0.name",
+      "flags",
+      "mode",
+      "selected.name",
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(compiled.ast)), compiled.ast);
+  });
+
+  it("accepts only state-rooted access paths as writable bindings", () => {
+    assert.deepEqual(getWritablePath("form.contacts[0].email", new Set(["form"])), [
+      "form",
+      "contacts",
+      0,
+      "email",
+    ]);
+    assert.equal(getWritablePath("props.value", new Set(["form"])), undefined);
+    assert.deepEqual(getWritablePath("form.contacts[index]", new Set(["form"])), [
+      "form",
+      "contacts",
+      { kind: "index", expression: { kind: "id", name: "index" } },
+    ]);
+    assert.equal(getWritablePath("form.total + 1", new Set(["form"])), undefined);
+  });
+});
 
 function scope(entries: Record<string, Value>): Scope {
   return new Map(Object.entries(entries));
@@ -84,6 +119,11 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate('p.name $= "pro"', s), true);
     assert.equal(evaluate('p.name *= "get-p"', s), true);
     assert.equal(evaluate('p.name ^= "x"', s), false);
+  });
+
+  it("formats dynamic slot names with the standard format function", () => {
+    assert.equal(evaluate("format('row-%s-%s', 'alpha', 2)", s), "row-alpha-2");
+    assert.equal(evaluate("format(1, 'alpha')", s), ABSENT);
   });
   it("ordered comparison and precedence", () => {
     assert.equal(evaluate("(2 + 3) * 2 > 9", scope({})), true);

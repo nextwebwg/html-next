@@ -1,9 +1,13 @@
 import type { ComponentDefinition, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
+import { targetComponent } from "./backend.js";
 import {
   frameworkBindingExpression,
+  isVoidElement,
+  provenanceAttributes,
   propKey,
   quote,
+  serializedDefinition,
   typeSource,
 } from "./shared.js";
 
@@ -21,16 +25,26 @@ function renderNode(
   node: TemplateNode,
   aliases: ReadonlyMap<string, string>,
   props: Readonly<Record<string, PropContract>>,
+  owner: string,
   depth: number,
 ): string {
   if (node.kind === "text") return textExpression(node.value);
-  if (node.kind === "slot") return "{children}";
+  if (node.kind === "slot") {
+    const fallbackNodes = node.fallback?.map(
+      (child) => renderNode(child, aliases, props, owner, depth),
+    ).join("\n") ?? "";
+    const fallback = fallbackNodes === "" ? "null" : `<>${fallbackNodes}</>`;
+    if (node.name !== undefined) return `{slots?.[${quote(node.name)}] ?? (${fallback})}`;
+    if (node.nameExpression !== undefined) return `{(${fallback})}`;
+    return `{children ?? (${fallback})}`;
+  }
   const indent = "  ".repeat(depth);
   const attributes = node.attributes.map((attribute) => {
     if (attribute.kind === "literal") {
       return `${htmlAttributeName(attribute.name)}=${quote(attribute.value)}`;
     }
-    const value = aliases.get(attribute.expression)!;
+    if (attribute.kind === "directive") return "";
+    const value = aliases.get(attribute.expression) ?? "undefined";
     const expression = frameworkBindingExpression(
       attribute,
       props,
@@ -40,26 +54,35 @@ function renderNode(
     );
     return `${htmlAttributeName(attribute.name)}={${expression}}`;
   });
-  const open = `<${node.name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
+  attributes.push(...provenanceAttributes(owner));
+  const open = `<${node.name}${attributes.filter(Boolean).length === 0 ? "" : ` ${attributes.filter(Boolean).join(" ")}`}>`;
+  if (isVoidElement(node.name)) return open.slice(0, -1) + " />";
   if (node.children.length === 0) return `${open}</${node.name}>`;
-  const children = node.children.map((child) => renderNode(child, aliases, props, depth + 1)).join("\n");
+  const children = node.children.map((child) => renderNode(child, aliases, props, owner, depth + 1)).join("\n");
   return `${open}\n${indent}  ${children}\n${indent}</${node.name}>`;
 }
 
 export function generateReact(definition: ComponentDefinition, version: string): string {
   const { contract, template } = definition;
-  const props = Object.entries(contract.props);
-  const aliases = new Map(props.map(([name], index) => [name, `prop${index}`]));
+  const target = targetComponent(definition);
+  const props = target.props.map(({ name, contract }) => [name, contract] as const);
+  const aliases = new Map(target.props.map(({ name, local }) => [name, local]));
   const nativeElement = quote(contract.nativeElement);
   const destructured = props.map(([name, prop], index) => {
     const defaultValue = "default" in prop ? ` = ${JSON.stringify(prop.default)}` : "";
     return `${quote(name)}: prop${index}${defaultValue}`;
   });
+  const polymorphic = target.polymorphic;
+  const controllerImport = definition.controller === undefined
+    ? []
+    : [`import * as controller from ${quote(definition.controller)};`];
   const rootAttributes = [
     "{...nativeProps}",
+    ...provenanceAttributes(contract.tag, true),
     ...template.attributes.map((attribute) => {
       if (attribute.kind === "literal") return `${htmlAttributeName(attribute.name)}=${quote(attribute.value)}`;
-      const value = aliases.get(attribute.expression)!;
+      if (attribute.kind === "directive") return "";
+      const value = aliases.get(attribute.expression) ?? "undefined";
       const expression = frameworkBindingExpression(
         attribute,
         contract.props,
@@ -69,30 +92,75 @@ export function generateReact(definition: ComponentDefinition, version: string):
       );
       return `${htmlAttributeName(attribute.name)}={${expression}}`;
     }),
-    "ref={ref}",
-  ].join(" ");
-  const children = template.children.map((child) => renderNode(child, aliases, contract.props, 2)).join("\n");
+    "ref={setRoot}",
+  ].filter(Boolean).join(" ");
+  const children = template.children.map((child) =>
+    renderNode(child, aliases, contract.props, contract.tag, 2)
+  ).join("\n");
+  const handleName = `${contract.name}Handle`;
+  const eventEffects = target.events.flatMap((event, index) => [
+    "  useLayoutEffect(() => {",
+    "    const node = root.current;",
+    `    if (node == null || ${event.callbackName} == null) return;`,
+    `    const listener${index} = (event: Event) => ${event.callbackName}((event as CustomEvent<${event.detailType}>).detail, event as CustomEvent<${event.detailType}>);`,
+    `    node.addEventListener(${quote(event.name)}, listener${index});`,
+    `    return () => node.removeEventListener(${quote(event.name)}, listener${index});`,
+    `  }, [${event.callbackName}]);`,
+  ]);
 
   return [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
-    'import type { ComponentPropsWithoutRef, ComponentRef, ReactNode, Ref } from "react";',
+    'import { useLayoutEffect, useRef } from "react";',
+    'import type { ComponentPropsWithoutRef, ComponentRef, ElementType, ReactNode, Ref } from "react";',
+    'import { attachComponent } from "@nextwebwg/html/runtime";',
+    'import type { ComponentDefinition } from "@nextwebwg/html";',
+    ...controllerImport,
     `import "../styles/${contract.tag}.css";`,
+    "",
+    `const definition = ${serializedDefinition(definition)} as unknown as ComponentDefinition;`,
     "",
     `interface ${contract.name}OwnProps {`,
     ...props.map(([name, prop]) =>
       `  ${propKey(name)}${prop.required ? "" : "?"}: ${typeSource(prop.type)}${prop.required ? "" : " | null"};`,
     ),
+    ...target.events.map((event) =>
+      `  ${event.callbackName}?: (detail: ${event.detailType}, event: CustomEvent<${event.detailType}>) => void;`
+    ),
+    ...(polymorphic ? [`  as?: ${definition.root!.kind === "native" ? definition.root!.choices.map(quote).join(" | ") : "never"};`] : []),
+    "  slots?: Readonly<Record<string, ReactNode>>;",
     "}",
     "",
+    `export type ${handleName} = ComponentRef<${nativeElement}> & {`,
+    ...target.methods.map((method) => `  ${propKey(method.name)}(): ${method.returnType};`),
+    "};",
+    "",
     `export type ${contract.name}Props = Omit<ComponentPropsWithoutRef<${nativeElement}>, keyof ${contract.name}OwnProps | "children"> &`,
-    `  ${contract.name}OwnProps & { children?: ReactNode; ref?: Ref<ComponentRef<${nativeElement}>> };`,
+    `  ${contract.name}OwnProps & { children?: ReactNode; ref?: Ref<${handleName}> };`,
     "",
     `export function ${contract.name}(props: ${contract.name}Props) {`,
-    `  const { ${[...destructured, "children", "ref", "...nativeProps"].join(", ")} } = props;`,
+    `  const { ${[...destructured, ...target.events.map((event) => event.callbackName), ...(polymorphic ? ["as"] : []), "slots", "children", "ref", "...nativeProps"].join(", ")} } = props;`,
+    `  const root = useRef<${handleName} | null>(null);`,
+    `  const setRoot = (node: ${handleName} | null) => {`,
+    `    (root as { current: ${handleName} | null }).current = node;`,
+    "    if (typeof ref === \"function\") ref(node);",
+    "    else if (ref != null) ref.current = node;",
+    "  };",
+    `  const componentProps: Record<string, unknown> = { ${props.map(([name], index) => `${quote(name)}: prop${index}`).join(", ")} };`,
+    "  useLayoutEffect(() => root.current == null ? undefined : attachComponent(root.current, definition, {",
+    "    props: componentProps,",
+    ...(definition.controller === undefined ? [] : ["    controller,"]),
+    "  }), []);",
+    "  useLayoutEffect(() => { if (root.current != null) Object.assign(root.current, componentProps); });",
+    ...eventEffects,
+    ...(polymorphic ? [`  const Root = (as ?? ${quote(template.name)}) as ElementType;`] : []),
     "  return (",
-    `    <${template.name} ${rootAttributes}>`,
-    children === "" ? "" : `      ${children}`,
-    `    </${template.name}>`,
+    ...(isVoidElement(template.name) && !polymorphic
+      ? [`    <${template.name} ${rootAttributes} />`]
+      : [
+        `    <${polymorphic ? "Root" : template.name} ${rootAttributes}>`,
+        children === "" ? "" : `      ${children}`,
+        `    </${polymorphic ? "Root" : template.name}>`,
+      ]),
     "  );",
     "}",
     "",

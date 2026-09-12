@@ -73,10 +73,13 @@ const successes: ConformanceCase[] = [
         attributes: [
           ["aria-label", "Save"],
           ["class", "cta"],
+          ["data-component", "x-btn"],
+          ["data-component-root", "x-btn"],
+          ["data-label", "Save"],
           ["id", "b"],
           ["type", "button"],
         ],
-        children: [{ tag: "strong", attributes: [], children: [{ text: "now" }] }],
+        children: [{ tag: "strong", attributes: [["data-slotted", ""]], children: [{ text: "now" }] }],
       },
     },
   },
@@ -105,7 +108,7 @@ const successes: ConformanceCase[] = [
         `const e = q('#b'); return { sum: e.getAttribute('data-sum'), ` +
         `hasFlag: e.hasAttribute('data-flag'), flag: e.getAttribute('data-flag'), ` +
         `kind: e.getAttribute('data-kind'), s: e.getAttribute('data-s') };`,
-      result: { sum: "6", hasFlag: true, flag: "", kind: "b", s: "hey" },
+      result: { sum: "6", hasFlag: true, flag: "true", kind: "b", s: "hey" },
     },
   },
   {
@@ -126,9 +129,11 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "bind: renders one-way; on:/on:connect/on:disconnect are consumed and inert",
+    name: "bind: renders its initial state; declared on: bindings are consumed",
     source: scene({
-      defs: `<prop name="v" type="string" default="x">Value.</prop>`,
+      defs:
+        `<state name="v" value="x"></state>` +
+        `<handler name="foo"></handler><handler name="c"></handler><handler name="d"></handler>`,
       root:
         `<div><output bind:value="v"></output>` +
         `<button on:click="foo" $value="v"></button>` +
@@ -392,13 +397,13 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HR001" },
   },
   {
-    name: "HC021: a name collides in the flat component namespace (prop and state)",
+    name: "HC020: a name collides in the flat component namespace (prop and state)",
     source: scene({
       defs: `<prop name="count" type="number" default="0">Count.</prop><state name="count" :value="1"></state>`,
       root: `<div :data-c="count"></div>`,
       use: `<x-t></x-t>`,
     }),
-    expect: { code: "HC021" },
+    expect: { code: "HC020" },
   },
   {
     name: "HC011: prop names collide after lowercase normalization",
@@ -419,9 +424,12 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HT018" },
   },
   {
-    name: "HT011: the removed .property binding syntax",
+    name: ".property binding resolves through the generated DOM contract",
     source: scene({ root: `<button .disabled="true"></button>`, use: `<x-t></x-t>` }),
-    expect: { code: "HT011" },
+    expect: {
+      probe: `const e = q('button'); return { disabled: e.disabled, hasDirective: e.hasAttribute('.disabled') };`,
+      result: { disabled: true, hasDirective: false },
+    },
   },
   {
     name: "HT007: a :srcdoc binding into a raw content sink",
@@ -499,9 +507,9 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HR002" },
   },
   {
-    name: "HB001: an undeclared name in an expression",
+    name: "HT003: an undeclared name in an expression",
     source: scene({ root: `<div $value="nope"></div>`, use: `<x-t></x-t>` }),
-    expect: { code: "HB001" },
+    expect: { code: "HT003" },
   },
   {
     name: "HC010: a <prop> without a name",

@@ -1,0 +1,214 @@
+import type { Scope, Value } from "./expression.js";
+
+type Cleanup = void | (() => void);
+type SubscriberSet = Set<ReactiveEffect>;
+
+let activeEffect: ReactiveEffect | undefined;
+let nextEffectId = 0;
+
+export class ReactiveScheduler {
+  readonly #pending = new Set<ReactiveEffect>();
+  #scheduled = false;
+  #flushing = false;
+
+  enqueue(effect: ReactiveEffect): void {
+    if (effect.stopped) return;
+    this.#pending.add(effect);
+    if (!this.#scheduled && !this.#flushing) {
+      this.#scheduled = true;
+      queueMicrotask(() => this.flush());
+    }
+  }
+
+  flush(): void {
+    if (this.#flushing) return;
+    this.#scheduled = false;
+    this.#flushing = true;
+    try {
+      while (this.#pending.size > 0) {
+        const effects = [...this.#pending].sort(
+          (left, right) => left.priority - right.priority || left.id - right.id,
+        );
+        this.#pending.clear();
+        for (const effect of effects) effect.execute();
+      }
+    } finally {
+      this.#flushing = false;
+    }
+  }
+}
+
+export class ReactiveEffect {
+  readonly id = nextEffectId++;
+  readonly dependencies = new Set<SubscriberSet>();
+  stopped = false;
+  paused = false;
+  #cleanup: Cleanup = undefined;
+
+  constructor(
+    readonly scheduler: ReactiveScheduler,
+    readonly run: () => Cleanup,
+    readonly priority: number,
+  ) {}
+
+  execute(): void {
+    if (this.stopped || this.paused) return;
+    this.#unsubscribe();
+    this.#cleanup?.();
+    this.#cleanup = undefined;
+    const previous = activeEffect;
+    activeEffect = this;
+    try {
+      this.#cleanup = this.run();
+    } finally {
+      activeEffect = previous;
+    }
+  }
+
+  schedule(): void {
+    if (this.paused) return;
+    this.scheduler.enqueue(this);
+  }
+
+  pause(): void {
+    if (this.stopped || this.paused) return;
+    this.paused = true;
+    this.#unsubscribe();
+    this.#cleanup?.();
+    this.#cleanup = undefined;
+  }
+
+  resume(): void {
+    if (this.stopped || !this.paused) return;
+    this.paused = false;
+    this.execute();
+  }
+
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.#unsubscribe();
+    this.#cleanup?.();
+    this.#cleanup = undefined;
+  }
+
+  #unsubscribe(): void {
+    for (const dependency of this.dependencies) dependency.delete(this);
+    this.dependencies.clear();
+  }
+}
+
+function track(subscribers: SubscriberSet): void {
+  if (activeEffect === undefined || activeEffect.stopped) return;
+  subscribers.add(activeEffect);
+  activeEffect.dependencies.add(subscribers);
+}
+
+function trigger(subscribers: SubscriberSet | undefined): void {
+  if (subscribers === undefined) return;
+  for (const effect of [...subscribers]) effect.schedule();
+}
+
+export function createEffect(
+  scheduler: ReactiveScheduler,
+  run: () => Cleanup,
+  priority = 1,
+): ReactiveEffect {
+  const effect = new ReactiveEffect(scheduler, run, priority);
+  effect.execute();
+  return effect;
+}
+
+/** A scope layer whose root reads and nested object/array paths are dependency tracked. */
+export class ReactiveScope implements Scope {
+  readonly #values = new Map<string, Value>();
+  readonly #subscribers = new Map<string, SubscriberSet>();
+  readonly #proxyCache = new WeakMap<object, object>();
+  readonly #objectSubscribers = new WeakMap<object, Map<PropertyKey, SubscriberSet>>();
+
+  constructor(
+    values: Iterable<readonly [string, Value]> = [],
+    readonly scheduler = new ReactiveScheduler(),
+    readonly parent?: ReactiveScope,
+  ) {
+    for (const [name, value] of values) this.#values.set(name, this.#wrap(value));
+  }
+
+  get size(): number { return new Set([...this.keys()]).size; }
+
+  has(name: string): boolean {
+    return this.#values.has(name) || this.parent?.has(name) === true;
+  }
+
+  get(name: string): Value | undefined {
+    if (!this.#values.has(name)) return this.parent?.get(name);
+    const subscribers = this.#subscribers.get(name) ?? new Set();
+    this.#subscribers.set(name, subscribers);
+    track(subscribers);
+    return this.#values.get(name);
+  }
+
+  set(name: string, value: Value): void {
+    const wrapped = this.#wrap(value);
+    if (Object.is(this.#values.get(name), wrapped) && this.#values.has(name)) return;
+    this.#values.set(name, wrapped);
+    trigger(this.#subscribers.get(name));
+  }
+
+  fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
+    return new ReactiveScope(values, this.scheduler, this);
+  }
+
+  entries(): MapIterator<[string, Value]> {
+    return new Map([...this.parent?.entries() ?? [], ...this.#values]).entries();
+  }
+
+  keys(): MapIterator<string> {
+    return new Map([...this.parent?.entries() ?? [], ...this.#values]).keys();
+  }
+
+  values(): MapIterator<Value> {
+    return new Map([...this.parent?.entries() ?? [], ...this.#values]).values();
+  }
+
+  [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
+
+  forEach(
+    callbackfn: (value: Value, key: string, map: ReadonlyMap<string, Value>) => void,
+    thisArg?: unknown,
+  ): void {
+    for (const [key, value] of this.entries()) callbackfn.call(thisArg, value, key, this);
+  }
+
+  #wrap(value: Value): Value {
+    if (value === null || typeof value !== "object") return value;
+    const cached = this.#proxyCache.get(value);
+    if (cached !== undefined) return cached as Value;
+    const proxy = new Proxy(value, {
+      get: (target, key, receiver) => {
+        const properties = this.#objectSubscribers.get(target) ?? new Map();
+        this.#objectSubscribers.set(target, properties);
+        const subscribers = properties.get(key) ?? new Set();
+        properties.set(key, subscribers);
+        track(subscribers);
+        return this.#wrap(Reflect.get(target, key, receiver) as Value);
+      },
+      set: (target, key, next, receiver) => {
+        const previous = Reflect.get(target, key, receiver);
+        const changed = !Object.is(previous, next);
+        const result = Reflect.set(target, key, this.#wrap(next as Value), receiver);
+        if (changed) trigger(this.#objectSubscribers.get(target)?.get(key));
+        return result;
+      },
+      deleteProperty: (target, key) => {
+        const had = Reflect.has(target, key);
+        const result = Reflect.deleteProperty(target, key);
+        if (had) trigger(this.#objectSubscribers.get(target)?.get(key));
+        return result;
+      },
+    });
+    this.#proxyCache.set(value, proxy);
+    this.#proxyCache.set(proxy, proxy);
+    return proxy as Value;
+  }
+}

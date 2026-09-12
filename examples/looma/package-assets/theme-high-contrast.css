@@ -1,0 +1,33 @@
+@layer base {
+  @media (prefers-contrast: more) {
+    :root:not([data-contrast]) {
+      color-scheme: light;
+      --ui-surface-canvas: #ffffff;
+      --ui-surface-default: #ffffff;
+      --ui-surface-muted: #f8f8f6;
+      --ui-surface-subtle: #f0f0ec;
+      --ui-surface-elevated: #ffffff;
+      --ui-text-primary: #000000;
+      --ui-text-secondary: #111111;
+      --ui-text-muted: #222222;
+      --ui-border-default: #000000;
+      --ui-border-strong: #000000;
+      --ui-focus-ring: #0000ff;
+    }
+  }
+
+  [data-contrast="high"] {
+    color-scheme: light;
+    --ui-surface-canvas: #ffffff;
+    --ui-surface-default: #ffffff;
+    --ui-surface-muted: #f8f8f6;
+    --ui-surface-subtle: #f0f0ec;
+    --ui-surface-elevated: #ffffff;
+    --ui-text-primary: #000000;
+    --ui-text-secondary: #111111;
+    --ui-text-muted: #222222;
+    --ui-border-default: #000000;
+    --ui-border-strong: #000000;
+    --ui-focus-ring: #0000ff;
+  }
+}

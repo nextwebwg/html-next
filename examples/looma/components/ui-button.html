@@ -1,0 +1,8 @@
+<template component="ui-button" status="early" summary="A native button with Looma presentation.">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="size" type="string">Size token.</prop>
+    <prop name="variant" type="outline | solid | destructive | ghost" default="outline">Visual treatment.</prop>
+  </defs>
+  <button type="button" :disabled="disabled" :data-size="size" :data-variant="variant"><slot></slot></button>
+</template>

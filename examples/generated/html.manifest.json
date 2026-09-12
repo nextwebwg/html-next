@@ -13,7 +13,9 @@
         "svelte/XButton.svelte",
         "styles/x-button.css",
         "docs/x-button.md"
-      ]
+      ],
+      "dependencies": [],
+      "controller": null
     }
   ]
 }

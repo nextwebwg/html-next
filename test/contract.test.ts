@@ -113,6 +113,20 @@ describe("defineContract", () => {
     });
   });
 
+  it("requires callbacks and opaque values to target properties", () => {
+    const input = validContract();
+    input.props = {
+      provider: {
+        type: "function",
+        target: { property: "provider" },
+        description: "Loads values.",
+      },
+    };
+    assert.equal(defineFromButtonFile(input).props.provider?.target.property, "provider");
+    input.props.provider.target = { attribute: "provider" };
+    expectDiagnostic("HC017", () => defineFromButtonFile(input));
+  });
+
   it("rejects unknown fields at every schema object boundary", () => {
     expectDiagnostic("HC002", () =>
       defineFromButtonFile({ ...validContract(), typo: true }),
@@ -145,7 +159,7 @@ describe("defineContract", () => {
       defineFromButtonFile({ ...validContract(), nativeElement: "bad element" }),
     );
     expectDiagnostic("HC008", () =>
-      defineFromButtonFile({ ...validContract(), nativeElement: "not-a-native-element" }),
+      defineFromButtonFile({ ...validContract(), nativeElement: "notanativeelement" }),
     );
 
     const invalidProp = validContract();
@@ -157,7 +171,7 @@ describe("defineContract", () => {
 
   it("rejects invalid types, defaults, required flags, and targets", () => {
     const cases: Array<[string, (input: ReturnType<typeof validContract>) => void]> = [
-      ["HC013", (input) => { input.props.variant.type = "date" as never; }],
+      ["HC013", (input) => { input.props.variant.type = "list(" as never; }],
       ["HC014", (input) => { input.props.variant.type = { enum: [] }; }],
       ["HC014", (input) => { input.props.variant.type = { enum: ["a", "a"] }; }],
       ["HC015", (input) => { input.props.variant.default = "missing"; }],
@@ -208,6 +222,7 @@ describe("defineContract", () => {
     assert.ok(Object.isFrozen(contract.props.variant?.type));
     assert.ok(
       typeof contract.props.variant?.type === "object" &&
+        "enum" in contract.props.variant.type &&
         Object.isFrozen(contract.props.variant.type.enum),
     );
 

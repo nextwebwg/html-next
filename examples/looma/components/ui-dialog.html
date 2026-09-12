@@ -1,0 +1,11 @@
+<template component="ui-dialog" status="early" summary="A native modal or non-modal dialog." controller="./ui-dialog.js">
+  <defs>
+    <prop name="open" type="boolean?">Controlled open state.</prop>
+    <prop name="defaultOpen" type="boolean" default="false">Initial uncontrolled open state.</prop>
+    <prop name="modal" type="boolean" default="true">Whether the dialog is modal.</prop>
+    <prop name="dismissible" type="boolean" default="true">Whether Escape and light dismissal may close the dialog.</prop>
+    <prop name="label" type="string?">Explicit accessible name.</prop>
+    <event name="close" type="object({ open: boolean, reason: action | programmatic | light-dismiss | escape, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="dialog-host" :data-open="open" :data-default-open="defaultOpen" :data-modal="modal" :data-dismissible="dismissible" :data-label="label"><dialog $ref="dialog"><slot></slot></dialog></div>
+</template>

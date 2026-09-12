@@ -1,0 +1,4 @@
+<template component="ui-inline" status="early" summary="An inline wrapping layout primitive.">
+  <defs><prop name="gap" type="string" default="">Gap token.</prop><prop name="align" type="string" default="">Cross-axis alignment.</prop><prop name="justify" type="string" default="">Main-axis alignment.</prop><prop name="wrap" type="string" default="">Wrapping policy.</prop></defs>
+  <div :data-gap="gap" :data-align="align" :data-justify="justify" :data-wrap="wrap"><slot></slot></div>
+</template>

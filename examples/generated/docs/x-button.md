@@ -18,6 +18,18 @@ A native button with a themed presentation.
 
 Native attributes and framework-native event surfaces pass through to the native root. Declared prop targets and template-owned attributes take precedence.
 
+## Slots
+
+- Default slot: required.
+
+## Events
+
+This component declares no custom events.
+
+## Methods
+
+This component exposes no controller methods.
+
 ## Usage
 
 ```html
@@ -30,6 +42,6 @@ import { XButton } from "./react/XButton.js";
 <XButton>Button label</XButton>
 ```
 
-## Coming soon
+## Runtime support
 
-State, computed values, data sources, control flow, filters, and actions are Coming soon. Named slots, component composition, reactive browser updates, SSR, and hydration are also Coming soon.
+The generated targets use the same HTML Next definition as the live runtime. State, computed values, handlers, structural rendering, data, enhanced forms, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.

@@ -1,0 +1,30 @@
+@layer base {
+  :root,
+  [data-theme="light"] {
+    color-scheme: light;
+    --ui-surface-canvas: #ffffff;
+    --ui-surface-default: #ffffff;
+    --ui-surface-muted: #f8f8f6;
+    --ui-surface-subtle: #f0f0ec;
+    --ui-surface-elevated: #ffffff;
+
+    --ui-text-primary: #1a1a1a;
+    --ui-text-secondary: #5c5c5c;
+    --ui-text-muted: #9b9b9b;
+    --ui-text-on-accent: #ffffff;
+
+    --ui-border-subtle: #ecece8;
+    --ui-border-default: #e4e4e0;
+    --ui-border-strong: #c8c8c4;
+
+    --ui-danger-solid: #b4233f;
+    --ui-danger-hover: #941d35;
+    --ui-danger-soft: #fceef1;
+    --ui-success-solid: #007a33;
+    --ui-success-soft: #edf7f1;
+    --ui-warning-solid: #cc8800;
+    --ui-warning-soft: #fdf7e6;
+    --ui-info-solid: #0066cc;
+    --ui-info-soft: #e8f0fb;
+  }
+}

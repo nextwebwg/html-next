@@ -1,0 +1,172 @@
+[
+  {
+    "tag": "ui-affordance-scope",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-avatar",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-avatar-group",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-badge",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-button",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-callout",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-checkbox",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-chip",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-combobox",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-context-menu",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-dialog",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-disclosure",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-editable",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-floating-action-button",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-form-field",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-icon-button",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-input",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-menu",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-menu-item",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-multi-combobox",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-popover",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-radio",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-radio-group",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-search-result-row",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-search-shell",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-select",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-switch",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-tabs",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-textarea",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-toast-region",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-tooltip",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-top-bar",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-tree",
+    "status": "ported",
+    "diagnostics": []
+  },
+  {
+    "tag": "ui-tree-item",
+    "status": "ported",
+    "diagnostics": []
+  }
+]

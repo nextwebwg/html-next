@@ -1,0 +1,12 @@
+<template component="ui-checkbox" status="early" summary="A controlled or uncontrolled projected native checkbox." controller="./ui-checkbox.js">
+  <defs>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="indeterminate" type="boolean" default="false">Mixed state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="checkbox" role="checkbox" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-indeterminate="indeterminate" :data-required="required" :data-value="value"><slot></slot></div>
+</template>

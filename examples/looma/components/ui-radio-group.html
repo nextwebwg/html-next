@@ -1,0 +1,12 @@
+<template component="ui-radio-group" status="early" summary="A keyboard-navigable group of projected ui-radio controls." controller="./ui-radio-group.js">
+  <defs>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="name" type="string" default="">Native radio group name.</prop>
+    <prop name="orientation" type="horizontal | vertical" default="horizontal">Keyboard navigation axis.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="">Selected radio value.</prop>
+    <event name="select" type="object({ value: string, previousValue: string, trigger: keyboard | pointer | programmatic })"></event>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <div class="radio-group" role="radiogroup" :data-disabled="disabled" :data-name="name" :data-orientation="orientation" :data-required="required" :data-value="value"><slot></slot></div>
+</template>

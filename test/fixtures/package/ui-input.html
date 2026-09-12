@@ -1,0 +1,8 @@
+<template component="ui-input" status="early" summary="A Looma-shaped email input.">
+  <defs>
+    <prop name="name" type="string" default="email">Form name.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="">Current value.</prop>
+  </defs>
+  <input type="email" :name="name" :required="required" .value="value">
+</template>

@@ -1,0 +1,4 @@
+<template component="ui-stack" status="early" summary="A vertical layout primitive.">
+  <defs><prop name="gap" type="string" default="">Gap token.</prop><prop name="align" type="string" default="">Cross-axis alignment.</prop><prop name="justify" type="string" default="">Main-axis alignment.</prop></defs>
+  <div :data-gap="gap" :data-align="align" :data-justify="justify"><slot></slot></div>
+</template>

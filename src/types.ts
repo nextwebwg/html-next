@@ -1,3 +1,5 @@
+import type { TrustedContentValue, TypeNode } from "./type-system.js";
+
 export type ContractStatus =
   | "early"
   | "experimental"
@@ -10,7 +12,7 @@ export interface EnumType {
   readonly enum: readonly string[];
 }
 
-export type PropType = ScalarType | EnumType;
+export type PropType = ScalarType | EnumType | TypeNode;
 
 export interface AttributeTarget {
   readonly attribute: string;
@@ -23,7 +25,18 @@ export interface PropertyTarget {
 }
 
 export type PropTarget = AttributeTarget | PropertyTarget;
-export type PropValue = string | boolean | number | null;
+export type PropValue =
+  | string
+  | boolean
+  | number
+  | null
+  | TrustedContentValue
+  | readonly PropValue[]
+  | PropValueRecord;
+
+export interface PropValueRecord {
+  readonly [name: string]: PropValue | undefined;
+}
 
 export interface PropContract {
   readonly type: PropType;
@@ -51,4 +64,4 @@ export interface DefineContractOptions {
 
 export type SerializedPropTarget =
   | { readonly kind: "attribute"; readonly name: string; readonly value: string | null }
-  | { readonly kind: "property"; readonly name: string; readonly value: PropValue };
+  | { readonly kind: "property"; readonly name: string; readonly value: PropValue | undefined };

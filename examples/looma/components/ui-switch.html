@@ -1,0 +1,11 @@
+<template component="ui-switch" status="early" summary="A native checkbox presented as a switch." controller="./ui-switch.js">
+  <defs>
+    <prop name="checked" type="boolean?">Controlled checked state.</prop>
+    <prop name="defaultChecked" type="boolean" default="false">Initial uncontrolled checked state.</prop>
+    <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
+    <prop name="required" type="boolean" default="false">Required state.</prop>
+    <prop name="value" type="string" default="on">Submitted value.</prop>
+    <event name="change" type="object({ checked: boolean, value: string, trigger: keyboard | pointer | programmatic })"></event>
+  </defs>
+  <label class="switch" role="switch" tabindex="0" :data-checked="checked" :data-default-checked="defaultChecked" :data-disabled="disabled" :data-required="required" :data-value="value"><input $ref="control" type="checkbox" aria-hidden="true" tabindex="-1"><slot></slot></label>
+</template>

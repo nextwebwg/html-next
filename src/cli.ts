@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import ts from "typescript";
 
 import {
   generateComponent,
@@ -10,6 +12,14 @@ import {
   type GeneratedArtifact,
 } from "./generate.js";
 import { parseComponent } from "./parser.js";
+import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
+import { extractStencilInventory, scaffoldStencilComponent, type ExtractStencilOptions } from "./migrate/stencil.js";
+
+export type BuildTarget = "docs" | "react" | "styles" | "svelte" | "vanilla" | "vue";
+
+export interface BuildOptions {
+  readonly targets?: readonly BuildTarget[];
+}
 
 export interface BuildManifest {
   readonly generatorVersion: string;
@@ -18,22 +28,125 @@ export interface BuildManifest {
     readonly name: string;
     readonly tag: string;
     readonly artifacts: readonly string[];
+    readonly dependencies: readonly string[];
+    readonly controller: null | string;
   }[];
+}
+
+async function addControllerGraph(
+  sourceURL: string,
+  trustRoot: string,
+  targetRoot: string,
+  artifacts: Map<string, GeneratedArtifact>,
+  seen: Set<string>,
+): Promise<string> {
+  const source = fileURLToPath(sourceURL);
+  const root = fileURLToPath(trustRoot);
+  const sourceRelative = relative(root, source);
+  if (sourceRelative === ".." || sourceRelative.startsWith(`..${sep}`)) {
+    throw new Error(`Controller module escaped its component root: ${source}.`);
+  }
+  const target = `${targetRoot}/${sourceRelative.split(sep).join("/")}`;
+  const key = `${targetRoot}\0${sourceURL}`;
+  if (seen.has(key)) return target;
+  seen.add(key);
+  const content = await readFile(source, "utf8");
+  const prior = artifacts.get(target);
+  if (prior !== undefined && prior.content !== content) throw new Error(`Generated artifact collision at ${target}.`);
+  artifacts.set(target, { path: target, content });
+  for (const item of ts.preProcessFile(content, true, true).importedFiles) {
+    if (!item.fileName.startsWith(".") && !item.fileName.startsWith("/")) continue;
+    await addControllerGraph(new URL(item.fileName, sourceURL).href, trustRoot, targetRoot, artifacts, seen);
+  }
+  return target;
+}
+
+async function componentGraph(entries: readonly string[]): Promise<NodeComponentGraph> {
+  if (entries.length === 0) throw new Error("At least one component source is required.");
+  const baseURL = pathToFileURL(`${process.cwd()}${sep}`).href;
+  return loadNodeComponents(entries.map((entry) => pathToFileURL(resolve(entry)).href), {
+    baseURL,
+    inspectModule: async (url) => {
+      const source = await readFile(fileURLToPath(url), "utf8");
+      return {
+        url,
+        dependencies: ts.preProcessFile(source, true, true).importedFiles
+          .map((item) => item.fileName)
+          .filter((specifier) => specifier.startsWith(".") || specifier.startsWith("/"))
+          .map((specifier) => new URL(specifier, url).href),
+      };
+    },
+  });
+}
+
+export interface InspectedComponentGraph {
+  readonly roots: readonly string[];
+  readonly components: readonly {
+    readonly tag: string;
+    readonly source: string;
+    readonly dependencies: readonly string[];
+    readonly controller: null | string;
+    readonly resources: readonly string[];
+    readonly support: string;
+  }[];
+  readonly modules: readonly string[];
+}
+
+export async function inspectComponents(entries: readonly string[]): Promise<InspectedComponentGraph> {
+  const graph = await componentGraph(entries);
+  const display = (url: string): string => url.startsWith("file:")
+    ? relative(process.cwd(), fileURLToPath(url)).split(sep).join("/")
+    : url;
+  return Object.freeze({
+    roots: Object.freeze(graph.roots.map(display)),
+    components: Object.freeze([...graph.nodes.values()].map((node) => Object.freeze({
+      tag: node.definition.contract.tag,
+      source: display(node.url),
+      dependencies: Object.freeze(node.dependencies.map(display)),
+      controller: node.controller === undefined ? null : display(node.controller.url),
+      resources: Object.freeze(node.resources.map((resource) => display(resource.url))),
+      support: node.definition.contract.status,
+    }))),
+    modules: Object.freeze(graph.moduleInputs.map(display)),
+  });
+}
+
+export async function checkComponents(entries: readonly string[]): Promise<InspectedComponentGraph> {
+  return inspectComponents(entries);
 }
 
 export async function buildComponents(
   entries: readonly string[],
   outDirectory: string,
+  options: BuildOptions = {},
 ): Promise<BuildManifest> {
   if (entries.length === 0) throw new Error("Build requires at least one component source.");
+  const normalizedEntries = entries.map((entry) => resolve(entry));
+  if (new Set(normalizedEntries).size !== normalizedEntries.length) {
+    throw new Error("Generated artifact collision: the same component source was provided more than once.");
+  }
 
   const outputRoot = resolve(outDirectory);
   const artifacts = new Map<string, GeneratedArtifact>();
   const components: Array<BuildManifest["components"][number]> = [];
+  const selected = new Set(options.targets ?? ["docs", "react", "styles", "svelte", "vanilla", "vue"]);
+  const graph = await componentGraph(entries);
+  const controllerModules = new Set<string>();
+  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
 
-  for (const entry of [...entries].map((path) => resolve(path)).sort()) {
-    const definition = parseComponent(await readFile(entry, "utf8"), entry);
-    const generated = generateComponent(definition);
+  for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
+    const entry = fileURLToPath(node.url);
+    const controllerTarget = node.controller === undefined ? undefined : await addControllerGraph(
+      node.controller.url,
+      node.trustRoot,
+      `controllers/${node.definition.contract.tag}`,
+      artifacts,
+      controllerModules,
+    );
+    const definition = controllerTarget === undefined
+      ? node.definition
+      : Object.freeze({ ...node.definition, controller: `../${controllerTarget}` });
+    const generated = generateComponent(definition).filter((artifact) => selected.has(artifact.path.split("/", 1)[0] as BuildTarget));
     for (const artifact of generated) {
       if (artifacts.has(artifact.path)) {
         throw new Error(`Generated artifact collision at ${artifact.path}.`);
@@ -45,6 +158,8 @@ export async function buildComponents(
       name: definition.contract.name,
       tag: definition.contract.tag,
       artifacts: generated.map((artifact) => artifact.path),
+      dependencies: node.dependencies.map(displayPath),
+      controller: node.controller === undefined ? null : displayPath(node.controller.url),
     });
   }
 
@@ -70,18 +185,69 @@ export async function buildComponents(
   return manifest;
 }
 
+export async function migrateStencilPackage(
+  source: string,
+  outDirectory: string,
+  inventoryFiles: Omit<ExtractStencilOptions, "root"> = {},
+): Promise<void> {
+  const sourceRoot = resolve(source);
+  const outputRoot = resolve(outDirectory);
+  const inventory = await extractStencilInventory({ root: sourceRoot, ...inventoryFiles });
+  await mkdir(outputRoot, { recursive: true });
+  await Promise.all(inventory.components.map(async (component) => {
+    const scaffold = scaffoldStencilComponent(component);
+    const styles = component.styles.map((style) => `styles/${component.tag}/${basename(style)}`);
+    await Promise.all(component.styles.map(async (style, index) => {
+      const target = resolve(outputRoot, styles[index]!);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(resolve(sourceRoot, style), target);
+    }));
+    await writeFile(resolve(outputRoot, `${component.tag}.html`), scaffold.source, "utf8");
+    await writeFile(resolve(outputRoot, `${component.tag}.migration.json`), `${JSON.stringify({
+      tag: component.tag,
+      status: "review-required",
+      diagnostics: scaffold.diagnostics,
+      styles,
+      capabilities: component.capabilities,
+    }, null, 2)}\n`, "utf8");
+  }));
+  await writeFile(resolve(outputRoot, "inventory.json"), `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
+}
+
 function usage(): string {
-  return "Usage: html-next build <component.html...> --out-dir <directory>";
+  return "Usage: html-next <check|inspect|build|migrate stencil> <component.html...> [--target <target>] [--out-dir <directory>]";
 }
 
 async function main(argv: readonly string[]): Promise<void> {
+  if (argv[0] === "check" || argv[0] === "inspect") {
+    if (argv.length < 2) throw new Error(usage());
+    const result = await inspectComponents(argv.slice(1));
+    if (argv[0] === "inspect") process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (argv[0] === "migrate" && argv[1] === "stencil") {
+    const outIndex = argv.indexOf("--out-dir");
+    const source = argv[2];
+    const outDirectory = argv[outIndex + 1];
+    if (source === undefined || outIndex !== 3 || outDirectory === undefined) throw new Error(usage());
+    await migrateStencilPackage(source, outDirectory);
+    return;
+  }
   if (argv[0] !== "build") throw new Error(usage());
   const outIndex = argv.indexOf("--out-dir");
   const outDirectory = argv[outIndex + 1];
-  if (outIndex < 2 || outIndex !== argv.length - 2 || outDirectory === undefined) {
+  if (outIndex < 2 || outDirectory === undefined) {
     throw new Error(usage());
   }
-  await buildComponents(argv.slice(1, outIndex), outDirectory);
+  const targetArgs = argv.slice(outIndex + 2);
+  const targets: BuildTarget[] = [];
+  for (let index = 0; index < targetArgs.length; index += 2) {
+    if (targetArgs[index] !== "--target" || targetArgs[index + 1] === undefined) throw new Error(usage());
+    targets.push(targetArgs[index + 1] as BuildTarget);
+  }
+  const allowed = new Set<BuildTarget>(["docs", "react", "styles", "svelte", "vanilla", "vue"]);
+  if (targets.some((target) => !allowed.has(target))) throw new Error(`Unknown build target: ${targets.find((target) => !allowed.has(target))}.`);
+  await buildComponents(argv.slice(1, outIndex), outDirectory, targets.length === 0 ? {} : { targets });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
