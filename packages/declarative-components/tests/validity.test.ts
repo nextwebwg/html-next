@@ -8,7 +8,7 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
-const moduleUrl = new URL("../src/validity.ts", import.meta.url);
+const sourceDirectory = new URL("../src/", import.meta.url).pathname;
 
 describe.skipIf(!enabled)("browser validity", () => {
   let bundlePath = "";
@@ -18,12 +18,17 @@ describe.skipIf(!enabled)("browser validity", () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-validity-"));
     bundlePath = join(temporaryDirectory, "validity.js");
     await build({
-      entryPoints: [moduleUrl.pathname],
       bundle: true,
       format: "iife",
       globalName: "V",
       outfile: bundlePath,
       platform: "browser",
+      stdin: {
+        contents: `export * from "./validity.ts"; export { validate } from "./validate.ts";`,
+        loader: "ts",
+        resolveDir: sourceDirectory,
+        sourcefile: "validity-test-entry.ts",
+      },
       target: ["es2022"],
     });
   });
@@ -37,6 +42,78 @@ describe.skipIf(!enabled)("browser validity", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name}: matches browser-supported constraints and covers generalized values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const V = (window as unknown as {
+            V: typeof import("../src/validity.js") & Pick<typeof import("../src/validate.js"), "validate">;
+          }).V;
+          const cases: Array<[
+            string,
+            string,
+            import("../src/validate.js").Constraint,
+            Partial<Record<"type" | "required" | "multiple" | "min" | "max" | "step" | "pattern", string>>,
+          ]> = [
+            ["required", "", { required: true }, { required: "" }],
+            ["email", "bad", { type: "email" }, { type: "email" }],
+            ["multiple-email", "a@example.com, bad", { type: "email", multiple: true }, { type: "email", multiple: "" }],
+            ["url", "/relative", { type: "url" }, { type: "url" }],
+            ["underflow", "3", { type: "number", min: 5 }, { type: "number", min: "5" }],
+            ["overflow", "11", { type: "number", max: 10 }, { type: "number", max: "10" }],
+            ["step", "3", { type: "number", min: 0, step: 2 }, { type: "number", min: "0", step: "2" }],
+            ["pattern", "abc", { pattern: "[0-9]+" }, { pattern: "[0-9]+" }],
+            ["optional", "", { type: "email" }, { type: "email" }],
+          ];
+          const nativeFlags = [
+            "valueMissing", "typeMismatch", "patternMismatch", "rangeUnderflow",
+            "rangeOverflow", "stepMismatch", "badInput",
+          ] as const;
+          const parity = Object.fromEntries(cases.map(([key, value, constraint, attributes]) => {
+            const input = document.createElement("input");
+            for (const [attribute, attributeValue] of Object.entries(attributes)) {
+              input.setAttribute(attribute, attributeValue);
+            }
+            input.value = value;
+            const native = nativeFlags.filter((flag) => input.validity[flag]);
+            const custom = V.validate(value, constraint).errors.map((error) => error.reason);
+            return [key, { native, custom }];
+          }));
+          const generalized = {
+            emptyArray: V.validate([], { required: true, multiple: true }).errors.map((error) => error.reason),
+            falseValue: V.validate(false, { required: true }).errors.map((error) => error.reason),
+            zeroValue: V.validate(0, { required: true }).errors.map((error) => error.reason),
+            invalidNumber: V.validate("abc", { type: "number" }).errors.map((error) => error.reason),
+            fractionalInteger: V.validate(1.5, { type: "integer" }).errors.map((error) => error.reason),
+            short: V.validate("a", { minLength: 2 }).errors.map((error) => error.reason),
+            long: V.validate("abc", { maxLength: 2 }).errors.map((error) => error.reason),
+            invalidDate: V.validate("2026-02-31", { type: "date" }).errors.map((error) => error.reason),
+            schema: V.validate({ id: 1 }, { type: "object({ id: string })" }).errors.map((error) => error.reason),
+          };
+          return { parity, generalized };
+        });
+        for (const entry of Object.values(result.parity)) {
+          assert.deepEqual(entry.custom, entry.native);
+        }
+        assert.deepEqual(result.generalized, {
+          emptyArray: ["valueMissing"],
+          falseValue: [],
+          zeroValue: [],
+          invalidNumber: ["badInput"],
+          fractionalInteger: ["typeMismatch"],
+          short: ["tooShort"],
+          long: ["tooLong"],
+          invalidDate: ["typeMismatch"],
+          schema: ["typeMismatch"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name}: gives ordinary elements a native-shaped, independently layered validity API`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -172,10 +172,11 @@ project to their corresponding Trusted Types interfaces.
 
 ## Native constraints
 
-Native controls retain the browser's Constraint Validation API. The reference library asks the
-browser for native validity; it does not replace the browser's email, URL, number, or date/time
-algorithms with a smaller imitation. This includes submission blocking and the browser's rules
-for controls barred from constraint validation.
+Native controls retain the browser's Constraint Validation API. The reference library reads their
+native validity directly, including submission blocking and the browser's rules for controls
+barred from constraint validation. Ordinary managed elements expose the same contract through the
+generalized validity adapter described below; its supported scalar behavior is tested against
+native controls in Chromium, Firefox, and WebKit.
 
 | Constraint | Applicable value spaces | Failure reason |
 | --- | --- | --- |

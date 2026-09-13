@@ -167,12 +167,14 @@ HTML Next has a fully specified type grammar rather than a loose “CSS-like” 
 It covers scalar, keyword, collection, structured, nullable, web-value, callback, opaque,
 and trusted-content forms, including source diagnostics and TypeScript projections.
 
-Validation reuses native controls and the Constraint Validation API whenever the browser
-provides them—including email, URL, number, date/time, range, length, pattern, required,
-and step behavior. Managed ordinary elements receive the same validity shape and invalid
-events. Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the
-runtime and generated CSS carry the compatibility rewrite for browsers that cannot apply
-those pseudo-classes to arbitrary elements.
+Native form controls keep the browser's Constraint Validation API. Managed ordinary elements
+receive the same validity shape and invalid events from a small pure validator whose supported
+constraints are checked against native controls in Chromium, Firefox, and WebKit. This preserves
+browser behavior without creating and configuring a detached control for every validation.
+Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the runtime and
+generated CSS carry the compatibility rewrite for browsers that cannot apply those pseudo-classes
+to arbitrary elements. Runtime size and speed changes follow the
+[performance guardrails](./packages/declarative-components/docs/runtime-performance.md).
 
 ## Package and framework output
 
