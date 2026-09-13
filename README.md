@@ -7,6 +7,7 @@ and verification live at the repository root.
 | Package | Proposal | Current scope |
 | --- | --- | --- |
 | [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Browser runtime, compiler, validation, migration, and framework/package generation |
+| [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
 
 The Declarative HTML Components package authors a component once as inert,

@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "paths": {
+      "@nextwebwg/declarative-components": ["./packages/declarative-components/src/index.ts"],
       "@nextwebwg/html-forms": ["./packages/html-forms/src/index.ts"]
     },
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
