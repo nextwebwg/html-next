@@ -1,0 +1,12 @@
+<template component="computed-counter" status="experimental" summary="Computed bundle-size fixture.">
+  <defs>
+    <state name="count" :value="1"></state>
+    <computed name="doubled" from="count * 2"></computed>
+    <handler name="increment">
+      <set name="count" :value="count + 1"></set>
+    </handler>
+  </defs>
+  <button type="button" on:click="increment">
+    Count: <output $value="doubled"></output>
+  </button>
+</template>

@@ -1,0 +1,8 @@
+<template component="keyed-list" status="experimental" summary="Keyed list bundle-size fixture.">
+  <defs>
+    <prop name="rows" type="list(object({ id: string, label: string }))" default="[]">Rows.</prop>
+  </defs>
+  <ul>
+    <li $each="row of rows" $key="row.id"><span $value="row.label"></span></li>
+  </ul>
+</template>

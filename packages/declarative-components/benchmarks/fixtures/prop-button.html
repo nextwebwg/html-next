@@ -1,0 +1,7 @@
+<template component="prop-button" status="experimental" summary="Property bundle-size fixture.">
+  <props>
+    <prop name="variant" type="outline | solid" default="outline">Visual treatment.</prop>
+    <prop name="size" type="sm | md | lg" default="md">Control size.</prop>
+  </props>
+  <button :data-variant="variant" :data-size="size"><slot></slot></button>
+</template>

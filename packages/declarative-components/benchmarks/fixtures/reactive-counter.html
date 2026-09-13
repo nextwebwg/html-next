@@ -1,0 +1,11 @@
+<template component="reactive-counter" status="experimental" summary="Reactive bundle-size fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment">
+      <set name="count" :value="count + 1"></set>
+    </handler>
+  </defs>
+  <button type="button" on:click="increment">
+    Count: <output $value="count"></output>
+  </button>
+</template>

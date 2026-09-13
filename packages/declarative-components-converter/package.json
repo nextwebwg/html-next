@@ -1,0 +1,38 @@
+{
+  "name": "@nextwebwg/declarative-components-converter",
+  "version": "1.0.0-alpha.0",
+  "private": true,
+  "description": "React, Vue, and Svelte conversion for Declarative HTML Components.",
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "html-next-convert": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.13 <23 || >=24 <25"
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nextwebwg/declarative-components": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vue/compiler-sfc": "catalog:",
+    "esbuild": "catalog:",
+    "svelte": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "artifacts": {
+    ".github/dependabot.yml": "4c835c01213d922e37a495e4c027c9fc5a37afe86939ac216d848f18750b19d2",
+    "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+    "threadlabs.config.json": "9c420b4d39e107b3763641d545b4b73a0a36034f3b723e14e7ff4f0423933552"
+  },
+  "modules": {
+    "agents": "1.0.0",
+    "core": "1.0.0",
+    "cross-platform": "1.0.0",
+    "freshness": "1.0.0",
+    "generated-artifacts": "1.0.0",
+    "github": "1.0.0",
+    "public-api": "1.0.0",
+    "typescript-node": "1.0.0"
+  },
+  "schemaVersion": "1.0",
+  "standardVersion": "1.0.0"
+}

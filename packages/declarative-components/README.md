@@ -1,0 +1,22 @@
+# `@nextwebwg/declarative-components`
+
+Reference implementation for the [Declarative HTML Components proposal](https://nextwebwg.org/html-next/).
+It provides three paths over one component language:
+
+- a complete browser distributable for dynamic component graphs;
+- an application/library compiler that emits native DOM and graph-scoped runtime support; and
+- converters that emit React, Vue, and Svelte components using their target runtime.
+
+The live runtime supports every declarative capability. Builds analyze an application or library
+graph and share the support that graph requires; framework conversions preserve the same observable
+contract through target-native reactivity and small compatibility bridges.
+
+See the [delivery-mode specification](docs/spec/delivery-modes.md) and
+[independent goal ledger](docs/delivery-goals.md).
+
+The package is experimental and is not published yet. From the repository root:
+
+```sh
+corepack pnpm build
+corepack pnpm test
+```

@@ -1,33 +1,66 @@
-# HTML Next reference implementation
+# HTML Next implementations
 
-`@nextwebwg/html` is the polyfill, compiler, and component bridge for the HTML Next
-Stage 0 proposals. A component is authored once as inert, browser-parseable HTML. The
-same definition can run directly in a browser or compile to native DOM, React, Vue,
-Svelte, CSS, types, and inspectable package artifacts.
+This pnpm monorepo holds proposal-specific reference implementations for HTML Next.
+Each proposal owns an independently versioned package under `packages/`; shared policy
+and verification live at the repository root.
 
-The proposal does not depend on this library. This package implements the current
-proposal while browsers do not yet provide it natively. The exact behavior implemented
-by this checkout is defined by the [reference specification](./docs/spec/index.md), its
-[support profile](./docs/spec/support.json), and the shared conformance tests.
+| Package | Proposal | Current scope |
+| --- | --- | --- |
+| [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Browser runtime, compiler, validation, migration, and framework/package generation |
+| [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Closed-graph unplugin and Vite application/library builds |
+| [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Target-native React, Vue, and Svelte conversion |
+| [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
 
-> Stage 0: the syntax and generated package shape may change. No npm release has been
-> published from this checkout.
+The Declarative HTML Components package authors a component once as inert,
+browser-parseable HTML. The same definition can run directly in a browser or compile to
+native DOM, React, Vue, Svelte, CSS, types, and inspectable package artifacts. Its exact
+behavior is defined by the package's [reference specification](./packages/declarative-components/docs/spec/index.md),
+[support profile](./packages/declarative-components/docs/spec/support.json), and conformance tests.
+
+The HTML Forms package operates on native `HTMLFormElement` and submitter objects. Declarative
+Components consumes that API for its form declarations; the Forms package has no component,
+template, or reactive-runtime dependency.
+
+> Stage 0: the syntax and generated package shape may change. The repository and its
+> packages remain private until the project selects an open-source license and publication
+> policy.
+
+## Declarative Components delivery modes
+
+The Declarative Components implementation supports the same component language in three delivery
+modes:
+
+| Mode | Input | Output |
+| --- | --- | --- |
+| Live browser runtime | Any component graph selected or added by the application at runtime | A distributable that parses, mounts, updates, and disconnects every supported declarative capability without a build step |
+| Native application or library build | An application entry graph or a concrete set of library entries | Native DOM modules plus build-scoped support for the union of capabilities used across that graph |
+| Framework conversion | An application graph or component library plus a React, Vue, or Svelte target | Framework-native components that use the target's reactivity and carry small bridges only for HTML Next semantics the target does not supply |
+
+An application build may serve as a complete alternative to a React, Vue, or Svelte application.
+A library build keeps independently consumable component entries while allowing the consumer's
+bundler to combine their shared support. All three modes consume one normalized semantic model and
+must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
+behavior.
+
+The detailed contracts and independent progress tracks are in the
+[delivery-mode specification](./packages/declarative-components/docs/spec/delivery-modes.md) and
+[delivery goal ledger](./packages/declarative-components/docs/delivery-goals.md).
 
 ## Install and verify
 
-This repository currently installs from source and requires Node 20.19 or newer:
+Use Node 22 or Node 24 and pnpm through Corepack:
 
 ```sh
-npm install
-npm run build
-npm test
-npm run test:browser
-npm run test:targets
-npm run test:looma
+corepack pnpm install --frozen-lockfile
+corepack pnpm verify:pr
+corepack pnpm test:browser
+corepack pnpm test:targets
+corepack pnpm test:looma
+corepack pnpm test:consumer
 ```
 
 Playwright's pinned Chromium, Firefox, and WebKit builds are required for the browser
-gates. Install them once with `npx playwright install chromium firefox webkit`.
+gates. Install them once with `corepack pnpm exec playwright install chromium firefox webkit`.
 
 ## Define a component
 
@@ -65,8 +98,9 @@ export default function controller(host) {
 ```
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
-named and data-derived slots, typed data sources, enhanced forms, and generalized
-validation. See the [specification modules](./docs/spec/index.md) for the complete syntax.
+named and data-derived slots, typed data sources, native form participation, and generalized
+validation. See the [specification modules](./packages/declarative-components/docs/spec/index.md)
+for the complete syntax.
 
 ## Run a live component graph
 
@@ -85,7 +119,7 @@ component and controller dependencies, and the public browser loader follows tha
 <x-app></x-app>
 
 <script type="module">
-  import { startBrowserComponents } from "@nextwebwg/html/browser-loader";
+  import { startBrowserComponents } from "@nextwebwg/declarative-components/browser-loader";
   await startBrowserComponents();
 </script>
 ```
@@ -101,8 +135,35 @@ added later are registered and lowered, and reconnect/disconnect cleanup is bala
 Applications can call the lower-level loader and runtime APIs when they need explicit
 lifecycle control.
 
-The runnable [live graph example](./examples/poc/README.md) uses this public API; it no
-longer carries a separate demonstration runtime.
+The runnable [live graph example](./packages/declarative-components/examples/poc/README.md)
+uses this public API.
+
+## Browser compatibility layer
+
+The live loader supplies the proposal behavior and browser compatibility needed by the
+definitions it loads:
+
+| Surface | Runtime behavior |
+| --- | --- |
+| Component discovery and lifecycle | One shared `MutationObserver` discovers registered component tags and balances connection cleanup for lowered roots. |
+| Component parsing | The browser's HTML parser creates the inert DOM; the library reads declarations, validates the proposal grammar, and reports component diagnostics. |
+| Reactive declarations | Native events and microtasks drive a small dependency layer for live state, computed values, bindings, and effects. |
+| Generalized validity | Native controls keep `ValidityState`; managed ordinary elements receive the corresponding validity methods, flags, invalid events, and selector-state bridge. |
+| Dynamic `$html` | A 696-byte minified DOM sanitizer preserves the proposal's cross-browser content policy. It is retained until native `setHTML()` is available in every target engine with equivalent policy control. |
+| Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, projected content, and generalized validity selectors. |
+| Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
+| Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
+
+The native build currently specializes static markup, basic reactivity, numeric-computed state, and
+scalar props. CI records zero live-parser and full-runtime contribution for those four capability
+fixtures. Keyed lists, declared reads, and controller lifecycle currently use the
+general runtime fallback. These fixtures attribute feature cost; the build product operates on an
+application or library graph and should share its required support across that graph. The measured
+inventory and owner decisions live in the [native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).
+
+The current public loader is one predictable bundle. A future packaging experiment may split
+compatibility features into progressively loaded modules selected by browser capability and
+authored syntax; that is a potential delivery optimization, not current behavior.
 
 ## Inspect and build a graph
 
@@ -115,13 +176,15 @@ html-next build components/app.html --out-dir generated
 html-next build components/app.html --out-dir generated --target vue --target styles
 ```
 
-Until the package is published, substitute `npx tsx src/cli.ts` for `html-next`.
+Until the package is published, substitute
+`corepack pnpm exec tsx packages/declarative-components/src/cli.ts` for `html-next`.
 `inspect` reports component, controller, schema, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
 
 Generated targets preserve the definition's native root; they do not add a component
-wrapper. The checked-in [button output](./examples/generated) demonstrates each target.
+wrapper. The checked-in [button output](./packages/declarative-components/examples/generated)
+demonstrates each target.
 
 ## Migrate a Stencil package
 
@@ -133,7 +196,8 @@ Migration extracts public props, events, methods, slots, capabilities, and compo
 It emits review-required HTML scaffolds and explicit diagnostics for behavior that needs
 a controller. It never labels arbitrary TypeScript behavior as automatically converted.
 
-The checked-in [Looma corpus](./examples/looma) is the full reference workload: all 34
+The checked-in [Looma corpus](./packages/declarative-components/examples/looma) is the full
+reference workload: all 34
 public core components have reviewed definitions and behavioral tests, nine layout
 definitions are included, published CSS/theme/editor assets are preserved, and the
 package assembler emits Looma's current root, Vue, editor, extension, validation, layout,
@@ -143,8 +207,8 @@ consumers exercise the generated package.
 Build that compatibility package from a local Looma checkout with:
 
 ```sh
-npm run generate:looma-assets -- --source ../looma
-npm run build:looma -- --source ../looma --out-dir generated-looma
+corepack pnpm generate:looma-assets -- --source ../looma
+corepack pnpm build:looma -- --source ../looma --out-dir generated-looma
 ```
 
 ## Types and validation
@@ -153,12 +217,14 @@ HTML Next has a fully specified type grammar rather than a loose “CSS-like” 
 It covers scalar, keyword, collection, structured, nullable, web-value, callback, opaque,
 and trusted-content forms, including source diagnostics and TypeScript projections.
 
-Validation reuses native controls and the Constraint Validation API whenever the browser
-provides them—including email, URL, number, date/time, range, length, pattern, required,
-and step behavior. Managed ordinary elements receive the same validity shape and invalid
-events. Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the
-runtime and generated CSS carry the compatibility rewrite for browsers that cannot apply
-those pseudo-classes to arbitrary elements.
+Native form controls keep the browser's Constraint Validation API. Managed ordinary elements
+receive the same validity shape and invalid events from a small pure validator whose supported
+constraints are checked against native controls in Chromium, Firefox, and WebKit. This preserves
+browser behavior without creating and configuring a detached control for every validation.
+Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the runtime and
+generated CSS carry the compatibility rewrite for browsers that cannot apply those pseudo-classes
+to arbitrary elements. Runtime size and speed changes follow the
+[performance guardrails](./packages/declarative-components/docs/runtime-performance.md).
 
 ## Package and framework output
 
@@ -177,12 +243,12 @@ only application resolution and trust differ.
 
 ## Repository map
 
-- [Reference specification](./docs/spec/index.md)
-- [Support profile](./docs/spec/support.json)
-- [Conformance corpus](./test/conformance/README.md)
-- [Style-scoping note](./docs/style-scoping.md)
-- [Looma migration corpus](./examples/looma)
-- [Historical component-generation plan](./docs/mvp-plan.md)
+- [Reference specification](./packages/declarative-components/docs/spec/index.md)
+- [Support profile](./packages/declarative-components/docs/spec/support.json)
+- [Conformance corpus](./packages/declarative-components/tests/conformance/README.md)
+- [Style-scoping note](./packages/declarative-components/docs/style-scoping.md)
+- [Looma migration corpus](./packages/declarative-components/examples/looma)
+- [Historical component-generation plan](./packages/declarative-components/docs/mvp-plan.md)
 
 The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
 motivates the proposal. This repository remains library-agnostic: Looma is its demanding
