@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 import { build, type BuildOptions, type BuildResult } from "esbuild";
@@ -21,6 +23,25 @@ interface GeneratedMeasurement extends SizeMeasurement {
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
 const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
 const browserLoaderPath = new URL("../src/browser-loader.ts", import.meta.url).pathname;
+const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+const repositoryRoot = resolve(packageRoot, "../..");
+
+const liveCapabilityModules = {
+  componentGraph: "packages/declarative-components/src/graph.ts",
+  controllerHost: "packages/declarative-components/src/controller.ts",
+  declaredData: "packages/declarative-components/src/data.ts",
+  expressionEvaluation: "packages/declarative-components/src/expression.ts",
+  formEnhancement: "packages/html-forms/src/index.ts",
+  generalRuntime: "packages/declarative-components/src/runtime.ts",
+  jsonSchema: "packages/declarative-components/src/json-schema.ts",
+  liveSource: "packages/declarative-components/src/browser-source.ts",
+  proposalParser: "packages/declarative-components/src/parser.ts",
+  reactivity: "packages/declarative-components/src/reactivity.ts",
+  sanitization: "packages/declarative-components/src/sanitize.ts",
+  scopedStyles: "packages/declarative-components/src/style.ts",
+  typeSystem: "packages/declarative-components/src/type-system.ts",
+  validation: "packages/declarative-components/src/validity.ts",
+} as const;
 
 async function bundle(options: BuildOptions): Promise<BuildResult> {
   return build({
@@ -42,12 +63,16 @@ function size(result: BuildResult): SizeMeasurement {
   return { bytes: bytes.byteLength, gzip: gzipSync(bytes, { level: 9 }).byteLength };
 }
 
+function inputPath(path: string): string {
+  return relative(repositoryRoot, resolve(packageRoot, path)).split(sep).join("/");
+}
+
 function moduleBytes(result: BuildResult): Readonly<Record<string, number>> {
   const output = Object.values(result.metafile?.outputs ?? {})[0];
   if (output === undefined) return {};
   return Object.fromEntries(
     Object.entries(output.inputs)
-      .map(([path, contribution]) => [path.replace(/^.*\/src\//, "src/"), contribution.bytesInOutput] as const)
+      .map(([path, contribution]) => [inputPath(path), contribution.bytesInOutput] as const)
       .sort((left, right) => right[1] - left[1]),
   );
 }
@@ -94,57 +119,76 @@ const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINI
 const formGenerated = await generatedFixture("enhanced-form", Number.POSITIVE_INFINITY);
 const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
-const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {});
+const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
 ).length;
+const missingLiveCapabilityModules = Object.values(liveCapabilityModules)
+  .filter((path) => !browserInputs.includes(path));
+const liveSize = size(browserResult);
 
-process.stdout.write(`${JSON.stringify({
-  static_generated_gzip: staticGenerated.gzip,
-  reactive_generated_gzip: reactiveGenerated.gzip,
-  prop_generated_gzip: propGenerated.gzip,
-  computed_generated_gzip: computedGenerated.gzip,
-  keyed_generated_gzip: keyedGenerated.gzip,
-  data_generated_gzip: dataGenerated.gzip,
-  form_generated_gzip: formGenerated.gzip,
-  controller_generated_gzip: controllerGenerated.gzip,
-  live_browser_loader_gzip: size(browserResult).gzip,
-  static_generated_bytes: staticGenerated.bytes,
-  reactive_generated_bytes: reactiveGenerated.bytes,
-  prop_generated_bytes: propGenerated.bytes,
-  computed_generated_bytes: computedGenerated.bytes,
-  keyed_generated_bytes: keyedGenerated.bytes,
-  data_generated_bytes: dataGenerated.bytes,
-  form_generated_bytes: formGenerated.bytes,
-  controller_generated_bytes: controllerGenerated.bytes,
-  live_browser_loader_bytes: size(browserResult).bytes,
-  live_browser_module_bytes: moduleBytes(browserResult),
-  generated_full_runtime_modules: Object.fromEntries([
-    ["static", staticGenerated.fullRuntimeModules],
-    ["reactive", reactiveGenerated.fullRuntimeModules],
-    ["prop", propGenerated.fullRuntimeModules],
-    ["computed", computedGenerated.fullRuntimeModules],
-  ]),
-  generated_parser_modules: Object.fromEntries([
-    ["static", staticGenerated.parserModules],
-    ["reactive", reactiveGenerated.parserModules],
-    ["prop", propGenerated.parserModules],
-    ["computed", computedGenerated.parserModules],
-  ]),
+const liveDistributable = {
+  mode: "live-browser-distributable",
+  graph: "open",
+  browserTarget: "es2022",
+  bundleBoundary: "public-browser-loader-entry",
+  bundle: liveSize,
+  capabilityProfile: {
+    complete: missingLiveCapabilityModules.length === 0,
+    requiredModules: liveCapabilityModules,
+    missingModules: missingLiveCapabilityModules,
+  },
+  forbiddenServerModules: {
+    parse5: browserParse5Modules,
+    generatedDomPropertyInventory: browserDomInventoryModules,
+  },
+  moduleBytes: moduleBytes(browserResult),
+} as const;
+
+const nativeBuild = {
+  mode: "native-application-or-library-build",
+  graph: "fixture-specific-attribution",
+  bundleBoundary: "isolated-generated-capability-fixture",
+  capabilityFixtures: {
+    static: staticGenerated,
+    reactive: reactiveGenerated,
+    prop: propGenerated,
+    computed: computedGenerated,
+    keyed: keyedGenerated,
+    data: dataGenerated,
+    form: formGenerated,
+    controller: controllerGenerated,
+  },
+} as const;
+
+const liveProfile = {
+  live_distributable_gzip: liveSize.gzip,
+  live_distributable_bytes: liveSize.bytes,
+  live_distributable_complete_capability_profile:
+    liveDistributable.capabilityProfile.complete ? 1 : 0,
+  live_distributable_missing_capability_modules: missingLiveCapabilityModules,
   browser_parse5_modules: browserParse5Modules,
   browser_dom_property_inventory_modules: browserDomInventoryModules,
-  static_target_met: staticGenerated.targetMet,
-  reactive_target_met: reactiveGenerated.targetMet,
-  prop_target_met: propGenerated.targetMet,
-  computed_target_met: computedGenerated.targetMet,
-}, null, 2)}\n`);
+} as const;
+
+const report = process.argv.includes("--profile=live-distributable")
+  ? liveProfile
+  : {
+      live_distributable: liveDistributable,
+      native_build: nativeBuild,
+    };
+
+process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 if (
   generatedTargets.some((measurement) =>
     !measurement.targetMet || measurement.fullRuntimeModules > 0 || measurement.parserModules > 0
-  ) || browserParse5Modules > 0 || browserDomInventoryModules > 0
+  ) ||
+  missingLiveCapabilityModules.length > 0 ||
+  browserParse5Modules > 0 ||
+  browserDomInventoryModules > 0
 ) {
   process.exitCode = 1;
 }

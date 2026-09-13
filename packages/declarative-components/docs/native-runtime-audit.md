@@ -7,10 +7,12 @@ distributable supports arbitrary dynamic component graphs. Native builds analyze
 application or library graph and share the support required by that graph. Framework converters use
 their target runtime for equivalent behavior.
 
-The current live-loader attribution comes from `pnpm measure:runtime`. Values are minified raw bytes
-inside the 103,125-byte bundle; gzip is reported for whole fixtures because compressed bytes cannot
-be attributed cleanly to individual modules. `pnpm audit:native` records relevant platform surface
-support and the native sanitizer's output in the installed Chromium, Firefox, and WebKit builds.
+The current live-loader attribution comes from `pnpm measure:runtime` under
+`live_distributable`. Values are minified raw bytes inside the 103,125-byte bundle; its complete
+gzip baseline is 33,199 bytes. Compressed bytes cannot be attributed cleanly to individual modules.
+The `native_build.capabilityFixtures` group reports isolated generated attribution.
+`pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
+the installed Chromium, Firefox, and WebKit builds.
 
 | Subsystem | Platform foundation | Reference-library layer | Current evidence and status |
 | --- | --- | --- | --- |

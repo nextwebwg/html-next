@@ -42,13 +42,20 @@ cost.
 
 ## Current size gates
 
-`pnpm measure:runtime` generates and bundles representative components. Static generated output
-must remain at or below 2.5 KB gzip. Basic reactive, numeric-computed, and scalar-prop generated
-output must remain at or below 5 KB gzip. Feature fixtures without a settled budget are reported
-separately so a large fallback to the live interpreter is visible before a threshold is chosen.
-The settled limits fail `verify:inner`; they are release gates rather than informational targets.
-The same check rejects full-runtime or parser imports in settled generated fixtures, and rejects
-server-side parser or generated DOM-inventory modules in the browser loader.
+`pnpm measure:runtime` reports two named delivery products. `live_distributable` bundles the
+public browser-loader entry for an open graph, records its raw and gzip size, attributes its module
+inputs, and asserts that every implemented live capability remains reachable. It also rejects
+server-side parser and generated DOM-inventory modules.
+
+`native_build.capabilityFixtures` attributes isolated generated features. Static output must
+remain at or below 2.5 KB gzip. Basic reactive, numeric-computed, and scalar-prop output must remain
+at or below 5 KB gzip. Fixtures without a settled budget remain visible so a general-runtime
+fallback is measured before a graph-wide native implementation is designed. These capability
+fixtures do not stand in for the complete live distributable or a whole application/library build.
+
+The settled limits and complete-live assertion fail `verify:inner`; they are release gates rather
+than informational targets. The optimizer uses `--profile=live-distributable` to obtain the same
+complete live result as a flat metric record without measuring a different bundle.
 
 `pnpm measure:hydration` separately measures compatible server-DOM adoption and fresh lowering in
 Chromium, Firefox, and WebKit. Every sample also asserts that adoption preserves root and input
