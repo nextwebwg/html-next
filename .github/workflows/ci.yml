@@ -43,7 +43,7 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm --filter @nextwebwg/declarative-components exec playwright install --with-deps chromium firefox webkit
       - run: pnpm test:browser
 
   required:
