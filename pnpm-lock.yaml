@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@types/node':
-      specifier: 22.20.1
-      version: 22.20.1
+      specifier: 26.2.0
+      version: 26.2.0
     '@types/react':
       specifier: 19.3.0
       version: 19.3.0
@@ -70,7 +70,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
-        version: 22.20.1
+        version: 26.2.0
       oxlint:
         specifier: 'catalog:'
         version: 1.81.0
@@ -82,7 +82,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
 
   packages/declarative-components:
     dependencies:
@@ -95,7 +95,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
-        version: 22.20.1
+        version: 26.2.0
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
@@ -134,7 +134,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
       vue:
         specifier: 'catalog:'
         version: 3.5.42(typescript@7.0.2)
@@ -147,7 +147,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
-        version: 22.20.1
+        version: 26.2.0
       '@vue/compiler-sfc':
         specifier: 'catalog:'
         version: 3.5.42
@@ -162,7 +162,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
 
   packages/declarative-components-unplugin:
     dependencies:
@@ -171,26 +171,26 @@ importers:
         version: link:../declarative-components
       unplugin:
         specifier: 'catalog:'
-        version: 3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
-        version: 22.20.1
+        version: 26.2.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)
+        version: 8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)
       vitest:
         specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
 
   packages/html-forms:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
-        version: 22.20.1
+        version: 26.2.0
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
@@ -202,7 +202,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
 
 packages:
 
@@ -633,8 +633,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/node@22.20.1':
-    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+  '@types/node@26.2.0':
+    resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
 
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
@@ -1091,8 +1091,8 @@ packages:
     engines: {node: '>=16.20.0'}
     hasBin: true
 
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+  undici-types@8.3.0:
+    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
   unplugin@3.3.0:
     resolution: {integrity: sha512-qa66K+crbfyE6JK10GjvbJeRrOsuC/JpbnHctfyp/i4oBTxWOzJfRZyDiOk1PtErMFRu8JhsU/wPvOdBNWe5Rg==}
@@ -1461,9 +1461,9 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/node@22.20.1':
+  '@types/node@26.2.0':
     dependencies:
-      undici-types: 6.21.0
+      undici-types: 8.3.0
 
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
@@ -1537,14 +1537,14 @@ snapshots:
     dependencies:
       '@typescript/old': typescript@6.0.3
 
-  '@vitest/mocker@5.0.0(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@vitest/mocker@5.0.0(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.0
       estree-walker: 3.0.3
       magic-string: 1.3.1
     optionalDependencies:
-      vite: 8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)
 
   '@vitest/spy@5.0.0': {}
 
@@ -1885,9 +1885,9 @@ snapshots:
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
 
-  undici-types@6.21.0: {}
+  undici-types@8.3.0: {}
 
-  unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)):
+  unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       picomatch: 4.0.7
@@ -1895,9 +1895,9 @@ snapshots:
     optionalDependencies:
       esbuild: 0.28.2
       rolldown: 1.2.8
-      vite: 8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)
 
-  vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13):
+  vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1905,15 +1905,15 @@ snapshots:
       rolldown: 1.2.8
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.2.0
       esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.13
 
-  vitest@5.0.0(@types/node@22.20.1)(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)):
+  vitest@5.0.0(@types/node@26.2.0)(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.0(vite@8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13))
+      '@vitest/mocker': 5.0.0(vite@8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -1924,10 +1924,10 @@ snapshots:
       tinybench: 6.1.4
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
-      vite: 8.3.0(@types/node@22.20.1)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 22.20.1
+      '@types/node': 26.2.0
     transitivePeerDependencies:
       - msw
 
