@@ -52,7 +52,7 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
       "@nextwebwg/declarative-components/generated-runtime": generatedRuntimePath,
       "@nextwebwg/declarative-components/runtime": runtimePath,
     },
-    external: ["*.css"],
+    external: ["*.css", "./controller.js"],
     stdin: {
       contents: module,
       loader: "js",
@@ -67,6 +67,11 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 const staticGenerated = await generatedFixture("static-card", 2_500);
 const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
 const propGenerated = await generatedFixture("prop-button", 5_000);
+const computedGenerated = await generatedFixture("computed-counter", Number.POSITIVE_INFINITY);
+const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
+const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
+const formGenerated = await generatedFixture("enhanced-form", Number.POSITIVE_INFINITY);
+const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {});
 
@@ -74,10 +79,20 @@ process.stdout.write(`${JSON.stringify({
   static_generated_gzip: staticGenerated.gzip,
   reactive_generated_gzip: reactiveGenerated.gzip,
   prop_generated_gzip: propGenerated.gzip,
+  computed_generated_gzip: computedGenerated.gzip,
+  keyed_generated_gzip: keyedGenerated.gzip,
+  data_generated_gzip: dataGenerated.gzip,
+  form_generated_gzip: formGenerated.gzip,
+  controller_generated_gzip: controllerGenerated.gzip,
   live_browser_loader_gzip: size(browserResult).gzip,
   static_generated_bytes: staticGenerated.bytes,
   reactive_generated_bytes: reactiveGenerated.bytes,
   prop_generated_bytes: propGenerated.bytes,
+  computed_generated_bytes: computedGenerated.bytes,
+  keyed_generated_bytes: keyedGenerated.bytes,
+  data_generated_bytes: dataGenerated.bytes,
+  form_generated_bytes: formGenerated.bytes,
+  controller_generated_bytes: controllerGenerated.bytes,
   live_browser_loader_bytes: size(browserResult).bytes,
   browser_parse5_modules: browserInputs.filter((path) => path.includes("/parse5/")).length,
   browser_dom_property_inventory_modules: browserInputs.filter(

@@ -1,0 +1,11 @@
+<template component="enhanced-form" status="experimental" summary="Enhanced form bundle-size fixture.">
+  <defs>
+    <state name="post" :value="{ id: '42' }"></state>
+  </defs>
+  <form name="save" method="post" src="/api/posts/{id}">
+    <param name="id" :value="post.id"></param>
+    <input name="title" required>
+    <button>Save</button>
+    <output $value="save.pending"></output>
+  </form>
+</template>
