@@ -18,7 +18,7 @@ async function assemble() {
   const outDirectory = await mkdtemp(join(tmpdir(), "html-next-package-"));
   temporary.push(outDirectory);
   const result = await assembleComponentPackage({
-    name: "@example/looma-next",
+    name: "@example/component-library",
     version: "1.0.0",
     outDirectory,
     components: [
@@ -48,7 +48,7 @@ describe("component package assembler", () => {
     assert.ok(first.result.files.includes("vue/index.js"));
     assert.ok(first.result.files.includes("editor/extensions/editor-helper.js"));
     assert.match(await readFile(`${first.outDirectory}/controllers/ui-overlay.js`, "utf8"), /\.\/overlay-helper\.js/);
-    assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --looma-accent: rebeccapurple; }\n");
+    assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --component-accent: rebeccapurple; }\n");
 
     const entry = await readFile(`${first.outDirectory}/dist/index.js`, "utf8");
     assert.match(entry, /registerComponentDefinitions/);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 
 import { buildComponents, checkComponents, inspectComponents } from "../src/cli.js";
+import { GENERATOR_VERSION } from "../src/generate.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/x-button.html", import.meta.url));
 const graphFixture = fileURLToPath(new URL("./fixtures/graph/app.html", import.meta.url));
@@ -52,7 +53,7 @@ describe("buildComponents", () => {
         generatorVersion: string;
         components: Array<{ name: string; tag: string; artifacts: string[] }>;
       };
-      assert.equal(manifest.generatorVersion, "0.0.0");
+      assert.equal(manifest.generatorVersion, GENERATOR_VERSION);
       assert.equal(manifest.components[0]?.name, "XButton");
       assert.equal(manifest.components[0]?.tag, "x-button");
       assert.equal(manifest.components[0]?.artifacts.length, 7);

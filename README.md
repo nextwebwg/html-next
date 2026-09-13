@@ -55,7 +55,6 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm verify:pr
 corepack pnpm test:browser
 corepack pnpm test:targets
-corepack pnpm test:looma
 corepack pnpm test:consumer
 ```
 
@@ -186,31 +185,6 @@ Generated targets preserve the definition's native root; they do not add a compo
 wrapper. The checked-in [button output](./packages/declarative-components/examples/generated)
 demonstrates each target.
 
-## Migrate a Stencil package
-
-```sh
-html-next migrate stencil ../component-library --out-dir migration
-```
-
-Migration extracts public props, events, methods, slots, capabilities, and component CSS.
-It emits review-required HTML scaffolds and explicit diagnostics for behavior that needs
-a controller. It never labels arbitrary TypeScript behavior as automatically converted.
-
-The checked-in [Looma corpus](./packages/declarative-components/examples/looma) is the full
-reference workload: all 34
-public core components have reviewed definitions and behavioral tests, nine layout
-definitions are included, published CSS/theme/editor assets are preserved, and the
-package assembler emits Looma's current root, Vue, editor, extension, validation, layout,
-and CSS entry points. Knit-shaped SSR/hydration and LoadOps-shaped direct-registration
-consumers exercise the generated package.
-
-Build that compatibility package from a local Looma checkout with:
-
-```sh
-corepack pnpm generate:looma-assets -- --source ../looma
-corepack pnpm build:looma -- --source ../looma --out-dir generated-looma
-```
-
 ## Types and validation
 
 HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.
@@ -247,9 +221,7 @@ only application resolution and trust differ.
 - [Support profile](./packages/declarative-components/docs/spec/support.json)
 - [Conformance corpus](./packages/declarative-components/tests/conformance/README.md)
 - [Style-scoping note](./packages/declarative-components/docs/style-scoping.md)
-- [Looma migration corpus](./packages/declarative-components/examples/looma)
 - [Historical component-generation plan](./packages/declarative-components/docs/mvp-plan.md)
 
 The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
-motivates the proposal. This repository remains library-agnostic: Looma is its demanding
-conformance corpus, not a source of language-specific rules.
+motivates the proposal. This repository and its conformance corpus are library-agnostic.

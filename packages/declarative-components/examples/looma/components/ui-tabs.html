@@ -1,9 +1,0 @@
-<template component="ui-tabs" status="early" summary="A controlled or uncontrolled projected tab set." controller="./ui-tabs.js">
-  <defs>
-    <prop name="value" type="string?">Controlled selected tab identifier.</prop>
-    <prop name="defaultValue" type="string" default="">Initial uncontrolled tab identifier.</prop>
-    <prop name="orientation" type="horizontal | vertical" default="horizontal">Keyboard navigation axis.</prop>
-    <event name="select" type="object({ value: string, previousValue?: string, trigger: keyboard | pointer | programmatic })"></event>
-  </defs>
-  <div class="tabs" :data-value="value" :data-default-value="defaultValue" :data-orientation="orientation"><slot></slot></div>
-</template>

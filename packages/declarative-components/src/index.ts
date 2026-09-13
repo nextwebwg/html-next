@@ -8,7 +8,6 @@ export {
 export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
-export { assembleLoomaPackage } from "./migrate/looma-package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
 export {

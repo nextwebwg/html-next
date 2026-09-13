@@ -1,8 +1,22 @@
 {
   "name": "@nextwebwg/declarative-components",
-  "version": "0.0.0",
+  "version": "1.0.0-alpha.0",
   "private": true,
   "description": "Reference runtime and component bridge for Declarative HTML Components.",
+  "keywords": [
+    "components",
+    "html",
+    "web-components"
+  ],
+  "homepage": "https://github.com/nextwebwg/html-next#readme",
+  "bugs": {
+    "url": "https://github.com/nextwebwg/html-next/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nextwebwg/html-next.git",
+    "directory": "packages/declarative-components"
+  },
   "type": "module",
   "sideEffects": false,
   "bin": {
@@ -39,6 +53,11 @@
     }
   },
   "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "tag": "next",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=22.13 <23 || >=24 <25"
   },
@@ -46,21 +65,19 @@
     "audit:native": "tsx scripts/audit-native-features.ts",
     "build": "pnpm clean && tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
-    "build:looma": "tsx scripts/build-looma-package.ts",
-    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/generate-looma-scaffolds.ts --check && tsx scripts/check-example-generated.ts",
+    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/check-example-generated.ts",
+    "check:release": "tsx scripts/check-release.ts",
     "check:spec": "vitest run --config vitest.config.ts tests/spec.test.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
-    "generate:looma": "tsx scripts/generate-looma-inventory.ts",
-    "generate:looma-assets": "tsx scripts/generate-looma-assets.ts",
-    "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
     "measure:hydration": "tsx scripts/measure-hydration.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
+    "prepack": "pnpm check:release && pnpm build",
+    "release:dry-run": "npm pack --dry-run --json",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config ../../vitest.browser.config.ts",
-    "test:consumer": "pnpm build && vitest run --config ../../vitest.consumer.config.ts",
-    "test:looma": "vitest run --config ../../vitest.looma.config.ts",
+    "test:consumer": "vitest run --config ../../vitest.consumer.config.ts",
     "test:targets": "vitest run --config ../../vitest.targets.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

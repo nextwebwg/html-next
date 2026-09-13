@@ -152,7 +152,7 @@ describe("defineContract", () => {
   });
 
   it("rejects invalid tags, native elements, and prop names", () => {
-    for (const tag of ["button", "Looma-button"]) {
+    for (const tag of ["button", "Invalid-tag"]) {
       expectDiagnostic("HC005", () => defineWithTag(validContract(), tag));
     }
     expectDiagnostic("HC008", () =>

@@ -1,7 +1,0 @@
-<template component="ui-avatar-group" status="early" summary="A labeled avatar group with an overflow count." controller="./ui-avatar-group.js">
-  <defs>
-    <prop name="label" type="string" default="People">Accessible group label.</prop>
-    <prop name="max" type="number" default="5">Maximum visible avatars.</prop>
-  </defs>
-  <div class="avatar-group" role="group" :aria-label="label" :data-max="max"><slot></slot></div>
-</template>
