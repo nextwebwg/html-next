@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, it } from "vitest";
@@ -11,7 +12,7 @@ const script = new URL("../scripts/measure-runtime-size.ts", import.meta.url);
 async function measure(...args: string[]): Promise<Record<string, unknown>> {
   const { stdout } = await execute(
     process.execPath,
-    ["--import=tsx", script.pathname, ...args],
+    ["--import=tsx", fileURLToPath(script), ...args],
     { cwd: packageRoot },
   );
   return JSON.parse(stdout) as Record<string, unknown>;

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "vitest";
 
 import { assembleComponentPackage } from "../src/package.js";
 
-const fixture = new URL("./fixtures/package/", import.meta.url).pathname;
+const fixture = fileURLToPath(new URL("./fixtures/package/", import.meta.url));
 const temporary: string[] = [];
 
 afterEach(async () => {

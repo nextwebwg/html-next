@@ -21,9 +21,9 @@ interface GeneratedMeasurement extends SizeMeasurement {
   readonly targetMet: boolean;
 }
 
-const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
-const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
-const browserLoaderPath = new URL("../src/browser.ts", import.meta.url).pathname;
+const runtimePath = fileURLToPath(new URL("../src/runtime.ts", import.meta.url));
+const generatedRuntimePath = fileURLToPath(new URL("../src/generated-runtime.ts", import.meta.url));
+const browserLoaderPath = fileURLToPath(new URL("../src/browser.ts", import.meta.url));
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const repositoryRoot = resolve(packageRoot, "../..");
 
@@ -93,7 +93,7 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
     stdin: {
       contents: module,
       loader: "js",
-      resolveDir: new URL("..", import.meta.url).pathname,
+      resolveDir: fileURLToPath(new URL("..", import.meta.url)),
       sourcefile: `${definition.contract.name}.js`,
     },
   });
