@@ -404,7 +404,13 @@ function installFacade(el: Element): void {
   };
   if (!("validate" in target)) descriptors.validate = {
     configurable: true,
-    value: () => validateElement(el, states.get(el)?.constraint ?? {}),
+    value: () => {
+      if (nativeControl(el) && states.get(el) === undefined) {
+        el.checkValidity();
+        return current(el);
+      }
+      return validateElement(el, states.get(el)?.constraint ?? {});
+    },
   };
   Object.defineProperties(target, descriptors);
 }
@@ -416,6 +422,15 @@ export function manageElementValidity(
   options: ManageValidityOptions = {},
 ): () => void {
   unmanageElementValidity(el);
+  if (
+    nativeControl(el) &&
+    Object.keys(constraint).length === 0 &&
+    options.value === undefined &&
+    options.internals === undefined
+  ) {
+    installFacade(el);
+    return () => {};
+  }
   const state: ManagedState = {
     constraint,
     derived: VALID,

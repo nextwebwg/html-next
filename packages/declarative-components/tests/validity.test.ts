@@ -146,13 +146,19 @@ describe.skipIf(!enabled)("browser validity", () => {
             custom: V.getElementValidityState(input).customError,
             message: input.validationMessage,
           };
-          return { before, after, nativeCustom };
+          return {
+            before,
+            after,
+            nativeCustom,
+            installedCompatibilityStyles: document.querySelector("[data-html-next-validity-styles]") !== null,
+          };
         });
         assert.deepEqual(result.before, {
           normalizedTypeMismatch: true, nativeTypeMismatch: true, nativeCustomError: false, formValid: false,
         });
         assert.deepEqual(result.after, { normalizedValid: true, formValid: true });
         assert.deepEqual(result.nativeCustom, { custom: true, message: "Native application error" });
+        assert.equal(result.installedCompatibilityStyles, false);
       } finally {
         await browser.close();
       }
