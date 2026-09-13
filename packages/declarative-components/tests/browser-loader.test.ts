@@ -9,6 +9,7 @@ import { chromium, type Browser } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const browserLoaderUrl = new URL("../src/browser-loader.ts", import.meta.url);
+const browserDistributableUrl = new URL("../src/browser.ts", import.meta.url);
 
 describe.skipIf(!enabled)("browser graph loader", () => {
   let browser: Browser;
@@ -41,6 +42,46 @@ describe.skipIf(!enabled)("browser graph loader", () => {
   it("uses the browser's HTML parser instead of bundling parse5", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/parse5/")), false);
     assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
+  });
+
+  it("starts the linkable browser distributable when the module executes", async () => {
+    const page = await browser.newPage();
+    const distributablePath = join(temporaryDirectory, "browser.js");
+    await build({
+      entryPoints: [browserDistributableUrl.pathname],
+      bundle: true,
+      format: "esm",
+      outfile: distributablePath,
+      platform: "browser",
+      target: ["es2022"],
+    });
+    await page.route("https://distribution.example/**", async (route) => {
+      const url = route.request().url();
+      if (url.endsWith("/x-ready.html")) {
+        await route.fulfill({
+          contentType: "text/html",
+          body: '<template component="x-ready" status="early" summary="Ready."><output>ready</output></template>',
+        });
+      } else {
+        await route.fulfill({
+          contentType: "text/html",
+          body: '<link rel="component" href="/x-ready.html"><x-ready id="ready"></x-ready>',
+        });
+      }
+    });
+    await page.goto("https://distribution.example/");
+    await page.addScriptTag({ path: distributablePath, type: "module" });
+    const result = await page.evaluate(async () => {
+      const ready = (window as unknown as { HTMLNext?: { ready: Promise<unknown> } }).HTMLNext?.ready;
+      await ready;
+      return {
+        exposed: ready instanceof Promise,
+        tag: document.querySelector("#ready")?.localName,
+        text: document.querySelector("#ready")?.textContent,
+      };
+    });
+    await page.close();
+    assert.deepEqual(result, { exposed: true, tag: "output", text: "ready" });
   });
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {

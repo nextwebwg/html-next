@@ -8,6 +8,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/declarative-components/src/parser.ts",
   ],
   discoveryAndLifecycle: [
+    "packages/declarative-components/src/browser.ts",
     "packages/declarative-components/src/browser-loader.ts",
     "packages/declarative-components/src/registry.ts",
   ],

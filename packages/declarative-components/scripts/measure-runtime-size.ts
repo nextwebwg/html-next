@@ -23,7 +23,7 @@ interface GeneratedMeasurement extends SizeMeasurement {
 
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
 const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
-const browserLoaderPath = new URL("../src/browser-loader.ts", import.meta.url).pathname;
+const browserLoaderPath = new URL("../src/browser.ts", import.meta.url).pathname;
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const repositoryRoot = resolve(packageRoot, "../..");
 
@@ -136,7 +136,7 @@ const liveDistributable = {
   mode: "live-browser-distributable",
   graph: "open",
   browserTarget: "es2022",
-  bundleBoundary: "public-browser-loader-entry",
+  bundleBoundary: "public-linkable-browser-entry",
   bundle: liveSize,
   capabilityProfile: {
     complete: missingLiveCapabilityModules.length === 0,
