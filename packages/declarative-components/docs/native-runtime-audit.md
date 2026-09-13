@@ -20,7 +20,7 @@ support and the native sanitizer's output in the installed Chromium, Firefox, an
 | Declared reads | `fetch()`, `URL`, `URLSearchParams`, `AbortController`, response body readers, and timers | Parameter dependency updates, debounce/poll policy, stale-result suppression, state projection, and declared response validation | `data.ts` contributes 2,358 raw live-loader bytes before its type/schema dependencies. The generated data fixture is 22,868 bytes gzip. A feature-specific generated path and the remaining orchestration contract require owner review. |
 | Enhanced forms | Native `<form>`, successful controls via `FormData`, `SubmitEvent.submitter`, native constraint validation, URL encoding, `fetch()`, and `AbortController` | Opt-in fetch enhancement, declared parameters, pending/result state, and success/error events | The implementation lives in the independent `@nextwebwg/html-forms` package. The generated form fixture is 23,038 bytes gzip because component output still enters the general runtime. Generated integration is an active size target; form semantics remain owned by the separate proposal. |
 | Validity | Native controls and `ValidityState` | Equivalent generalized-element validity and extension errors | Native controls always use browser validity. The pure generalized validator is checked against controls in Chromium, Firefox, and WebKit. Cached detached-control delegation was rejected: 168 gzip bytes saved did not justify an approximately 80x numeric microbenchmark regression. Owner approved the measured guardrail. |
-| Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | `sanitize.ts` contributes 696 raw live-loader bytes. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Conditional use would therefore create two behaviors and retain the fallback. Retention pending owner review. |
+| Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the 696-byte minified raw `sanitize.ts` implementation across engines. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
 | Component styling | CSS parser/CSSOM, selectors, cascade, native style elements | Build-time scoping and live-source selector transformation, including generalized validity compatibility | `style.ts` contributes 5,485 raw live-loader bytes; generated CSS pays no browser-runtime parser cost. Native `@scope` and the remaining compatibility transformations need a separate parity and size experiment before a retention decision. |
 | Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. A controller-only generated fixture still costs 22,772 bytes gzip because it receives the general host. A smaller host subset would be new custom glue and therefore requires owner agreement before implementation. |
 | Resource graphs and import maps | `URL`, `fetch()`, native module loading, and application import-map markup | HTML component dependency graph, trust-root enforcement, redirect checks, and import-map snapshot resolution | `graph.ts`, `resolve.ts`, `browser-source.ts`, and `browser-loader.ts` contribute 7,346 raw live-loader bytes together. Browsers apply import maps to modules but expose no equivalent general component-resource resolver. Retention of the trust and graph policy remains pending owner review. |
@@ -47,13 +47,11 @@ their feature-specific implementations and budgets are evaluated.
 The next decisions are intentionally separated so approval of one custom layer cannot be read as
 approval of all runtime machinery:
 
-1. Dynamic HTML: retain the 696-byte interoperable DOM sanitizer until `setHTML()` is available in
-   all target engines, or ship conditional native behavior plus the same fallback.
-2. Controller host: define the smallest host contract generated controller-only components may
+1. Controller host: define the smallest host contract generated controller-only components may
    receive without importing the full reactive runtime.
-3. Declared reads: distinguish request behavior supplied directly by Fetch/URL/AbortController from
+2. Declared reads: distinguish request behavior supplied directly by Fetch/URL/AbortController from
    proposal state and scheduling that generated output must retain.
-4. Styling: test native `@scope` against current selector, `:host`, nesting, and validity behavior.
-5. Live expressions and dependency tracking: quantify the irreducible live-authoring layer after
+3. Styling: test native `@scope` against current selector, `:host`, nesting, and validity behavior.
+4. Live expressions and dependency tracking: quantify the irreducible live-authoring layer after
    generated paths have removed it from production components.
-6. Resource graphs: review the security/trust behavior separately from URL and import-map parsing.
+5. Resource graphs: review the security/trust behavior separately from URL and import-map parsing.

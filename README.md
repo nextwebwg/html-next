@@ -115,6 +115,33 @@ lifecycle control.
 The runnable [live graph example](./packages/declarative-components/examples/poc/README.md)
 uses this public API.
 
+## Browser compatibility layer
+
+The live loader supplies the proposal behavior and browser compatibility needed by the
+definitions it loads:
+
+| Surface | Runtime behavior |
+| --- | --- |
+| Component discovery and lifecycle | One shared `MutationObserver` discovers registered component tags and balances connection cleanup for lowered roots. |
+| Component parsing | The browser's HTML parser creates the inert DOM; the library reads declarations, validates the proposal grammar, and reports component diagnostics. |
+| Reactive declarations | Native events and microtasks drive a small dependency layer for live state, computed values, bindings, and effects. |
+| Generalized validity | Native controls keep `ValidityState`; managed ordinary elements receive the corresponding validity methods, flags, invalid events, and selector-state bridge. |
+| Dynamic `$html` | A 696-byte minified DOM sanitizer preserves the proposal's cross-browser content policy. It is retained until native `setHTML()` is available in every target engine with equivalent policy control. |
+| Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, projected content, and generalized validity selectors. |
+| Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
+| Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
+
+The generator emits feature-specific output for static markup, basic reactivity,
+numeric-computed state, and scalar props; those paths carry only their authored helpers. CI records
+zero live-parser and full-runtime contribution for all four fixtures. Keyed lists, declared reads,
+enhanced forms, and controller lifecycle currently use the general runtime fallback. The measured
+inventory and owner decisions live in the
+[native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).
+
+The current public loader is one predictable bundle. A future packaging experiment may split
+compatibility features into progressively loaded modules selected by browser capability and
+authored syntax; that is a potential delivery optimization, not current behavior.
+
 ## Inspect and build a graph
 
 The CLI reads component HTML and static ESM imports without executing controllers:
