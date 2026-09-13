@@ -111,6 +111,22 @@ describe("generateComponent", () => {
     );
   });
 
+  it("keeps unsupported computed expressions on the full-runtime fallback", () => {
+    const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <computed name="label" from="format('%s', count)"></computed>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button type="button" on:click="increment"><output $value="label"></output></button>
+    </template>`;
+    const vanilla = generateComponent(parseComponent(source))
+      .find((artifact) => artifact.path === "vanilla/ComputedLabel.js")?.content;
+
+    assert.ok(vanilla);
+    assert.match(vanilla, /@nextwebwg\/declarative-components\/runtime/);
+  });
+
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
       `<button title="A &amp; &quot;quote&quot;" .formAction="destination" :disabled="disabled" :data-selected="selected">Text &amp; {literal}<slot></slot></button>`,

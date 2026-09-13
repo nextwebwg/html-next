@@ -17,6 +17,7 @@ const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
 const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
+const computedFixtureUrl = new URL("../benchmarks/fixtures/computed-counter.html", import.meta.url);
 
 const source = `<template component="demo-counter" status="early" summary="Target parity fixture.">
   <defs>
@@ -169,6 +170,7 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
 
 describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
   let bundlePath = "";
+  let computedBundlePath = "";
   let directory = "";
 
   beforeAll(async () => {
@@ -191,6 +193,29 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       bundle: true,
       format: "iife",
       globalName: "ReactiveCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const computedDefinition = parseComponent(
+      await readFile(computedFixtureUrl, "utf8"),
+      computedFixtureUrl.href,
+    );
+    const computedModule = generateComponent(computedDefinition)
+      .find((artifact) => artifact.path === "vanilla/ComputedCounter.js")?.content;
+    assert.ok(computedModule);
+    assert.doesNotMatch(computedModule, /@nextwebwg\/declarative-components\/runtime/);
+    await writeFile(join(directory, "styles/computed-counter.css"), "");
+    const computedEntryPath = join(directory, "vanilla/ComputedCounter.js");
+    computedBundlePath = join(directory, "computed-bundle.js");
+    await writeFile(computedEntryPath, computedModule);
+    await build({
+      entryPoints: [computedEntryPath],
+      outfile: computedBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ComputedCounter",
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
@@ -235,6 +260,30 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           return { before, connected, detached, reconnected: output.textContent };
         });
         assert.deepEqual(result, { before: "0", connected: "1", detached: "1", reconnected: "2" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} recomputes directly compiled numeric computed state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: computedBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ComputedCounter: { createComputedCounter(): Element };
+          }).ComputedCounter;
+          const component = api.createComputedCounter();
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          const before = output.textContent;
+          (component as HTMLButtonElement).click();
+          await Promise.resolve();
+          return { before, after: output.textContent };
+        });
+        assert.deepEqual(result, { before: "2", after: "4" });
       } finally {
         await browser.close();
       }

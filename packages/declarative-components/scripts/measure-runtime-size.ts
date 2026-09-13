@@ -67,7 +67,7 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 const staticGenerated = await generatedFixture("static-card", 2_500);
 const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
 const propGenerated = await generatedFixture("prop-button", 5_000);
-const computedGenerated = await generatedFixture("computed-counter", Number.POSITIVE_INFINITY);
+const computedGenerated = await generatedFixture("computed-counter", 5_000);
 const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
 const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
 const formGenerated = await generatedFixture("enhanced-form", Number.POSITIVE_INFINITY);
@@ -101,4 +101,5 @@ process.stdout.write(`${JSON.stringify({
   static_target_met: staticGenerated.targetMet,
   reactive_target_met: reactiveGenerated.targetMet,
   prop_target_met: propGenerated.targetMet,
+  computed_target_met: computedGenerated.targetMet,
 }, null, 2)}\n`);

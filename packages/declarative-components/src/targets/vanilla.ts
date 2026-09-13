@@ -47,6 +47,8 @@ interface DirectEvent {
 
 interface DirectReactivePlan {
   readonly states: ReadonlyMap<string, { readonly variable: string; readonly initial: number }>;
+  readonly computed: ReadonlyMap<string, { readonly variable: string; readonly expression: string }>;
+  readonly values: ReadonlyMap<string, { readonly variable: string }>;
   readonly handlers: ReadonlyMap<string, { readonly variable: string; readonly declaration: HandlerDeclaration }>;
 }
 
@@ -96,6 +98,35 @@ function directSetExpression(node: ExpressionNode, state: string): { readonly op
   return value === undefined ? undefined : { op: node.op, value };
 }
 
+function directNumericExpression(
+  node: ExpressionNode,
+  values: ReadonlyMap<string, { readonly variable: string }>,
+): string | undefined {
+  if (node.kind === "literal" && typeof node.value === "number" && Number.isFinite(node.value)) {
+    return String(node.value);
+  }
+  if (node.kind === "id") return values.get(node.name)?.variable;
+  if (node.kind === "unary" && node.op === "-") {
+    const operand = directNumericExpression(node.operand, values);
+    return operand === undefined ? undefined : `(-${operand})`;
+  }
+  if (node.kind === "binary" && ["+", "-", "*", "/", "%"].includes(node.op)) {
+    const left = directNumericExpression(node.left, values);
+    const right = directNumericExpression(node.right, values);
+    return left === undefined || right === undefined ? undefined : `(${left} ${node.op} ${right})`;
+  }
+  if (node.kind === "call" && ["abs", "round", "min", "max", "clamp"].includes(node.fn)) {
+    const args = node.args.map((argument) => directNumericExpression(argument, values));
+    if (args.some((argument) => argument === undefined)) return undefined;
+    if ((node.fn === "abs" || node.fn === "round") && args.length !== 1) return undefined;
+    if ((node.fn === "min" || node.fn === "max") && args.length === 0) return undefined;
+    if (node.fn === "clamp" && args.length !== 3) return undefined;
+    if (node.fn === "clamp") return `Math.min(Math.max(${args[0]}, ${args[1]}), ${args[2]})`;
+    return `Math.${node.fn}(${args.join(", ")})`;
+  }
+  return undefined;
+}
+
 function directTemplateSupported(
   node: TemplateNode,
   states: ReadonlySet<string>,
@@ -129,14 +160,29 @@ function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan
   const handlers = declarations.filter(
     (declaration): declaration is HandlerDeclaration => declaration.kind === "handler",
   );
-  if (reactive.length === 0 || reactive.some((declaration) => declaration.kind !== "state")) return undefined;
+  if (reactive.length === 0) return undefined;
   if (reactive.length + handlers.length !== declarations.length) return undefined;
 
   const states = new Map<string, { variable: string; initial: number }>();
+  const computed = new Map<string, { variable: string; expression: string }>();
+  const values = new Map<string, { variable: string }>();
   for (const [index, declaration] of reactive.entries()) {
-    const initial = declaration.expression === undefined ? undefined : finiteNumber(declaration.expression.ast);
-    if (initial === undefined) return undefined;
-    states.set(declaration.name, { variable: `state${index}`, initial });
+    const variable = declaration.kind === "state" ? `state${index}` : `computed${index}`;
+    if (declaration.kind === "state") {
+      const initial = declaration.expression === undefined ? undefined : finiteNumber(declaration.expression.ast);
+      if (initial === undefined) return undefined;
+      const state = { variable, initial };
+      states.set(declaration.name, state);
+      values.set(declaration.name, state);
+      continue;
+    }
+    const expression = declaration.expression === undefined
+      ? undefined
+      : directNumericExpression(declaration.expression.ast, values);
+    if (expression === undefined) return undefined;
+    const derived = { variable, expression };
+    computed.set(declaration.name, derived);
+    values.set(declaration.name, derived);
   }
 
   const handlerPlans = new Map<string, { variable: string; declaration: HandlerDeclaration }>();
@@ -154,10 +200,10 @@ function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan
     handlerPlans.set(declaration.name, { variable: `handler${index}`, declaration });
   }
   if (handlerPlans.size === 0) return undefined;
-  if (!directTemplateSupported(definition.template, new Set(states.keys()), new Set(handlerPlans.keys()))) {
+  if (!directTemplateSupported(definition.template, new Set(values.keys()), new Set(handlerPlans.keys()))) {
     return undefined;
   }
-  return { states, handlers: handlerPlans };
+  return { states, computed, values, handlers: handlerPlans };
 }
 
 function directPropType(prop: PropContract): "string" | "boolean" | "number" | readonly string[] | undefined {
@@ -352,7 +398,10 @@ export function generateVanilla(
     `  const { attributes = {}, children = [], slots = {}, as${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
     ...(direct === undefined
       ? []
-      : [...direct.states.values()].map(({ variable, initial }) => `  let ${variable} = ${String(initial)};`)),
+      : [
+          ...[...direct.states.values()].map(({ variable, initial }) => `  let ${variable} = ${String(initial)};`),
+          ...[...direct.computed.values()].map(({ variable }) => `  let ${variable};`),
+        ]),
     ...(directProps === undefined
       ? []
       : [...directProps.props.entries()].map(([name, prop]) =>
@@ -406,8 +455,11 @@ export function generateVanilla(
     lines.push("  let pending = false;");
     lines.push("  const update = () => {");
     lines.push("    pending = false;");
+    for (const { variable, expression } of directPlan.computed.values()) {
+      lines.push(`    ${variable} = ${expression};`);
+    }
     for (const binding of directRender.bindings) {
-      lines.push(`    ${binding.element}.textContent = String(${directPlan.states.get(binding.state)!.variable});`);
+      lines.push(`    ${binding.element}.textContent = String(${directPlan.values.get(binding.state)!.variable});`);
     }
     lines.push("  };");
     lines.push("  const schedule = () => {");
