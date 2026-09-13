@@ -39,6 +39,9 @@ catalogs:
     react-dom:
       specifier: 19.3.0
       version: 19.3.0
+    reactive-framework-test-suite:
+      specifier: 0.0.2
+      version: 0.0.2
     svelte:
       specifier: 5.57.0
       version: 5.57.0
@@ -114,6 +117,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.0(react@19.3.0)
+      reactive-framework-test-suite:
+        specifier: 'catalog:'
+        version: 0.0.2
       svelte:
         specifier: 'catalog:'
         version: 5.57.0
@@ -980,6 +986,9 @@ packages:
     resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
 
+  reactive-framework-test-suite@0.0.2:
+    resolution: {integrity: sha512-wExFKyvh7u2CejdCLRPhf1qH1D9LlC4DJFAv0DNinvj3OuqMYj60ukFOMkWYoyLFt2ze0SwduK0t+1sWK7LEUQ==}
+
   rolldown@1.2.8:
     resolution: {integrity: sha512-Z67nTmhZe7anqnM/EjI392w5i/ANUinjip7QYsOyN37oayduxt3ksdX0hf5OOamkAd53BiIHfbfSzfUmzKFQqQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1696,6 +1705,8 @@ snapshots:
       scheduler: 0.28.0
 
   react@19.3.0: {}
+
+  reactive-framework-test-suite@0.0.2: {}
 
   rolldown@1.2.8:
     dependencies:

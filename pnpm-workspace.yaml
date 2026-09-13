@@ -19,6 +19,7 @@ catalog:
   oxlint: 1.81.0
   parse5: 8.0.1
   playwright: 1.63.0
+  reactive-framework-test-suite: 0.0.2
   react: 19.3.0
   react-dom: 19.3.0
   svelte: 5.57.0

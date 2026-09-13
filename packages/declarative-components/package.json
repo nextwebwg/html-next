@@ -67,6 +67,7 @@
     "@vue/server-renderer": "catalog:",
     "esbuild": "catalog:",
     "playwright": "catalog:",
+    "reactive-framework-test-suite": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "svelte": "catalog:",
