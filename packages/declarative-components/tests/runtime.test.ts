@@ -97,6 +97,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
           let wildcardQueries = 0;
           let rootMarkerQueries = 0;
           let discoveryQueries = 0;
+          let registryScans = 0;
+          const nativeMapKeys = Map.prototype.keys;
+          const nativeMapValues = Map.prototype.values;
+          Map.prototype.keys = function() {
+            registryScans += 1;
+            return nativeMapKeys.call(this);
+          };
+          Map.prototype.values = function() {
+            registryScans += 1;
+            return nativeMapValues.call(this);
+          };
           Document.prototype.querySelectorAll = function(selector) {
             if (this === document) documentQueries += 1;
             return nativeQuery.call(this, selector);
@@ -116,19 +127,23 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const localName = document.querySelector("#local").localName;
           Document.prototype.querySelectorAll = nativeQuery;
           Element.prototype.querySelectorAll = nativeElementQuery;
+          Map.prototype.keys = nativeMapKeys;
+          Map.prototype.values = nativeMapValues;
           stop();
-          return { documentQueries, wildcardQueries, rootMarkerQueries, discoveryQueries, localName };
+          return { documentQueries, wildcardQueries, rootMarkerQueries, discoveryQueries, registryScans, localName };
         })()`) as {
           documentQueries: number;
           wildcardQueries: number;
           rootMarkerQueries: number;
           discoveryQueries: number;
+          registryScans: number;
           localName: string;
         };
         assert.equal(result.documentQueries, 0);
         assert.equal(result.wildcardQueries, 0);
         assert.equal(result.rootMarkerQueries, 0);
         assert.equal(result.discoveryQueries, 2);
+        assert.equal(result.registryScans, 0);
         assert.equal(result.localName, "button");
       } finally {
         await browser.close();

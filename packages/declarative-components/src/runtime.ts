@@ -79,6 +79,7 @@ interface RuntimeInstance {
 interface DocumentRegistry {
   readonly definitions: Map<string, LiveDefinition>;
   readonly instances: WeakMap<Element, ComponentDefinition>;
+  discoverySelector: string | undefined;
 }
 
 const registries = new WeakMap<Document, DocumentRegistry>();
@@ -89,10 +90,20 @@ const frameworkProjectedNodes = new WeakMap<Element, readonly Node[]>();
 function registryFor(root: Document): DocumentRegistry {
   let registry = registries.get(root);
   if (registry === undefined) {
-    registry = { definitions: new Map(), instances: new WeakMap() };
+    registry = { definitions: new Map(), instances: new WeakMap(), discoverySelector: undefined };
     registries.set(root, registry);
   }
   return registry;
+}
+
+function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
+  registry.definitions.set(tag, definition);
+  if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
+}
+
+function discoverySelector(registry: DocumentRegistry): string {
+  return registry.discoverySelector ??=
+    ["template[component]", "[data-component-root]", ...registry.definitions.keys()].join(",");
 }
 
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
@@ -133,7 +144,7 @@ export function installComponentGraph(
       style.dataset.htmlNextComponent = tag;
       root.head.append(style);
     }
-    registry.definitions.set(tag, {
+    registerDefinition(registry, tag, {
       definition: node.definition,
       style,
     });
@@ -1305,72 +1316,56 @@ interface LoweredScopes {
 
 function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScopes {
   const registry = registryFor(root);
-  const registered = [...registry.definitions.values()];
-  const registeredTags = registered.map(({ definition }) => definition.contract.tag);
-  const discoverySelector = ["template[component]", "[data-component-root]", ...registeredTags].join(",");
-  const discoveredElements = [...new Set(scopes.flatMap((scope) => queryWithin(scope, discoverySelector)))];
+  const discoveredElements = [...new Set(scopes.flatMap((scope) => queryWithin(scope, discoverySelector(registry))))];
   const wrappers = discoveredElements.filter(
     (element): element is HTMLTemplateElement =>
       element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element),
   );
   const definitions = wrappers.map(parseDefinition);
-  const discovered = new Set(definitions);
-  const tags = new Set(registry.definitions.keys());
-  for (const { definition } of definitions) {
-    if (tags.has(definition.contract.tag)) {
-      fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
+  const newDefinitions = new Map<string, LiveDefinition>();
+  for (const live of definitions) {
+    const tag = live.definition.contract.tag;
+    if (registry.definitions.has(tag) || newDefinitions.has(tag)) {
+      fail("HR001", `More than one definition declares <${tag}>.`);
     }
-    tags.add(definition.contract.tag);
+    newDefinitions.set(tag, live);
   }
 
   const prepared: PreparedInvocation[] = [];
-  const lives = [...registered, ...definitions].filter(
-    ({ definition }) => root.defaultView?.customElements.get(definition.contract.tag) === undefined,
-  );
-  const invocations = new Map(lives.map((live) => [live, new Set<Element>()]));
-  const hydrationRoots = new Map(lives.map((live) => [live, new Set<Element>()]));
   const roots = new Set<Element>();
-  const collect = (search: readonly LiveDefinition[], elements: readonly Element[]): void => {
-    if (search.length === 0 || elements.length === 0) return;
-    const byTag = new Map(search.map((live) => [live.definition.contract.tag, live]));
+  const prepare = (live: LiveDefinition, element: Element, hydration: boolean): void => {
+    const { definition } = live;
+    if (
+      contentOnly.has(element) ||
+      root.defaultView?.customElements.get(definition.contract.tag) !== undefined
+    ) return;
+    prepared.push(prepareRuntimeInvocation(element, definition, hydration));
+  };
+  const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: readonly Element[]): void => {
     for (const element of elements) {
       const live = byTag.get(element.localName);
-      if (live !== undefined) invocations.get(live)!.add(element);
+      if (live !== undefined) prepare(live, element, false);
       if (!element.hasAttribute("data-component-root")) continue;
       roots.add(element);
       if (runtimeInstances.has(element)) continue;
-      for (const tag of (element.getAttribute("data-component-root") ?? "").split(/\s+/)) {
+      for (const tag of new Set((element.getAttribute("data-component-root") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
-        if (owner !== undefined) hydrationRoots.get(owner)!.add(element);
+        if (owner !== undefined) prepare(owner, element, true);
       }
     }
   };
-  collect(lives.filter((live) => !discovered.has(live)), discoveredElements);
+  collect(registry.definitions, discoveredElements);
   // A newly discovered definition also applies to matching invocations that predate it.
-  const newLives = lives.filter((live) => discovered.has(live));
-  if (newLives.length > 0) {
+  if (newDefinitions.size > 0) {
     const selector = [
       "[data-component-root]",
-      ...newLives.map(({ definition }) => definition.contract.tag),
+      ...newDefinitions.keys(),
     ].join(",");
-    collect(newLives, queryWithin(root, selector));
-  }
-
-  for (const live of lives) {
-    const { definition } = live;
-    // A <template>'s content is inert, so querySelectorAll never returns definition-internal
-    // markup; every match is a live invocation to lower.
-    for (const [invocation, hydration] of [
-      ...[...invocations.get(live)!].map((element) => [element, false] as const),
-      ...[...hydrationRoots.get(live)!].map((element) => [element, true] as const),
-    ]) {
-      if (contentOnly.has(invocation)) continue;
-      prepared.push(prepareRuntimeInvocation(invocation, definition, hydration));
-    }
+    collect(newDefinitions, queryWithin(root, selector));
   }
 
   for (const live of definitions) {
-    registry.definitions.set(live.definition.contract.tag, live);
+    registerDefinition(registry, live.definition.contract.tag, live);
     if (live.style !== undefined) {
       live.style.textContent = transformComponentStyles(
         live.style.textContent ?? "",
@@ -1560,7 +1555,7 @@ export function registerComponentDefinitions(
       }
       continue;
     }
-    registry.definitions.set(definition.contract.tag, {
+    registerDefinition(registry, definition.contract.tag, {
       definition,
       style: undefined,
     });
@@ -1589,7 +1584,7 @@ export function attachComponent(
   const registry = registryFor(root);
   const existing = registry.definitions.get(definition.contract.tag);
   if (existing === undefined) {
-    registry.definitions.set(definition.contract.tag, {
+    registerDefinition(registry, definition.contract.tag, {
       definition,
       style: undefined,
     });
