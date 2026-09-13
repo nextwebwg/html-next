@@ -23,9 +23,8 @@ import type {
 } from "./template.js";
 import type { ComponentContract, PropTarget } from "./types.js";
 
-type ChildNode = DefaultTreeAdapterTypes.ChildNode;
-type Element = DefaultTreeAdapterTypes.Element;
-type Template = DefaultTreeAdapterTypes.Template;
+type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
+type Element = DefaultTreeAdapterTypes.Element | globalThis.Element;
 
 export type ComponentSourceNode = ChildNode;
 
@@ -38,32 +37,55 @@ function isElement(node: ChildNode): node is Element {
   return "tagName" in node;
 }
 
-function isText(node: ChildNode): node is DefaultTreeAdapterTypes.TextNode {
-  return node.nodeName === "#text" && "value" in node;
+function isText(node: ChildNode): boolean {
+  return node.nodeName === "#text";
+}
+
+function sourceTag(element: Element): string {
+  return "localName" in element ? element.localName : element.tagName;
+}
+
+function sourceAttributes(element: Element): ReadonlyArray<Readonly<{ name: string; value: string }>> {
+  return "attrs" in element
+    ? element.attrs
+    : Array.from(element.attributes, ({ name, value }) => ({ name, value }));
+}
+
+function sourceChildren(element: Element): ChildNode[] {
+  const content = sourceTag(element) === "template"
+    ? (element as unknown as { content?: { childNodes: ArrayLike<unknown> } }).content
+    : undefined;
+  const children = content?.childNodes ?? element.childNodes;
+  return Array.from(children as ArrayLike<unknown>) as ChildNode[];
+}
+
+function sourceText(node: ChildNode): string {
+  if ("value" in node) return node.value;
+  return "nodeValue" in node ? node.nodeValue ?? "" : "";
 }
 
 function significant(nodes: readonly ChildNode[]): ChildNode[] {
   return nodes.filter((node) => {
     if (node.nodeName === "#comment") return false;
-    if (isText(node)) return node.value.trim() !== "";
+    if (isText(node)) return sourceText(node).trim() !== "";
     return true;
   });
 }
 
 function attr(element: Element, name: string): string | undefined {
-  return element.attrs.find((item) => item.name === name)?.value;
+  return sourceAttributes(element).find((item) => item.name === name)?.value;
 }
 
 function textContent(element: Element): string {
-  return element.childNodes
+  return sourceChildren(element)
     .filter(isText)
-    .map((node) => node.value)
+    .map(sourceText)
     .join("");
 }
 
 function directElements(element: Element, name: string): Element[] {
-  return element.childNodes.filter(
-    (node): node is Element => isElement(node) && node.tagName === name,
+  return sourceChildren(element).filter(
+    (node): node is Element => isElement(node) && sourceTag(node) === name,
   );
 }
 
@@ -144,7 +166,7 @@ function collectTargets(
     targets[name] = target;
   };
   const visit = (element: Element): void => {
-    for (const attribute of element.attrs) {
+    for (const attribute of sourceAttributes(element)) {
       if (attribute.name.startsWith(":")) {
         if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
           record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
@@ -152,12 +174,12 @@ function collectTargets(
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
         if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
-          record(attribute.value, { property: platform.resolveDomProperty(element.tagName, key) ?? key });
+          record(attribute.value, { property: platform.resolveDomProperty(sourceTag(element), key) ?? key });
         }
       }
     }
-    for (const child of element.childNodes) {
-      if (isElement(child) && child.tagName !== "slot") visit(child);
+    for (const child of sourceChildren(element)) {
+      if (isElement(child) && sourceTag(child) !== "slot") visit(child);
     }
   };
   visit(root);
@@ -188,7 +210,7 @@ function readProps(
     target ??= { attribute: name.toLowerCase() };
     const type = parseTypeAttribute(typeAttribute);
     const spec: Record<string, unknown> = { type, target, description: textContent(element).trim() };
-    if (element.attrs.some((item) => item.name === "required")) spec.required = true;
+    if (sourceAttributes(element).some((item) => item.name === "required")) spec.required = true;
     const defaultValue = attr(element, "default");
     if (defaultValue !== undefined) spec.default = coerceDefault(type, defaultValue);
     props[name] = spec;
@@ -210,12 +232,12 @@ function readHandlerSteps(
   source: string,
 ): HandlerStep[] {
   const steps: HandlerStep[] = [];
-  for (const step of significant(handler.childNodes)) {
+  for (const step of significant(sourceChildren(handler))) {
     if (!isElement(step)) fail("HC023", "Handler bodies contain declarative step elements only.", source);
     const guardSource = attr(step, "$if");
     const guard =
       guardSource === undefined ? undefined : compileScopedExpression(guardSource, scope, source);
-    if (step.tagName === "set") {
+    if (sourceTag(step) === "set") {
       const path = attr(step, "name") ?? "";
       const expressionSource = attr(step, ":value");
       const literal = attr(step, "value");
@@ -240,7 +262,7 @@ function readHandlerSteps(
       });
       continue;
     }
-    if (step.tagName === "dispatch") {
+    if (sourceTag(step) === "dispatch") {
       const event = attr(step, "event") ?? "";
       if (!EVENT_PART_RE.test(event)) {
         fail("HC023", "A <dispatch> requires a valid `event` name.", source);
@@ -262,19 +284,19 @@ function readHandlerSteps(
       });
       continue;
     }
-    if (step.tagName === "validate" || step.tagName === "focus") {
+    if (sourceTag(step) === "validate" || sourceTag(step) === "focus") {
       const target = attr(step, "target") ?? attr(step, "ref") ?? attr(step, "name") ?? "";
       if (!NAME_RE.test(target)) {
-        fail("HC023", `<${step.tagName}> requires a valid target reference.`, source);
+        fail("HC023", `<${sourceTag(step)}> requires a valid target reference.`, source);
       }
       steps.push({
-        kind: step.tagName,
+        kind: sourceTag(step) as "validate" | "focus",
         target,
         ...(guard === undefined ? {} : { guard }),
       });
       continue;
     }
-    fail("HC023", `<${step.tagName}> is not a recognized handler step.`, source);
+    fail("HC023", `<${sourceTag(step)}> is not a recognized handler step.`, source);
   }
   return steps;
 }
@@ -286,12 +308,12 @@ function readDeclarations(
   formNames: ReadonlySet<string> = new Set(),
 ): ComponentDeclaration[] {
   if (group === undefined) return [];
-  const elements = group.childNodes.filter(isElement);
+  const elements = sourceChildren(group).filter(isElement);
   const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
   const names = new Set<string>(formNames);
   const eventNames = new Set<string>();
   for (const element of elements) {
-    const kind = element.tagName;
+    const kind = sourceTag(element);
     if (!allowed.has(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
@@ -312,18 +334,18 @@ function readDeclarations(
     roots: new Set([...Object.keys(contract.props), ...names]),
     writableRoots: new Set(
       elements
-        .filter((element) => element.tagName === "state")
+        .filter((element) => sourceTag(element) === "state")
         .map((element) => attr(element, "name")!),
     ),
     handlers: new Set(
       elements
-        .filter((element) => element.tagName === "handler")
+        .filter((element) => sourceTag(element) === "handler")
         .map((element) => attr(element, "name")!),
     ),
   };
   const declarations: ComponentDeclaration[] = [];
   for (const element of elements) {
-    const kind = element.tagName;
+    const kind = sourceTag(element);
     if (kind === "prop") continue;
     const name = attr(element, "name")!;
 
@@ -421,8 +443,8 @@ function readDeclarations(
 function enhancedForms(root: Element, source: string): Element[] {
   const forms: Element[] = [];
   const visit = (element: Element): void => {
-    if (element.tagName === "form" && attr(element, "src") !== undefined) forms.push(element);
-    for (const child of element.childNodes) if (isElement(child)) visit(child);
+    if (sourceTag(element) === "form" && attr(element, "src") !== undefined) forms.push(element);
+    for (const child of sourceChildren(element)) if (isElement(child)) visit(child);
   };
   visit(root);
   const names = new Set<string>();
@@ -469,13 +491,13 @@ function parseAttributes(
   source: string,
   platform: ComponentParserPlatform,
 ): TemplateAttribute[] {
-  return element.attrs
+  return sourceAttributes(element)
     .filter(
       (attribute) =>
         !FLOW_NAMES.has(attribute.name) &&
         attribute.name !== "$ref" &&
         attribute.name !== "as" &&
-        !(element.tagName === "form" && attribute.name === "src") &&
+        !(sourceTag(element) === "form" && attribute.name === "src") &&
         !attribute.name.startsWith("on:"),
     )
     .map((attribute) => {
@@ -551,10 +573,10 @@ function parseAttributes(
       if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
         fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
-      const name = platform.resolveDomProperty(element.tagName, key) ??
+      const name = platform.resolveDomProperty(sourceTag(element), key) ??
         (prop !== undefined && "property" in prop.target ? prop.target.property : undefined);
       if (name === undefined) {
-        fail("HP001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
+        fail("HP001", `\`${key}\` is not a known property of <${sourceTag(element)}>.`, source);
       }
       validateMvpDomProperty(name, source);
       return { kind: "property", key, name, expression: attribute.value, expressionPlan };
@@ -567,7 +589,7 @@ function parseAttributes(
 
 function parseEvents(element: Element, scope: ParseScope, source: string): EventBinding[] {
   const events: EventBinding[] = [];
-  for (const attribute of element.attrs.filter((item) => item.name.startsWith("on:"))) {
+  for (const attribute of sourceAttributes(element).filter((item) => item.name.startsWith("on:"))) {
     const [name = "", ...modifiers] = attribute.name.slice("on:".length).split(".");
     if (!EVENT_PART_RE.test(name) || modifiers.some((modifier) => !EVENT_PART_RE.test(modifier))) {
       fail("HT010", `\`${attribute.name}\` is not a valid declarative event binding.`, source);
@@ -703,10 +725,10 @@ function parseElement(
   },
   platform: ComponentParserPlatform,
 ): ElementNode {
-  if (isReservedElement(element.tagName)) {
-    fail("HT009", `<${element.tagName}> is reserved but not supported by this profile.`, source);
+  if (isReservedElement(sourceTag(element))) {
+    fail("HT009", `<${sourceTag(element)}> is reserved but not supported by this profile.`, source);
   }
-  validateDefinitionElementName(element.tagName, source);
+  validateDefinitionElementName(sourceTag(element), source);
 
   const flow = extractFlow(element, scope, source);
   const nodeScope =
@@ -719,27 +741,26 @@ function parseElement(
   const events = parseEvents(element, nodeScope, source);
   const ref = parseRef(element, slotState.refs, source);
   const children: TemplateNode[] = [];
-  const childNodes =
-    element.tagName === "template" && "content" in element
-      ? (element as Template).content.childNodes
-      : element.childNodes;
+  const childNodes = sourceChildren(element);
   for (const child of childNodes) {
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
-      if (child.value.trim() !== "") children.push({ kind: "text", value: child.value });
+      const value = sourceText(child);
+      if (value.trim() !== "") children.push({ kind: "text", value });
       continue;
     }
     if (!isElement(child)) continue;
-    if (element.tagName === "form" && attr(element, "src") !== undefined && child.tagName === "param") {
+    if (sourceTag(element) === "form" && attr(element, "src") !== undefined && sourceTag(child) === "param") {
       continue;
     }
-    if (child.tagName === "slot") {
+    if (sourceTag(child) === "slot") {
       const name = attr(child, "name");
       const nameExpression = attr(child, ":name");
       if (name !== undefined && nameExpression !== undefined) {
         fail("HT008", "A slot cannot declare both `name` and `:name`.", source);
       }
-      const unknown = child.attrs.filter((item) => item.name !== "name" && item.name !== ":name");
+      const unknown = sourceAttributes(child)
+        .filter((item) => item.name !== "name" && item.name !== ":name");
       if (unknown.length > 0) fail("HT008", "A slot has an unsupported attribute.", source);
       if (name === undefined && nameExpression === undefined) {
         slotState.defaults += 1;
@@ -752,10 +773,11 @@ function parseElement(
         slotState.names.add(name);
       }
       const fallback: TemplateNode[] = [];
-      for (const fallbackNode of child.childNodes) {
+      for (const fallbackNode of sourceChildren(child)) {
         if (fallbackNode.nodeName === "#comment") continue;
         if (isText(fallbackNode)) {
-          if (fallbackNode.value.trim() !== "") fallback.push({ kind: "text", value: fallbackNode.value });
+          const value = sourceText(fallbackNode);
+          if (value.trim() !== "") fallback.push({ kind: "text", value });
         } else if (isElement(fallbackNode)) {
           fallback.push(parseElement(fallbackNode, contract, nodeScope, source, slotState, platform));
         }
@@ -811,7 +833,7 @@ function parseElement(
 
   return {
     kind: "element",
-    name: element.tagName,
+    name: sourceTag(element),
     attributes,
     children,
     ...(flow === undefined ? {} : { flow }),
@@ -828,7 +850,7 @@ export function parseComponentNodes(
   const roots = significant(childNodes).filter(isElement);
   if (
     roots.length !== 1 ||
-    roots[0]!.tagName !== "template" ||
+    sourceTag(roots[0]!) !== "template" ||
     attr(roots[0]!, "component") === undefined
   ) {
     fail("HS001", "A source must contain exactly one top-level <template component>.", source);
@@ -836,13 +858,13 @@ export function parseComponentNodes(
   if (significant(childNodes).length !== 1) {
     fail("HS001", "A source must contain only one top-level component definition.", source);
   }
-  const wrapper = roots[0]! as Template;
+  const wrapper = roots[0]!;
   const tag = attr(wrapper, "component")!;
 
   // A <template>'s children live in its content fragment, inert and unrendered.
-  const content = wrapper.content.childNodes;
+  const content = sourceChildren(wrapper);
   const contentElement = (name: string): Element[] =>
-    content.filter((node): node is Element => isElement(node) && node.tagName === name);
+    content.filter((node): node is Element => isElement(node) && sourceTag(node) === name);
   const propGroups = contentElement("props");
   const defGroups = contentElement("defs");
   const styles = contentElement("style");
@@ -857,18 +879,18 @@ export function parseComponentNodes(
     fail("HT001", "A component's markup must be exactly one element root.", source);
   }
   const root = markup[0] as Element;
-  const rootChoices = (attr(root, "as") ?? root.tagName)
+  const rootChoices = (attr(root, "as") ?? sourceTag(root))
     .split("|")
     .map((choice) => choice.trim())
     .filter((choice) => choice !== "");
-  const delegatedRoot = !platform.isNativeElement(root.tagName);
+  const delegatedRoot = !platform.isNativeElement(sourceTag(root));
   if (delegatedRoot && attr(root, "as") !== undefined) {
     fail("HT021", "A delegated component root cannot also declare native `as` choices.", source);
   }
   if (
     !delegatedRoot &&
     (rootChoices.length === 0 ||
-      !rootChoices.includes(root.tagName) ||
+      !rootChoices.includes(sourceTag(root)) ||
       new Set(rootChoices).size !== rootChoices.length ||
       rootChoices.some((choice) => !platform.isNativeElement(choice)))
   ) {
@@ -879,7 +901,7 @@ export function parseComponentNodes(
   const rawContract = {
     status: attr(wrapper, "status"),
     summary: attr(wrapper, "summary"),
-    nativeElement: root.tagName,
+    nativeElement: sourceTag(root),
     props: readProps(propGroups[0] ?? defGroups[0], targets, source, defGroups.length === 0),
   };
   const contract = defineContractWithNativeCheck(rawContract, { source, tag }, platform.isNativeElement);
@@ -944,10 +966,10 @@ export function parseComponentNodes(
     declarations: Object.freeze(declarations),
     slots: Object.freeze(slotState.contracts),
     root: delegatedRoot
-      ? Object.freeze({ kind: "component" as const, tag: root.tagName })
+      ? Object.freeze({ kind: "component" as const, tag: sourceTag(root) })
       : Object.freeze({
           kind: "native" as const,
-          element: root.tagName,
+          element: sourceTag(root),
           choices: Object.freeze(rootChoices),
         }),
   });

@@ -1,6 +1,6 @@
 import { fail } from "./diagnostics.js";
 import type { ParsedComponentResource } from "./graph.js";
-import { parseComponentNodes, type ComponentSourceNode } from "./parser.js";
+import { parseComponentNodes } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
 function browserPlatform(root: Document) {
@@ -33,38 +33,9 @@ function browserPlatform(root: Document) {
   };
 }
 
-function sourceNode(node: Node): ComponentSourceNode {
-  if (node.nodeType === 1) {
-    const element = node as Element;
-    const template = element.localName === "template" ? element as HTMLTemplateElement : undefined;
-    const children = template?.content.childNodes ?? element.childNodes;
-    const converted = {
-      nodeName: element.localName,
-      tagName: element.localName,
-      attrs: Array.from(element.attributes, ({ name, value }) => ({ name, value })),
-      childNodes: Array.from(children, sourceNode),
-    };
-    if (template !== undefined) {
-      return {
-        ...converted,
-        content: {
-          nodeName: "#document-fragment",
-          childNodes: converted.childNodes,
-        },
-      } as unknown as ComponentSourceNode;
-    }
-    return converted as unknown as ComponentSourceNode;
-  }
-  if (node.nodeType === 3) {
-    return { nodeName: "#text", value: node.nodeValue ?? "" } as ComponentSourceNode;
-  }
-  return { nodeName: "#comment", data: node.nodeValue ?? "" } as ComponentSourceNode;
-}
-
 /**
- * Adapts a browser-parsed inert carrier directly to the normalized parser input used by build
- * tools. The browser has already normalized names, values, entities, and template contents, so
- * the runtime does not ship or invoke a second HTML parser.
+ * Reads a browser-parsed inert carrier directly through the shared component parser. The browser
+ * has already normalized names, values, entities, and template contents.
  */
 export function parseBrowserComponent(
   carrier: Element,
@@ -73,7 +44,7 @@ export function parseBrowserComponent(
   if (carrier.localName !== "template" || !carrier.hasAttribute("component")) {
     fail("HS001", "A browser component carrier must be a <template component>.", source);
   }
-  return parseComponentNodes([sourceNode(carrier)], source, browserPlatform(carrier.ownerDocument));
+  return parseComponentNodes([carrier], source, browserPlatform(carrier.ownerDocument));
 }
 
 function significant(nodes: readonly Node[]): Node[] {

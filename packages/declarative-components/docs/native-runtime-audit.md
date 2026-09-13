@@ -8,25 +8,26 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the 103,125-byte bundle; its complete
-gzip baseline is 33,199 bytes. Compressed bytes cannot be attributed cleanly to individual modules.
+`live_distributable`. Values are minified raw bytes inside the current 102,688-byte bundle; its
+complete gzip size is 33,155 bytes, down from the 33,199-byte baseline. Compressed bytes cannot be
+attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
 the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 103,001 attributed minified raw bytes plus 124
+The production browser entry currently contains 102,564 attributed minified raw bytes plus 124
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
 | Responsibility | Minified raw bytes | Native foundation under review |
 | --- | ---: | --- |
 | Reactive execution | 38,480 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
-| Types and validation | 26,171 | Native control validity, Web IDL conversion, platform value objects |
-| Parsing and contract | 24,036 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
+| Types and validation | 26,177 | Native control validity, Web IDL conversion, platform value objects |
+| Parsing and contract | 23,591 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 6,181 | CSSOM, `@scope`, template parsing, safe HTML sinks |
-| Component resources | 3,958 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Component resources | 3,960 | URL, Fetch, import maps, native ESM, CORS, CSP |
 | Form enhancement | 2,216 | Native forms, successful controls, submitters, FormData, constraint validation |
 | Discovery and lifecycle | 1,959 | Shared MutationObserver, selector matching, node identity, connection state |
 
@@ -35,7 +36,7 @@ contains all of them for arbitrary later graphs.
 
 | Subsystem | Platform foundation | Reference-library layer | Current evidence and status |
 | --- | --- | --- | --- |
-| Component HTML parsing | `<template>`, the HTML parser, DOM traversal, native element/property introspection | Proposal grammar, declarations, diagnostics, and contract construction | Browser bundles contain zero `parse5` and zero generated DOM-property inventory modules. `parser.ts` contributes 16,302 raw bytes to the full live compiler and zero bytes to directly generated components. Retained for live authoring; continue compiling it out of generated output. |
+| Component HTML parsing | `<template>`, the HTML parser, DOM traversal, native element/property introspection | Proposal grammar, declarations, diagnostics, and contract construction | The live parser reads the browser's inert DOM directly instead of cloning a parse5-shaped tree. This removes 437 raw and 44 gzip bytes plus the recursive copy allocation while preserving Chromium, Firefox, and WebKit normalization parity. Browser bundles contain zero `parse5` and zero generated DOM-property inventory modules. |
 | Component discovery and lifecycle | `MutationObserver`, selector matching, `Node.isConnected`, native `connect`/`disconnect` events | One realm-global document subscriber hub and one component lifecycle coordinator | Owner-approved shape: added scopes are queried once against the registered tag selector; removed scopes are queried only for marked component roots. Connected instances own their cleanup and reconnect work. |
 | Reactive scheduling | Native events, property access, `queueMicrotask()` | Dependency collection for proposal state, computed values, and effects | `reactivity.ts` contributes 2,794 raw live-loader bytes. Static, numeric state, numeric computed, and scalar-prop generated components compile this layer away. Retention for dynamic live expressions remains pending owner review. |
 | Expressions | JavaScript primitives and native string/number operations | CSP-safe parser, typed operations, missing-value semantics, dependency paths, and diagnostics | `expression.ts` contributes 7,075 raw live-loader bytes. Generated output emits only expressions whose semantics it can prove; all other shapes retain the interpreter. Retention for the live authoring path remains pending owner review. |
