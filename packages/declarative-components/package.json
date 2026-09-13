@@ -51,6 +51,7 @@
     "generate:looma-assets": "tsx scripts/generate-looma-assets.ts",
     "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
+    "measure:hydration": "tsx scripts/measure-hydration.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config ../../vitest.browser.config.ts",

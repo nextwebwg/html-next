@@ -23,6 +23,7 @@
     "generate:snapshots": "pnpm --filter @nextwebwg/declarative-components generate:snapshots",
     "lint": "oxlint --config oxlint.json --deny-warnings .",
     "measure:runtime": "pnpm --filter @nextwebwg/declarative-components measure:runtime",
+    "measure:hydration": "pnpm --filter @nextwebwg/declarative-components measure:hydration",
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:consumer": "pnpm build && vitest run --config vitest.consumer.config.ts",
