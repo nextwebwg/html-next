@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
-import { chromium } from "playwright";
+import { chromium, firefox, webkit, type BrowserType } from "playwright";
 import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateComponent } from "../src/generate.js";
@@ -15,6 +15,7 @@ import { parseComponent } from "../src/source-parser.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
+const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
 
 const source = `<template component="demo-counter" status="early" summary="Target parity fixture.">
   <defs>
@@ -158,6 +159,81 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
           invalid: true,
           provenance: "demo-counter",
         });
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+});
+
+describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
+  let bundlePath = "";
+  let directory = "";
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-vanilla-aot-"));
+    const definition = parseComponent(await readFile(reactiveFixtureUrl, "utf8"), reactiveFixtureUrl.href);
+    const module = generateComponent(definition)
+      .find((artifact) => artifact.path === "vanilla/ReactiveCounter.js")?.content;
+    assert.ok(module);
+    assert.doesNotMatch(module, /@nextwebwg\/declarative-components\/runtime/);
+
+    await mkdir(join(directory, "vanilla"), { recursive: true });
+    await mkdir(join(directory, "styles"), { recursive: true });
+    await writeFile(join(directory, "styles/reactive-counter.css"), "");
+    const entryPath = join(directory, "vanilla/ReactiveCounter.js");
+    bundlePath = join(directory, "bundle.js");
+    await writeFile(entryPath, module);
+    await build({
+      entryPoints: [entryPath],
+      outfile: bundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ReactiveCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  const engines: ReadonlyArray<[string, BrowserType]> = [
+    ["Chromium", chromium],
+    ["Firefox", firefox],
+    ["WebKit", webkit],
+  ];
+
+  for (const [name, browserType] of engines) {
+    it(`${name} updates directly compiled state from a native event`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ReactiveCounter: { createReactiveCounter(): Element };
+          }).ReactiveCounter;
+          const component = api.createReactiveCounter();
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          const before = output.textContent;
+          (component as HTMLButtonElement).click();
+          await Promise.resolve();
+          const connected = output.textContent;
+          component.remove();
+          (component as HTMLButtonElement).click();
+          await Promise.resolve();
+          const detached = output.textContent;
+          document.querySelector("main")!.append(component);
+          (component as HTMLButtonElement).click();
+          await Promise.resolve();
+          return { before, connected, detached, reconnected: output.textContent };
+        });
+        assert.deepEqual(result, { before: "0", connected: "1", detached: "1", reconnected: "2" });
       } finally {
         await browser.close();
       }

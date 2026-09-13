@@ -100,6 +100,36 @@ describe("official target compilers", () => {
     assert.match(module, /document\.createElement\("article"\)/);
   });
 
+  it("compiles simple numeric state directly to native browser primitives", async () => {
+    const module = generated(`<template component="demo-counter" status="experimental" summary="Counter.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment">
+          <set name="count" :value="count + 1"></set>
+          <set name="count" :value="count + 1"></set>
+        </handler>
+      </defs>
+      <button type="button" on:click="increment"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoCounter.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/declarative-components\/runtime/);
+    assert.match(module, /queueMicrotask\(update\)/);
+    assert.match(module, /addEventListener\("click", handler0\)/);
+    assert.match(module, /const next0 = state0 \+ 1/);
+    assert.match(module, /const next1 = state0 \+ 1/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps the complete runtime for reactive shapes outside the direct subset", () => {
+    const module = generated(`<template component="demo-derived" status="experimental" summary="Derived output.">
+      <defs><state name="count" :value="0"></state></defs>
+      <output $value="count + 1"></output>
+    </template>`).get("vanilla/DemoDerived.js")!;
+
+    assert.match(module, /@nextwebwg\/declarative-components\/runtime/);
+    assert.match(module, /manageComponentLifecycle/);
+  });
+
   it("emits provenance-scoped CSS and matching target markers", async () => {
     const artifacts = generated(componentSource(
       "demo-card",
