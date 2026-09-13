@@ -168,6 +168,105 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
   }
 });
 
+describe.skipIf(!enabled)("framework-native reactive conversion", () => {
+  let directory = "";
+  const bundles = new Map<string, string>();
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-native-targets-"));
+    const definition = parseComponent(
+      await readFile(computedFixtureUrl, "utf8"),
+      computedFixtureUrl.href,
+    );
+    const artifacts = new Map(
+      generateComponent(definition).map((artifact) => [artifact.path, artifact.content]),
+    );
+    for (const [path, content] of artifacts) {
+      const parent = path.split("/").slice(0, -1).join("/");
+      if (parent !== "") await mkdir(join(directory, parent), { recursive: true });
+      await writeFile(join(directory, path), content);
+    }
+    for (const target of ["react", "vue", "svelte"]) {
+      const source = artifacts.get(`${target}/ComputedCounter.${target === "react" ? "tsx" : target === "vue" ? "vue" : "svelte"}`)!;
+      assert.doesNotMatch(source, /declarative-components\/runtime|attachComponent/);
+    }
+
+    const vueParsed = parseVue(artifacts.get("vue/ComputedCounter.vue")!, {
+      filename: "ComputedCounter.vue",
+    });
+    assert.deepEqual(vueParsed.errors, []);
+    await writeFile(join(directory, "vue/ComputedCounter.ts"), compileScript(vueParsed.descriptor, {
+      id: "computed-counter",
+      inlineTemplate: true,
+    }).content);
+    await writeFile(
+      join(directory, "svelte/ComputedCounter.js"),
+      compileSvelte(artifacts.get("svelte/ComputedCounter.svelte")!, {
+        filename: "ComputedCounter.svelte",
+        generate: "client",
+      }).js.code,
+    );
+
+    const entries: Readonly<Record<string, string>> = {
+      react: `import React from "react";
+import { createRoot } from "react-dom/client";
+import { ComputedCounter } from "./react/ComputedCounter";
+createRoot(document.querySelector("main")).render(<ComputedCounter />);`,
+      vue: `import { createApp, h } from "vue";
+import ComputedCounter from "./vue/ComputedCounter";
+createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("main"));`,
+      svelte: `import { mount } from "svelte";
+import ComputedCounter from "./svelte/ComputedCounter";
+mount(ComputedCounter, { target: document.querySelector("main") });`,
+    };
+    for (const [target, entry] of Object.entries(entries)) {
+      const entryPath = join(directory, `${target}.${target === "react" ? "tsx" : "ts"}`);
+      const outfile = join(directory, `${target}.js`);
+      await writeFile(entryPath, entry);
+      await build({
+        entryPoints: [entryPath],
+        outfile,
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: ["es2022"],
+        jsx: "automatic",
+        nodePaths: [nodeModulesPath],
+        loader: { ".css": "empty" },
+      });
+      bundles.set(target, outfile);
+    }
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  for (const target of ["react", "vue", "svelte"] as const) {
+    it(`${target} owns state, computed updates, and event scheduling`, async () => {
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundles.get(target)! });
+        await page.waitForSelector('[data-component-root="computed-counter"] output');
+        const result = await page.evaluate(async () => {
+          const root = document.querySelector('[data-component-root="computed-counter"]')!;
+          const output = root.querySelector("output")!;
+          const before = output.textContent;
+          (root as HTMLButtonElement).click();
+          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { before, after: output.textContent };
+        });
+        assert.deepEqual(result, { before: "2", after: "4" });
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+});
+
 describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
   let bundlePath = "";
   let computedBundlePath = "";

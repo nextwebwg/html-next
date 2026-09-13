@@ -65,6 +65,13 @@ describe("official target compilers", () => {
     assert.ok(result.js.code.length > 0);
   });
 
+  it("uses framework rendering directly for prop-and-slot components", async () => {
+    const output = await targets();
+    for (const path of ["react/XButton.tsx", "vue/XButton.vue", "svelte/XButton.svelte"]) {
+      assert.doesNotMatch(output.get(path)!, /declarative-components\/runtime|attachComponent/);
+    }
+  });
+
   it("compiles non-button and native-boolean target projections", async () => {
     const audio = generated(componentSource(
       "demo-player",
