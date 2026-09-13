@@ -35,9 +35,6 @@ export const liveRuntimeSubsystemModules = {
     "packages/declarative-components/src/graph.ts",
     "packages/declarative-components/src/resolve.ts",
   ],
-  formEnhancement: [
-    "packages/html-forms/src/index.ts",
-  ],
 } as const;
 
 export interface LiveRuntimeInventory {

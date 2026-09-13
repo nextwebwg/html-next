@@ -879,47 +879,36 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} enhances declared forms while preserving native request semantics`, async () => {
+    it(`${name} keeps component controls associated with their author-owned form`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        const requests: Array<{ url: string; body: string | null }> = [];
-        await page.route("https://example.test/api/**", async (route) => {
-          requests.push({ url: route.request().url(), body: route.request().postData() });
-          await route.fulfill({
-            contentType: "application/json",
-            body: JSON.stringify({ saved: true }),
-          });
-        });
         await page.setContent(
-          `<base href="https://example.test/"><template component="x-editor" status="early" summary="Editor.">` +
-            `<defs><state name="post" :value="{ id: '42', title: 'Draft', tags: ['web', 'next'] }"></state>` +
-            `<state name="complete" :value="false"></state>` +
-            `<handler name="saved"><set name="complete" :value="true"></set></handler></defs>` +
-            `<form name="save" method="post" enctype="application/x-www-form-urlencoded" src="/api/posts/{id}" on:success="saved">` +
-            `<param name="id" :value="post.id"></param><param name="tags" :value="post.tags"></param>` +
-            `<input name="title" required bind:value="post.title"><button name="intent" value="publish">Save</button>` +
-            `<output class="pending" $value="save.pending"></output><output class="complete" $value="complete"></output>` +
-            `</form></template><x-editor id="editor"></x-editor>`,
+          `<template component="x-slug" status="early" summary="Slug editor.">` +
+            `<defs><state name="slug" :value="''"></state></defs>` +
+            `<fieldset><input name="slug" required pattern="[a-z-]+" bind:value="slug">` +
+            `<output $value="slug"></output></fieldset></template>` +
+            `<form id="post" action="/posts" method="post"><x-slug></x-slug>` +
+            `<button type="submit">Save post</button></form>`,
         );
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
-          const form = document.querySelector("#editor") as HTMLFormElement;
-          form.requestSubmit(form.querySelector("button"));
+          const input = document.querySelector("input[name=slug]") as HTMLInputElement;
+          input.value = "short-slug";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
         });
-        await page.waitForFunction(() => document.querySelector("#editor .complete")?.textContent === "true");
-        const result = await page.evaluate(() => ({
-          pending: document.querySelector("#editor .pending")?.textContent,
-          complete: document.querySelector("#editor .complete")?.textContent,
-          paramCount: document.querySelectorAll("#editor param").length,
-          srcPresent: document.querySelector("#editor")?.hasAttribute("src"),
-        }));
-        assert.deepEqual(result, { pending: "false", complete: "true", paramCount: 0, srcPresent: false });
-        assert.deepEqual(requests, [{
-          url: "https://example.test/api/posts/42",
-          body: "title=Draft&intent=publish&tags=web&tags=next",
-        }]);
+        await page.waitForFunction(() => document.querySelector("output")?.textContent === "short-slug");
+        const result = await page.evaluate(() => {
+          const input = document.querySelector("input[name=slug]") as HTMLInputElement;
+          return {
+            form: input.form?.id,
+            valid: input.checkValidity(),
+            output: document.querySelector("output")?.textContent,
+            formCount: document.querySelectorAll("form").length,
+          };
+        });
+        assert.deepEqual(result, { form: "post", valid: true, output: "short-slug", formCount: 1 });
       } finally {
         await browser.close();
       }

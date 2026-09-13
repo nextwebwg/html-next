@@ -32,7 +32,6 @@ const liveCapabilityModules = {
   controllerHost: "packages/declarative-components/src/controller.ts",
   declaredData: "packages/declarative-components/src/data.ts",
   expressionEvaluation: "packages/declarative-components/src/expression.ts",
-  formEnhancement: "packages/html-forms/src/index.ts",
   generalRuntime: "packages/declarative-components/src/runtime.ts",
   jsonSchema: "packages/declarative-components/src/json-schema.ts",
   liveSource: "packages/declarative-components/src/browser-source.ts",
@@ -117,7 +116,6 @@ const propGenerated = await generatedFixture("prop-button", 5_000);
 const computedGenerated = await generatedFixture("computed-counter", 5_000);
 const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
 const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
-const formGenerated = await generatedFixture("enhanced-form", Number.POSITIVE_INFINITY);
 const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
@@ -162,7 +160,6 @@ const nativeBuild = {
     computed: computedGenerated,
     keyed: keyedGenerated,
     data: dataGenerated,
-    form: formGenerated,
     controller: controllerGenerated,
   },
 } as const;

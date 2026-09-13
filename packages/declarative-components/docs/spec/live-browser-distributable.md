@@ -19,8 +19,8 @@ root.
 
 One public browser entry must make the complete implemented capability profile available,
 including component discovery, native-root lowering, projection, props, state, computed values,
-effects, handlers, structural directives, declared requests, enhanced forms, validation, scoped
-styles, controllers, resource graphs, and hydration.
+effects, handlers, structural directives, declared requests, validation, scoped styles,
+controllers, resource graphs, and hydration.
 
 The implementation may load an internal module only when a definition needs its capability. The
 public entry still promises that any later conforming graph can obtain that capability with
@@ -99,4 +99,3 @@ hot-path performance guardrail.
    leaked live work.
 5. Hydrate server-lowered DOM while preserving node identity, edits, focus, selection, and current
    control state.
-

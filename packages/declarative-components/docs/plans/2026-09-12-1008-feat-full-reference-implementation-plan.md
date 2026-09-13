@@ -103,7 +103,7 @@ Looma supplies the concrete baseline. Its 34 core components exercise named, fal
 
 ### Scope Boundaries
 
-Included despite experimental maturity because the user explicitly requested a working reference implementation: controllers, the host adapter, generalized validation, typed data reads, enhanced form writes, hydration adoption, and the concrete loading/trust model.
+Included despite experimental maturity because the user explicitly requested a working reference implementation: controllers, the host adapter, generalized validation, typed data reads, native form participation, hydration adoption, and the concrete loading/trust model. Request enhancement remains owned and shipped by the independent Forms proposal.
 
 #### Deferred to Follow-Up Work
 
@@ -221,7 +221,7 @@ flowchart TB
 - Generated artifacts become executable framework integrations rather than static prop wrappers, so framework compiler versions and target-runtime helpers become compatibility contracts.
 - Package generation must cover two distinct consumer contracts: typed framework adapters for Knit and side-effect registration of directly authored custom elements for LoadOps. Neither may be treated as a test-only alias.
 - The Looma editor and extension graph demonstrates that a component package can also expose ordinary JavaScript libraries. Package assembly therefore needs explicit pass-through/build edges without presenting those modules as HTML component definitions.
-- Network behavior enters the runtime through component definition fetches, declared data reads, enhanced forms, and controller imports; cancellation, teardown, CSP, CORS, and deterministic diagnostics apply across them.
+- Network behavior enters the runtime through component definition fetches, declared data reads, and controller imports; cancellation, teardown, CSP, CORS, and deterministic diagnostics apply across them.
 - The specification, examples, conformance corpus, and implementation must change together. A feature is not shipped when only prose or only one execution path supports it.
 
 ### Risks and Dependencies
@@ -310,7 +310,7 @@ flowchart TB
 - **Requirements:** R4, R10-R13.
 - **Dependencies:** U2, U3.
 - **Files:** `src/reactivity.ts`, `src/render.ts`, `src/runtime.ts`, `src/handlers.ts`, `src/data.ts`, `src/forms.ts`, `src/sanitize.ts`, `src/controller.ts`, `test/reactivity.test.ts`, `test/runtime.test.ts`, `test/data.test.ts`, `test/forms.test.ts`, `test/sanitize.test.ts`, `test/conformance/cases.ts`, `test/runtime.html`.
-- **Approach:** Compile instance scopes and effects from the IR; add microtask scheduling, dependency invalidation, computed propagation, keyed structural ranges, input write-back, handler steps/modifiers, component events, lifecycle connect/disconnect/adopt, data cancellation/cache keys/debounce/poll, enhanced form writes, safe content insertion, nested lowering, provenance/prop reflection, and SSR root adoption. On a semantic hydration mismatch, repair only the owning component's authored region in place, preserve projected nodes and compatible focused/form controls with their live values and selection, then restore focus. If safe bounded repair cannot establish the expected structure, leave the server DOM inert, do not run its controller, and emit a stable diagnostic rather than replacing user-visible state. Ensure ownership cleanup follows nodes across removal and reconnection.
+- **Approach:** Compile instance scopes and effects from the IR; add microtask scheduling, dependency invalidation, computed propagation, keyed structural ranges, input write-back, handler steps/modifiers, component events, lifecycle connect/disconnect/adopt, data cancellation/cache keys/debounce/poll, native form participation, safe content insertion, nested lowering, provenance/prop reflection, and SSR root adoption. On a semantic hydration mismatch, repair only the owning component's authored region in place, preserve projected nodes and compatible focused/form controls with their live values and selection, then restore focus. If safe bounded repair cannot establish the expected structure, leave the server DOM inert, do not run its controller, and emit a stable diagnostic rather than replacing user-visible state. Ensure ownership cleanup follows nodes across removal and reconnection.
 - **Execution note:** Work behavior-first through browser conformance cases; keep network and clocks injectable so cancellation, debounce, polling, and teardown are deterministic.
 - **Patterns to follow:** The existing `evaluate()` semantics, `renderNode()` lowering behavior, POC signal cleanup, and native `AbortController`, `FormData`, and event APIs.
 - **Test scenarios:**

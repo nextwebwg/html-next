@@ -27,7 +27,6 @@ export {
   type Controller,
   type ControllerModule,
 } from "./controller.js";
-export { buildFormRequest, enhanceForm, type FormState } from "@nextwebwg/html-forms";
 export { validateJsonSchema, type JsonSchema } from "./json-schema.js";
 export { DataResource, DataValidationError } from "./data.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";

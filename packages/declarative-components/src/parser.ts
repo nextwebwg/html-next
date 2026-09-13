@@ -15,7 +15,6 @@ import type {
   ElementNode,
   EventBinding,
   Flow,
-  FormDeclaration,
   HandlerStep,
   SlotContract,
   TemplateAttribute,
@@ -316,12 +315,11 @@ function readDeclarations(
   group: Element | undefined,
   contract: ComponentContract,
   source: string,
-  formNames: ReadonlySet<string> = new Set(),
 ): ComponentDeclaration[] {
   if (group === undefined) return [];
   const elements = Array.from(sourceChildren(group)).filter(isElement);
   const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
-  const names = new Set<string>(formNames);
+  const names = new Set<string>();
   const eventNames = new Set<string>();
   for (const element of elements) {
     const kind = sourceTag(element);
@@ -451,50 +449,6 @@ function readDeclarations(
   return declarations;
 }
 
-function enhancedForms(root: Element, source: string): Element[] {
-  const forms: Element[] = [];
-  const visit = (element: Element): void => {
-    if (sourceTag(element) === "form" && attr(element, "src") !== undefined) forms.push(element);
-    for (const child of sourceChildren(element)) if (isElement(child)) visit(child);
-  };
-  visit(root);
-  const names = new Set<string>();
-  for (const form of forms) {
-    const name = attr(form, "name") ?? "";
-    if (!NAME_RE.test(name)) fail("HC025", "An enhanced form requires a valid `name`.", source);
-    if (names.has(name)) fail("HC020", `Enhanced form \`${name}\` is duplicated.`, source);
-    names.add(name);
-  }
-  return forms;
-}
-
-function readFormDeclarations(
-  forms: readonly Element[],
-  scope: ParseScope,
-  source: string,
-): FormDeclaration[] {
-  return forms.map((form) => {
-    const name = attr(form, "name")!;
-    const formSource = attr(form, "src")!;
-    if (formSource === "") fail("HC025", `Enhanced form \`${name}\` requires a non-empty \`src\`.`, source);
-    const parameters = directElements(form, "param").map((parameter) => {
-      const parameterName = attr(parameter, "name") ?? "";
-      const expressionSource = attr(parameter, ":value");
-      if (!NAME_RE.test(parameterName) || expressionSource === undefined) {
-        fail("HC025", "A form <param> requires a valid `name` and a `:value` expression.", source);
-      }
-      return Object.freeze({
-        name: parameterName,
-        expression: compileScopedExpression(expressionSource, scope, source),
-      });
-    });
-    if (new Set(parameters.map((parameter) => parameter.name)).size !== parameters.length) {
-      fail("HC025", `Enhanced form \`${name}\` repeats a parameter name.`, source);
-    }
-    return { kind: "form", name, source: formSource, parameters: Object.freeze(parameters) };
-  });
-}
-
 function parseAttributes(
   element: Element,
   contract: ComponentContract,
@@ -503,13 +457,11 @@ function parseAttributes(
   platform: ComponentParserPlatform,
 ): TemplateAttribute[] {
   const parsed: TemplateAttribute[] = [];
-  const tag = sourceTag(element);
   for (const attribute of sourceAttributes(element)) {
     if (
       FLOW_NAMES.has(attribute.name) ||
       attribute.name === "$ref" ||
       attribute.name === "as" ||
-      (tag === "form" && attribute.name === "src") ||
       attribute.name.startsWith("on:")
     ) continue;
     if (attribute.name.startsWith("bind:")) {
@@ -768,9 +720,6 @@ function parseElement(
       continue;
     }
     if (!isElement(child)) continue;
-    if (sourceTag(element) === "form" && attr(element, "src") !== undefined && sourceTag(child) === "param") {
-      continue;
-    }
     if (sourceTag(child) === "slot") {
       const name = attr(child, "name");
       const nameExpression = attr(child, ":name");
@@ -929,9 +878,7 @@ export function parseComponentNodes(
   };
   const contract = defineContractWithNativeCheck(rawContract, { source, tag }, platform.isNativeElement);
 
-  const forms = enhancedForms(root, source);
-  const formNames = new Set(forms.map((form) => attr(form, "name")!));
-  const declarations = readDeclarations(defGroups[0], contract, source, formNames);
+  const declarations = readDeclarations(defGroups[0], contract, source);
   const declaredEvents = new Set(
     declarations.filter((declaration) => declaration.kind === "event").map((declaration) => declaration.name),
   );
@@ -946,7 +893,6 @@ export function parseComponentNodes(
   const rootsInScope = new Set([
     ...Object.keys(contract.props),
     ...declarations.map((declaration) => declaration.name),
-    ...formNames,
   ]);
   const scope: ParseScope = {
     roots: rootsInScope,
@@ -969,7 +915,6 @@ export function parseComponentNodes(
       validateCompiledExpression(declaration.expression, scope, source);
     }
   }
-  declarations.push(...readFormDeclarations(forms, scope, source));
   const slotState = {
     defaults: 0,
     names: new Set<string>(),

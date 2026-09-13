@@ -26,7 +26,7 @@ For the same definition and inputs, conforming modes must agree on:
 
 - the authored native root and projected-content identity;
 - public attributes, properties, events, methods, slots, and validation;
-- state, computed values, effects, declared requests, and enhanced form results;
+- state, computed values, effects, and declared request results;
 - connection, disconnection, reconnection, controller cleanup, and hydration;
 - scoped styles and observable diagnostics.
 
@@ -72,4 +72,3 @@ whole-product measurement.
 - [Live browser distributable](live-browser-distributable.md)
 - [Native application or library build](native-application-build.md)
 - [Framework conversion](framework-conversion.md)
-

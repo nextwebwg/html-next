@@ -17,7 +17,7 @@ output inventory.
 
 Generated target components must preserve the shared semantic model: the same native root,
 projected-content identity, public properties, events, methods, validation, state results,
-requests, enhanced-form results, styles, lifecycle, controller behavior, and hydration outcome.
+requests, styles, lifecycle, controller behavior, and hydration outcome.
 
 Target-native conventions may shape private implementation and generated source. They must not add
 wrapper elements, change public names, substitute framework-only event semantics, or make target
@@ -86,4 +86,3 @@ multi-entry consumer bundles.
    bridge deduplication.
 5. Reject a semantic gap the target adapter cannot preserve with a source-located conversion
    diagnostic rather than emitting an approximation.
-

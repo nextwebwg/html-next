@@ -8,9 +8,6 @@ export default defineConfig({
       "@nextwebwg/declarative-components": fileURLToPath(
         new URL("../declarative-components/src/index.ts", import.meta.url),
       ),
-      "@nextwebwg/html-forms": fileURLToPath(
-        new URL("../html-forms/src/index.ts", import.meta.url),
-      ),
     },
   },
   test: {

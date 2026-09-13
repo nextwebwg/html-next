@@ -213,22 +213,21 @@ describe("parseComponent", () => {
     assert.equal(output.attributes[0]?.kind, "directive");
   });
 
-  it("normalizes enhanced forms and makes their request state available to expressions", () => {
+  it("preserves native forms as component markup without creating component declarations", () => {
     const definition = parseComponent(
       `<template component="x-editor" status="early" summary="Editor.">` +
-        `<defs><state name="post" :value="{ id: '42', title: 'Draft' }"></state>` +
-        `<handler name="saved"></handler></defs>` +
-        `<form name="save" method="post" src="/api/posts/{id}" on:success="saved">` +
-        `<param name="id" :value="post.id"></param><param name="title" :value="post.title"></param>` +
-        `<button>Save</button><output $value="save.pending"></output></form></template>`,
+        `<defs><state name="draft" :value="{ title: 'Draft' }"></state></defs>` +
+        `<form name="editor" method="post" action="/api/posts/42">` +
+        `<input name="title" bind:value="draft.title"><button>Save</button></form></template>`,
     );
-    const form = definition.declarations?.find((declaration) => declaration.kind === "form");
-    assert.ok(form?.kind === "form");
-    assert.equal(form.source, "/api/posts/{id}");
-    assert.deepEqual(form.parameters.map((parameter) => parameter.name), ["id", "title"]);
-    assert.equal(definition.template.children.some(
-      (child) => child.kind === "element" && child.name === "param",
-    ), false);
+    assert.deepEqual(definition.declarations?.map((declaration) => declaration.kind), ["state"]);
+    assert.equal(definition.template.name, "form");
+    assert.deepEqual(
+      definition.template.attributes
+        .filter((attribute) => attribute.kind === "literal")
+        .map((attribute) => [attribute.name, attribute.value]),
+      [["name", "editor"], ["method", "post"], ["action", "/api/posts/42"]],
+    );
   });
 
   it("normalizes the complete declaration and template language into one IR", () => {

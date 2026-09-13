@@ -1,10 +1,10 @@
-# Reactivity, handlers, data, and forms
+# Reactivity, handlers, and data
 
 ## Reactive declarations
 
 State is per component instance. Computed values are pure expressions over declared dependencies. Synchronous writes mark dependent computations and effects dirty; one microtask flush evaluates them in dependency order and updates each dirty effect once.
 
-External property changes, controller writes, form/input bindings, data transitions, and declarative handlers enter the same scheduler. Disconnect runs owned cleanup. Reconnection creates no duplicate listener, observer, timer, or request.
+External property changes, controller writes, control bindings, data transitions, and declarative handlers enter the same scheduler. Disconnect runs owned cleanup. Reconnection creates no duplicate listener, observer, timer, or request.
 
 Each effect may execute at most 100 times while one change set is being drained. Crossing
 that bound clears pending work and reports `HR006`. Cyclic write graphs therefore terminate
@@ -38,21 +38,21 @@ An effect runs once while connecting and tracks the `host.state` paths read duri
 
 The public contract exposes values and lifetime-bound reactions, not raw `Signal.State`, `Signal.Computed`, or `Signal.Watcher` objects. A runtime may use TC39 Signals internally, but signal identity and APIs are not observable and cannot bypass declared writability, types, or connection ownership.
 
-## Data and forms
+## Data resources
 
 A declared read serializes URI-template and query parameters, cancels stale work, and exposes `pending`, `value`, `error`, and `ok`. Debounce and polling use owned timers and stop on disconnect. Typed response validation happens before the value becomes observable.
 
-Enhanced forms preserve the native successful-controls set, submitter, validation, method, encoding, and navigation fallback. Enhancement is additive: when the runtime or request fails before interception, the native submission remains usable. An enhanced request participates in cancellation and exposes the same state shape as a declared read.
+## Native form participation
 
-An enhanced form is a native `form` with a unique `name` and a `src` request template. Its state is available under that name. Direct child `param` declarations add non-control values: placeholders such as `{id}` are substituted into `src`, and remaining parameters join the native successful-controls set in the query or request body. `on:success` and `on:error` are ordinary named-handler bindings dispatched after the latest non-stale response settles.
+Form controls authored by a component remain native controls. When a component instance is inside an author-owned `form`, its rendered controls participate in that form through the platform's normal form-owner, successful-controls, validation, and submission behavior. A component may also render a complete native form when that is its public purpose.
 
 ```html conforming
-<form name="save" method="post" src="/api/posts/{id}" on:success="afterSave">
-  <param name="id" :value="post.id">
-  <input name="title" bind:value="draft.title">
-  <button>Save</button>
+<form action="/posts" method="post">
+  <x-slug-field></x-slug-field>
+  <button type="submit">Save post</button>
 </form>
-<p $if="save.pending">Saving…</p>
 ```
 
-Expected outcome: native validation runs before interception; a valid submission posts the successful controls to `/api/posts/<encoded id>`, exposes pending and result state as `save`, and then runs `afterSave`.
+If `x-slug-field` renders `<input name="slug">`, that control belongs to the outer form without the component creating, finding, or submitting a second form.
+
+The HTML Forms proposal defines optional request enhancement as a separate package and contract. An application can apply that enhancement to a form containing component-rendered controls without making Declarative Components depend on Forms.

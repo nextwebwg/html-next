@@ -46,7 +46,6 @@ describe("runtime size measurement", () => {
       "controllerHost",
       "declaredData",
       "expressionEvaluation",
-      "formEnhancement",
       "generalRuntime",
       "jsonSchema",
       "liveSource",
@@ -72,7 +71,6 @@ describe("runtime size measurement", () => {
       "computed",
       "keyed",
       "data",
-      "form",
       "controller",
     ]);
   });

@@ -86,9 +86,6 @@ importers:
 
   packages/declarative-components:
     dependencies:
-      '@nextwebwg/html-forms':
-        specifier: workspace:*
-        version: link:../html-forms
       parse5:
         specifier: 'catalog:'
         version: 8.0.1

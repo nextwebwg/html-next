@@ -2,8 +2,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { SvelteHTMLElements } from "svelte/elements";
-  import { attachComponent } from "@nextwebwg/declarative-components/runtime";
-  import type { ComponentDefinition } from "@nextwebwg/declarative-components";
   import "../styles/x-button.css";
 
   interface OwnProps {
@@ -14,15 +12,12 @@
   type Props = Omit<SvelteHTMLElements["button"], keyof OwnProps | "children"> & OwnProps & { children?: Snippet };
 
   let { "size": prop0 = "md", "variant": prop1 = "outline", slots, children, ...nativeProps }: Props = $props();
-  const definition = {...{"contract":{"tag":"x-button","props":{"size":{"type":{"enum":["sm","md","lg"]},"required":false,"default":"md"},"variant":{"type":{"enum":["outline","solid","destructive","ghost"]},"required":false,"default":"outline"}}},"template":{"kind":"element","name":"button","attributes":[{"kind":"literal","name":"data-x-button","value":""},{"kind":"attribute","name":"data-variant","expression":"variant","expressionPlan":{"source":"variant","ast":{"kind":"id","name":"variant"},"dependencies":["variant"]}},{"kind":"attribute","name":"data-size","expression":"size","expressionPlan":{"source":"size","ast":{"kind":"id","name":"size"},"dependencies":["size"]}}],"children":[{"kind":"slot"}]},"declarations":[],"root":{"kind":"native","element":"button","choices":["button"]}},source:{file:import.meta.url},css:""} as unknown as ComponentDefinition;
   let root: Element;
   function htmlNext(node: Element, props: Record<string, unknown>) {
-    const detach = attachComponent(node, definition, { props,
-    });
+    Object.assign(node, props);
     return {
       update(next: Record<string, unknown>) { Object.assign(node, next); },
       destroy() {
-        detach();
       },
     };
   }

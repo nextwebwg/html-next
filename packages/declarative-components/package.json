@@ -65,7 +65,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@nextwebwg/html-forms": "workspace:*",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
     "parse5": "catalog:"
   },

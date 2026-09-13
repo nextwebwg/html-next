@@ -96,7 +96,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     "",
     "## Runtime support",
     "",
-    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} State, computed values, handlers, structural rendering, data, enhanced forms, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
+    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} State, computed values, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
     "",
   ].join("\n");
 }

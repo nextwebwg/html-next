@@ -98,7 +98,7 @@ export default function controller(host) {
 ```
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
-named and data-derived slots, typed data sources, enhanced forms, and generalized
+named and data-derived slots, typed data sources, native form participation, and generalized
 validation. See the [specification modules](./packages/declarative-components/docs/spec/index.md)
 for the complete syntax.
 
@@ -156,7 +156,7 @@ definitions it loads:
 
 The native build currently specializes static markup, basic reactivity, numeric-computed state, and
 scalar props. CI records zero live-parser and full-runtime contribution for those four capability
-fixtures. Keyed lists, declared reads, enhanced forms, and controller lifecycle currently use the
+fixtures. Keyed lists, declared reads, and controller lifecycle currently use the
 general runtime fallback. These fixtures attribute feature cost; the build product operates on an
 application or library graph and should share its required support across that graph. The measured
 inventory and owner decisions live in the [native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).

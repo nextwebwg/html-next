@@ -35,7 +35,7 @@ graph-scoped support plan.
 - Primary metrics: whole application output; full library output; representative consumer subsets
 - Attribution metrics: isolated capability fixtures, reported separately from product output
 - Current evidence: static, basic-reactive, computed, and scalar-prop fixtures avoid the live parser
-  and general runtime; keyed lists, declared reads, enhanced forms, and controller lifecycle still
+  and general runtime; keyed lists, declared reads, and controller lifecycle still
   enter the general fallback
 - Completion: graph capability union, shared support emission, application and library packaging,
   dynamic-boundary behavior, hydration, and live/native conformance all satisfy the delivery spec

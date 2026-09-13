@@ -16,7 +16,7 @@
     { "id": "HN-REA-002", "title": "Structural control flow", "status": "required", "spec": "reactivity.md", "owner": "Structural regions" },
     { "id": "HN-REA-003", "title": "Handlers and lifecycle", "status": "required", "spec": "reactivity.md", "owner": "Handlers and lifecycle" },
     { "id": "HN-REA-005", "title": "Controller host effects", "status": "required", "spec": "reactivity.md", "owner": "Controller host and effects" },
-    { "id": "HN-REA-004", "title": "Declared data and enhanced forms", "status": "required", "spec": "reactivity.md", "owner": "Data and forms" },
+    { "id": "HN-REA-004", "title": "Declared data resources", "status": "required", "spec": "reactivity.md", "owner": "Data resources" },
     { "id": "HN-LOD-001", "title": "Component dependency graph", "status": "required", "spec": "loading-and-security.md", "owner": "Dependency graph" },
     { "id": "HN-LOD-004", "title": "Controller module protocol", "status": "required", "spec": "loading-and-security.md", "owner": "Controller module protocol" },
     { "id": "HN-LOD-002", "title": "Live application trust", "status": "required", "spec": "loading-and-security.md", "owner": "Live trust policy" },

@@ -44,4 +44,4 @@ import { XButton } from "./react/XButton.js";
 
 ## Runtime support
 
-The generated targets use the same HTML Next definition as the live runtime. State, computed values, handlers, structural rendering, data, enhanced forms, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.
+The generated targets use the same HTML Next definition as the live runtime. State, computed values, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.

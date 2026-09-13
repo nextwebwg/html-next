@@ -2,7 +2,6 @@ import { parseBrowserComponent } from "./browser-source.js";
 import type { ControllerModule } from "./controller.js";
 import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
-import { enhanceForm } from "@nextwebwg/html-forms";
 import type { ComponentGraph } from "./graph.js";
 import {
   UndeclaredName,
@@ -35,7 +34,6 @@ import type {
   DirectiveAttribute,
   ElementNode,
   Flow,
-  FormDeclaration,
   HandlerDeclaration,
   SlotNode,
   TemplateNode,
@@ -233,14 +231,12 @@ function readInvocation(
   for (const declaration of declarations) {
     if (
       declaration.kind === "state" || declaration.kind === "computed" ||
-      declaration.kind === "data" || declaration.kind === "form"
+      declaration.kind === "data"
     ) scope.set(declaration.name, null);
   }
   for (const declaration of declarations) {
     if (declaration.kind === "data") {
       scope.set(declaration.name, { pending: true, value: null, error: null, ok: false });
-    } else if (declaration.kind === "form") {
-      scope.set(declaration.name, { pending: false, value: null, error: null, ok: false });
     } else if (declaration.kind === "state") {
       scope.set(
         declaration.name,
@@ -485,34 +481,6 @@ function bindEvents(
       });
     }, 2);
   }
-}
-
-function bindEnhancedForm(
-  element: Element,
-  node: ElementNode,
-  scope: ReactiveScope,
-  context: RuntimeRenderContext,
-): void {
-  if (!(element instanceof HTMLFormElement) || node.name !== "form") return;
-  const name = node.attributes.find(
-    (attribute) => attribute.kind === "literal" && attribute.name === "name",
-  );
-  if (name?.kind !== "literal") return;
-  const declaration = (context.definition.declarations ?? []).find(
-    (candidate): candidate is FormDeclaration =>
-      candidate.kind === "form" && candidate.name === name.value,
-  );
-  if (declaration === undefined) return;
-  ownEffect(context, scope, () => enhanceForm(element, {
-    source: declaration.source,
-    parameters: () => Object.fromEntries(
-      declaration.parameters.map((parameter) => [
-        parameter.name,
-        evaluateCompiled(parameter.expression, scope),
-      ]),
-    ),
-    onState: (state) => scope.set(declaration.name, state as unknown as Value),
-  }), 2);
 }
 
 function setAttribute(element: Element, name: string, value: string | null): void {
@@ -1001,7 +969,6 @@ function renderInstance(
     }
   }
   bindEvents(element, node, scope, context);
-  bindEnhancedForm(element, node, scope, context);
   return [element];
 }
 

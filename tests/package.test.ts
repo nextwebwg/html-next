@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,11 +28,12 @@ function pack(packageDirectory: string): string {
 }
 
 describe("workspace package contracts", () => {
-  it("installs both tarballs and exposes every public import", () => {
-    const formsTarball = pack("html-forms");
+  it("installs Declarative Components without the independent Forms package", () => {
     const componentsTarball = pack("declarative-components");
+    const consumer = join(workspace, "declarative-components-consumer");
+    mkdirSync(consumer);
     writeFileSync(
-      join(workspace, "package.json"),
+      join(consumer, "package.json"),
       JSON.stringify({ name: "package-consumer", private: true, type: "module" }),
     );
     execFileSync(
@@ -42,41 +43,65 @@ describe("workspace package contracts", () => {
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
-        formsTarball,
         componentsTarball,
       ],
-      { cwd: workspace, shell: useCommandShell },
+      { cwd: consumer, shell: useCommandShell },
     );
 
     const installedRoot = join(
-      workspace,
+      consumer,
       "node_modules",
       "@nextwebwg",
       "declarative-components",
     );
     const manifest = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
       exports?: unknown;
     };
     expect(manifest.exports).toBeDefined();
+    expect(manifest.dependencies).not.toHaveProperty("@nextwebwg/html-forms");
     expect(existsSync(join(installedRoot, "dist", "index.d.ts"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "runtime.d.ts"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "generated-runtime.d.ts"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "browser.js"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "browser.d.ts"))).toBe(true);
-    expect(
-      existsSync(
-        join(workspace, "node_modules", "@nextwebwg", "html-forms", "dist", "index.d.ts"),
-      ),
-    ).toBe(true);
+    expect(existsSync(join(consumer, "node_modules", "@nextwebwg", "html-forms"))).toBe(false);
     expect(
       execFileSync(
         process.execPath,
         [
           "--input-type=module",
           "--eval",
-          "Promise.all([import('@nextwebwg/html-forms'), import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime'), import('@nextwebwg/declarative-components/generated-runtime')]).then(() => process.stdout.write('ok'))",
+          "Promise.all([import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime'), import('@nextwebwg/declarative-components/generated-runtime')]).then(() => process.stdout.write('ok'))",
         ],
-        { cwd: workspace, encoding: "utf8" },
+        { cwd: consumer, encoding: "utf8" },
+      ),
+    ).toBe("ok");
+  });
+
+  it("installs the Forms package independently", () => {
+    const formsTarball = pack("html-forms");
+    const consumer = join(workspace, "forms-consumer");
+    mkdirSync(consumer);
+    writeFileSync(
+      join(consumer, "package.json"),
+      JSON.stringify({ name: "forms-consumer", private: true, type: "module" }),
+    );
+    execFileSync(
+      "npm",
+      ["install", "--ignore-scripts", "--no-audit", "--no-fund", formsTarball],
+      { cwd: consumer, shell: useCommandShell },
+    );
+
+    expect(
+      execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          "import('@nextwebwg/html-forms').then(() => process.stdout.write('ok'))",
+        ],
+        { cwd: consumer, encoding: "utf8" },
       ),
     ).toBe("ok");
   });
