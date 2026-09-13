@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 
-import ts from "typescript";
+import ts from "typescript-compiler";
 
 import { kebabCase } from "../names.js";
 

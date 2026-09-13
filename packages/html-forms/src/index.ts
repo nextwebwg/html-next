@@ -1,11 +1,16 @@
-import type { DataState } from "./data.js";
+export interface FormState<T = unknown> {
+  readonly pending: boolean;
+  readonly value: T | null;
+  readonly error: unknown;
+  readonly ok: boolean;
+}
 
 export interface EnhancedFormOptions<T = unknown> {
   readonly fetch?: typeof fetch;
   readonly parse?: (response: Response) => Promise<T>;
   readonly source?: string;
   readonly parameters?: () => Readonly<Record<string, unknown>>;
-  readonly onState: (state: DataState<T>) => void;
+  readonly onState: (state: FormState<T>) => void;
 }
 
 export interface FormRequest {

@@ -74,7 +74,21 @@ export function provenanceAttributes(tag: string, root = false): readonly string
 }
 
 export function serializedDefinition(definition: ComponentDefinition): string {
-  return JSON.stringify(definition);
+  const props = Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [
+    name,
+    {
+      type: prop.type,
+      required: prop.required,
+      ...("default" in prop ? { default: prop.default } : {}),
+    },
+  ]));
+  const runtime = {
+    contract: { tag: definition.contract.tag, props },
+    template: definition.template,
+    ...(definition.declarations === undefined ? {} : { declarations: definition.declarations }),
+    ...(definition.root === undefined ? {} : { root: definition.root }),
+  };
+  return `{...${JSON.stringify(runtime)},source:{file:import.meta.url},css:""}`;
 }
 
 function isBooleanAttributeBinding(

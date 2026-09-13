@@ -8,4 +8,5 @@ await build({
   platform: "browser",
   target: ["es2022"],
   legalComments: "none",
+  minify: true,
 });

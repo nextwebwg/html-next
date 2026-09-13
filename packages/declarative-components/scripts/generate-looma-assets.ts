@@ -3,13 +3,13 @@ import { join } from "node:path";
 
 import { loomaStyleRoots, migrateLoomaStyles } from "../src/migrate/looma-css.js";
 import type { StencilPackageInventory } from "../src/migrate/stencil.js";
-import { parseComponent } from "../src/parser.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const sourceIndex = process.argv.indexOf("--source");
 const source = sourceIndex === -1 ? process.env.LOOMA_SOURCE : process.argv[sourceIndex + 1];
 if (!source) throw new Error("Set LOOMA_SOURCE or pass --source with a Looma repository checkout.");
 const output = new URL("../examples/looma/package-assets/", import.meta.url);
-const inventory = JSON.parse(await readFile(new URL("../test/fixtures/looma/inventory.json", import.meta.url), "utf8")) as StencilPackageInventory;
+const inventory = JSON.parse(await readFile(new URL("../tests/fixtures/looma/inventory.json", import.meta.url), "utf8")) as StencilPackageInventory;
 const definitions = new Map(await Promise.all(inventory.components.map(async (component) => {
   const definition = parseComponent(
     await readFile(new URL(`../examples/looma/components/${component.tag}.html`, import.meta.url), "utf8"),

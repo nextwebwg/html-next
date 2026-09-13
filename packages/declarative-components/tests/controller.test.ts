@@ -3,7 +3,7 @@ import { describe, it } from "vitest";
 
 import { clearControllerCache, loadController } from "../src/controller.js";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
-import { buildComponentGraph } from "../src/graph.js";
+import { buildComponentGraph } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
 
 async function controllerNode() {

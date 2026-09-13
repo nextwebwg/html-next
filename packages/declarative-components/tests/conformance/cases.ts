@@ -12,8 +12,8 @@
  *  - Diagnostic: `lowerDocument()` must throw an `HtmlDiagnosticError` whose `.diagnostic.code`
  *    equals `code`.
  *
- * The harness in `test/conformance.test.ts` runs the whole table against Chromium, Firefox, and
- * WebKit. See `test/conformance/README.md` for how to run it.
+ * The harness in `tests/conformance.test.ts` runs the whole table against Chromium, Firefox, and
+ * WebKit. See `tests/conformance/README.md` for how to run it.
  */
 
 export interface SuccessExpect {

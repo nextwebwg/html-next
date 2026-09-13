@@ -8,7 +8,7 @@ export default mergeConfig(baseConfig, {
     include: [
       "packages/declarative-components/tests/browser-loader.test.ts",
       "packages/declarative-components/tests/conformance.test.ts",
-      "packages/declarative-components/tests/forms.test.ts",
+      "packages/html-forms/tests/forms.test.ts",
       "packages/declarative-components/tests/runtime.test.ts",
       "packages/declarative-components/tests/source-adapters.test.ts",
       "packages/declarative-components/tests/validity.test.ts"

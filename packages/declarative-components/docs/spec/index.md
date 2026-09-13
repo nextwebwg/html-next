@@ -1,6 +1,6 @@
 # HTML Next reference specification
 
-This directory is the implementation-pinned specification for `@nextwebwg/html`. It defines the behavior that the browser polyfill and generated targets must share. The public Working Draft may explain and motivate the proposal; conformance is determined here and by the linked support profile and tests.
+This directory is the implementation-pinned specification for `@nextwebwg/declarative-components`. It defines the behavior that the browser polyfill and generated targets must share. The public Working Draft may explain and motivate the proposal; conformance is determined here and by the linked support profile and tests.
 
 The key words **must**, **must not**, **should**, and **may** are normative. A feature is shipped only when [`support.json`](support.json) labels it `required` or `experimental` and its conformance tests pass. A `deferred` entry reserves no runtime behavior.
 

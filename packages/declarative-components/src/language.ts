@@ -50,6 +50,8 @@ const URL_ATTRIBUTES = new Set([
 ]);
 
 function hasExecutableUrl(value: string): boolean {
+  // ASCII controls and whitespace are deliberately stripped before scheme detection.
+  // oxlint-disable-next-line eslint/no-control-regex
   const normalized = value.replace(/[\u0000-\u0020\u007f]+/g, "");
   return /^(?:data|javascript|vbscript):/i.test(normalized);
 }

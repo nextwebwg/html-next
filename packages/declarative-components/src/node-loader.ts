@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { buildComponentGraph, type ComponentGraph } from "./graph.js";
+import type { ComponentGraph } from "./graph.js";
+import { buildComponentGraph } from "./source-graph.js";
 import {
   isWithinTrustRoot,
   type ComponentResourceResolver,

@@ -35,7 +35,7 @@ export const loaded = true;`);
       platform: "browser",
       target: ["es2022"],
       nodePaths: [nodeModulesPath],
-      alias: { "@nextwebwg/html/runtime": runtimePath, "@nextwebwg/html": libraryPath },
+      alias: { "@nextwebwg/declarative-components/runtime": runtimePath, "@nextwebwg/declarative-components": libraryPath },
     });
   });
 

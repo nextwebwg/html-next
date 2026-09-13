@@ -1,21 +1,10 @@
-import {
-  parseFragment,
-  type DefaultTreeAdapterTypes,
-  type ParserError,
-} from "parse5";
-
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
-import { parseComponent } from "./parser.js";
 import {
   isWithinTrustRoot,
   type ComponentResourceResolver,
   type ResolvedResource,
 } from "./resolve.js";
 import type { ComponentDefinition } from "./template.js";
-
-type ChildNode = DefaultTreeAdapterTypes.ChildNode;
-type Element = DefaultTreeAdapterTypes.Element;
-type Template = DefaultTreeAdapterTypes.Template;
 
 export interface FetchedComponent {
   readonly url: string;
@@ -54,13 +43,19 @@ export interface ComponentGraph {
 export interface BuildGraphOptions {
   readonly resolver: ComponentResourceResolver;
   readonly fetchComponent: ComponentFetcher;
+  readonly parseComponentResource: ComponentResourceParser;
   readonly isCustomElementRegistered?: (tag: string) => boolean;
 }
 
-interface ParsedResource {
-  readonly definitionSource: string;
+export interface ParsedComponentResource {
+  readonly definition: ComponentDefinition;
   readonly dependencies: readonly string[];
 }
+
+export type ComponentResourceParser = (
+  sourceText: string,
+  source: string,
+) => ParsedComponentResource;
 
 interface DraftNode {
   url: string;
@@ -90,61 +85,6 @@ class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
   forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
     this.#map.forEach((value, key) => callbackfn.call(thisArg, value, key, this));
   }
-}
-
-function isElement(node: ChildNode): node is Element {
-  return "tagName" in node;
-}
-
-function attr(element: Element, name: string): string | undefined {
-  return element.attrs.find((item) => item.name === name)?.value;
-}
-
-function significant(nodes: readonly ChildNode[]): ChildNode[] {
-  return nodes.filter((node) => {
-    if (node.nodeName === "#comment") return false;
-    if (node.nodeName === "#text" && "value" in node) return node.value.trim() !== "";
-    return true;
-  });
-}
-
-/** Separates resource-level dependency links from the one inert component carrier. */
-export function parseComponentResource(sourceText: string, source: string): ParsedResource {
-  const parserErrors: ParserError[] = [];
-  const fragment = parseFragment(sourceText, {
-    sourceCodeLocationInfo: true,
-    onParseError: (error) => parserErrors.push(error),
-  });
-  if (parserErrors.length > 0) {
-    fail("HS005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
-  }
-  const nodes = significant(fragment.childNodes);
-  const templates = nodes.filter(
-    (node): node is Template => isElement(node) && node.tagName === "template" && attr(node, "component") !== undefined,
-  );
-  if (templates.length !== 1) {
-    fail("HS001", "A component resource must contain exactly one <template component>.", source);
-  }
-  const dependencies: string[] = [];
-  for (const node of nodes) {
-    if (node === templates[0]) continue;
-    if (!isElement(node) || node.tagName !== "link" || attr(node, "rel") !== "component") {
-      fail("HT009", "A component resource may contain only dependency links and one inert carrier.", source);
-    }
-    const href = attr(node, "href");
-    if (href === undefined || href.trim() === "") {
-      fail("HL006", "A component dependency link requires a non-empty `href`.", source);
-    }
-    dependencies.push(href);
-  }
-  const location = templates[0]!.sourceCodeLocation;
-  if (location == null || !("startOffset" in location) || !("endOffset" in location)) {
-    fail("HS005", "The component carrier has no stable source range.", source);
-  }
-  return Object.freeze({
-    definitionSource: sourceText.slice(location.startOffset, location.endOffset),
-    dependencies: Object.freeze(dependencies),
-  });
 }
 
 export async function buildComponentGraph(
@@ -177,8 +117,8 @@ export async function buildComponentGraph(
     const redirected = drafts.get(finalURL);
     if (redirected !== undefined) return redirected.url;
 
-    const parsed = parseComponentResource(response.source, finalURL);
-    const definition = parseComponent(parsed.definitionSource, finalURL);
+    const parsed = options.parseComponentResource(response.source, finalURL);
+    const definition = parsed.definition;
     const priorURL = tags.get(definition.contract.tag);
     if (priorURL !== undefined && priorURL !== finalURL) {
       fail(

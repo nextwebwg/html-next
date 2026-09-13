@@ -4,14 +4,13 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import ts from "typescript";
+import ts from "typescript-compiler";
 
 import {
   generateComponent,
   GENERATOR_VERSION,
   type GeneratedArtifact,
 } from "./generate.js";
-import { parseComponent } from "./parser.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
 import { extractStencilInventory, scaffoldStencilComponent, type ExtractStencilOptions } from "./migrate/stencil.js";
 

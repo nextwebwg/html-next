@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { migrateLoomaComponent } from "../src/migrate/looma.js";
 import type { StencilPackageInventory } from "../src/migrate/stencil.js";
 
-const inventoryUrl = new URL("../test/fixtures/looma/inventory.json", import.meta.url);
+const inventoryUrl = new URL("../tests/fixtures/looma/inventory.json", import.meta.url);
 const outputUrl = new URL("../examples/looma/components/", import.meta.url);
 const reviewUrl = new URL("../examples/looma/migration-review.json", import.meta.url);
 const supportAssetsUrl = new URL("../src/migrate/looma-assets/", import.meta.url);

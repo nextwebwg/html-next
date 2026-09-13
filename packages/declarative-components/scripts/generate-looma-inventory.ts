@@ -8,7 +8,7 @@ const source = sourceIndex === -1 ? process.env.LOOMA_SOURCE : process.argv[sour
 if (source === undefined || source === "") {
   throw new Error("Set LOOMA_SOURCE or pass --source with a Looma repository checkout.");
 }
-const output = new URL("../test/fixtures/looma/inventory.json", import.meta.url);
+const output = new URL("../tests/fixtures/looma/inventory.json", import.meta.url);
 const serialized = `${JSON.stringify(await extractStencilInventory({ root: source }), null, 2)}\n`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8");

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
 const read = (path: string) =>
-  readFile(new URL(`../../../examples/poc/${path}`, import.meta.url), "utf8");
+  readFile(new URL(`../examples/poc/${path}`, import.meta.url), "utf8");
 
 describe("live component graph example", () => {
   it("declares default-export controllers and starts the public browser loader", async () => {

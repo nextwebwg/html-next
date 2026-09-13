@@ -230,7 +230,9 @@ describe("defineContract", () => {
       (contract.props.variant as { required: boolean }).required = true;
     }, TypeError);
     assert.throws(() => {
-      (contract.props.variant?.type as { enum: string[] }).enum.push("new");
+      const variant = contract.props.variant;
+      assert.ok(variant !== undefined);
+      (variant.type as { enum: string[] }).enum.push("new");
     }, TypeError);
   });
 

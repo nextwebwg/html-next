@@ -7,7 +7,7 @@ import { transform } from "esbuild";
 import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateComponent } from "../src/generate.js";
-import { parseComponent } from "../src/parser.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
@@ -86,6 +86,18 @@ describe("official target compilers", () => {
     ] as const) {
       assert.ok(compileSvelte(source, { filename, generate: "client" }).js.code.length > 0);
     }
+  });
+
+  it("emits a standalone Vanilla module when the component has no runtime behavior", () => {
+    const module = generated(componentSource(
+      "demo-card",
+      "",
+      `<article><h2>Card</h2><slot></slot></article>`,
+    )).get("vanilla/DemoCard.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/declarative-components\/runtime/);
+    assert.doesNotMatch(module, /manageComponentLifecycle|const definition/);
+    assert.match(module, /document\.createElement\("article"\)/);
   });
 
   it("emits provenance-scoped CSS and matching target markers", async () => {

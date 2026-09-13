@@ -5,12 +5,12 @@ export {
   GENERATOR_VERSION,
   type GeneratedArtifact,
 } from "./generate.js";
-export { parseComponent } from "./parser.js";
+export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
 export { assembleLoomaPackage } from "./migrate/looma-package.js";
 export type * from "./package-config.js";
-export { buildComponentGraph, parseComponentResource } from "./graph.js";
+export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
 export {
   loadBrowserComponents,
   loadDocumentComponents,
@@ -27,7 +27,7 @@ export {
   type Controller,
   type ControllerModule,
 } from "./controller.js";
-export { buildFormRequest, enhanceForm } from "./forms.js";
+export { buildFormRequest, enhanceForm, type FormState } from "@nextwebwg/html-forms";
 export { validateJsonSchema, type JsonSchema } from "./json-schema.js";
 export { DataResource, DataValidationError } from "./data.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";

@@ -3,6 +3,9 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "paths": {
+      "@nextwebwg/html-forms": ["./packages/html-forms/src/index.ts"]
+    },
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"],
     "strict": true,

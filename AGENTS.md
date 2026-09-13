@@ -12,6 +12,13 @@
 - Put shared tooling at the repository root; keep proposal-specific source, tests, and build configuration with its package.
 - Use pnpm through Corepack and preserve strict ESM TypeScript package boundaries.
 
+## Browser runtime design
+
+- Start every runtime design with an audit of native DOM and Web Platform behavior. Prefer composing existing browser parsing, observation, events, scheduling, cancellation, validation, and lifecycle primitives over implementing parallel machinery.
+- Before adding custom browser-runtime behavior, record the relevant native mechanisms and the precise remaining gap. Proceed with the smallest proven layer when the answer is clear; consult the owner when the gap or semantic choice remains uncertain.
+- For validation, first probe detached native controls configured with the proposed type and constraints. Treat their parsed values and `ValidityState` as authoritative wherever the platform defines the behavior.
+- Keep the live parser/interpreter separate from generated component output. Generated components import only the helpers required by their authored features.
+
 ## Safe work
 
 - Preserve unrelated changes and never rewrite shared Git history without explicit approval.

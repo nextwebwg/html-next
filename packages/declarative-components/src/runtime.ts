@@ -2,7 +2,7 @@ import { parseBrowserComponent } from "./browser-source.js";
 import type { ControllerModule } from "./controller.js";
 import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
-import { enhanceForm } from "./forms.js";
+import { enhanceForm } from "@nextwebwg/html-forms";
 import type { ComponentGraph } from "./graph.js";
 import {
   UndeclaredName,
@@ -38,13 +38,12 @@ import type {
   Flow,
   FormDeclaration,
   HandlerDeclaration,
-  HandlerStep,
   SlotNode,
   TemplateNode,
   TextNode,
 } from "./template.js";
 import type { WritablePath } from "./expression.js";
-import type { ComponentContract, PropContract, PropValue } from "./types.js";
+import type { PropContract, PropValue } from "./types.js";
 
 /**
  * A `<defs>` reactive declaration seeding the render scope. At L1 the runtime lowers once
@@ -1169,123 +1168,80 @@ function installPublicMethods(root: Element, instance: RuntimeInstance): void {
   }
 }
 
-/**
- * Performs one explicit lowering pass, retaining definitions in a document registry for
- * later passes. It does not observe mutations or register Custom Elements.
- */
-export function lowerDocument(root: Document = document): number {
-  const registry = registryFor(root);
-  const wrappers = Array.from(
-    root.querySelectorAll("template[component]"),
-  ).filter((element) => !contentOnly.has(element)) as HTMLTemplateElement[];
-  const definitions = wrappers.map(parseDefinition);
-  const tags = new Set(registry.definitions.keys());
-  for (const { definition } of definitions) {
-    if (tags.has(definition.contract.tag)) {
-      fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
-    }
-    tags.add(definition.contract.tag);
+function prepareRuntimeInvocation(
+  invocation: Element,
+  definition: ComponentDefinition,
+  hydration: boolean,
+): PreparedInvocation {
+  const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
+    ? invocation.ownerDocument.activeElement
+    : null;
+  const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
+    ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
+    : undefined;
+  const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
+  const children = hydration
+    ? [...(frameworkProjectedNodes.get(invocation) ?? invocation.querySelectorAll("[data-slotted]"))]
+    : Array.from(invocation.childNodes);
+  const instance: RuntimeInstance = {
+    definition,
+    scope,
+    refs: {},
+    effects,
+    connectCallbacks: new Set(),
+    disconnectCallbacks: new Set(),
+    connected: false,
+  };
+  const context: RuntimeRenderContext = {
+    definition,
+    effects,
+    refs: instance.refs,
+    connectCallbacks: instance.connectCallbacks,
+    disconnectCallbacks: instance.disconnectCallbacks,
+    projectedNodes: children,
+    slotInsertions: [],
+    rootName,
+    committed: hydration,
+  };
+  const rendered = renderNode(
+    definition.template,
+    scope,
+    invocation.ownerDocument,
+    passThrough,
+    context,
+    hydration ? invocation : undefined,
+  );
+  const nativeRoot = rendered[0] as Element;
+  if (hydration && nativeRoot !== invocation) {
+    fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
   }
-
-  const prepared: PreparedInvocation[] = [];
-  for (const { definition } of [...registry.definitions.values(), ...definitions]) {
-    if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
-    // A <template>'s content is inert, so querySelectorAll never returns definition-internal
-    // markup; every match is a live invocation to lower.
-    const invocations = Array.from(root.querySelectorAll(definition.contract.tag)).map(
-      (invocation) => ({ invocation, hydration: false }),
-    );
-    const hydrationRoots = Array.from(
-      root.querySelectorAll(`[data-component-root~="${definition.contract.tag}"]`),
-    ).filter((element) => !runtimeInstances.has(element)).map(
-      (invocation) => ({ invocation, hydration: true }),
-    );
-    for (const { invocation, hydration } of [...invocations, ...hydrationRoots]) {
-      if (contentOnly.has(invocation)) continue;
-      const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
-        ? invocation.ownerDocument.activeElement
-        : null;
-      const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
-        ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
-        : undefined;
-      const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
-      const children = hydration
-        ? [...(frameworkProjectedNodes.get(invocation) ?? invocation.querySelectorAll("[data-slotted]"))]
-        : Array.from(invocation.childNodes);
-      const instance: RuntimeInstance = {
-        definition,
-        scope,
-        refs: {},
-        effects,
-        connectCallbacks: new Set(),
-        disconnectCallbacks: new Set(),
-        connected: false,
-      };
-      const context: RuntimeRenderContext = {
-        definition,
-        effects,
-        refs: instance.refs,
-        connectCallbacks: instance.connectCallbacks,
-        disconnectCallbacks: instance.disconnectCallbacks,
-        projectedNodes: children,
-        slotInsertions: [],
-        rootName,
-        committed: hydration,
-      };
-      const rendered = renderNode(
-        definition.template,
-        scope,
-        invocation.ownerDocument,
-        passThrough,
-        context,
-        hydration ? invocation : undefined,
-      );
-      const nativeRoot = rendered[0] as Element;
-      if (hydration && nativeRoot !== invocation) {
-        fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
-      }
-      if (focusedControl instanceof HTMLElement) {
-        focusedControl.focus({ preventScroll: true });
-        if (
-          focusedSelection !== undefined &&
-          (focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement) &&
-          typeof focusedSelection[0] === "number" &&
-          typeof focusedSelection[1] === "number"
-        ) focusedControl.setSelectionRange(focusedSelection[0], focusedSelection[1]);
-      }
-      stampComponentRoot(nativeRoot, definition.contract.tag);
-      instance.element = nativeRoot;
-      prepared.push({
-        invocation,
-        nativeRoot,
-        context,
-        definition,
-        instance,
-        replace: !hydration,
-      });
-    }
+  if (focusedControl instanceof HTMLElement) {
+    focusedControl.focus({ preventScroll: true });
+    if (
+      focusedSelection !== undefined &&
+      (focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement) &&
+      typeof focusedSelection[0] === "number" &&
+      typeof focusedSelection[1] === "number"
+    ) focusedControl.setSelectionRange(focusedSelection[0], focusedSelection[1]);
   }
+  stampComponentRoot(nativeRoot, definition.contract.tag);
+  instance.element = nativeRoot;
+  return {
+    invocation,
+    nativeRoot,
+    context,
+    definition,
+    instance,
+    replace: !hydration,
+  };
+}
 
-  for (const live of definitions) {
-    registry.definitions.set(live.definition.contract.tag, live);
-    if (live.style !== undefined) {
-      live.style.textContent = transformComponentStyles(
-        live.style.textContent ?? "",
-        live.definition.contract.tag,
-        {
-          mode: componentStyleMode(live.wrapper!.ownerDocument),
-          rootElement: live.definition.template.name,
-        },
-      );
-      live.wrapper!.ownerDocument.head.append(live.style);
-    }
-    live.wrapper!.remove();
-  }
-
-  // A projected component invocation can be nested inside another invocation in the
-  // authored document. Commit ancestors first so their slot insertion moves the live
-  // invocation; the descendant can then replace itself at that new location. Definition
-  // discovery order must not decide whether nested authored components survive.
+function commitRuntimeInvocations(
+  registry: DocumentRegistry,
+  prepared: PreparedInvocation[],
+): void {
+  // Commit ancestors first so their slot insertion moves nested live invocations before
+  // descendants replace themselves. Discovery order does not determine nested survival.
   prepared.sort((left, right) => {
     if (left.invocation.contains(right.invocation)) return -1;
     if (right.invocation.contains(left.invocation)) return 1;
@@ -1306,12 +1262,228 @@ export function lowerDocument(root: Document = document): number {
     installInstanceValidity(invocation.nativeRoot, invocation.instance);
     connectRuntimeInstance(invocation.instance);
   }
-  return prepared.length;
+}
+
+type QueryRoot = Node & ParentNode;
+
+function queryWithin(scope: QueryRoot, selector: string): Element[] {
+  const matches = scope.nodeType === 1 && (scope as Element).matches(selector)
+    ? [scope as Element]
+    : [];
+  return [...matches, ...scope.querySelectorAll(selector)];
+}
+
+function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
+  const registry = registryFor(root);
+  const wrappers = [...new Set(scopes.flatMap((scope) => queryWithin(scope, "template[component]")
+    .filter((element) => !contentOnly.has(element))))] as HTMLTemplateElement[];
+  const definitions = wrappers.map(parseDefinition);
+  const discovered = new Set(definitions);
+  const tags = new Set(registry.definitions.keys());
+  for (const { definition } of definitions) {
+    if (tags.has(definition.contract.tag)) {
+      fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
+    }
+    tags.add(definition.contract.tag);
+  }
+
+  const prepared: PreparedInvocation[] = [];
+  for (const live of [...registry.definitions.values(), ...definitions]) {
+    const { definition } = live;
+    if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
+    // A <template>'s content is inert, so querySelectorAll never returns definition-internal
+    // markup; every match is a live invocation to lower.
+    // A newly discovered definition also applies to matching invocations that predate it.
+    const searchScopes = discovered.has(live) ? [root] : scopes;
+    const invocations = [...new Set(searchScopes.flatMap((scope) =>
+      queryWithin(scope, definition.contract.tag)
+    ))].map(
+      (invocation) => ({ invocation, hydration: false }),
+    );
+    const hydrationRoots = [...new Set(searchScopes.flatMap((scope) =>
+      queryWithin(scope, `[data-component-root~="${definition.contract.tag}"]`)
+    ))].filter((element) => !runtimeInstances.has(element)).map(
+      (invocation) => ({ invocation, hydration: true }),
+    );
+    for (const { invocation, hydration } of [...invocations, ...hydrationRoots]) {
+      if (contentOnly.has(invocation)) continue;
+      prepared.push(prepareRuntimeInvocation(invocation, definition, hydration));
+    }
+  }
+
+  for (const live of definitions) {
+    registry.definitions.set(live.definition.contract.tag, live);
+    if (live.style !== undefined) {
+      live.style.textContent = transformComponentStyles(
+        live.style.textContent ?? "",
+        live.definition.contract.tag,
+        {
+          mode: componentStyleMode(live.wrapper!.ownerDocument),
+          rootElement: live.definition.template.name,
+        },
+      );
+      live.wrapper!.ownerDocument.head.append(live.style);
+    }
+    live.wrapper!.remove();
+  }
+
+  commitRuntimeInvocations(registry, prepared);
+  return prepared.map((invocation) => invocation.nativeRoot);
+}
+
+/**
+ * Performs one explicit lowering pass, retaining definitions in a document registry for
+ * later passes. It does not observe mutations or register Custom Elements.
+ */
+export function lowerDocument(root: Document = document): number {
+  return lowerScopes(root, [root]).length;
 }
 
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
+}
+
+interface ManagedComponentLifecycle {
+  readonly connect: (element: Element) => () => void;
+  disconnect: undefined | (() => void);
+}
+
+interface LifecycleCoordinator {
+  add(element: Element, record: ManagedComponentLifecycle): void;
+  remove(element: Element, record: ManagedComponentLifecycle): void;
+}
+
+type DocumentMutationSubscriber = (mutations: readonly MutationRecord[]) => void;
+
+interface DocumentMutationHub {
+  readonly observer: MutationObserver;
+  readonly subscribers: Set<DocumentMutationSubscriber>;
+}
+
+const mutationHubKey = Symbol.for("@nextwebwg/declarative-components.mutation-hub.v1");
+const lifecycleCoordinatorKey = Symbol.for("@nextwebwg/declarative-components.lifecycle.v1");
+const documentObserversKey = Symbol.for("@nextwebwg/declarative-components.document-observers.v1");
+
+function globalDocumentMap<T>(key: symbol): WeakMap<Document, T> {
+  const host = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  const existing = host[key];
+  if (existing instanceof WeakMap) return existing as WeakMap<Document, T>;
+  const map = new WeakMap<Document, T>();
+  Object.defineProperty(host, key, { value: map });
+  return map;
+}
+
+function subscribeDocumentMutations(
+  root: Document,
+  subscriber: DocumentMutationSubscriber,
+): () => void {
+  const hubs = globalDocumentMap<DocumentMutationHub>(mutationHubKey);
+  let hub = hubs.get(root);
+  if (hub === undefined) {
+    const Observer = root.defaultView?.MutationObserver;
+    if (Observer === undefined) {
+      fail("HR003", "Automatic component management requires a browser MutationObserver.");
+    }
+    const subscribers = new Set<DocumentMutationSubscriber>();
+    const observer = new Observer((mutations) => {
+      // Snapshot so a callback can unsubscribe without changing this delivery pass.
+      for (const notify of Array.from(subscribers)) notify(mutations);
+    });
+    hub = { observer, subscribers };
+    hubs.set(root, hub);
+    observer.observe(root, { childList: true, subtree: true });
+  }
+  hub.subscribers.add(subscriber);
+  let subscribed = true;
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    hub.subscribers.delete(subscriber);
+    if (hub.subscribers.size === 0) {
+      hub.observer.disconnect();
+      hubs.delete(root);
+    }
+  };
+}
+
+function coordinatorFor(root: Document): LifecycleCoordinator {
+  const coordinators = globalDocumentMap<LifecycleCoordinator>(lifecycleCoordinatorKey);
+  const existing = coordinators.get(root);
+  if (existing !== undefined) return existing;
+  const records = new WeakMap<Element, ManagedComponentLifecycle>();
+  let size = 0;
+  const synchronize = (element: Element): void => {
+    const record = records.get(element);
+    if (record === undefined) return;
+    if (element.isConnected && record.disconnect === undefined) {
+      record.disconnect = record.connect(element);
+    } else if (!element.isConnected && record.disconnect !== undefined) {
+      record.disconnect();
+      record.disconnect = undefined;
+    }
+  };
+  const stopObservation = subscribeDocumentMutations(root, (mutations) => {
+    const changed = new Set<Element>();
+    const collect = (node: Node): void => {
+      if (node.nodeType !== 1) return;
+      const element = node as Element;
+      if (records.has(element)) changed.add(element);
+      for (const descendant of element.querySelectorAll("*")) {
+        if (records.has(descendant)) changed.add(descendant);
+      }
+    };
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) collect(node);
+      for (const node of mutation.removedNodes) collect(node);
+    }
+    for (const element of changed) synchronize(element);
+  });
+  const coordinator: LifecycleCoordinator = {
+    add(element, record) {
+      const previous = records.get(element);
+      if (previous === record) return;
+      previous?.disconnect?.();
+      if (previous === undefined) size += 1;
+      records.set(element, record);
+      synchronize(element);
+    },
+    remove(element, record) {
+      if (records.get(element) !== record) return;
+      record.disconnect?.();
+      records.delete(element);
+      size -= 1;
+      if (size === 0) {
+        stopObservation();
+        coordinators.delete(root);
+      }
+    },
+  };
+  coordinators.set(root, coordinator);
+  return coordinator;
+}
+
+/**
+ * Gives generated Vanilla roots native-like connection lifecycle without installing one
+ * observer per instance. Runtime copies in the same realm share one coordinator per document.
+ */
+export function manageComponentLifecycle(
+  element: Element,
+  definition: ComponentDefinition,
+  options: ComponentAttachmentOptions = {},
+): () => void {
+  const coordinator = coordinatorFor(element.ownerDocument);
+  const record: ManagedComponentLifecycle = {
+    connect: (current) => attachComponent(current, definition, options),
+    disconnect: undefined,
+  };
+  coordinator.add(element, record);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    coordinator.remove(element, record);
+  };
 }
 
 /** Registers already parsed package definitions without manufacturing live `<template>` nodes. */
@@ -1412,7 +1584,7 @@ export function attachComponent(
         }
       }
     }
-    lowerDocument(root);
+    commitRuntimeInvocations(registry, [prepareRuntimeInvocation(element, definition, true)]);
   }
 
   const attached = runtimeInstances.get(element);
@@ -1420,6 +1592,7 @@ export function attachComponent(
   for (const [name, value] of Object.entries(options.props ?? {})) {
     if (name in definition.contract.props) (element as unknown as Record<string, unknown>)[name] = value;
   }
+  connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
   let disposed = false;
@@ -1539,7 +1712,9 @@ export interface DocumentObservationOptions {
   readonly onError?: (error: unknown) => void;
 }
 
-const documentObservers = new WeakMap<Document, () => void>();
+function activeDocumentObservers(): WeakMap<Document, () => void> {
+  return globalDocumentMap(documentObserversKey);
+}
 
 /**
  * Discover inline definitions and instances added after boot. This browser-only entrypoint
@@ -1551,45 +1726,78 @@ export function observeDocument(
   root: Document = document,
   options: DocumentObservationOptions = {},
 ): () => void {
+  const documentObservers = activeDocumentObservers();
   if (documentObservers.has(root)) fail("HR003", "This document is already being observed.");
   const registry = registryFor(root);
   const connected = new Map<Element, void | (() => void)>();
   const report = options.onError ?? ((error: unknown) => console.error(error));
   let stopped = false;
-  const synchronize = (): void => {
+  const disconnect = (element: Element): void => {
+    const dispose = connected.get(element);
+    connected.delete(element);
+    const instance = runtimeInstances.get(element);
+    if (instance !== undefined) disconnectRuntimeInstance(instance);
+    try { dispose?.(); } catch (error) { report(error); }
+  };
+  const connect = (element: Element): void => {
+    const definition = registry.instances.get(element);
+    if (definition === undefined || connected.has(element) || !root.contains(element)) return;
+    // Record first so callback mutations cannot connect an instance twice.
+    connected.set(element, undefined);
+    try {
+      const instance = runtimeInstances.get(element);
+      if (instance !== undefined) connectRuntimeInstance(instance);
+      const dispose = options.onConnect?.(element, definition);
+      if (stopped) dispose?.();
+      else connected.set(element, dispose);
+    } catch (error) { report(error); }
+  };
+  const synchronize = (mutations?: readonly MutationRecord[]): void => {
     if (stopped) return;
-    for (const [element, dispose] of connected) {
-      if (!root.contains(element)) {
-        connected.delete(element);
-        const instance = runtimeInstances.get(element);
-        if (instance !== undefined) disconnectRuntimeInstance(instance);
-        try { dispose?.(); } catch (error) { report(error); }
+    const scopes: QueryRoot[] = [];
+    const candidates = new Set<Element>();
+    if (mutations === undefined) {
+      scopes.push(root);
+    } else {
+      const removed = new Set<Element>();
+      for (const mutation of mutations) {
+        for (const node of mutation.removedNodes) {
+          if (node.nodeType !== 1) continue;
+          for (const element of queryWithin(node as QueryRoot, "*")) {
+            if (connected.has(element)) removed.add(element);
+          }
+        }
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const scope = node as QueryRoot;
+          scopes.push(scope);
+          for (const element of queryWithin(scope, "*")) {
+            if (registry.instances.has(element)) candidates.add(element);
+          }
+        }
+      }
+      for (const element of removed) if (!root.contains(element)) disconnect(element);
+    }
+    if (scopes.length > 0) {
+      try {
+        for (const element of lowerScopes(root, scopes)) candidates.add(element);
+      } catch (error) { report(error); }
+    }
+    if (mutations === undefined) {
+      for (const element of root.querySelectorAll("*")) {
+        if (registry.instances.has(element)) candidates.add(element);
       }
     }
-    try { lowerDocument(root); } catch (error) { report(error); }
-    for (const element of Array.from(root.querySelectorAll("*"))) {
+    for (const element of candidates) {
       if (stopped) break;
-      const definition = registry.instances.get(element);
-      if (definition === undefined || connected.has(element) || !root.contains(element)) continue;
-      // Record first so callback mutations cannot connect an instance twice.
-      connected.set(element, undefined);
-      try {
-        const instance = runtimeInstances.get(element);
-        if (instance !== undefined) connectRuntimeInstance(instance);
-        const dispose = options.onConnect?.(element, definition);
-        if (stopped) dispose?.();
-        else connected.set(element, dispose);
-      }
-      catch (error) { report(error); }
+      connect(element);
     }
   };
-  const Observer = root.defaultView?.MutationObserver;
-  if (Observer === undefined) fail("HR003", "Document observation requires a browser MutationObserver.");
-  const observer = new Observer(synchronize);
+  const stopObservation = subscribeDocumentMutations(root, synchronize);
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
-    observer.disconnect();
+    stopObservation();
     documentObservers.delete(root);
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
@@ -1601,7 +1809,6 @@ export function observeDocument(
     connected.clear();
   };
   documentObservers.set(root, stop);
-  observer.observe(root, { childList: true, subtree: true });
   synchronize();
   return stop;
 }

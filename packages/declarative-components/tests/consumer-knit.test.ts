@@ -56,8 +56,8 @@ export async function render() {
       target: ["node20"], nodePaths: [nodeModulesPath], loader: { ".css": "empty" },
       plugins: [vuePlugin],
       alias: {
-        "@nextwebwg/html/runtime": runtimePath,
-        "@nextwebwg/html": libraryPath,
+        "@nextwebwg/declarative-components/runtime": runtimePath,
+        "@nextwebwg/declarative-components": libraryPath,
         "@threadlabs/looma/vue/editor": join(directory, "vue/editor/index.js"),
         "@threadlabs/looma/editor/extensions": join(directory, "editor/extensions/index.js"),
         "@threadlabs/looma/vue": join(directory, "vue/index.js"),
@@ -72,10 +72,11 @@ createSSRApp({ render: () => h(Button, { disabled: false }, { default: () => h("
     await build({
       entryPoints: [browserEntry], outfile: browserBundle, bundle: true, format: "iife", platform: "browser",
       target: ["es2022"], nodePaths: [nodeModulesPath], loader: { ".css": "empty" },
+      define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
       plugins: [vuePlugin],
       alias: {
-        "@nextwebwg/html/runtime": runtimePath,
-        "@nextwebwg/html": libraryPath,
+        "@nextwebwg/declarative-components/runtime": runtimePath,
+        "@nextwebwg/declarative-components": libraryPath,
         "@threadlabs/looma/vue": join(directory, "vue/index.js"),
       },
     });

@@ -70,4 +70,37 @@ describe("reactive scope", () => {
     await Promise.resolve();
     assert.deepEqual(seen, [["A", "!"], ["B", "?"]]);
   });
+
+  it("bounds a reactive write cycle and clears the runaway queue", () => {
+    const scope = new ReactiveScope([["count", 0]]);
+    let runs = 0;
+    createEffect(scope.scheduler, () => {
+      runs += 1;
+      scope.set("count", (scope.get("count") as number) + 1);
+    });
+
+    assert.throws(
+      () => scope.scheduler.flush(),
+      (error: unknown) => error instanceof Error && error.message.includes("HR006"),
+    );
+    assert.equal(runs, 101);
+
+    scope.scheduler.flush();
+    assert.equal(runs, 101);
+  });
+
+  it("allows wide fan-out because the loop bound is per effect", () => {
+    const scope = new ReactiveScope([["value", 0]]);
+    let runs = 0;
+    for (let index = 0; index < 200; index += 1) {
+      createEffect(scope.scheduler, () => {
+        scope.get("value");
+        runs += 1;
+      });
+    }
+
+    scope.set("value", 1);
+    scope.scheduler.flush();
+    assert.equal(runs, 400);
+  });
 });

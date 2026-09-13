@@ -1,4 +1,5 @@
 import { buildComponentGraph, type ComponentGraph } from "./graph.js";
+import { parseBrowserComponentResource } from "./browser-source.js";
 import { ComponentRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
@@ -37,6 +38,8 @@ export async function loadBrowserComponents(
       if (!response.ok) throw new TypeError(`Component request \`${url}\` failed with ${response.status}.`);
       return { url: response.url || url, source: await response.text() };
     },
+    parseComponentResource: (sourceText, source) =>
+      parseBrowserComponentResource(sourceText, source, root),
     isCustomElementRegistered: (tag) => root.defaultView?.customElements.get(tag) !== undefined,
   });
   const registry = options.registry ?? new ComponentRegistry();

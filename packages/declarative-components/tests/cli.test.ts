@@ -78,7 +78,7 @@ describe("buildComponents", () => {
     const inspected = await inspectComponents([graphFixture]);
     assert.deepEqual(checked, inspected);
     assert.deepEqual(inspected.components.map((component) => component.tag), ["x-app", "x-child"]);
-    assert.match(inspected.components[0]!.controller!, /test\/fixtures\/graph\/app\.js$/);
+    assert.match(inspected.components[0]!.controller!, /tests\/fixtures\/graph\/app\.js$/);
     assert.deepEqual(inspected.modules.map((path) => path.split("/").at(-1)), ["app.js", "helper.js"]);
   });
 

@@ -7,12 +7,17 @@ and verification live at the repository root.
 | Package | Proposal | Current scope |
 | --- | --- | --- |
 | [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Browser runtime, compiler, validation, migration, and framework/package generation |
+| [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
 
 The Declarative HTML Components package authors a component once as inert,
 browser-parseable HTML. The same definition can run directly in a browser or compile to
 native DOM, React, Vue, Svelte, CSS, types, and inspectable package artifacts. Its exact
 behavior is defined by the package's [reference specification](./packages/declarative-components/docs/spec/index.md),
 [support profile](./packages/declarative-components/docs/spec/support.json), and conformance tests.
+
+The HTML Forms package operates on native `HTMLFormElement` and submitter objects. Declarative
+Components consumes that API for its form declarations; the Forms package has no component,
+template, or reactive-runtime dependency.
 
 > Stage 0: the syntax and generated package shape may change. The repository and its
 > packages remain private until the project selects an open-source license and publication

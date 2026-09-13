@@ -1,8 +1,4 @@
-import {
-  parseFragment,
-  type DefaultTreeAdapterTypes,
-  type ParserError,
-} from "parse5";
+import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { coerceDefault, defineContract, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
@@ -31,6 +27,8 @@ import type { ComponentContract, PropTarget } from "./types.js";
 type ChildNode = DefaultTreeAdapterTypes.ChildNode;
 type Element = DefaultTreeAdapterTypes.Element;
 type Template = DefaultTreeAdapterTypes.Template;
+
+export type ComponentSourceNode = ChildNode;
 
 function isElement(node: ChildNode): node is Element {
   return "tagName" in node;
@@ -812,17 +810,11 @@ function parseElement(
   };
 }
 
-export function parseComponent(sourceText: string, source = "<source>"): ComponentDefinition {
-  const parserErrors: ParserError[] = [];
-  const fragment = parseFragment(sourceText, {
-    sourceCodeLocationInfo: true,
-    onParseError: (error) => parserErrors.push(error),
-  });
-  if (parserErrors.length > 0) {
-    fail("HS005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
-  }
-
-  const roots = significant(fragment.childNodes).filter(isElement);
+export function parseComponentNodes(
+  childNodes: readonly ChildNode[],
+  source = "<source>",
+): ComponentDefinition {
+  const roots = significant(childNodes).filter(isElement);
   if (
     roots.length !== 1 ||
     roots[0]!.tagName !== "template" ||
@@ -830,7 +822,7 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
   ) {
     fail("HS001", "A source must contain exactly one top-level <template component>.", source);
   }
-  if (significant(fragment.childNodes).length !== 1) {
+  if (significant(childNodes).length !== 1) {
     fail("HS001", "A source must contain only one top-level component definition.", source);
   }
   const wrapper = roots[0]! as Template;

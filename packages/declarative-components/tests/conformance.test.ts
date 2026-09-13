@@ -1,7 +1,7 @@
 /**
  * HTML Next in-browser conformance harness.
  *
- * Runs the shared `source -> expected observable result` corpus (`test/conformance/cases.ts`)
+ * Runs the shared `source -> expected observable result` corpus (`tests/conformance/cases.ts`)
  * against the in-browser compilation path (`src/runtime.ts`, `lowerDocument`) in Chromium,
  * Firefox, and WebKit, on the model of web-platform-tests. Every case is full HTML; the runtime
  * is bundled once (esbuild, iife, globalName `HtmlRuntime`) and injected per case.

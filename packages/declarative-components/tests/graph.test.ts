@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
-import { buildComponentGraph, type FetchedComponent } from "../src/graph.js";
+import type { FetchedComponent } from "../src/graph.js";
+import { buildComponentGraph } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
 
 const root = "https://cdn.example/ui/1/";

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
 import { generateComponent } from "../src/generate.js";
-import { parseComponent } from "../src/parser.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 const snapshotUrl = new URL("./snapshots/x-button.json", import.meta.url);

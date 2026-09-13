@@ -13,26 +13,33 @@ const browserLoaderUrl = new URL("../src/browser-loader.ts", import.meta.url);
 describe.skipIf(!enabled)("browser graph loader", () => {
   let browser: Browser;
   let bundlePath = "";
+  let bundleInputs: readonly string[] = [];
   let temporaryDirectory = "";
 
   beforeAll(async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-browser-loader-"));
     bundlePath = join(temporaryDirectory, "browser-loader.js");
-    await build({
+    const result = await build({
       entryPoints: [browserLoaderUrl.pathname],
       bundle: true,
       format: "iife",
       globalName: "HtmlNextLoader",
+      metafile: true,
       outfile: bundlePath,
       platform: "browser",
       target: ["es2022"],
     });
+    bundleInputs = Object.keys(result.metafile.inputs);
     browser = await chromium.launch({ headless: true });
   });
 
   afterAll(async () => {
     await browser?.close();
     if (temporaryDirectory !== "") await rm(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it("uses the browser's HTML parser instead of bundling parse5", () => {
+    assert.equal(bundleInputs.some((path) => path.includes("/parse5/")), false);
   });
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {

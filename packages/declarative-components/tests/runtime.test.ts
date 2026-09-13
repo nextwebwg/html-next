@@ -49,6 +49,118 @@ describe.skipIf(!enabled)("browser runtime", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} parses and lowers components owned by another browser realm`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          const frame = document.createElement("iframe");
+          document.querySelector("main").append(frame);
+          const frameDocument = frame.contentDocument;
+          frameDocument.open();
+          frameDocument.write('<template component="realm-button" status="early" summary="Cross-realm fixture."><button><slot></slot></button></template><realm-button id="realm">Realm</realm-button>');
+          frameDocument.close();
+          const stop = window.HtmlRuntime.observeDocument(frameDocument);
+          const result = {
+            localName: frameDocument.querySelector("#realm").localName,
+            text: frameDocument.querySelector("#realm").textContent,
+          };
+          stop();
+          frame.remove();
+          return result;
+        })()`);
+        assert.deepEqual(result, { localName: "button", text: "Realm" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} lowers later declarative instances without rescanning the document`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<template component="demo-local" status="early" summary="Local mutation fixture."><button><slot></slot></button></template><main></main>');
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const stop = window.HtmlRuntime.observeDocument();
+          const nativeQuery = Document.prototype.querySelectorAll;
+          let documentQueries = 0;
+          Document.prototype.querySelectorAll = function(selector) {
+            if (this === document) documentQueries += 1;
+            return nativeQuery.call(this, selector);
+          };
+          const section = document.createElement("section");
+          section.innerHTML = '<demo-local id="local">Local</demo-local>';
+          document.querySelector("main").append(section);
+          await tick();
+          const localName = document.querySelector("#local").localName;
+          Document.prototype.querySelectorAll = nativeQuery;
+          stop();
+          return { documentQueries, localName };
+        })()`);
+        assert.deepEqual(result, { documentQueries: 0, localName: "button" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} shares one mutation observer across live and generated components`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const NativeObserver = window.MutationObserver;
+          let documentObservers = 0;
+          window.MutationObserver = class extends NativeObserver {
+            observe(target, options) {
+              if (target instanceof Document) documentObservers += 1;
+              return super.observe(target, options);
+            }
+          };
+          const stopDocument = window.HtmlRuntime.observeDocument();
+          const definition = {
+            contract: { version: 1, name: "DemoManaged", tag: "demo-managed", status: "early",
+              summary: "Managed lifecycle fixture.", nativeElement: "button", props: {} },
+            template: { kind: "element", name: "button", attributes: [], children: [] },
+            css: "", declarations: [], slots: [],
+            root: { kind: "native", element: "button", choices: ["button"] },
+          };
+          const first = document.createElement("button");
+          const second = document.createElement("button");
+          const stopFirst = window.HtmlRuntime.manageComponentLifecycle(first, definition);
+          const stopSecond = window.HtmlRuntime.manageComponentLifecycle(second, definition);
+          document.querySelector("main").append(first, second);
+          await tick();
+          const connected = [first, second].every(element => window.HtmlRuntime.getComponentHost(element) != null);
+          const events = [];
+          const host = window.HtmlRuntime.getComponentHost(first);
+          host.on("connect", () => events.push("connect"));
+          host.on("disconnect", () => events.push("disconnect"));
+          first.remove();
+          await tick();
+          document.querySelector("main").append(first);
+          await tick();
+          stopDocument();
+          stopFirst();
+          stopSecond();
+          return { documentObservers, connected, events };
+        })()`);
+        assert.deepEqual(result, {
+          documentObservers: 1,
+          connected: true,
+          events: ["connect", "disconnect", "connect", "disconnect"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} observes later definitions and instances with balanced connection cleanup`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

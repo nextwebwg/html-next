@@ -433,10 +433,18 @@ function parseTerminal(value: unknown, name: TerminalTypeName, path: string): Ty
       ? { ok: true, value: value.toLowerCase() } : issue("typeMismatch", "Must be a six-digit sRGB color.", path);
     case "token": return typeof value === "string" && value !== "" && !/[\t\n\f\r ]/.test(value)
       ? { ok: true, value } : issue("typeMismatch", "Must be one non-empty HTML token.", path);
-    case "ident": return typeof value === "string" && /^-?(?:-?[A-Za-z_]|[^\0-\x7f])(?:[A-Za-z0-9_-]|[^\0-\x7f])*$/.test(value) && !/^--$/.test(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be an identifier.", path);
-    case "url-value": return typeof value === "string" && value.trim() !== "" && !/[\u0000-\u001f\u007f]/.test(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be a URL value.", path);
+    case "ident": {
+      // Non-ASCII code points are valid identifier characters in this conservative projection.
+      // oxlint-disable-next-line eslint/no-control-regex
+      return typeof value === "string" && /^-?(?:-?[A-Za-z_]|[^\0-\x7f])(?:[A-Za-z0-9_-]|[^\0-\x7f])*$/.test(value) && !/^--$/.test(value)
+        ? { ok: true, value } : issue("typeMismatch", "Must be an identifier.", path);
+    }
+    case "url-value": {
+      // URL values reject all ASCII control characters.
+      // oxlint-disable-next-line eslint/no-control-regex
+      return typeof value === "string" && value.trim() !== "" && !/[\u0000-\u001f\u007f]/.test(value)
+        ? { ok: true, value } : issue("typeMismatch", "Must be a URL value.", path);
+    }
     case "token-list": {
       const tokens = Array.isArray(value) ? value : typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean) : undefined;
       return tokens !== undefined && tokens.every((token) => typeof token === "string" && token !== "" && !/\s/.test(token))

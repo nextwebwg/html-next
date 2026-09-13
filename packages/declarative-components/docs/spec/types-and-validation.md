@@ -11,7 +11,7 @@ defines every accepted production below. Implementations must not accept an unli
 production merely because a CSS parser would accept it.
 
 Normative platform behavior and compatibility-library behavior are separated throughout this
-module. The proposal does not require `@nextwebwg/html`; the library implements the proposed
+module. The proposal does not require `@nextwebwg/declarative-components`; the library implements the proposed
 surface while browsers do not yet provide it.
 
 ## Type grammar
@@ -237,7 +237,7 @@ algorithm. Form-associated custom elements delegate to `ElementInternals.setVali
 
 ## Reference-library adaptation
 
-The official `@nextwebwg/html` library exports the pure type parser/serializer and validator as
+The official `@nextwebwg/declarative-components` library exports the pure type parser/serializer and validator as
 well as the DOM adapter. Inside managed component roots it installs non-enumerable compatibility
 members only where the browser has no native member. Native controls remain authoritative and
 receive `setCustomValidity()` only when an HTML Next-derived or external issue must bridge into

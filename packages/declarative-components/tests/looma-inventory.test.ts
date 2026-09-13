@@ -4,7 +4,7 @@ import { describe, it } from "vitest";
 
 import { scaffoldStencilComponent, type StencilPackageInventory } from "../src/migrate/stencil.js";
 import { LOOMA_PORTED_TAGS, migrateLoomaComponent } from "../src/migrate/looma.js";
-import { parseComponent } from "../src/parser.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const inventoryUrl = new URL("./fixtures/looma/inventory.json", import.meta.url);
 

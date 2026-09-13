@@ -1,11 +1,11 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 
-import ts from "typescript";
+import ts from "typescript-compiler";
 
 import { generateComponent } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
-import { parseComponent } from "./parser.js";
+import { parseComponent } from "./source-parser.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface AssembledPackage {
@@ -75,7 +75,7 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     `  ${JSON.stringify(tag)}: () => import(${JSON.stringify(`../${path}`)}), // controller ${index + 1}`
   );
   return [
-    'import { getComponentHost, observeDocument, registerComponentDefinitions, setControllerModule } from "@nextwebwg/html/runtime";',
+    'import { getComponentHost, observeDocument, registerComponentDefinitions, setControllerModule } from "@nextwebwg/declarative-components/runtime";',
     "",
     `export const definitions = ${JSON.stringify(definitions)};`,
     "const controllerImports = {",
@@ -195,7 +195,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   }
   files.set("dist/index.js", packageEntry(definitions, controllers));
   files.set("dist/index.d.ts", [
-    'import type { ComponentDefinition } from "@nextwebwg/html";',
+    'import type { ComponentDefinition } from "@nextwebwg/declarative-components";',
     "export declare const definitions: readonly ComponentDefinition[];",
     "export declare function register(root?: Document): () => void;",
     "export declare const stop: undefined | (() => void);",
@@ -206,7 +206,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     version: config.version,
     type: "module",
     sideEffects: ["./dist/index.js", "./*.css"],
-    peerDependencies: { "@nextwebwg/html": "^0.0.0", ...config.peerDependencies },
+    peerDependencies: { "@nextwebwg/declarative-components": "^0.0.0", ...config.peerDependencies },
     ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
     exports: config.exports ?? {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },

@@ -4,5 +4,11 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "ignorePatterns": ["examples/generated/**", "packages/*/dist/**"]
+  "rules": {
+    "eslint/no-new": "off",
+    "eslint/no-shadow": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "ignorePatterns": ["packages/*/dist/**", "packages/*/examples/generated/**"]
 }

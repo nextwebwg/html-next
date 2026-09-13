@@ -6,6 +6,10 @@ State is per component instance. Computed values are pure expressions over decla
 
 External property changes, controller writes, form/input bindings, data transitions, and declarative handlers enter the same scheduler. Disconnect runs owned cleanup. Reconnection creates no duplicate listener, observer, timer, or request.
 
+Each effect may execute at most 100 times while one change set is being drained. Crossing
+that bound clears pending work and reports `HR006`. Cyclic write graphs therefore terminate
+with a stable diagnostic while independent wide fan-out continues normally.
+
 ## Structural regions
 
 Conditional, match, `with`, and list constructs own bounded DOM ranges. A keyed list preserves node and component identity by key during insertion, deletion, filtering, sorting, and reordering. A removed branch disposes its effects and controller lifetime. Loop locals cannot escape their region.

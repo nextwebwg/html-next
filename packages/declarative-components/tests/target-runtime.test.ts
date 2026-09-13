@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -10,7 +10,7 @@ import { chromium } from "playwright";
 import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateComponent } from "../src/generate.js";
-import { parseComponent } from "../src/parser.js";
+import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
@@ -101,10 +101,11 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
         format: "iife",
         platform: "browser",
         target: ["es2022"],
+        define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
         jsx: "automatic",
         nodePaths: [nodeModulesPath],
         loader: { ".css": "empty" },
-        alias: { "@nextwebwg/html/runtime": runtimePath },
+        alias: { "@nextwebwg/declarative-components/runtime": runtimePath },
       });
       bundles.set(target, outfile);
     }

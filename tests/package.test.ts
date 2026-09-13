@@ -7,32 +7,44 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const packageRoot = join(root, "packages", "declarative-components");
 const workspace = mkdtempSync(join(tmpdir(), "html-next-package-consumer-"));
 const useCommandShell = process.platform === "win32";
 
 afterAll(() => rmSync(workspace, { recursive: true, force: true }));
 
-describe("declarative-components package", () => {
-  it("installs its tarball and exposes both public imports", () => {
-    const packed = execFileSync(
-      "corepack",
-      ["pnpm", "pack", "--pack-destination", workspace],
-      { cwd: packageRoot, encoding: "utf8", shell: useCommandShell },
-    )
-      .trim()
-      .split("\n")
-      .at(-1);
+function pack(packageDirectory: string): string {
+  const packageRoot = join(root, "packages", packageDirectory);
+  const packed = execFileSync(
+    "corepack",
+    ["pnpm", "pack", "--pack-destination", workspace],
+    { cwd: packageRoot, encoding: "utf8", shell: useCommandShell },
+  )
+    .trim()
+    .split("\n")
+    .at(-1);
 
-    expect(packed).toBeDefined();
-    const tarball = isAbsolute(packed!) ? packed! : join(workspace, packed!);
+  expect(packed).toBeDefined();
+  return isAbsolute(packed!) ? packed! : join(workspace, packed!);
+}
+
+describe("workspace package contracts", () => {
+  it("installs both tarballs and exposes every public import", () => {
+    const formsTarball = pack("html-forms");
+    const componentsTarball = pack("declarative-components");
     writeFileSync(
       join(workspace, "package.json"),
       JSON.stringify({ name: "package-consumer", private: true, type: "module" }),
     );
     execFileSync(
       "npm",
-      ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
+      [
+        "install",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        formsTarball,
+        componentsTarball,
+      ],
       { cwd: workspace, shell: useCommandShell },
     );
 
@@ -49,12 +61,17 @@ describe("declarative-components package", () => {
     expect(existsSync(join(installedRoot, "dist", "index.d.ts"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "runtime.d.ts"))).toBe(true);
     expect(
+      existsSync(
+        join(workspace, "node_modules", "@nextwebwg", "html-forms", "dist", "index.d.ts"),
+      ),
+    ).toBe(true);
+    expect(
       execFileSync(
         process.execPath,
         [
           "--input-type=module",
           "--eval",
-          "Promise.all([import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime')]).then(() => process.stdout.write('ok'))",
+          "Promise.all([import('@nextwebwg/html-forms'), import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime')]).then(() => process.stdout.write('ok'))",
         ],
         { cwd: workspace, encoding: "utf8" },
       ),

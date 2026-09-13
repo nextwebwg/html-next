@@ -1,10 +1,12 @@
 import type { Scope, Value } from "./expression.js";
+import { fail } from "./diagnostics.js";
 
 type Cleanup = void | (() => void);
 type SubscriberSet = Set<ReactiveEffect>;
 
 let activeEffect: ReactiveEffect | undefined;
 let nextEffectId = 0;
+const maximumExecutionsPerFlush = 100;
 
 export class ReactiveScheduler {
   readonly #pending = new Set<ReactiveEffect>();
@@ -24,13 +26,22 @@ export class ReactiveScheduler {
     if (this.#flushing) return;
     this.#scheduled = false;
     this.#flushing = true;
+    const executions = new Map<ReactiveEffect, number>();
     try {
       while (this.#pending.size > 0) {
         const effects = [...this.#pending].sort(
           (left, right) => left.priority - right.priority || left.id - right.id,
         );
         this.#pending.clear();
-        for (const effect of effects) effect.execute();
+        for (const effect of effects) {
+          const count = (executions.get(effect) ?? 0) + 1;
+          if (count > maximumExecutionsPerFlush) {
+            this.#pending.clear();
+            fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
+          }
+          executions.set(effect, count);
+          effect.execute();
+        }
       }
     } finally {
       this.#flushing = false;
@@ -57,6 +68,8 @@ export class ReactiveEffect {
     this.#cleanup?.();
     this.#cleanup = undefined;
     const previous = activeEffect;
+    // The module-scoped pointer is the dependency collector for the currently running effect.
+    // oxlint-disable-next-line typescript/no-this-alias
     activeEffect = this;
     try {
       this.#cleanup = this.run();
@@ -106,7 +119,7 @@ function track(subscribers: SubscriberSet): void {
 
 function trigger(subscribers: SubscriberSet | undefined): void {
   if (subscribers === undefined) return;
-  for (const effect of [...subscribers]) effect.schedule();
+  for (const effect of subscribers) effect.schedule();
 }
 
 export function createEffect(
@@ -134,7 +147,7 @@ export class ReactiveScope implements Scope {
     for (const [name, value] of values) this.#values.set(name, this.#wrap(value));
   }
 
-  get size(): number { return new Set([...this.keys()]).size; }
+  get size(): number { return new Set(this.keys()).size; }
 
   has(name: string): boolean {
     return this.#values.has(name) || this.parent?.has(name) === true;

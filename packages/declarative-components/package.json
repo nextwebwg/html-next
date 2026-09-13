@@ -46,6 +46,7 @@
     "generate:looma-assets": "tsx scripts/generate-looma-assets.ts",
     "generate:looma-scaffolds": "tsx scripts/generate-looma-scaffolds.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
+    "measure:runtime": "tsx scripts/measure-runtime-size.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config ../../vitest.browser.config.ts",
     "test:consumer": "pnpm build && vitest run --config ../../vitest.consumer.config.ts",
@@ -54,6 +55,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@nextwebwg/html-forms": "workspace:*",
+    "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
     "parse5": "catalog:"
   },
   "devDependencies": {
@@ -61,6 +64,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vue/compiler-sfc": "catalog:",
+    "@vue/server-renderer": "catalog:",
     "esbuild": "catalog:",
     "playwright": "catalog:",
     "react": "catalog:",

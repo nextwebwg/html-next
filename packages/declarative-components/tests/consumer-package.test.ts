@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -28,16 +28,18 @@ describe.skipIf(!enabled)("external package consumer", () => {
     await assembleFixtureLooma(looma);
     await mkdir(join(modules, "@nextwebwg"), { recursive: true });
     await mkdir(join(modules, "@threadlabs"), { recursive: true });
-    await symlink(repository, join(modules, "@nextwebwg/html"), "dir");
+    await symlink(repository, join(modules, "@nextwebwg/declarative-components"), "dir");
     await symlink(looma, join(modules, "@threadlabs/looma"), "dir");
     await symlink(resolve(repository, "node_modules/@vue"), join(modules, "@vue"), "dir");
     await symlink(resolve(repository, "node_modules/vue"), join(modules, "vue"), "dir");
 
     entry = join(consumer, "index.ts");
+    const styleTypes = join(consumer, "styles.d.ts");
+    await writeFile(styleTypes, 'declare module "*.css";\n', "utf8");
     await writeFile(entry, `import "@threadlabs/looma";
 import "@threadlabs/looma/layout";
 import "@threadlabs/looma/styles.css";
-import type { ComponentDefinition } from "@nextwebwg/html";
+import type { ComponentDefinition } from "@nextwebwg/declarative-components";
 import { definitions } from "@threadlabs/looma";
 import { Button, Dialog, FormField, Menu, SearchShell } from "@threadlabs/looma/vue";
 import { EditorToolbar } from "@threadlabs/looma/vue/editor";
@@ -62,6 +64,9 @@ export { typed, Button, Dialog, FormField, Menu, SearchShell, EditorToolbar, Loo
       },
     };
     bundle = join(consumer, "bundle.mjs");
+    const dependencyRoots = await Promise.all(["parse5", "vue"].map(async (name) =>
+      dirname(await realpath(resolve(repository, "node_modules", name)))
+    ));
     await build({
       entryPoints: [entry],
       outfile: bundle,
@@ -70,14 +75,20 @@ export { typed, Button, Dialog, FormField, Menu, SearchShell, EditorToolbar, Loo
       platform: "browser",
       target: ["es2022"],
       preserveSymlinks: true,
+      nodePaths: dependencyRoots,
       loader: { ".css": "empty" },
       plugins: [vuePlugin],
     });
 
-    await run(resolve(repository, "node_modules/.bin/tsc"), [
-      "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022",
-      "--module", "NodeNext", "--moduleResolution", "NodeNext", "--preserveSymlinks", entry,
-    ], { cwd: consumer });
+    try {
+      await run(resolve(repository, "node_modules/.bin/tsc"), [
+        "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022",
+        "--module", "NodeNext", "--moduleResolution", "NodeNext", "--preserveSymlinks", styleTypes, entry,
+      ], { cwd: consumer });
+    } catch (error) {
+      const output = error as { stdout?: string; stderr?: string };
+      throw new Error(`Consumer typecheck failed.\n${output.stdout ?? ""}${output.stderr ?? ""}`, { cause: error });
+    }
   });
 
   afterAll(async () => {
