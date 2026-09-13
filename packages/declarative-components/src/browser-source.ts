@@ -3,32 +3,41 @@ import type { ParsedComponentResource } from "./graph.js";
 import { parseComponentNodes } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
+const platforms = new WeakMap<Document, ReturnType<typeof browserPlatform>>();
+
 function browserPlatform(root: Document) {
-  const propertyCache = new Map<string, ReadonlyMap<string, string>>();
+  const nativeElements: Record<string, boolean> = {};
+  const properties: Record<string, string> = {};
   const isNativeElement = (name: string): boolean => {
     if (name.includes("-")) return false;
+    if (Object.hasOwn(nativeElements, name)) return nativeElements[name]!;
     const element = root.createElement(name);
     const Unknown = root.defaultView?.HTMLUnknownElement;
-    return Unknown === undefined
+    const native = Unknown === undefined
       ? element.constructor.name !== "HTMLUnknownElement"
       : !(element instanceof Unknown);
+    nativeElements[name] = native;
+    return native;
   };
   return {
     isNativeElement,
     resolveDomProperty(tagName: string, propertyName: string): string | undefined {
       if (!isNativeElement(tagName)) return undefined;
-      let properties = propertyCache.get(tagName);
-      if (properties === undefined) {
-        const found = new Map<string, string>();
-        let object: object | null = root.createElement(tagName);
-        while (object !== null) {
-          for (const name of Object.getOwnPropertyNames(object)) found.set(name.toLowerCase(), name);
-          object = Object.getPrototypeOf(object) as object | null;
+      const key = `${tagName}:${propertyName}`;
+      if (key in properties) return properties[key] || undefined;
+      let object: object | null = root.createElement(tagName);
+      const lowerName = propertyName.toLowerCase();
+      while (object !== null) {
+        for (const name of Object.getOwnPropertyNames(object)) {
+          if (name.toLowerCase() === lowerName) {
+            properties[key] = name;
+            return name;
+          }
         }
-        properties = found;
-        propertyCache.set(tagName, properties);
+        object = Object.getPrototypeOf(object) as object | null;
       }
-      return properties.get(propertyName.toLowerCase());
+      properties[key] = "";
+      return undefined;
     },
   };
 }
@@ -44,13 +53,13 @@ export function parseBrowserComponent(
   if (carrier.localName !== "template" || !carrier.hasAttribute("component")) {
     fail("HS001", "A browser component carrier must be a <template component>.", source);
   }
-  return parseComponentNodes([carrier], source, browserPlatform(carrier.ownerDocument));
-}
-
-function significant(nodes: readonly Node[]): Node[] {
-  return nodes.filter((node) =>
-    node.nodeType !== 8 && (node.nodeType !== 3 || (node.nodeValue ?? "").trim() !== "")
-  );
+  const document = carrier.ownerDocument;
+  let platform = platforms.get(document);
+  if (platform === undefined) {
+    platform = browserPlatform(document);
+    platforms.set(document, platform);
+  }
+  return parseComponentNodes([carrier], source, platform);
 }
 
 /** Parses a fetched component resource with the browser's inert HTML fragment parser. */
@@ -61,17 +70,25 @@ export function parseBrowserComponentResource(
 ): ParsedComponentResource {
   const container = root.createElement("template");
   container.innerHTML = sourceText;
-  const nodes = significant(Array.from(container.content.childNodes));
-  const templates = nodes.filter((node): node is HTMLTemplateElement =>
-    node.nodeType === 1 && (node as Element).localName === "template" &&
-    (node as Element).hasAttribute("component")
-  );
-  if (templates.length !== 1) {
+  let carrier: HTMLTemplateElement | undefined;
+  for (const node of container.content.childNodes) {
+    if (
+      node.nodeType === 1 && (node as Element).localName === "template" &&
+      (node as Element).hasAttribute("component")
+    ) {
+      if (carrier !== undefined) {
+        fail("HS001", "A component resource must contain exactly one <template component>.", source);
+      }
+      carrier = node as HTMLTemplateElement;
+    }
+  }
+  if (carrier === undefined) {
     fail("HS001", "A component resource must contain exactly one <template component>.", source);
   }
   const dependencies: string[] = [];
-  for (const node of nodes) {
-    if (node === templates[0]) continue;
+  for (const node of container.content.childNodes) {
+    if (node === carrier || node.nodeType === 8 ||
+      (node.nodeType === 3 && (node.nodeValue ?? "").trim() === "")) continue;
     if (
       node.nodeType !== 1 || (node as Element).localName !== "link" ||
       (node as Element).getAttribute("rel") !== "component"
@@ -84,8 +101,8 @@ export function parseBrowserComponentResource(
     }
     dependencies.push(href);
   }
-  return Object.freeze({
-    definition: parseBrowserComponent(templates[0]!, source),
-    dependencies: Object.freeze(dependencies),
-  });
+  return {
+    definition: parseBrowserComponent(carrier, source),
+    dependencies,
+  };
 }

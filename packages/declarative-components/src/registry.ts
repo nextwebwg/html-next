@@ -9,7 +9,7 @@ export interface ComponentRegistryEntry {
 /** A deterministic, customElements-shaped registry for validated graph entries. */
 export class ComponentRegistry {
   readonly #entries = new Map<string, ComponentRegistryEntry>();
-  readonly #waiters = new Map<string, Set<() => void>>();
+  readonly #waiters = new Map<string, Array<() => void>>();
 
   define(tag: string, entry: ComponentRegistryEntry): void {
     if (this.#entries.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
@@ -25,8 +25,8 @@ export class ComponentRegistry {
   whenDefined(tag: string): Promise<void> {
     if (this.#entries.has(tag)) return Promise.resolve();
     return new Promise((resolve) => {
-      const waiters = this.#waiters.get(tag) ?? new Set();
-      waiters.add(resolve);
+      const waiters = this.#waiters.get(tag) ?? [];
+      waiters.push(resolve);
       this.#waiters.set(tag, waiters);
     });
   }

@@ -16,7 +16,7 @@ export interface BrowserLoaderOptions {
 
 function readImportMap(root: Document): ImportMapLike {
   const imports: Record<string, string> = {};
-  for (const script of Array.from(root.querySelectorAll('script[type="importmap"]'))) {
+  for (const script of root.querySelectorAll('script[type="importmap"]')) {
     const parsed = JSON.parse(script.textContent ?? "{}") as ImportMapLike;
     Object.assign(imports, parsed.imports ?? {});
   }
@@ -49,11 +49,10 @@ export async function loadBrowserComponents(
 
 /** Reads the application's direct live roots from link[rel=component]. */
 export function documentComponentRoots(root: Document = document): readonly string[] {
-  return Object.freeze(
-    Array.from(root.querySelectorAll('link[rel="component"][href]'))
-      .map((link) => link.getAttribute("href")!)
-      .filter((href) => href.trim() !== ""),
-  );
+  return Object.freeze(Array.from(
+    root.querySelectorAll('link[rel="component"][href]'),
+    (link) => link.getAttribute("href")!,
+  ).filter((href) => href.trim() !== ""));
 }
 
 export function loadDocumentComponents(
@@ -81,13 +80,10 @@ export async function startBrowserComponents(
   const loaded = await loadDocumentComponents(root, options);
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));
-  const nodesByTag = new Map(
-    [...loaded.graph.nodes.values()].map((node) => [node.definition.contract.tag, node]),
-  );
   const stop = observeDocument(root, {
     onError: report,
     onConnect(element, definition) {
-      const node = nodesByTag.get(definition.contract.tag);
+      const node = loaded.registry.get(definition.contract.tag)?.node;
       if (node?.controller === undefined) return;
       const module = loadControllerModule(node, options.importer);
       setControllerModule(element, module);

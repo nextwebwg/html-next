@@ -7,6 +7,8 @@ type SubscriberSet = Set<ReactiveEffect>;
 let activeEffect: ReactiveEffect | undefined;
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
+const proxyCache = new WeakMap<object, object>();
+const objectSubscribers = new WeakMap<object, Map<PropertyKey, SubscriberSet>>();
 
 export class ReactiveScheduler {
   readonly #pending = new Set<ReactiveEffect>();
@@ -68,7 +70,6 @@ export class ReactiveEffect {
     this.#cleanup?.();
     this.#cleanup = undefined;
     const previous = activeEffect;
-    // The module-scoped pointer is the dependency collector for the currently running effect.
     // oxlint-disable-next-line typescript/no-this-alias
     activeEffect = this;
     try {
@@ -79,8 +80,7 @@ export class ReactiveEffect {
   }
 
   schedule(): void {
-    if (this.paused) return;
-    this.scheduler.enqueue(this);
+    if (!this.paused) this.scheduler.enqueue(this);
   }
 
   pause(): void {
@@ -136,8 +136,6 @@ export function createEffect(
 export class ReactiveScope implements Scope {
   readonly #values = new Map<string, Value>();
   readonly #subscribers = new Map<string, SubscriberSet>();
-  readonly #proxyCache = new WeakMap<object, object>();
-  readonly #objectSubscribers = new WeakMap<object, Map<PropertyKey, SubscriberSet>>();
 
   constructor(
     values: Iterable<readonly [string, Value]> = [],
@@ -147,7 +145,9 @@ export class ReactiveScope implements Scope {
     for (const [name, value] of values) this.#values.set(name, this.#wrap(value));
   }
 
-  get size(): number { return new Set(this.keys()).size; }
+  get size(): number {
+    return new Set(this.keys()).size;
+  }
 
   has(name: string): boolean {
     return this.#values.has(name) || this.parent?.has(name) === true;
@@ -155,9 +155,14 @@ export class ReactiveScope implements Scope {
 
   get(name: string): Value | undefined {
     if (!this.#values.has(name)) return this.parent?.get(name);
-    const subscribers = this.#subscribers.get(name) ?? new Set();
-    this.#subscribers.set(name, subscribers);
-    track(subscribers);
+    if (activeEffect !== undefined) {
+      let subscribers = this.#subscribers.get(name);
+      if (subscribers === undefined) {
+        subscribers = new Set();
+        this.#subscribers.set(name, subscribers);
+      }
+      track(subscribers);
+    }
     return this.#values.get(name);
   }
 
@@ -184,7 +189,9 @@ export class ReactiveScope implements Scope {
     return new Map([...this.parent?.entries() ?? [], ...this.#values]).values();
   }
 
-  [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
+  [Symbol.iterator](): MapIterator<[string, Value]> {
+    return this.entries();
+  }
 
   forEach(
     callbackfn: (value: Value, key: string, map: ReadonlyMap<string, Value>) => void,
@@ -195,33 +202,41 @@ export class ReactiveScope implements Scope {
 
   #wrap(value: Value): Value {
     if (value === null || typeof value !== "object") return value;
-    const cached = this.#proxyCache.get(value);
+    const cached = proxyCache.get(value);
     if (cached !== undefined) return cached as Value;
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => {
-        const properties = this.#objectSubscribers.get(target) ?? new Map();
-        this.#objectSubscribers.set(target, properties);
-        const subscribers = properties.get(key) ?? new Set();
-        properties.set(key, subscribers);
-        track(subscribers);
+        if (activeEffect !== undefined) {
+          let properties = objectSubscribers.get(target);
+          if (properties === undefined) {
+            properties = new Map();
+            objectSubscribers.set(target, properties);
+          }
+          let subscribers = properties.get(key);
+          if (subscribers === undefined) {
+            subscribers = new Set();
+            properties.set(key, subscribers);
+          }
+          track(subscribers);
+        }
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },
       set: (target, key, next, receiver) => {
         const previous = Reflect.get(target, key, receiver);
-        const changed = !Object.is(previous, next);
-        const result = Reflect.set(target, key, this.#wrap(next as Value), receiver);
-        if (changed) trigger(this.#objectSubscribers.get(target)?.get(key));
+        const wrapped = this.#wrap(next as Value);
+        const result = Reflect.set(target, key, wrapped, receiver);
+        if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
         return result;
       },
       deleteProperty: (target, key) => {
         const had = Reflect.has(target, key);
         const result = Reflect.deleteProperty(target, key);
-        if (had) trigger(this.#objectSubscribers.get(target)?.get(key));
+        if (had) trigger(objectSubscribers.get(target)?.get(key));
         return result;
       },
     });
-    this.#proxyCache.set(value, proxy);
-    this.#proxyCache.set(proxy, proxy);
+    proxyCache.set(value, proxy);
+    proxyCache.set(proxy, proxy);
     return proxy as Value;
   }
 }

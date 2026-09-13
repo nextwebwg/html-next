@@ -17,21 +17,24 @@ interface DocumentMutationHub {
   readonly subscribers: Set<DocumentMutationSubscriber>;
 }
 
-const mutationHubKey = Symbol.for("@nextwebwg/declarative-components.mutation-hub.v1");
-const lifecycleCoordinatorKey = Symbol.for("@nextwebwg/declarative-components.lifecycle.v1");
+const runtimeKey = Symbol.for("@nextwebwg/declarative-components.runtime.v1");
+const lifecycleKey = Symbol.for("@nextwebwg/declarative-components.lifecycle.v1");
 
-function globalDocumentMap<T>(key: symbol): WeakMap<Document, T> {
-  const host = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
-  const installed = host[key];
-  if (installed instanceof WeakMap) return installed as WeakMap<Document, T>;
-  const documents = new WeakMap<Document, T>();
-  Object.defineProperty(host, key, { value: documents });
-  return documents;
+interface DocumentState {
+  mutationHub?: DocumentMutationHub;
+  lifecycle?: LifecycleCoordinator;
+}
+
+type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
+type RuntimeElement = Element & { [lifecycleKey]?: ManagedComponentLifecycle };
+
+function documentState(root: Document): DocumentState {
+  return (root as RuntimeDocument)[runtimeKey] ??= {};
 }
 
 function subscribeDocumentMutations(root: Document, subscriber: DocumentMutationSubscriber): () => void {
-  const hubs = globalDocumentMap<DocumentMutationHub>(mutationHubKey);
-  let hub = hubs.get(root);
+  const state = documentState(root);
+  let hub = state.mutationHub;
   if (hub === undefined) {
     const Observer = root.defaultView?.MutationObserver ?? MutationObserver;
     const subscribers = new Set<DocumentMutationSubscriber>();
@@ -39,20 +42,29 @@ function subscribeDocumentMutations(root: Document, subscriber: DocumentMutation
       for (const notify of Array.from(subscribers)) notify(mutations);
     });
     hub = { observer, subscribers };
-    hubs.set(root, hub);
+    state.mutationHub = hub;
     observer.observe(root, { childList: true, subtree: true });
   }
   hub.subscribers.add(subscriber);
-  return () => hub.subscribers.delete(subscriber);
+  let subscribed = true;
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    hub.subscribers.delete(subscriber);
+    if (hub.subscribers.size === 0) {
+      hub.observer.disconnect();
+      delete state.mutationHub;
+    }
+  };
 }
 
 function coordinatorFor(root: Document): LifecycleCoordinator {
-  const coordinators = globalDocumentMap<LifecycleCoordinator>(lifecycleCoordinatorKey);
-  const installed = coordinators.get(root);
+  const state = documentState(root);
+  const installed = state.lifecycle;
   if (installed !== undefined) return installed;
-  const records = new WeakMap<Element, ManagedComponentLifecycle>();
+  let size = 0;
   const synchronize = (element: Element): void => {
-    const record = records.get(element);
+    const record = (element as RuntimeElement)[lifecycleKey];
     if (record === undefined) return;
     if (element.isConnected && record.disconnect === undefined) {
       record.disconnect = record.connect(element);
@@ -61,15 +73,15 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       record.disconnect = undefined;
     }
   };
-  subscribeDocumentMutations(root, (mutations) => {
-    const changed = new Set<Element>();
+  const stopObservation = subscribeDocumentMutations(root, (mutations) => {
+    const changed: Element[] = [];
     const collect = (node: Node): void => {
       if (node.nodeType !== 1) return;
       const element = node as Element;
-      if (records.has(element)) changed.add(element);
+      if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
       if (element.childElementCount === 0) return;
-      for (const root of element.querySelectorAll("[data-component-root]")) {
-        if (records.has(root)) changed.add(root);
+      for (const descendant of element.querySelectorAll("[data-component-root]")) {
+        if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       }
     };
     for (const mutation of mutations) {
@@ -80,25 +92,33 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
   });
   const coordinator: LifecycleCoordinator = {
     add(element, record) {
-      const previous = records.get(element);
+      const target = element as RuntimeElement;
+      const previous = target[lifecycleKey];
       if (previous === record) return;
       previous?.disconnect?.();
-      records.set(element, record);
+      if (previous === undefined) size += 1;
+      target[lifecycleKey] = record;
       synchronize(element);
     },
     remove(element, record) {
-      if (records.get(element) !== record) return;
+      const target = element as RuntimeElement;
+      if (target[lifecycleKey] !== record) return;
       record.disconnect?.();
-      records.delete(element);
+      delete target[lifecycleKey];
+      size -= 1;
+      if (size === 0) {
+        stopObservation();
+        delete state.lifecycle;
+      }
     },
   };
-  coordinators.set(root, coordinator);
+  state.lifecycle = coordinator;
   return coordinator;
 }
 
 /**
  * Connects generated behavior while its native root is in the document. Every generated
- * bundle in the realm shares the same document observer through the global symbol registry.
+ * bundle in the realm shares the same browser-owned document observer and coordinator.
  */
 export function manageGeneratedLifecycle(
   element: Element,
