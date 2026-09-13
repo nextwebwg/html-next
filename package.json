@@ -9,6 +9,7 @@
     "node": ">=22.13 <23 || >=24 <25"
   },
   "scripts": {
+    "audit:native": "pnpm --filter @nextwebwg/declarative-components audit:native",
     "build": "pnpm --recursive --if-present build",
     "build:example": "pnpm --filter @nextwebwg/declarative-components build:example",
     "build:looma": "pnpm --filter @nextwebwg/declarative-components build:looma",

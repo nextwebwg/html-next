@@ -39,6 +39,7 @@
     "node": ">=22.13 <23 || >=24 <25"
   },
   "scripts": {
+    "audit:native": "tsx scripts/audit-native-features.ts",
     "build": "pnpm clean && tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "build:looma": "tsx scripts/build-looma-package.ts",
