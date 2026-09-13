@@ -1039,6 +1039,10 @@ function renderTemplateNode(
 const VALIDITY_ATTRIBUTES = new Set([
   "type", "required", "multiple", "min", "max", "minlength", "maxlength", "pattern", "step",
 ]);
+const VALIDITY_SELECTOR = [
+  "button", "fieldset", "input", "object", "output", "select", "textarea",
+  ...[...VALIDITY_ATTRIBUTES].map((name) => `[${name}]`),
+].join(",");
 
 function nativeValidatableElement(element: Element): boolean {
   return "validity" in element && typeof (element as { checkValidity?: unknown }).checkValidity === "function";
@@ -1078,7 +1082,9 @@ function installInstanceValidity(root: Element, instance: RuntimeInstance): void
   let cleanups: Array<() => void> = [];
   const connect = (): void => {
     if (cleanups.length > 0) return;
-    const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+    const elements = root.matches(VALIDITY_SELECTOR)
+      ? [root, ...Array.from(root.querySelectorAll(VALIDITY_SELECTOR))]
+      : Array.from(root.querySelectorAll(VALIDITY_SELECTOR));
     for (const element of elements) {
       const native = nativeValidatableElement(element);
       const generalized = Array.from(element.attributes).some((attribute) =>
@@ -1288,24 +1294,41 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
   }
 
   const prepared: PreparedInvocation[] = [];
-  for (const live of [...registry.definitions.values(), ...definitions]) {
+  const lives = [...registry.definitions.values(), ...definitions].filter(
+    ({ definition }) => root.defaultView?.customElements.get(definition.contract.tag) === undefined,
+  );
+  const invocations = new Map(lives.map((live) => [live, new Set<Element>()]));
+  const hydrationRoots = new Map(lives.map((live) => [live, new Set<Element>()]));
+  const collect = (search: readonly LiveDefinition[], searchScopes: readonly QueryRoot[]): void => {
+    if (search.length === 0 || searchScopes.length === 0) return;
+    const byTag = new Map(search.map((live) => [live.definition.contract.tag, live]));
+    const invocationSelector = [...byTag.keys()].join(",");
+    for (const scope of searchScopes) {
+      for (const element of queryWithin(scope, invocationSelector)) {
+        const live = byTag.get(element.localName);
+        if (live !== undefined) invocations.get(live)!.add(element);
+      }
+      for (const element of queryWithin(scope, "[data-component-root]")) {
+        if (runtimeInstances.has(element)) continue;
+        for (const tag of (element.getAttribute("data-component-root") ?? "").split(/\s+/)) {
+          const live = byTag.get(tag);
+          if (live !== undefined) hydrationRoots.get(live)!.add(element);
+        }
+      }
+    }
+  };
+  collect(lives.filter((live) => !discovered.has(live)), scopes);
+  // A newly discovered definition also applies to matching invocations that predate it.
+  collect(lives.filter((live) => discovered.has(live)), [root]);
+
+  for (const live of lives) {
     const { definition } = live;
-    if (root.defaultView?.customElements.get(definition.contract.tag) !== undefined) continue;
     // A <template>'s content is inert, so querySelectorAll never returns definition-internal
     // markup; every match is a live invocation to lower.
-    // A newly discovered definition also applies to matching invocations that predate it.
-    const searchScopes = discovered.has(live) ? [root] : scopes;
-    const invocations = [...new Set(searchScopes.flatMap((scope) =>
-      queryWithin(scope, definition.contract.tag)
-    ))].map(
-      (invocation) => ({ invocation, hydration: false }),
-    );
-    const hydrationRoots = [...new Set(searchScopes.flatMap((scope) =>
-      queryWithin(scope, `[data-component-root~="${definition.contract.tag}"]`)
-    ))].filter((element) => !runtimeInstances.has(element)).map(
-      (invocation) => ({ invocation, hydration: true }),
-    );
-    for (const { invocation, hydration } of [...invocations, ...hydrationRoots]) {
+    for (const [invocation, hydration] of [
+      ...[...invocations.get(live)!].map((element) => [element, false] as const),
+      ...[...hydrationRoots.get(live)!].map((element) => [element, true] as const),
+    ]) {
       if (contentOnly.has(invocation)) continue;
       prepared.push(prepareRuntimeInvocation(invocation, definition, hydration));
     }
@@ -1429,7 +1452,7 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       if (node.nodeType !== 1) return;
       const element = node as Element;
       if (records.has(element)) changed.add(element);
-      for (const descendant of element.querySelectorAll("*")) {
+      for (const descendant of element.querySelectorAll("[data-component-root]")) {
         if (records.has(descendant)) changed.add(descendant);
       }
     };
@@ -1763,7 +1786,7 @@ export function observeDocument(
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) {
           if (node.nodeType !== 1) continue;
-          for (const element of queryWithin(node as QueryRoot, "*")) {
+          for (const element of queryWithin(node as QueryRoot, "[data-component-root]")) {
             if (connected.has(element)) removed.add(element);
           }
         }
@@ -1771,7 +1794,7 @@ export function observeDocument(
           if (node.nodeType !== 1) continue;
           const scope = node as QueryRoot;
           scopes.push(scope);
-          for (const element of queryWithin(scope, "*")) {
+          for (const element of queryWithin(scope, "[data-component-root]")) {
             if (registry.instances.has(element)) candidates.add(element);
           }
         }
@@ -1784,7 +1807,7 @@ export function observeDocument(
       } catch (error) { report(error); }
     }
     if (mutations === undefined) {
-      for (const element of root.querySelectorAll("*")) {
+      for (const element of root.querySelectorAll("[data-component-root]")) {
         if (registry.instances.has(element)) candidates.add(element);
       }
     }

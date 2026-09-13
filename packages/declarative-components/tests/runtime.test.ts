@@ -81,16 +81,33 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent('<template component="demo-local" status="early" summary="Local mutation fixture."><button><slot></slot></button></template><main></main>');
+        await page.setContent(
+          '<template component="demo-local" status="early" summary="Local mutation fixture."><button><slot></slot></button></template>' +
+          '<template component="demo-unused-a" status="early" summary="Unused A."><span></span></template>' +
+          '<template component="demo-unused-b" status="early" summary="Unused B."><span></span></template>' +
+          '<main></main>',
+        );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
           const tick = () => new Promise(resolve => setTimeout(resolve, 0));
           const stop = window.HtmlRuntime.observeDocument();
           const nativeQuery = Document.prototype.querySelectorAll;
+          const nativeElementQuery = Element.prototype.querySelectorAll;
           let documentQueries = 0;
+          let wildcardQueries = 0;
+          let rootMarkerQueries = 0;
+          let registryQueries = 0;
           Document.prototype.querySelectorAll = function(selector) {
             if (this === document) documentQueries += 1;
             return nativeQuery.call(this, selector);
+          };
+          Element.prototype.querySelectorAll = function(selector) {
+            if (selector === "*") wildcardQueries += 1;
+            if (selector === "[data-component-root]") rootMarkerQueries += 1;
+            if (["demo-local", "demo-unused-a", "demo-unused-b"].every(tag => selector.includes(tag))) {
+              registryQueries += 1;
+            }
+            return nativeElementQuery.call(this, selector);
           };
           const section = document.createElement("section");
           section.innerHTML = '<demo-local id="local">Local</demo-local>';
@@ -98,10 +115,21 @@ describe.skipIf(!enabled)("browser runtime", () => {
           await tick();
           const localName = document.querySelector("#local").localName;
           Document.prototype.querySelectorAll = nativeQuery;
+          Element.prototype.querySelectorAll = nativeElementQuery;
           stop();
-          return { documentQueries, localName };
-        })()`);
-        assert.deepEqual(result, { documentQueries: 0, localName: "button" });
+          return { documentQueries, wildcardQueries, rootMarkerQueries, registryQueries, localName };
+        })()`) as {
+          documentQueries: number;
+          wildcardQueries: number;
+          rootMarkerQueries: number;
+          registryQueries: number;
+          localName: string;
+        };
+        assert.equal(result.documentQueries, 0);
+        assert.equal(result.wildcardQueries, 0);
+        assert.ok(result.rootMarkerQueries > 0);
+        assert.equal(result.registryQueries, 2);
+        assert.equal(result.localName, "button");
       } finally {
         await browser.close();
       }
