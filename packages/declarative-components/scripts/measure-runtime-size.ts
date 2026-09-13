@@ -62,17 +62,23 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 
 const staticGenerated = await generatedFixture("static-card", 2_500);
 const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
+const propGenerated = await generatedFixture("prop-button", Number.POSITIVE_INFINITY);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {});
 
 process.stdout.write(`${JSON.stringify({
   static_generated_gzip: staticGenerated.gzip,
   reactive_generated_gzip: reactiveGenerated.gzip,
+  prop_generated_gzip: propGenerated.gzip,
   live_browser_loader_gzip: size(browserResult).gzip,
   static_generated_bytes: staticGenerated.bytes,
   reactive_generated_bytes: reactiveGenerated.bytes,
+  prop_generated_bytes: propGenerated.bytes,
   live_browser_loader_bytes: size(browserResult).bytes,
   browser_parse5_modules: browserInputs.filter((path) => path.includes("/parse5/")).length,
+  browser_dom_property_inventory_modules: browserInputs.filter(
+    (path) => path.includes("/generated/dom-properties"),
+  ).length,
   static_target_met: staticGenerated.targetMet,
   reactive_target_met: reactiveGenerated.targetMet,
 }, null, 2)}\n`);
