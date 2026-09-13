@@ -30,11 +30,17 @@ describe("runtime size measurement", () => {
         missingModules: string[];
         requiredModules: Record<string, string>;
       };
+      subsystemInventory: {
+        subsystemBytes: Record<string, number>;
+        unclassifiedModules: string[];
+      };
     };
     assert.equal(live.mode, "live-browser-distributable");
     assert.equal(live.graph, "open");
     assert.equal(live.capabilityProfile.complete, true);
     assert.deepEqual(live.capabilityProfile.missingModules, []);
+    assert.deepEqual(live.subsystemInventory.unclassifiedModules, []);
+    assert.ok(Object.keys(live.subsystemInventory.subsystemBytes).length > 1);
     assert.deepEqual(Object.keys(live.capabilityProfile.requiredModules).sort(), [
       "componentGraph",
       "controllerHost",
@@ -78,10 +84,12 @@ describe("runtime size measurement", () => {
       "live_distributable_bytes",
       "live_distributable_complete_capability_profile",
       "live_distributable_missing_capability_modules",
+      "live_distributable_unclassified_modules",
       "browser_parse5_modules",
       "browser_dom_property_inventory_modules",
     ]);
     assert.equal(report.live_distributable_complete_capability_profile, 1);
+    assert.equal(report.live_distributable_unclassified_modules, 0);
     assert.deepEqual(report.live_distributable_missing_capability_modules, []);
   });
 });

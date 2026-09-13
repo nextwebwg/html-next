@@ -7,6 +7,7 @@ import { build, type BuildOptions, type BuildResult } from "esbuild";
 
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { classifyLiveRuntimeModules } from "./live-runtime-inventory.js";
 
 interface SizeMeasurement {
   readonly bytes: number;
@@ -128,6 +129,8 @@ const browserDomInventoryModules = browserInputs.filter(
 const missingLiveCapabilityModules = Object.values(liveCapabilityModules)
   .filter((path) => !browserInputs.includes(path));
 const liveSize = size(browserResult);
+const liveModuleBytes = moduleBytes(browserResult);
+const liveSubsystemInventory = classifyLiveRuntimeModules(liveModuleBytes);
 
 const liveDistributable = {
   mode: "live-browser-distributable",
@@ -144,7 +147,8 @@ const liveDistributable = {
     parse5: browserParse5Modules,
     generatedDomPropertyInventory: browserDomInventoryModules,
   },
-  moduleBytes: moduleBytes(browserResult),
+  moduleBytes: liveModuleBytes,
+  subsystemInventory: liveSubsystemInventory,
 } as const;
 
 const nativeBuild = {
@@ -169,6 +173,8 @@ const liveProfile = {
   live_distributable_complete_capability_profile:
     liveDistributable.capabilityProfile.complete ? 1 : 0,
   live_distributable_missing_capability_modules: missingLiveCapabilityModules,
+  live_distributable_unclassified_modules:
+    liveSubsystemInventory.unclassifiedModules.length,
   browser_parse5_modules: browserParse5Modules,
   browser_dom_property_inventory_modules: browserDomInventoryModules,
 } as const;
@@ -187,6 +193,7 @@ if (
     !measurement.targetMet || measurement.fullRuntimeModules > 0 || measurement.parserModules > 0
   ) ||
   missingLiveCapabilityModules.length > 0 ||
+  liveSubsystemInventory.unclassifiedModules.length > 0 ||
   browserParse5Modules > 0 ||
   browserDomInventoryModules > 0
 ) {

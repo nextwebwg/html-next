@@ -14,6 +14,25 @@ The `native_build.capabilityFixtures` group reports isolated generated attributi
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
 the installed Chromium, Firefox, and WebKit builds.
 
+## Complete live inventory
+
+The production browser entry currently contains 103,001 attributed minified raw bytes plus 124
+bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
+unclassified dependency fails `measure:runtime`.
+
+| Responsibility | Minified raw bytes | Native foundation under review |
+| --- | ---: | --- |
+| Reactive execution | 38,480 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
+| Types and validation | 26,171 | Native control validity, Web IDL conversion, platform value objects |
+| Parsing and contract | 24,036 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
+| Style and content policy | 6,181 | CSSOM, `@scope`, template parsing, safe HTML sinks |
+| Component resources | 3,958 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Form enhancement | 2,216 | Native forms, successful controls, submitters, FormData, constraint validation |
+| Discovery and lifecycle | 1,959 | Shared MutationObserver, selector matching, node identity, connection state |
+
+These groups are cost attribution, not separately shipped runtimes. The complete live distributable
+contains all of them for arbitrary later graphs.
+
 | Subsystem | Platform foundation | Reference-library layer | Current evidence and status |
 | --- | --- | --- | --- |
 | Component HTML parsing | `<template>`, the HTML parser, DOM traversal, native element/property introspection | Proposal grammar, declarations, diagnostics, and contract construction | Browser bundles contain zero `parse5` and zero generated DOM-property inventory modules. `parser.ts` contributes 16,302 raw bytes to the full live compiler and zero bytes to directly generated components. Retained for live authoring; continue compiling it out of generated output. |

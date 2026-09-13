@@ -19,8 +19,10 @@ and removing universally redundant runtime machinery.
   smaller than the baseline, performance guardrails pass, and no known universally redundant layer
   remains
 
-Next work separates the measurement output by delivery mode, classifies every live dependency, and
-then runs measured parser, execution, lifecycle, compatibility, and policy reductions.
+Measurement output now separates this complete live product from native-build capability
+attribution. All 23 contributing modules are classified into seven audited responsibilities, and a
+new unclassified dependency fails the gate. Next work runs measured parser, execution, lifecycle,
+compatibility, and policy reductions against this complete entry.
 
 ## Native application or library build
 
@@ -65,4 +67,3 @@ general-runtime imports, and moves shared cases onto target-native facilities.
 Every reported number names one of these goals, the input graph, included capabilities, browser or
 framework versions, and the measured bundle boundary. A reduction advances only the goal whose
 delivery assumptions produced it.
-
