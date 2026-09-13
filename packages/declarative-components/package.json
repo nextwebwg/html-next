@@ -17,6 +17,10 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js"
     },
+    "./generated-runtime": {
+      "types": "./dist/generated-runtime.d.ts",
+      "import": "./dist/generated-runtime.js"
+    },
     "./validation": {
       "types": "./dist/validation.d.ts",
       "import": "./dist/validation.js"

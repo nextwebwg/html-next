@@ -14,6 +14,7 @@ import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
+const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
 
@@ -239,4 +240,219 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       }
     });
   }
+});
+
+describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
+  let bundlePath = "";
+  let mixedBundlePath = "";
+  let directory = "";
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-vanilla-props-"));
+    const definition = parseComponent(`<template component="demo-props" status="experimental" summary="Props.">
+      <props>
+        <prop name="count" type="number" default="1">Count.</prop>
+        <prop name="label" type="string" default="Ready">Label.</prop>
+        <prop name="tone" type="quiet | loud" default="quiet">Tone.</prop>
+      </props>
+      <section :data-count="count" :data-tone="tone"><output $value="count"></output><span :aria-label="label"></span><slot></slot></section>
+    </template>`);
+    const module = generateComponent(definition)
+      .find((artifact) => artifact.path === "vanilla/DemoProps.js")?.content;
+    assert.ok(module);
+    assert.match(module, /declarative-components\/generated-runtime/);
+    assert.doesNotMatch(module, /declarative-components\/runtime/);
+
+    await mkdir(join(directory, "vanilla"), { recursive: true });
+    await mkdir(join(directory, "styles"), { recursive: true });
+    await writeFile(join(directory, "styles/demo-props.css"), "");
+    const entryPath = join(directory, "vanilla/DemoProps.js");
+    bundlePath = join(directory, "bundle.js");
+    await writeFile(entryPath, module);
+    await build({
+      entryPoints: [entryPath],
+      outfile: bundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "DemoProps",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/declarative-components/generated-runtime": generatedRuntimePath },
+    });
+    const mixedEntryPath = join(directory, "mixed.ts");
+    mixedBundlePath = join(directory, "mixed.js");
+    await writeFile(
+      mixedEntryPath,
+      `export { createDemoProps } from "./vanilla/DemoProps.js";\n` +
+      `export { observeDocument } from "@nextwebwg/declarative-components/runtime";\n`,
+    );
+    await build({
+      entryPoints: [mixedEntryPath],
+      outfile: mixedBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "MixedProps",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: {
+        "@nextwebwg/declarative-components/generated-runtime": generatedRuntimePath,
+        "@nextwebwg/declarative-components/runtime": runtimePath,
+      },
+    });
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  const engines: ReadonlyArray<[string, BrowserType]> = [
+    ["Chromium", chromium],
+    ["Firefox", firefox],
+    ["WebKit", webkit],
+  ];
+
+  for (const [name, browserType] of engines) {
+    it(`${name} batches reflected props and pauses DOM work while detached`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.evaluate(() => {
+          const NativeObserver = MutationObserver;
+          (window as unknown as { observedTargets: string[] }).observedTargets = [];
+          window.MutationObserver = class extends NativeObserver {
+            override observe(target: Node, options?: MutationObserverInit): void {
+              (window as unknown as { observedTargets: string[] }).observedTargets.push(
+                target === document ? "#document" : target.nodeName,
+              );
+              super.observe(target, options);
+            }
+          };
+        });
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          (window as unknown as { observedTargets: string[] }).observedTargets = [];
+          const create = (window as unknown as {
+            DemoProps: { createDemoProps(options?: Record<string, unknown>): Element };
+          }).DemoProps.createDemoProps;
+          const root = create({ children: ["Projected"] }) as Element & {
+            count: number;
+            label: string;
+            tone: string;
+          };
+          const second = create();
+          document.querySelector("main")!.append(root, second);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const output = root.querySelector("output")!;
+          const label = root.querySelector("span")!;
+          const initial = {
+            count: root.count,
+            text: output.textContent,
+            label: label.getAttribute("aria-label"),
+            tone: root.getAttribute("data-tone"),
+          };
+
+          root.count = 2;
+          root.label = "First";
+          root.label = "Second";
+          const synchronous = {
+            text: output.textContent,
+            label: label.getAttribute("aria-label"),
+          };
+          await Promise.resolve();
+          const batched = {
+            text: output.textContent,
+            label: label.getAttribute("aria-label"),
+            reflected: root.getAttribute("data-label"),
+          };
+
+          root.setAttribute("data-label", "External");
+          await Promise.resolve();
+          await Promise.resolve();
+          const external = { property: root.label, label: label.getAttribute("aria-label") };
+
+          root.remove();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          root.count = 3;
+          await Promise.resolve();
+          const detached = {
+            property: root.count,
+            text: output.textContent,
+            reflected: root.getAttribute("data-count"),
+          };
+          document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const reconnected = {
+            text: output.textContent,
+            reflected: root.getAttribute("data-count"),
+          };
+
+          let invalid = "";
+          try { root.tone = "unknown"; }
+          catch (error) { invalid = String(error); }
+          return {
+            initial,
+            synchronous,
+            batched,
+            external,
+            detached,
+            reconnected,
+            invalid,
+            observedTargets: (window as unknown as { observedTargets: string[] }).observedTargets,
+          };
+        });
+        assert.deepEqual(result.initial, { count: 1, text: "1", label: "Ready", tone: "quiet" });
+        assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
+        assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
+        assert.deepEqual(result.external, { property: "External", label: "External" });
+        assert.deepEqual(result.detached, { property: 3, text: "2", reflected: "2" });
+        assert.deepEqual(result.reconnected, { text: "3", reflected: "3" });
+        assert.match(result.invalid, /HR002/);
+        assert.deepEqual(result.observedTargets, ["#document", "SECTION", "SECTION", "SECTION"]);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
+  it("shares its document mutation hub with the live runtime", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent("<main></main>");
+      await page.evaluate(() => {
+        const NativeObserver = MutationObserver;
+        (window as unknown as { documentObservations: number }).documentObservations = 0;
+        window.MutationObserver = class extends NativeObserver {
+          override observe(target: Node, options?: MutationObserverInit): void {
+            if (target === document) {
+              (window as unknown as { documentObservations: number }).documentObservations += 1;
+            }
+            super.observe(target, options);
+          }
+        };
+      });
+      await page.addScriptTag({ path: mixedBundlePath });
+      const count = await page.evaluate(async () => {
+        (window as unknown as { documentObservations: number }).documentObservations = 0;
+        const api = (window as unknown as {
+          MixedProps: {
+            createDemoProps(): Element;
+            observeDocument(): () => void;
+          };
+        }).MixedProps;
+        const root = api.createDemoProps();
+        document.querySelector("main")!.append(root);
+        const stop = api.observeDocument();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        stop();
+        return (window as unknown as { documentObservations: number }).documentObservations;
+      });
+      assert.equal(count, 1);
+    } finally {
+      await browser.close();
+    }
+  });
 });

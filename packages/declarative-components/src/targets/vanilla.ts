@@ -9,6 +9,7 @@ import type {
 } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { getDomInterface } from "../platform.js";
+import { kebabCase } from "../names.js";
 import { typeScriptType } from "../type-system.js";
 import { serializedDefinition } from "./shared.js";
 import { targetComponent } from "./backend.js";
@@ -53,6 +54,27 @@ interface DirectRenderContext {
   readonly plan: DirectReactivePlan;
   readonly bindings: DirectBinding[];
   readonly events: DirectEvent[];
+}
+
+interface DirectProp {
+  readonly variable: string;
+  readonly contract: PropContract;
+}
+
+interface DirectPropBinding {
+  readonly element: string;
+  readonly prop: string;
+  readonly kind: "attribute" | "text";
+  readonly name?: string;
+}
+
+interface DirectPropPlan {
+  readonly props: ReadonlyMap<string, DirectProp>;
+}
+
+interface DirectPropRenderContext {
+  readonly plan: DirectPropPlan;
+  readonly bindings: DirectPropBinding[];
 }
 
 function finiteNumber(node: ExpressionNode): number | undefined {
@@ -138,6 +160,50 @@ function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan
   return { states, handlers: handlerPlans };
 }
 
+function directPropType(prop: PropContract): "string" | "boolean" | "number" | readonly string[] | undefined {
+  if (prop.type === "string" || prop.type === "boolean" || prop.type === "number") return prop.type;
+  if ("enum" in prop.type) return prop.type.enum;
+  return undefined;
+}
+
+function directPropTemplateSupported(node: TemplateNode, props: ReadonlySet<string>): boolean {
+  if (node.kind === "text") return true;
+  if (node.kind === "slot") {
+    return node.nameExpression === undefined &&
+      (node.fallback ?? []).every((child) => directPropTemplateSupported(child, props));
+  }
+  if (node.flow !== undefined || node.ref !== undefined || (node.events?.length ?? 0) > 0) return false;
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "literal") continue;
+    const name = attribute.expressionPlan?.ast.kind === "id"
+      ? attribute.expressionPlan.ast.name
+      : undefined;
+    if (name === undefined || !props.has(name)) return false;
+    if (attribute.kind === "directive") {
+      if (attribute.name !== "value") return false;
+    } else if (
+      attribute.kind !== "attribute" || attribute.twoWay === true || attribute.target !== undefined ||
+      !/^(?:aria-|data-)/.test(attribute.name)
+    ) return false;
+  }
+  return node.children.every((child) => directPropTemplateSupported(child, props));
+}
+
+function directPropPlan(definition: ComponentDefinition): DirectPropPlan | undefined {
+  const entries = Object.entries(definition.contract.props);
+  if (
+    definition.controller !== undefined ||
+    (definition.declarations?.length ?? 0) > 0 ||
+    entries.length === 0 ||
+    entries.some(([, prop]) => directPropType(prop) === undefined)
+  ) return undefined;
+  const props = new Map(entries.map(([name, contract], index) => [
+    name,
+    { variable: `prop${index}`, contract },
+  ]));
+  return directPropTemplateSupported(definition.template, new Set(props.keys())) ? { props } : undefined;
+}
+
 function collectDirectEvents(node: ElementNode, variable: string, context: DirectRenderContext): void {
   for (const event of node.events ?? []) {
     context.events.push({ element: variable, name: event.name, handler: event.handler });
@@ -154,22 +220,25 @@ function renderNode(
   owner: string,
   slots = "slots",
   direct?: DirectRenderContext,
+  directProps?: DirectPropRenderContext,
 ): void {
   if (node.kind === "text") {
     lines.push(`  ${parent}.append(${js(node.value)});`);
     return;
   }
   if (node.kind === "slot") {
-    renderSlot(node, lines, counter, parent, props, valueCounter, owner, slots, direct);
+    renderSlot(node, lines, counter, parent, props, valueCounter, owner, slots, direct, directProps);
     return;
   }
 
   const variable = `element${counter.value++}`;
   lines.push(`  const ${variable} = document.createElement(${js(node.name)});`);
-  renderAttributes(node, variable, lines, props, valueCounter, "  ", direct);
+  renderAttributes(node, variable, lines, props, valueCounter, "  ", direct, directProps);
   if (direct !== undefined) collectDirectEvents(node, variable, direct);
   lines.push(`  ${variable}.setAttribute("data-component", ${js(owner)});`);
-  for (const child of node.children) renderNode(child, lines, counter, variable, props, valueCounter, owner, slots, direct);
+  for (const child of node.children) {
+    renderNode(child, lines, counter, variable, props, valueCounter, owner, slots, direct, directProps);
+  }
   lines.push(`  ${parent}.append(${variable});`);
 }
 
@@ -183,13 +252,14 @@ function renderSlot(
   owner: string,
   slots: string,
   direct?: DirectRenderContext,
+  directProps?: DirectPropRenderContext,
 ): void {
   const assigned = node.name === undefined ? "children" : `${slots}[${js(node.name)}] ?? []`;
   lines.push(`  if (${assigned}.length > 0) {`);
   lines.push(`    for (const child of ${assigned}) ${parent}.append(child);`);
   lines.push("  } else {");
   for (const child of node.fallback ?? []) {
-    renderNode(child, lines, counter, parent, props, valueCounter, owner, slots, direct);
+    renderNode(child, lines, counter, parent, props, valueCounter, owner, slots, direct, directProps);
   }
   lines.push("  }");
 }
@@ -202,6 +272,7 @@ function renderAttributes(
   valueCounter: { value: number },
   indent: string,
   direct?: DirectRenderContext,
+  directProps?: DirectPropRenderContext,
 ): void {
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
@@ -211,12 +282,32 @@ function renderAttributes(
     if (attribute.kind === "directive") {
       if (direct !== undefined && attribute.name === "value" && attribute.expressionPlan?.ast.kind === "id") {
         direct.bindings.push({ element: variable, state: attribute.expressionPlan.ast.name });
+      } else if (
+        directProps !== undefined && attribute.name === "value" &&
+        attribute.expressionPlan?.ast.kind === "id"
+      ) {
+        const name = attribute.expressionPlan.ast.name;
+        const prop = directProps.plan.props.get(name)!;
+        directProps.bindings.push({ element: variable, prop: name, kind: "text" });
+        lines.push(`${indent}${variable}.textContent = ${prop.variable} == null ? "" : String(${prop.variable});`);
       }
       continue;
     }
     const prop = props[attribute.expression];
     if (prop === undefined) continue;
-    const expression = `componentProps[${js(attribute.expression)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "undefined"} : componentProps[${js(attribute.expression)}]`;
+    const directProp = directProps?.plan.props.get(attribute.expression);
+    const expression = directProp?.variable ?? `componentProps[${js(attribute.expression)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "undefined"} : componentProps[${js(attribute.expression)}]`;
+    if (
+      directProp !== undefined && attribute.kind === "attribute" &&
+      (variable !== "element" || attribute.name !== `data-${kebabCase(attribute.expression)}`)
+    ) {
+      directProps!.bindings.push({
+        element: variable,
+        prop: attribute.expression,
+        kind: "attribute",
+        name: attribute.name,
+      });
+    }
     const local = `value${valueCounter.value++}`;
     lines.push(`${indent}const ${local} = ${expression};`);
     if (attribute.kind === "property") {
@@ -241,11 +332,15 @@ export function generateVanilla(
   const hasRequired = props.some(([, prop]) => prop.required);
   const polymorphic = target.polymorphic;
   const direct = directReactivePlan(definition);
-  const needsRuntime = direct === undefined && (
+  const directProps = direct === undefined ? directPropPlan(definition) : undefined;
+  const needsRuntime = direct === undefined && directProps === undefined && (
     props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
   );
   const lines = [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
+    ...(directProps === undefined
+      ? []
+      : [`import { manageGeneratedProps } from "@nextwebwg/declarative-components/generated-runtime";`]),
     ...(needsRuntime
       ? [`import { manageComponentLifecycle } from "@nextwebwg/declarative-components/runtime";`]
       : []),
@@ -254,10 +349,15 @@ export function generateVanilla(
     "",
     ...(needsRuntime ? [`const definition = ${serializedDefinition(definition)};`, ""] : []),
     `export function create${contract.name}(options${hasRequired ? "" : " = {}"}) {`,
-    `  const { attributes = {}, children = [], slots = {}, as${needsRuntime ? ", ...componentProps" : ""} } = options;`,
+    `  const { attributes = {}, children = [], slots = {}, as${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
     ...(direct === undefined
       ? []
       : [...direct.states.values()].map(({ variable, initial }) => `  let ${variable} = ${String(initial)};`)),
+    ...(directProps === undefined
+      ? []
+      : [...directProps.props.entries()].map(([name, prop]) =>
+        `  const ${prop.variable} = componentProps[${js(name)}] === undefined ? ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "undefined"} : componentProps[${js(name)}];`
+      )),
     `  const element = document.createElement(${polymorphic ? `as ?? ${js(template.name)}` : js(template.name)});`,
     "  for (const [name, value] of Object.entries(attributes)) {",
     "    if (value === null || value === undefined || value === false) continue;",
@@ -268,7 +368,19 @@ export function generateVanilla(
   const directRender: DirectRenderContext | undefined = direct === undefined
     ? undefined
     : { plan: direct, bindings: [], events: [] };
-  renderAttributes(template, "element", lines, contract.props, valueCounter, "  ", directRender);
+  const directPropRender: DirectPropRenderContext | undefined = directProps === undefined
+    ? undefined
+    : { plan: directProps, bindings: [] };
+  renderAttributes(
+    template,
+    "element",
+    lines,
+    contract.props,
+    valueCounter,
+    "  ",
+    directRender,
+    directPropRender,
+  );
   if (directRender !== undefined) collectDirectEvents(template, "element", directRender);
   lines.push(
     `  element.setAttribute("data-component", ${js(contract.tag)});`,
@@ -276,7 +388,18 @@ export function generateVanilla(
   );
   const counter = { value: 0 };
   for (const child of template.children) {
-    renderNode(child, lines, counter, "element", contract.props, valueCounter, contract.tag, "slots", directRender);
+    renderNode(
+      child,
+      lines,
+      counter,
+      "element",
+      contract.props,
+      valueCounter,
+      contract.tag,
+      "slots",
+      directRender,
+      directPropRender,
+    );
   }
   if (directRender !== undefined) {
     const directPlan = directRender.plan;
@@ -311,6 +434,35 @@ export function generateVanilla(
       lines.push(`  ${event.element}.addEventListener(${js(event.name)}, ${directPlan.handlers.get(event.handler)!.variable});`);
     }
     lines.push("  update();");
+  }
+  if (directPropRender !== undefined) {
+    lines.push("  manageGeneratedProps(element, [");
+    for (const [name, prop] of directPropRender.plan.props) {
+      const type = directPropType(prop.contract)!;
+      lines.push(
+        `    { name: ${js(name)}, attribute: ${js(`data-${kebabCase(name)}`)}, value: ${prop.variable}, type: ${typeof type === "string" ? js(type) : JSON.stringify(type)}, required: ${String(prop.contract.required)} },`,
+      );
+    }
+    if (directPropRender.bindings.length === 0) {
+      lines.push("  ]);");
+    } else {
+      lines.push("  ], (name, value) => {");
+      for (const [name] of directPropRender.plan.props) {
+        const bindings = directPropRender.bindings.filter((binding) => binding.prop === name);
+        if (bindings.length === 0) continue;
+        lines.push(`    if (name === ${js(name)}) {`);
+        for (const binding of bindings) {
+          if (binding.kind === "text") {
+            lines.push(`      ${binding.element}.textContent = value == null ? "" : String(value);`);
+          } else {
+            lines.push(`      if (value === null || value === undefined || value === false) ${binding.element}.removeAttribute(${js(binding.name!)});`);
+            lines.push(`      else ${binding.element}.setAttribute(${js(binding.name!)}, value === true ? "" : String(value));`);
+          }
+        }
+        lines.push("    }");
+      }
+      lines.push("  });");
+    }
   }
   if (needsRuntime) {
     lines.push(

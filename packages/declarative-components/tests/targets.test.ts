@@ -120,6 +120,30 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
+  it("compiles scalar prop reflection without the live interpreter", async () => {
+    const module = generated(componentSource(
+      "demo-label",
+      `<prop name="label" type="string" default="Ready">Label.</prop>`,
+      `<output :data-label="label"><span $value="label"></span></output>`,
+    )).get("vanilla/DemoLabel.js")!;
+
+    assert.match(module, /declarative-components\/generated-runtime/);
+    assert.doesNotMatch(module, /declarative-components\/runtime/);
+    assert.match(module, /manageGeneratedProps/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps unsafe attribute sinks on the complete runtime path", () => {
+    const module = generated(componentSource(
+      "demo-link",
+      `<prop name="target" type="string" default="https://example.test">Target.</prop>`,
+      `<a :href="target"><slot></slot></a>`,
+    )).get("vanilla/DemoLink.js")!;
+
+    assert.match(module, /declarative-components\/runtime/);
+    assert.doesNotMatch(module, /declarative-components\/generated-runtime/);
+  });
+
   it("keeps the complete runtime for reactive shapes outside the direct subset", () => {
     const module = generated(`<template component="demo-derived" status="experimental" summary="Derived output.">
       <defs><state name="count" :value="0"></state></defs>

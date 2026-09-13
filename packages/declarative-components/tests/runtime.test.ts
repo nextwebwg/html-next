@@ -1063,6 +1063,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           filled.label = 'Updated';
           filled.rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
           await Promise.resolve();
+          filled.setAttribute('data-label', 'External');
+          await Promise.resolve();
           await Promise.resolve();
           return {
             initial,
@@ -1087,9 +1089,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
             fallbacks: ["Untitled", "Empty"],
           },
           updated: {
-            label: "Updated",
+              label: "External",
             rows: ["A", "b", "c"],
-            reflectedLabel: "Updated",
+              reflectedLabel: "External",
             reflectedRows: '[{"id":"a"},{"id":"b"},{"id":"c"}]',
           },
         });

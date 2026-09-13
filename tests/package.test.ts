@@ -60,6 +60,7 @@ describe("workspace package contracts", () => {
     expect(manifest.exports).toBeDefined();
     expect(existsSync(join(installedRoot, "dist", "index.d.ts"))).toBe(true);
     expect(existsSync(join(installedRoot, "dist", "runtime.d.ts"))).toBe(true);
+    expect(existsSync(join(installedRoot, "dist", "generated-runtime.d.ts"))).toBe(true);
     expect(
       existsSync(
         join(workspace, "node_modules", "@nextwebwg", "html-forms", "dist", "index.d.ts"),
@@ -71,7 +72,7 @@ describe("workspace package contracts", () => {
         [
           "--input-type=module",
           "--eval",
-          "Promise.all([import('@nextwebwg/html-forms'), import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime')]).then(() => process.stdout.write('ok'))",
+          "Promise.all([import('@nextwebwg/html-forms'), import('@nextwebwg/declarative-components'), import('@nextwebwg/declarative-components/runtime'), import('@nextwebwg/declarative-components/generated-runtime')]).then(() => process.stdout.write('ok'))",
         ],
         { cwd: workspace, encoding: "utf8" },
       ),

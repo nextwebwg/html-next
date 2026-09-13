@@ -1163,7 +1163,7 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
     Object.entries(props).filter(([, prop]) => !isPropertyOnlyType(prop.type))
       .map(([name]) => [`data-${kebabCase(name)}`, name]),
   );
-  const reflected = new Set<string>();
+  const reflected = new Map<string, string | null>();
 
   for (const [name, prop] of Object.entries(props)) {
     Object.defineProperty(root, name, {
@@ -1176,10 +1176,10 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
     const attributeName = `data-${kebabCase(name)}`;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
-      reflected.add(attributeName);
-      if (value === undefined) root.removeAttribute(attributeName);
-      else root.setAttribute(attributeName, serializeTypedValue(value, prop.type));
-      queueMicrotask(() => reflected.delete(attributeName));
+      const serialized = value === undefined ? null : serializeTypedValue(value, prop.type);
+      reflected.set(attributeName, serialized);
+      if (serialized === null) root.removeAttribute(attributeName);
+      else root.setAttribute(attributeName, serialized);
     }, 2));
   }
 
@@ -1188,11 +1188,13 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const observer = new Observer((records) => {
     for (const record of records) {
       const attributeName = record.attributeName;
-      if (attributeName === null || reflected.has(attributeName)) continue;
+      if (attributeName === null) continue;
       const name = attributeNames.get(attributeName);
       if (name === undefined) continue;
-      const prop = props[name]!;
       const value = root.getAttribute(attributeName);
+      if (reflected.get(attributeName) === value && reflected.delete(attributeName)) continue;
+      reflected.delete(attributeName);
+      const prop = props[name]!;
       instance.scope.set(name, invocationValue(prop, value ?? undefined, value !== null) as Value);
     }
   });
