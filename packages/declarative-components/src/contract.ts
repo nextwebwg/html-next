@@ -1,4 +1,5 @@
 import { fail } from "./diagnostics.js";
+import { deepFreeze } from "./freeze.js";
 import {
   formatType,
   isPropertyOnlyType,
@@ -299,12 +300,6 @@ export function serializePropTarget(
     return { kind: "attribute", name: prop.target.attribute, value: canonical ? "" : null };
   }
   return { kind: "attribute", name: prop.target.attribute, value: serializeTypedValue(canonical, prop.type) };
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
 }
 
 export type {

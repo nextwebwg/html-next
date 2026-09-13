@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
+import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -366,6 +367,18 @@ describe("parseComponent", () => {
       "HT009",
       componentSource(`<button></button>`, `<script>bad()</script>`),
     );
+  });
+
+  it("applies the shared executable URL policy to every URL attribute", () => {
+    for (const attribute of ["action", "data", "formaction", "href", "poster", "src", "xlink:href"]) {
+      for (const value of ["javascript:alert(1)", "data:text/html,bad", "vbscript:bad", "java\nscript:bad"]) {
+        assert.throws(
+          () => validateLiteralAttributeName(attribute, "component.html", value),
+          (error: unknown) =>
+            error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT007",
+        );
+      }
+    }
   });
 
   it("rejects invalid default-slot shapes and reserved language elements", () => {

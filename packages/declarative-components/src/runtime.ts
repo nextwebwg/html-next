@@ -44,37 +44,10 @@ import type {
 import type { WritablePath } from "./expression.js";
 import type { PropContract, PropValue } from "./types.js";
 
-/**
- * A `<defs>` reactive declaration seeding the render scope. At L1 the runtime lowers once
- * (no live updates): `state`/`computed` seed their initial value, `data` seeds the pending
- * reactive-read shape. Live reactivity, and executing `<handler>` steps, are the L2 layer.
- */
-interface Decl {
-  readonly kind: "state" | "computed" | "data";
-  readonly name: string;
-  readonly expr?: string;
-}
-
 interface LiveDefinition {
   readonly wrapper?: Element;
   readonly style: HTMLStyleElement | undefined;
   readonly definition: ComponentDefinition;
-  readonly decls: readonly Decl[];
-}
-
-function runtimeDeclarations(definition: ComponentDefinition): Decl[] {
-  return (definition.declarations ?? []).flatMap((declaration) => {
-    if (declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "data") {
-      return [];
-    }
-    return [{
-      kind: declaration.kind,
-      name: declaration.name,
-      ...(declaration.kind === "data" || declaration.expression === undefined
-        ? {}
-        : { expr: declaration.expression.source }),
-    }];
-  });
 }
 
 interface PreparedInvocation {
@@ -136,7 +109,6 @@ function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefin
   return {
     wrapper,
     style,
-    decls: runtimeDeclarations(definition),
     definition,
   };
 }
@@ -163,7 +135,6 @@ export function installComponentGraph(
     }
     registry.definitions.set(tag, {
       definition: node.definition,
-      decls: runtimeDeclarations(node.definition),
       style,
     });
     installed += 1;
@@ -1591,7 +1562,6 @@ export function registerComponentDefinitions(
     }
     registry.definitions.set(definition.contract.tag, {
       definition,
-      decls: runtimeDeclarations(definition),
       style: undefined,
     });
     if (definition.css !== "") {
@@ -1621,7 +1591,6 @@ export function attachComponent(
   if (existing === undefined) {
     registry.definitions.set(definition.contract.tag, {
       definition,
-      decls: runtimeDeclarations(definition),
       style: undefined,
     });
   } else if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {

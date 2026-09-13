@@ -1,4 +1,5 @@
 import { fail } from "./diagnostics.js";
+import { hasExecutableUrl, isUrlAttribute } from "./sanitize.js";
 import type { ComponentContract } from "./types.js";
 
 const RESERVED_ELEMENTS = new Set([
@@ -38,23 +39,6 @@ const UNSAFE_DEFINITION_ELEMENTS = new Set([
   "script",
   "style",
 ]);
-
-const URL_ATTRIBUTES = new Set([
-  "action",
-  "data",
-  "formaction",
-  "href",
-  "poster",
-  "src",
-  "xlink:href",
-]);
-
-function hasExecutableUrl(value: string): boolean {
-  // ASCII controls and whitespace are deliberately stripped before scheme detection.
-  // oxlint-disable-next-line eslint/no-control-regex
-  const normalized = value.replace(/[\u0000-\u0020\u007f]+/g, "");
-  return /^(?:data|javascript|vbscript):/i.test(normalized);
-}
 
 export function isReservedElement(name: string): boolean {
   return RESERVED_ELEMENTS.has(name);
@@ -97,7 +81,7 @@ export function validateLiteralAttributeName(
   if (lowerName === "srcdoc") {
     fail("HT007", "Literal `srcdoc` is not permitted in a component definition.", source);
   }
-  if (URL_ATTRIBUTES.has(lowerName) && hasExecutableUrl(value)) {
+  if (isUrlAttribute(lowerName) && hasExecutableUrl(value)) {
     fail("HT007", `Literal \`${name}\` contains an executable URL.`, source);
   }
   return name;

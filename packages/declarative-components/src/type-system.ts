@@ -1,5 +1,7 @@
 /** The complete HTML Next value-type grammar and its canonical runtime representation. */
 
+import { deepFreeze } from "./freeze.js";
+
 export type TerminalTypeName =
   | "string"
   | "boolean"
@@ -566,10 +568,4 @@ export function trustedContent(
   value: unknown,
 ): TrustedContentValue {
   return Object.freeze({ kind, value });
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
 }

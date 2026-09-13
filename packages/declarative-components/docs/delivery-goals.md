@@ -11,7 +11,7 @@ and removing universally redundant runtime machinery.
 - Contract: [live browser distributable](spec/live-browser-distributable.md)
 - Input boundary: any conforming component graph introduced during the document lifetime
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
-- Current result: 102,517 minified raw bytes and 33,123 gzip bytes
+- Current result: 101,943 minified raw bytes and 33,029 gzip bytes
 - Primary metric: production gzip for the public browser-loader entry
 - Required evidence: complete-capability assertion, module attribution, cross-browser conformance,
   and representative runtime measurements
@@ -21,7 +21,7 @@ and removing universally redundant runtime machinery.
   remains
 
 Measurement output now separates this complete live product from native-build capability
-attribution. All 23 contributing modules are classified into seven audited responsibilities, and a
+attribution. All 24 contributing modules are classified into seven audited responsibilities, and a
 new unclassified dependency fails the gate. Next work runs measured parser, execution, lifecycle,
 compatibility, and policy reductions against this complete entry.
 
