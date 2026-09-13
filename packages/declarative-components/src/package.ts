@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { basename, dirname, extname, posix, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
@@ -35,8 +35,8 @@ async function addStaticModuleGraph(
   moduleDependencies: Map<string, readonly string[]>,
 ): Promise<void> {
   const sourcePath = resolve(source);
-  const targetPath = normalize(target);
-  if (isAbsolute(targetPath) || targetPath === ".." || targetPath.startsWith(`..${sep}`)) {
+  const targetPath = posix.normalize(target);
+  if (posix.isAbsolute(targetPath) || targetPath === ".." || targetPath.startsWith("../")) {
     throw new Error(`Controller module output escaped the package: ${target}.`);
   }
   const priorSource = moduleSources.get(targetPath);
@@ -57,7 +57,7 @@ async function addStaticModuleGraph(
     }
     await addStaticModuleGraph(
       resolve(dirname(sourcePath), specifier),
-      normalize(join(dirname(targetPath), specifier)),
+      posix.join(posix.dirname(targetPath), specifier),
       files,
       moduleSources,
       moduleDependencies,
