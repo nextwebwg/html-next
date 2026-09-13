@@ -6,6 +6,10 @@ The key words **must**, **must not**, **should**, and **may** are normative. A f
 
 ## Modules
 
+- [Delivery modes](delivery-modes.md)
+  - [Live browser distributable](live-browser-distributable.md)
+  - [Native application or library build](native-application-build.md)
+  - [Framework conversion](framework-conversion.md)
 - [Syntax and diagnostics](syntax.md)
 - [Components](components.md)
 - [Expressions](expressions.md)

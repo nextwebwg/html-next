@@ -23,6 +23,27 @@ template, or reactive-runtime dependency.
 > packages remain private until the project selects an open-source license and publication
 > policy.
 
+## Declarative Components delivery modes
+
+The Declarative Components implementation supports the same component language in three delivery
+modes:
+
+| Mode | Input | Output |
+| --- | --- | --- |
+| Live browser runtime | Any component graph selected or added by the application at runtime | A distributable that parses, mounts, updates, and disconnects every supported declarative capability without a build step |
+| Native application or library build | An application entry graph or a concrete set of library entries | Native DOM modules plus build-scoped support for the union of capabilities used across that graph |
+| Framework conversion | An application graph or component library plus a React, Vue, or Svelte target | Framework-native components that use the target's reactivity and carry small bridges only for HTML Next semantics the target does not supply |
+
+An application build may serve as a complete alternative to a React, Vue, or Svelte application.
+A library build keeps independently consumable component entries while allowing the consumer's
+bundler to combine their shared support. All three modes consume one normalized semantic model and
+must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
+behavior.
+
+The detailed contracts and independent progress tracks are in the
+[delivery-mode specification](./packages/declarative-components/docs/spec/delivery-modes.md) and
+[delivery goal ledger](./packages/declarative-components/docs/delivery-goals.md).
+
 ## Install and verify
 
 Use Node 22 or Node 24 and pnpm through Corepack:
@@ -131,12 +152,12 @@ definitions it loads:
 | Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
 | Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
 
-The generator emits feature-specific output for static markup, basic reactivity,
-numeric-computed state, and scalar props; those paths carry only their authored helpers. CI records
-zero live-parser and full-runtime contribution for all four fixtures. Keyed lists, declared reads,
-enhanced forms, and controller lifecycle currently use the general runtime fallback. The measured
-inventory and owner decisions live in the
-[native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).
+The native build currently specializes static markup, basic reactivity, numeric-computed state, and
+scalar props. CI records zero live-parser and full-runtime contribution for those four capability
+fixtures. Keyed lists, declared reads, enhanced forms, and controller lifecycle currently use the
+general runtime fallback. These fixtures attribute feature cost; the build product operates on an
+application or library graph and should share its required support across that graph. The measured
+inventory and owner decisions live in the [native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).
 
 The current public loader is one predictable bundle. A future packaging experiment may split
 compatibility features into progressively loaded modules selected by browser capability and

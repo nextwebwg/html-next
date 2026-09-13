@@ -18,6 +18,10 @@ interface SupportProfile {
 const specRoot = new URL("../docs/spec/", import.meta.url);
 const requiredModules = [
   "index.md",
+  "delivery-modes.md",
+  "live-browser-distributable.md",
+  "native-application-build.md",
+  "framework-conversion.md",
   "syntax.md",
   "components.md",
   "expressions.md",
@@ -26,6 +30,23 @@ const requiredModules = [
   "types-and-validation.md",
   "styling.md",
   "targets-and-conformance.md",
+] as const;
+
+const deliveryModules = [
+  "live-browser-distributable.md",
+  "native-application-build.md",
+  "framework-conversion.md",
+] as const;
+
+const deliverySections = [
+  "Inputs and graph boundary",
+  "Capability contract",
+  "Runtime ownership",
+  "Output artifacts",
+  "Failure behavior",
+  "Optimization boundary",
+  "Measurement contract",
+  "Conformance scenarios",
 ] as const;
 
 describe("normative support profile", () => {
@@ -64,6 +85,17 @@ describe("normative support profile", () => {
       const fences = [...source.matchAll(/^```html(?:\s+([^\n]+))?$/gm)];
       for (const [, disposition] of fences) {
         assert.match(disposition ?? "", /^(conforming|diagnostic HN-[A-Z]+-\d{3})$/);
+      }
+    }
+  });
+
+  it("keeps each delivery mode independently specified and linked", async () => {
+    const overview = await readFile(new URL("delivery-modes.md", specRoot), "utf8");
+    for (const module of deliveryModules) {
+      const source = await readFile(new URL(module, specRoot), "utf8");
+      assert.match(overview, new RegExp(`\\(${module.replace(".", "\\.")}\\)`));
+      for (const section of deliverySections) {
+        assert.match(source, new RegExp(`^## ${section}$`, "m"));
       }
     }
   });
