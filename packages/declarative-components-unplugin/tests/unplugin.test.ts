@@ -84,4 +84,39 @@ describe("HTML Next unplugin", () => {
       build: { lib: { entry: join(root, "main.js"), formats: ["es"] } },
     }), /at least one component entry/);
   });
+
+  it("recompiles changed component sources on a subsequent Vite build", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-rebuild-"));
+    temporary.push(root);
+    const component = join(root, "counter.html");
+    await writeFile(component, `<template component="x-counter" status="early" summary="Counter.">
+      <output>First</output>
+    </template>`);
+    await writeFile(join(root, "main.js"), `export { createXCounter } from ${JSON.stringify(componentsModule)};`);
+    const plugin = htmlNext.vite({ entries: ["counter.html"], root });
+    const buildApp = () => build({
+      root,
+      logLevel: "silent",
+      plugins: [plugin],
+      build: {
+        minify: false,
+        lib: {
+          entry: join(root, "main.js"),
+          formats: ["es"],
+          fileName: () => "app.js",
+          cssFileName: "components",
+        },
+      },
+    });
+
+    await buildApp();
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /First/);
+    await writeFile(component, `<template component="x-counter" status="early" summary="Counter.">
+      <output>Second</output>
+    </template>`);
+    await buildApp();
+    const rebuilt = await readFile(join(root, "dist/app.js"), "utf8");
+    assert.match(rebuilt, /Second/);
+    assert.doesNotMatch(rebuilt, /First/);
+  });
 });

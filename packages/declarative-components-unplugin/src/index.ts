@@ -63,7 +63,7 @@ function visitTemplate(node: TemplateNode, capabilities: Set<string>): void {
   for (const child of node.children) visitTemplate(child, capabilities);
 }
 
-export function componentCapabilities(definition: ComponentDefinition): readonly string[] {
+function componentCapabilities(definition: ComponentDefinition): readonly string[] {
   const capabilities = new Set<string>(["native-markup"]);
   if (Object.keys(definition.contract.props).length > 0) capabilities.add("props");
   if (definition.css !== "") capabilities.add("scoped-styles");
@@ -152,7 +152,8 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
     name: "html-next-declarative-components",
     enforce: "pre",
     async buildStart() {
-      const current = await graph();
+      compiled = compileGraph(options);
+      const current = await compiled;
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },
     resolveId(id) {
@@ -161,10 +162,17 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
       if (id.startsWith(stylePrefix)) return `\0${id}`;
       return null;
     },
-    async load(id) {
-      const current = await graph();
-      if (id === resolvedComponentsModule) return current.entry;
-      return current.components.get(id) ?? current.styles.get(id) ?? null;
+    load(id) {
+      if (
+        id !== resolvedComponentsModule &&
+        !id.startsWith(resolvedComponentPrefix) &&
+        !id.startsWith(resolvedStylePrefix)
+      ) return null;
+      return graph().then((current) =>
+        id === resolvedComponentsModule
+          ? current.entry
+          : current.components.get(id) ?? current.styles.get(id) ?? null
+      );
     },
     async generateBundle() {
       const fileName = options.manifestFile === undefined ? "html-next.manifest.json" : options.manifestFile;
