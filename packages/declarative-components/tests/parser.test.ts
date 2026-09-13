@@ -362,6 +362,10 @@ describe("parseComponent", () => {
     expectDiagnostic("HT007", componentSource(`<a href="javascript:alert(1)">Bad</a>`));
     expectDiagnostic("HT007", componentSource(`<iframe srcdoc="<script>bad()</script>"></iframe>`));
     expectDiagnostic("HT009", componentSource(`<div><script>bad()</script></div>`));
+    expectDiagnostic(
+      "HT009",
+      componentSource(`<button></button>`, `<script>bad()</script>`),
+    );
   });
 
   it("rejects invalid default-slot shapes and reserved language elements", () => {

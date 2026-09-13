@@ -14,7 +14,6 @@ import {
   type Scope,
   type Value,
 } from "./expression.js";
-import { validateLiteralAttributeName } from "./language.js";
 import { kebabCase } from "./names.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
@@ -123,34 +122,12 @@ function registryFor(root: Document): DocumentRegistry {
   return registry;
 }
 
-/** Validate inert carrier content before moving any authored node into the document. */
-function validateDefinitionContent(container: ParentNode, source: string): void {
-  for (const element of Array.from(container.children)) {
-    if (["script", "base", "meta", "object", "embed"].includes(element.localName)) {
-      fail("HT009", `<${element.localName}> is not permitted in component definitions.`, source);
-    }
-    if (element.localName === "link") {
-      fail("HL001", "External definition dependencies require the application-owned graph resolver.", source);
-    }
-    for (const attribute of Array.from(element.attributes)) {
-      if (/^on(?!:)/i.test(attribute.name)) {
-        validateLiteralAttributeName(attribute.name, source, attribute.value);
-      }
-    }
-    validateDefinitionContent(
-      element.localName === "template" ? (element as HTMLTemplateElement).content : element,
-      source,
-    );
-  }
-}
-
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
   const tag = wrapper.getAttribute("component") ?? "";
   const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
   if (wrapper.hasAttribute("src")) {
     fail("HL001", "External definitions require the application-owned graph resolver.", source);
   }
-  validateDefinitionContent(wrapper.content, source);
   const definition = parseBrowserComponent(wrapper, source);
   const style = Array.from(wrapper.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style",

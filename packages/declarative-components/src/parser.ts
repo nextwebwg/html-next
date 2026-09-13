@@ -89,6 +89,23 @@ function directElements(element: Element, name: string): Element[] {
   );
 }
 
+function validateDeclarationContent(element: Element, source: string): void {
+  for (const child of sourceChildren(element)) {
+    if (!isElement(child)) continue;
+    const name = sourceTag(child);
+    if (name === "link") {
+      fail("HL001", "External definition dependencies require the application-owned graph resolver.", source);
+    }
+    validateDefinitionElementName(name, source);
+    for (const attribute of sourceAttributes(child)) {
+      if (/^on(?!:)/i.test(attribute.name)) {
+        validateLiteralAttributeName(attribute.name, source, attribute.value);
+      }
+    }
+    validateDeclarationContent(child, source);
+  }
+}
+
 const FLOW_NAMES = new Set([
   "$if",
   "$each",
@@ -870,6 +887,9 @@ export function parseComponentNodes(
   const styles = contentElement("style");
   if (propGroups.length + defGroups.length > 1 || styles.length > 1) {
     fail("HS002", "A component has one optional declaration group, one markup root, and one optional <style>.", source);
+  }
+  for (const group of [...propGroups, ...defGroups]) {
+    validateDeclarationContent(group, source);
   }
 
   // Everything that is not the props group or a style is the component markup.
