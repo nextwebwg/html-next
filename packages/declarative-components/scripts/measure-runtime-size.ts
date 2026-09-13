@@ -84,6 +84,7 @@ const formGenerated = await generatedFixture("enhanced-form", Number.POSITIVE_IN
 const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {});
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated];
 
 process.stdout.write(`${JSON.stringify({
   static_generated_gzip: staticGenerated.gzip,
@@ -114,3 +115,7 @@ process.stdout.write(`${JSON.stringify({
   prop_target_met: propGenerated.targetMet,
   computed_target_met: computedGenerated.targetMet,
 }, null, 2)}\n`);
+
+if (generatedTargets.some((measurement) => !measurement.targetMet)) {
+  process.exitCode = 1;
+}

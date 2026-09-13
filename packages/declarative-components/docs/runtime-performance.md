@@ -46,3 +46,4 @@ cost.
 must remain at or below 2.5 KB gzip. Basic reactive, numeric-computed, and scalar-prop generated
 output must remain at or below 5 KB gzip. Feature fixtures without a settled budget are reported
 separately so a large fallback to the live interpreter is visible before a threshold is chosen.
+The settled limits fail `verify:inner`; they are release gates rather than informational targets.
