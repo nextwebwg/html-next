@@ -45,18 +45,16 @@ function sourceTag(element: Element): string {
   return "localName" in element ? element.localName : element.tagName;
 }
 
-function sourceAttributes(element: Element): ReadonlyArray<Readonly<{ name: string; value: string }>> {
-  return "attrs" in element
-    ? element.attrs
-    : Array.from(element.attributes, ({ name, value }) => ({ name, value }));
+function sourceAttributes(element: Element): Iterable<Readonly<{ name: string; value: string }>> {
+  return "attrs" in element ? element.attrs : element.attributes;
 }
 
-function sourceChildren(element: Element): ChildNode[] {
+function sourceChildren(element: Element): Iterable<ChildNode> {
   const content = sourceTag(element) === "template"
     ? (element as unknown as { content?: { childNodes: ArrayLike<unknown> } }).content
     : undefined;
   const children = content?.childNodes ?? element.childNodes;
-  return Array.from(children as ArrayLike<unknown>) as ChildNode[];
+  return children as unknown as Iterable<ChildNode>;
 }
 
 function sourceText(node: ChildNode): string {
@@ -64,27 +62,23 @@ function sourceText(node: ChildNode): string {
   return "nodeValue" in node ? node.nodeValue ?? "" : "";
 }
 
-function significant(nodes: readonly ChildNode[]): ChildNode[] {
-  return nodes.filter((node) => {
-    if (node.nodeName === "#comment") return false;
-    if (isText(node)) return sourceText(node).trim() !== "";
-    return true;
-  });
+function significant(nodes: Iterable<ChildNode>): ChildNode[] {
+  return Array.from(nodes).filter((node) =>
+    node.nodeName !== "#comment" && (!isText(node) || sourceText(node).trim() !== ""));
 }
 
 function attr(element: Element, name: string): string | undefined {
-  return sourceAttributes(element).find((item) => item.name === name)?.value;
+  return "attrs" in element
+    ? element.attrs.find((item) => item.name === name)?.value
+    : element.getAttribute(name) ?? undefined;
 }
 
 function textContent(element: Element): string {
-  return sourceChildren(element)
-    .filter(isText)
-    .map(sourceText)
-    .join("");
+  return Array.from(sourceChildren(element)).filter(isText).map(sourceText).join("");
 }
 
 function directElements(element: Element, name: string): Element[] {
-  return sourceChildren(element).filter(
+  return Array.from(sourceChildren(element)).filter(
     (node): node is Element => isElement(node) && sourceTag(node) === name,
   );
 }
@@ -227,7 +221,7 @@ function readProps(
     target ??= { attribute: name.toLowerCase() };
     const type = parseTypeAttribute(typeAttribute);
     const spec: Record<string, unknown> = { type, target, description: textContent(element).trim() };
-    if (sourceAttributes(element).some((item) => item.name === "required")) spec.required = true;
+    if (attr(element, "required") !== undefined) spec.required = true;
     const defaultValue = attr(element, "default");
     if (defaultValue !== undefined) spec.default = coerceDefault(type, defaultValue);
     props[name] = spec;
@@ -325,7 +319,7 @@ function readDeclarations(
   formNames: ReadonlySet<string> = new Set(),
 ): ComponentDeclaration[] {
   if (group === undefined) return [];
-  const elements = sourceChildren(group).filter(isElement);
+  const elements = Array.from(sourceChildren(group)).filter(isElement);
   const allowed = new Set(["prop", "state", "computed", "data", "handler", "event", "method"]);
   const names = new Set<string>(formNames);
   const eventNames = new Set<string>();
@@ -508,16 +502,16 @@ function parseAttributes(
   source: string,
   platform: ComponentParserPlatform,
 ): TemplateAttribute[] {
-  return sourceAttributes(element)
-    .filter(
-      (attribute) =>
-        !FLOW_NAMES.has(attribute.name) &&
-        attribute.name !== "$ref" &&
-        attribute.name !== "as" &&
-        !(sourceTag(element) === "form" && attribute.name === "src") &&
-        !attribute.name.startsWith("on:"),
-    )
-    .map((attribute) => {
+  const parsed: TemplateAttribute[] = [];
+  const tag = sourceTag(element);
+  for (const attribute of sourceAttributes(element)) {
+    if (
+      FLOW_NAMES.has(attribute.name) ||
+      attribute.name === "$ref" ||
+      attribute.name === "as" ||
+      (tag === "form" && attribute.name === "src") ||
+      attribute.name.startsWith("on:")
+    ) continue;
     if (attribute.name.startsWith("bind:")) {
       const name = attribute.name.slice("bind:".length).toLowerCase();
       if (name === "" || RAW_SINKS.has(name)) {
@@ -528,14 +522,15 @@ function parseAttributes(
       if (writablePath === undefined) {
         fail("HT005", `\`${attribute.value}\` is not a writable state-rooted path.`, source);
       }
-      return {
+      parsed.push({
         kind: "attribute",
         name,
         expression: attribute.value,
         expressionPlan,
         twoWay: true,
         writablePath,
-      };
+      });
+      continue;
     }
 
     if (attribute.name.startsWith("class:") || attribute.name.startsWith("style:")) {
@@ -548,13 +543,14 @@ function parseAttributes(
       if (!valid) {
         fail("HT020", `\`${attribute.name}\` does not name a valid ${target} binding target.`, source);
       }
-      return {
+      parsed.push({
         kind: "attribute",
         name,
         expression: attribute.value,
         expressionPlan: compileScopedExpression(attribute.value, scope, source),
         target,
-      };
+      });
+      continue;
     }
 
     if (attribute.name.startsWith("$")) {
@@ -562,12 +558,13 @@ function parseAttributes(
       if (name !== "value" && name !== "html") {
         fail("HT012", `\`$${name}\` is not a known content directive.`, source);
       }
-      return {
+      parsed.push({
         kind: "directive",
         name,
         expression: attribute.value,
         expressionPlan: compileScopedExpression(attribute.value, scope, source),
-      };
+      });
+      continue;
     }
 
     if (attribute.name.startsWith(":")) {
@@ -580,7 +577,8 @@ function parseAttributes(
       if (prop !== undefined && (!("attribute" in prop.target) || prop.target.attribute !== name)) {
         fail("HT004", `Binding \`:${name}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
-      return { kind: "attribute", name, expression: attribute.value, expressionPlan };
+      parsed.push({ kind: "attribute", name, expression: attribute.value, expressionPlan });
+      continue;
     }
 
     if (attribute.name.startsWith(".")) {
@@ -596,17 +594,20 @@ function parseAttributes(
         fail("HP001", `\`${key}\` is not a known property of <${sourceTag(element)}>.`, source);
       }
       validateMvpDomProperty(name, source);
-      return { kind: "property", key, name, expression: attribute.value, expressionPlan };
+      parsed.push({ kind: "property", key, name, expression: attribute.value, expressionPlan });
+      continue;
     }
 
     validateLiteralAttributeName(attribute.name, source, attribute.value);
-    return { kind: "literal", name: attribute.name, value: attribute.value };
-  });
+    parsed.push({ kind: "literal", name: attribute.name, value: attribute.value });
+  }
+  return parsed;
 }
 
 function parseEvents(element: Element, scope: ParseScope, source: string): EventBinding[] {
   const events: EventBinding[] = [];
-  for (const attribute of sourceAttributes(element).filter((item) => item.name.startsWith("on:"))) {
+  for (const attribute of sourceAttributes(element)) {
+    if (!attribute.name.startsWith("on:")) continue;
     const [name = "", ...modifiers] = attribute.name.slice("on:".length).split(".");
     if (!EVENT_PART_RE.test(name) || modifiers.some((modifier) => !EVENT_PART_RE.test(modifier))) {
       fail("HT010", `\`${attribute.name}\` is not a valid declarative event binding.`, source);
@@ -776,9 +777,11 @@ function parseElement(
       if (name !== undefined && nameExpression !== undefined) {
         fail("HT008", "A slot cannot declare both `name` and `:name`.", source);
       }
-      const unknown = sourceAttributes(child)
-        .filter((item) => item.name !== "name" && item.name !== ":name");
-      if (unknown.length > 0) fail("HT008", "A slot has an unsupported attribute.", source);
+      for (const attribute of sourceAttributes(child)) {
+        if (attribute.name !== "name" && attribute.name !== ":name") {
+          fail("HT008", "A slot has an unsupported attribute.", source);
+        }
+      }
       if (name === undefined && nameExpression === undefined) {
         slotState.defaults += 1;
         if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
@@ -879,7 +882,7 @@ export function parseComponentNodes(
   const tag = attr(wrapper, "component")!;
 
   // A <template>'s children live in its content fragment, inert and unrendered.
-  const content = sourceChildren(wrapper);
+  const content = Array.from(sourceChildren(wrapper));
   const contentElement = (name: string): Element[] =>
     content.filter((node): node is Element => isElement(node) && sourceTag(node) === name);
   const propGroups = contentElement("props");
