@@ -93,7 +93,11 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const rootAttributes = [...provenanceAttributes(contract.tag, true), ...template.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
     if (attribute.kind === "directive") return "";
-    const value = contract.props[attribute.expression] === undefined ? "undefined" : access(attribute.expression);
+    const value = reactive?.values.get(attribute.expression) ?? (
+      contract.props[attribute.expression] === undefined
+        ? "undefined"
+        : access(attribute.expression)
+    );
     const expression = frameworkBindingExpression(
       attribute,
       contract.props,
