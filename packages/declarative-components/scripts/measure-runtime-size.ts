@@ -12,6 +12,8 @@ interface SizeMeasurement {
 }
 
 interface GeneratedMeasurement extends SizeMeasurement {
+  readonly fullRuntimeModules: number;
+  readonly parserModules: number;
   readonly targetGzip: number;
   readonly targetMet: boolean;
 }
@@ -71,7 +73,16 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
     },
   });
   const measured = size(result);
-  return { ...measured, targetGzip, targetMet: measured.gzip <= targetGzip };
+  const inputs = Object.keys(result.metafile?.inputs ?? {});
+  return {
+    ...measured,
+    fullRuntimeModules: inputs.filter((path) => path.endsWith("/src/runtime.ts")).length,
+    parserModules: inputs.filter((path) =>
+      path.endsWith("/src/parser.ts") || path.endsWith("/src/source-parser.ts")
+    ).length,
+    targetGzip,
+    targetMet: measured.gzip <= targetGzip,
+  };
 }
 
 const staticGenerated = await generatedFixture("static-card", 2_500);
@@ -85,6 +96,10 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", Numbe
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {});
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated];
+const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
+const browserDomInventoryModules = browserInputs.filter(
+  (path) => path.includes("/generated/dom-properties"),
+).length;
 
 process.stdout.write(`${JSON.stringify({
   static_generated_gzip: staticGenerated.gzip,
@@ -106,16 +121,30 @@ process.stdout.write(`${JSON.stringify({
   controller_generated_bytes: controllerGenerated.bytes,
   live_browser_loader_bytes: size(browserResult).bytes,
   live_browser_module_bytes: moduleBytes(browserResult),
-  browser_parse5_modules: browserInputs.filter((path) => path.includes("/parse5/")).length,
-  browser_dom_property_inventory_modules: browserInputs.filter(
-    (path) => path.includes("/generated/dom-properties"),
-  ).length,
+  generated_full_runtime_modules: Object.fromEntries([
+    ["static", staticGenerated.fullRuntimeModules],
+    ["reactive", reactiveGenerated.fullRuntimeModules],
+    ["prop", propGenerated.fullRuntimeModules],
+    ["computed", computedGenerated.fullRuntimeModules],
+  ]),
+  generated_parser_modules: Object.fromEntries([
+    ["static", staticGenerated.parserModules],
+    ["reactive", reactiveGenerated.parserModules],
+    ["prop", propGenerated.parserModules],
+    ["computed", computedGenerated.parserModules],
+  ]),
+  browser_parse5_modules: browserParse5Modules,
+  browser_dom_property_inventory_modules: browserDomInventoryModules,
   static_target_met: staticGenerated.targetMet,
   reactive_target_met: reactiveGenerated.targetMet,
   prop_target_met: propGenerated.targetMet,
   computed_target_met: computedGenerated.targetMet,
 }, null, 2)}\n`);
 
-if (generatedTargets.some((measurement) => !measurement.targetMet)) {
+if (
+  generatedTargets.some((measurement) =>
+    !measurement.targetMet || measurement.fullRuntimeModules > 0 || measurement.parserModules > 0
+  ) || browserParse5Modules > 0 || browserDomInventoryModules > 0
+) {
   process.exitCode = 1;
 }

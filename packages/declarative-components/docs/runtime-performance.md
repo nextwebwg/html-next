@@ -47,6 +47,8 @@ must remain at or below 2.5 KB gzip. Basic reactive, numeric-computed, and scala
 output must remain at or below 5 KB gzip. Feature fixtures without a settled budget are reported
 separately so a large fallback to the live interpreter is visible before a threshold is chosen.
 The settled limits fail `verify:inner`; they are release gates rather than informational targets.
+The same check rejects full-runtime or parser imports in settled generated fixtures, and rejects
+server-side parser or generated DOM-inventory modules in the browser loader.
 
 `pnpm measure:hydration` separately measures compatible server-DOM adoption and fresh lowering in
 Chromium, Firefox, and WebKit. Every sample also asserts that adoption preserves root and input
