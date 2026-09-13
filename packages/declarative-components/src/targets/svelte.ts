@@ -11,7 +11,14 @@ import {
   typeSource,
 } from "./shared.js";
 import { targetComponent } from "./backend.js";
-import { nativeExpression, nativeReactivePlan, type NativeReactivePlan } from "./native-reactive.js";
+import {
+  hasNativeDispatch,
+  nativeDispatch,
+  nativeEventDispatch,
+  nativeExpression,
+  nativeReactivePlan,
+  type NativeReactivePlan,
+} from "./native-reactive.js";
 
 function renderNode(
   node: TemplateNode,
@@ -69,6 +76,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
   const aliases = new Map(target.props.map(({ name, local }) => [name, local]));
   const polymorphic = target.polymorphic;
   const reactive = nativeReactivePlan(definition);
+  const dispatchesEvents = hasNativeDispatch(reactive);
   const needsBridge = ((definition.declarations?.length ?? 0) > 0 && reactive === undefined) || definition.controller !== undefined;
   if (reactive !== undefined) {
     for (const [name, variable] of reactive.values) aliases.set(name, variable);
@@ -115,6 +123,9 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     '<script lang="ts">',
     '  import type { Snippet } from "svelte";',
     '  import type { SvelteHTMLElements } from "svelte/elements";',
+    ...(dispatchesEvents
+      ? ['  import { dispatchGeneratedEvent } from "@nextwebwg/declarative-components/generated-runtime";']
+      : []),
     ...(needsBridge ? [
       '  import { attachComponent } from "@nextwebwg/declarative-components/runtime";',
       '  import type { ComponentDefinition } from "@nextwebwg/declarative-components";',
@@ -139,9 +150,13 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
       ...reactive.handlers.flatMap((handler) => {
         const lines = [`  const ${handler.variable} = () => {`];
         for (const step of handler.declaration.steps) {
-          if (step.kind !== "set" || typeof step.writablePath[0] !== "string") continue;
-          const state = reactive.states.find(({ name }) => name === step.writablePath[0])!;
-          lines.push(`    ${state.variable} = ${nativeExpression(step.value.ast, reactive.values)};`);
+          if (step.kind === "set" && typeof step.writablePath[0] === "string") {
+            const state = reactive.states.find(({ name }) => name === step.writablePath[0])!;
+            lines.push(`    ${state.variable} = ${nativeExpression(step.value.ast, reactive.values)};`);
+          } else if (step.kind === "dispatch") {
+            const dispatch = nativeDispatch(step, target.events, reactive.values)!;
+            lines.push(`    ${nativeEventDispatch("root", dispatch)};`);
+          }
         }
         lines.push("  };");
         return lines;

@@ -20,3 +20,6 @@ The package is experimental and is not published yet. From the repository root:
 corepack pnpm build
 corepack pnpm test
 ```
+
+Release-candidate mechanics and the deliberately separate publication-policy gate are documented
+in [the release guide](docs/releasing.md).

@@ -1,7 +1,0 @@
-<template component="ui-sidebar" status="early" summary="A responsive sidebar with optional native separator resizing." controller="./ui-sidebar.js">
-  <defs>
-    <prop name="gap" type="string" default="">Gap token.</prop><prop name="side" type="start | end" default="start">Sidebar side.</prop><prop name="width" type="string" default="">Width token.</prop><prop name="align" type="string" default="">Cross-axis alignment.</prop><prop name="resizable" type="boolean" default="false">Enable resizing.</prop><prop name="storageKey" type="string" default="">Persistence key.</prop><prop name="minWidth" type="number" default="176">Minimum pixel width.</prop><prop name="maxWidth" type="number" default="480">Maximum pixel width.</prop><prop name="resizeStep" type="number" default="16">Keyboard resize step.</prop><prop name="resizeLabel" type="string" default="Resize sidebar">Resize handle label.</prop>
-    <event name="resize" type="object({ width: number, trigger: keyboard | pointer | programmatic })"></event>
-  </defs>
-  <div class="sidebar" :data-gap="gap" :data-side="side" :data-width="width" :data-align="align" :data-resizable="resizable" :data-storage-key="storageKey" :data-min-width="minWidth" :data-max-width="maxWidth" :data-resize-step="resizeStep" :data-resize-label="resizeLabel"><slot></slot><div $ref="handle" data-ui-sidebar-resizer role="separator" aria-orientation="vertical" tabindex="0"><span data-ui-guide aria-hidden="true"></span></div></div>
-</template>

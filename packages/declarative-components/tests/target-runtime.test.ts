@@ -24,14 +24,19 @@ const source = `<template component="demo-counter" status="early" summary="Targe
     <prop name="email" type="string" default="invalid">Email.</prop>
     <state name="count" :value="0"></state>
     <event name="count-change" type="number"></event>
+    <event name="invalid-change" type="number"></event>
     <handler name="increment">
       <set name="count" :value="count + 1"></set>
       <dispatch event="count-change" :value="count"></dispatch>
+    </handler>
+    <handler name="invalid">
+      <dispatch event="invalid-change" :value="'not-a-number'"></dispatch>
     </handler>
   </defs>
   <section>
     <header><slot name="title"><h2>Untitled</h2></slot></header>
     <button type="button" on:click="increment"><output $value="count"></output></button>
+    <button type="button" data-invalid on:click="invalid">Invalid event</button>
     <input type="email" required :value="email">
     <slot><strong>Fallback</strong></slot>
   </section>
@@ -70,26 +75,27 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
 
     const entries: Record<string, string> = {
       vanilla: `import { createDemoCounter } from "./vanilla/DemoCounter.js";
-const events = []; window.targetEvents = events;
+const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
 const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
+component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
 document.querySelector("main").append(component);`,
       react: `import React from "react";
 import { createRoot } from "react-dom/client";
 import { DemoCounter } from "./react/DemoCounter";
-const events = []; window.targetEvents = events;
-createRoot(document.querySelector("main")).render(<DemoCounter onCountChange={detail => events.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter>);`,
+const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
+createRoot(document.querySelector("main")).render(<DemoCounter onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter>);`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
-const events = []; window.targetEvents = events;
-createApp({ render: () => h(DemoCounter, { onCountChange: detail => events.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }) }).mount(document.querySelector("main"));`,
+const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
+createApp({ render: () => h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }) }).mount(document.querySelector("main"));`,
       svelte: `import { createRawSnippet, mount } from "svelte";
 import DemoCounter from "./svelte/DemoCounter";
-const events = []; window.targetEvents = events;
+const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = createRawSnippet(() => ({ render: () => '<h1 slot="title">Title</h1>' }));
 const children = createRawSnippet(() => ({ render: () => 'Projected' }));
-mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), children, slots: { title } } });`,
+mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -108,7 +114,10 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
         jsx: "automatic",
         nodePaths: [nodeModulesPath],
         loader: { ".css": "empty" },
-        alias: { "@nextwebwg/declarative-components/runtime": runtimePath },
+        alias: {
+          "@nextwebwg/declarative-components/generated-runtime": generatedRuntimePath,
+          "@nextwebwg/declarative-components/runtime": runtimePath,
+        },
       });
       bundles.set(target, outfile);
     }
@@ -161,6 +170,13 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
           invalid: true,
           provenance: "demo-counter",
         });
+        const invalidError = page.waitForEvent("pageerror");
+        await page.locator('[data-component-root~="demo-counter"] button[data-invalid]').click();
+        assert.match((await invalidError).message, /HR002: Event `invalid-change` detail does not satisfy its declared type/);
+        assert.deepEqual(
+          await page.evaluate(() => (window as unknown as { invalidTargetEvents: unknown[] }).invalidTargetEvents),
+          [],
+        );
       } finally {
         await browser.close();
       }

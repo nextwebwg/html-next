@@ -30,7 +30,6 @@
     { "id": "HN-STY-002", "title": "Provenance boundaries", "status": "required", "spec": "styling.md", "owner": "Provenance" },
     { "id": "HN-TGT-001", "title": "Observable target equivalence", "status": "required", "spec": "targets-and-conformance.md", "owner": "Target equivalence" },
     { "id": "HN-TGT-002", "title": "Inspectable package output", "status": "required", "spec": "targets-and-conformance.md", "owner": "Package output" },
-    { "id": "HN-MIG-001", "title": "Reviewed Stencil migration", "status": "required", "spec": "targets-and-conformance.md", "owner": "Migration" },
     { "id": "HN-FUT-001", "title": "Runtime-selected components", "status": "deferred", "spec": "targets-and-conformance.md", "owner": "Deferred features" },
     { "id": "HN-FUT-002", "title": "Portals", "status": "deferred", "spec": "targets-and-conformance.md", "owner": "Deferred features" },
     { "id": "HN-FUT-003", "title": "Optional Shadow DOM", "status": "deferred", "spec": "targets-and-conformance.md", "owner": "Deferred features" }

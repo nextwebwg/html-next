@@ -3,7 +3,7 @@ import { basename, dirname, extname, posix, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { parseComponent } from "./source-parser.js";
 import type { ComponentDefinition } from "./template.js";
@@ -206,7 +206,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     version: config.version,
     type: "module",
     sideEffects: ["./dist/index.js", "./*.css"],
-    peerDependencies: { "@nextwebwg/declarative-components": "^0.0.0", ...config.peerDependencies },
+    peerDependencies: { "@nextwebwg/declarative-components": `^${GENERATOR_VERSION}`, ...config.peerDependencies },
     ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
     exports: config.exports ?? {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },

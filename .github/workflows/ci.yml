@@ -32,7 +32,7 @@ jobs:
       - run: pnpm verify:pr
 
   browser:
-    name: Browser engines
+    name: Browser and compatibility
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,7 +44,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nextwebwg/declarative-components exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm test:browser
+      - run: pnpm verify:compatibility
 
   required:
     name: Required

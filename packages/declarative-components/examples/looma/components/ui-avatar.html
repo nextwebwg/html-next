@@ -1,9 +1,0 @@
-<template component="ui-avatar" status="early" summary="An image avatar with a generated text fallback." controller="./ui-avatar.js">
-  <defs>
-    <prop name="alt" type="string" default="">Alternative text.</prop>
-    <prop name="fallback" type="string" default="">Explicit fallback text.</prop>
-    <prop name="name" type="string" default="">Person name used for labeling and initials.</prop>
-    <prop name="src" type="string" default="">Image source resolved by the native image element.</prop>
-  </defs>
-  <div class="avatar" role="img" :data-alt="alt" :data-fallback="fallback" :data-name="name" :data-src="src"><img $ref="image" alt="" hidden aria-hidden="true"><span $ref="fallback" class="fallback" aria-hidden="false"></span></div>
-</template>

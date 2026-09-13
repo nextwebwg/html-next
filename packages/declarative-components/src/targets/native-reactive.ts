@@ -1,7 +1,9 @@
 import type { ExpressionNode } from "../expression.js";
 import type {
   ComponentDefinition,
+  EventDeclaration,
   HandlerDeclaration,
+  HandlerStep,
   ReactiveDeclaration,
   TemplateNode,
 } from "../template.js";
@@ -17,6 +19,7 @@ export interface NativeComputed {
   readonly name: string;
   readonly variable: string;
   readonly expression: string;
+  readonly ast: ExpressionNode;
 }
 
 export interface NativeHandler {
@@ -25,11 +28,48 @@ export interface NativeHandler {
   readonly declaration: HandlerDeclaration;
 }
 
+export interface NativeDispatch {
+  readonly event: string;
+  readonly type: string;
+  readonly detail: string;
+  readonly bubbles: boolean;
+  readonly composed: boolean;
+  readonly cancelable: boolean;
+}
+
+export function nativeEventDispatch(target: string, dispatch: NativeDispatch): string {
+  return `dispatchGeneratedEvent(${target}, { name: ${JSON.stringify(dispatch.event)}, type: ${JSON.stringify(dispatch.type)}, detail: ${dispatch.detail}, bubbles: ${dispatch.bubbles}, composed: ${dispatch.composed}, cancelable: ${dispatch.cancelable} })`;
+}
+
+export function hasNativeDispatch(plan: NativeReactivePlan | undefined): boolean {
+  return plan?.handlers.some(({ declaration }) =>
+    declaration.steps.some(({ kind }) => kind === "dispatch")
+  ) ?? false;
+}
+
 export interface NativeReactivePlan {
   readonly values: ReadonlyMap<string, string>;
   readonly states: readonly NativeState[];
   readonly computed: readonly NativeComputed[];
   readonly handlers: readonly NativeHandler[];
+}
+
+export function nativeDispatch(
+  step: Extract<HandlerStep, { readonly kind: "dispatch" }>,
+  events: readonly EventDeclaration[],
+  values: ReadonlyMap<string, string>,
+): NativeDispatch | undefined {
+  const declaration = events.find(({ name }) => name === step.event);
+  const detail = step.value === undefined ? "undefined" : nativeExpression(step.value.ast, values);
+  if (declaration === undefined || detail === undefined) return undefined;
+  return {
+    event: step.event,
+    type: declaration.type,
+    detail,
+    bubbles: declaration.bubbles,
+    composed: declaration.composed,
+    cancelable: declaration.cancelable,
+  };
 }
 
 const operators: Readonly<Record<string, string>> = {
@@ -117,7 +157,8 @@ export function nativeReactivePlan(
   const declarations = definition.declarations ?? [];
   if (declarations.length === 0) return undefined;
   if (declarations.some((declaration) =>
-    declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "handler"
+    declaration.kind !== "state" && declaration.kind !== "computed" &&
+    declaration.kind !== "event" && declaration.kind !== "handler"
   )) return undefined;
 
   const values = new Map<string, string>(propValues ??
@@ -142,7 +183,12 @@ export function nativeReactivePlan(
       states.push(state);
       values.set(declaration.name, state.variable);
     } else {
-      const value = { name: declaration.name, variable: `computed${index}`, expression };
+      const value = {
+        name: declaration.name,
+        variable: `computed${index}`,
+        expression,
+        ast: declaration.expression!.ast,
+      };
       computed.push(value);
       values.set(declaration.name, value.variable);
     }
@@ -156,12 +202,17 @@ export function nativeReactivePlan(
     declaration,
   }));
   const stateNames = new Set(states.map(({ name }) => name));
+  const events = declarations.filter(
+    (declaration): declaration is EventDeclaration => declaration.kind === "event",
+  );
   for (const handler of handlers) {
-    if (handler.declaration.steps.length === 0 || handler.declaration.steps.some((step) =>
-      step.kind !== "set" || step.guard !== undefined || step.writablePath.length !== 1 ||
-      typeof step.writablePath[0] !== "string" || !stateNames.has(step.writablePath[0]) ||
-      nativeExpression(step.value.ast, values) === undefined
-    )) return undefined;
+    if (handler.declaration.steps.length === 0 || handler.declaration.steps.some((step) => {
+      if (step.guard !== undefined) return true;
+      if (step.kind === "dispatch") return nativeDispatch(step, events, values) === undefined;
+      return step.kind !== "set" || step.writablePath.length !== 1 ||
+        typeof step.writablePath[0] !== "string" || !stateNames.has(step.writablePath[0]) ||
+        nativeExpression(step.value.ast, values) === undefined;
+    })) return undefined;
   }
   if (!templateSupported(definition.template, values, new Set(handlers.map(({ name }) => name)))) {
     return undefined;

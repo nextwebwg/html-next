@@ -5,12 +5,19 @@ source. Generated components keep the authored native root and use the target fr
 props, projection, updates, refs, and lifecycle.
 
 ```sh
-html-next-convert react components/app.html --out-dir generated
-html-next-convert vue components/app.html --out-dir generated
-html-next-convert svelte components/app.html --out-dir generated
+html-next-convert react components/app.html --mode application --out-dir generated
+html-next-convert vue components/button.html components/card.html --mode library --out-dir generated
+html-next-convert svelte components/app.html --mode application --out-dir generated
 ```
 
-The converter emits target source, scoped CSS, and `html-next.conversion.json`. That inventory names
-the target version and every semantic bridge. A capability without a target-native mapping produces
-the source-located `HTC001` diagnostic; conversion does not silently fall back to the complete live
-browser runtime.
+Application conversion emits an `application.ts` entry for the selected graph roots. Library
+conversion emits an `index.ts` entry whose named exports are independently consumable. Both modes
+emit target source, scoped CSS, and `html-next.conversion.json`; the inventory records the input
+entries, output entry, complete artifact list, target version, and every semantic bridge. Stable
+bridge IDs currently include `dom-event-callback` for framework callback forwarding and
+`typed-event-validation` for the shared declared-event boundary.
+
+A capability without a target-native mapping produces the source-located `HTC001` diagnostic.
+Colliding generated paths produce `HTC002` before any output is written, and an unsupported target
+version produces `HTC003` before the graph is loaded. Conversion does not silently fall back to the
+complete live browser runtime.

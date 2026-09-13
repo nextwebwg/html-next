@@ -6,7 +6,7 @@ import { generateVue } from "./targets/vue.js";
 import type { ComponentDefinition } from "./template.js";
 import { transformComponentStyles } from "./style.js";
 
-export const GENERATOR_VERSION = "0.0.0";
+export const GENERATOR_VERSION = "1.0.0-alpha.0";
 
 export interface GeneratedArtifact {
   readonly path: string;
