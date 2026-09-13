@@ -3,6 +3,8 @@
 The reference runtime aims to add as little JavaScript and DOM work as each authored feature
 requires. Native platform behavior is the first implementation candidate because it often removes
 code and preserves browser semantics. It is not automatically the fastest or smallest composition.
+The [native runtime audit](./native-runtime-audit.md) records each browser primitive, remaining
+library layer, measurement, and owner decision.
 
 ## Evidence required
 

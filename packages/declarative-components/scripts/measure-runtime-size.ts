@@ -40,6 +40,16 @@ function size(result: BuildResult): SizeMeasurement {
   return { bytes: bytes.byteLength, gzip: gzipSync(bytes, { level: 9 }).byteLength };
 }
 
+function moduleBytes(result: BuildResult): Readonly<Record<string, number>> {
+  const output = Object.values(result.metafile?.outputs ?? {})[0];
+  if (output === undefined) return {};
+  return Object.fromEntries(
+    Object.entries(output.inputs)
+      .map(([path, contribution]) => [path.replace(/^.*\/src\//, "src/"), contribution.bytesInOutput] as const)
+      .sort((left, right) => right[1] - left[1]),
+  );
+}
+
 async function generatedFixture(name: string, targetGzip: number): Promise<GeneratedMeasurement> {
   const sourceURL = new URL(`../benchmarks/fixtures/${name}.html`, import.meta.url);
   const source = await readFile(sourceURL, "utf8");
@@ -94,6 +104,7 @@ process.stdout.write(`${JSON.stringify({
   form_generated_bytes: formGenerated.bytes,
   controller_generated_bytes: controllerGenerated.bytes,
   live_browser_loader_bytes: size(browserResult).bytes,
+  live_browser_module_bytes: moduleBytes(browserResult),
   browser_parse5_modules: browserInputs.filter((path) => path.includes("/parse5/")).length,
   browser_dom_property_inventory_modules: browserInputs.filter(
     (path) => path.includes("/generated/dom-properties"),
