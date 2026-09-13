@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const repositoryLicense = readFileSync(join(root, "LICENSE"), "utf8");
 const workspace = mkdtempSync(join(tmpdir(), "html-next-package-consumer-"));
 const useCommandShell = process.platform === "win32";
 const componentsPackage = "@nextwebwg/declarative-components";
@@ -86,7 +87,7 @@ describe("workspace package contracts", () => {
     };
     expect(manifest.version).toBe("1.0.0-alpha.0");
     expect(manifest.private).toBe(true);
-    expect(manifest.license).toBeUndefined();
+    expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
       type: "git",
       url: "git+https://github.com/nextwebwg/html-next.git",
@@ -97,6 +98,7 @@ describe("workspace package contracts", () => {
       tag: "next",
       registry: "https://registry.npmjs.org/",
     });
+    expect(readFileSync(join(installedRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
     expect(manifest.dependencies).not.toHaveProperty("@nextwebwg/html-forms");
     expect(Object.keys(manifest.exports)).toEqual(publicExports);
     for (const path of publicExports) {
@@ -164,6 +166,20 @@ describe("workspace package contracts", () => {
       { cwd: consumer, shell: useCommandShell },
     );
 
+    const manifest = JSON.parse(
+      readFileSync(
+        join(consumer, "node_modules", "@nextwebwg", "html-forms", "package.json"),
+        "utf8",
+      ),
+    ) as { license?: string };
+    expect(manifest.license).toBe("MIT");
+    expect(
+      readFileSync(
+        join(consumer, "node_modules", "@nextwebwg", "html-forms", "LICENSE"),
+        "utf8",
+      ),
+    ).toBe(repositoryLicense);
+
     expect(
       execFileSync(
         process.execPath,
@@ -175,5 +191,22 @@ describe("workspace package contracts", () => {
         { cwd: consumer, encoding: "utf8" },
       ),
     ).toBe("ok");
+  });
+
+  it("keeps every workspace package on the private MIT contract", () => {
+    for (const packageDirectory of [
+      "declarative-components",
+      "declarative-components-converter",
+      "declarative-components-unplugin",
+      "html-forms",
+    ]) {
+      const packageRoot = join(root, "packages", packageDirectory);
+      const manifest = JSON.parse(
+        readFileSync(join(packageRoot, "package.json"), "utf8"),
+      ) as { private?: boolean; license?: string };
+      expect(manifest.private, packageDirectory).toBe(true);
+      expect(manifest.license, packageDirectory).toBe("MIT");
+      expect(readFileSync(join(packageRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
+    }
   });
 });

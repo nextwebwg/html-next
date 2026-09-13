@@ -3,6 +3,7 @@
   "version": "1.0.0-alpha.0",
   "private": true,
   "description": "Reference runtime and component bridge for Declarative HTML Components.",
+  "license": "MIT",
   "keywords": [
     "components",
     "html",

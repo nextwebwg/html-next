@@ -32,4 +32,4 @@
 
 - During development, run the smallest focused test plus `pnpm verify:inner`.
 - Before handoff, run `pnpm verify:pr` and report commands, results, skips, and remaining judgment.
-- Packages remain private until the repository owner explicitly selects a license, public visibility, and a protected release workflow.
+- Keep package license metadata aligned with the repository's MIT license. Packages remain private until the repository owner explicitly selects public visibility and a protected release workflow.

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Reference implementations for HTML Next proposals.",
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.25.0",
   "engines": {
