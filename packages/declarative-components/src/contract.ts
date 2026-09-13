@@ -1,5 +1,6 @@
 import { fail } from "./diagnostics.js";
 import { deepFreeze } from "./freeze.js";
+import { componentName } from "./names.js";
 import {
   formatType,
   isPropertyOnlyType,
@@ -21,37 +22,24 @@ import type {
   SerializedPropTarget,
 } from "./types.js";
 
-const CONTRACT_FIELDS = new Set([
+export { componentName as deriveName } from "./names.js";
+
+const CONTRACT_FIELDS = [
   "status",
   "summary",
   "nativeElement",
   "props",
-]);
-const PROP_FIELDS = new Set([
+] as const;
+const PROP_FIELDS = [
   "type",
   "default",
   "required",
   "target",
   "description",
-]);
-const STATUSES = new Set<ContractStatus>([
-  "early",
-  "experimental",
-  "stable",
-  "deprecated",
-]);
-const SCALAR_TYPES = new Set(["string", "boolean", "number"]);
+] as const;
+const STATUS_RE = /^(?:early|experimental|stable|deprecated)$/;
 
 type UnknownRecord = Record<string, unknown>;
-
-/** Derives the PascalCase component name from its `component` tag, e.g. `x-button` -> `XButton`. */
-export function deriveName(tag: string): string {
-  return tag
-    .split("-")
-    .filter((segment) => segment !== "")
-    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
-    .join("");
-}
 
 /**
  * Parses a `<prop type>` attribute into a raw prop type. A single scalar keyword
@@ -65,7 +53,10 @@ export function parseTypeAttribute(value: string): PropType {
   } catch (error) {
     fail("HC013", error instanceof Error ? error.message : "Invalid prop type expression.");
   }
-  if (parsed.kind === "terminal" && SCALAR_TYPES.has(parsed.name)) return parsed.name as PropType;
+  if (
+    parsed.kind === "terminal" &&
+    (parsed.name === "string" || parsed.name === "boolean" || parsed.name === "number")
+  ) return parsed.name;
   if (parsed.kind === "keyword") return { enum: [parsed.value] };
   if (parsed.kind === "union" && parsed.members.every((member) => member.kind === "keyword")) {
     return { enum: parsed.members.map((member) => member.value) };
@@ -88,10 +79,10 @@ function record(value: unknown, code: string, message: string, source?: string):
 
 function rejectUnknownFields(
   value: UnknownRecord,
-  allowed: ReadonlySet<string>,
+  allowed: readonly string[],
   source?: string,
 ): void {
-  const unknown = Object.keys(value).filter((key) => !allowed.has(key)).sort();
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key)).sort();
   if (unknown.length > 0) {
     fail("HC002", `Unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`, source);
   }
@@ -116,7 +107,10 @@ function parseType(value: unknown, source?: string): PropType {
     } catch (error) {
       fail("HC013", error instanceof Error ? error.message : `Unsupported prop type \`${value}\`.`, source);
     }
-    return parsed.kind === "terminal" && SCALAR_TYPES.has(parsed.name) ? parsed.name as PropType : parsed;
+    return parsed.kind === "terminal" &&
+      (parsed.name === "string" || parsed.name === "boolean" || parsed.name === "number")
+      ? parsed.name
+      : parsed;
   }
 
   const object = record(value, "HC013", "A prop type must be a scalar name or enum object.", source);
@@ -127,7 +121,7 @@ function parseType(value: unknown, source?: string): PropType {
       fail("HC013", error instanceof Error ? error.message : "Invalid type node.", source);
     }
   }
-  rejectUnknownFields(object, new Set(["enum"]), source);
+  rejectUnknownFields(object, ["enum"], source);
   if (!Array.isArray(object.enum) || object.enum.length === 0) {
     fail("HC014", "An enum must contain at least one string member.", source);
   }
@@ -135,15 +129,17 @@ function parseType(value: unknown, source?: string): PropType {
     fail("HC014", "Every enum member must be a string.", source);
   }
   const members = object.enum as string[];
-  if (new Set(members).size !== members.length) {
-    fail("HC014", "Enum members must be unique.", source);
+  for (let index = 0; index < members.length; index += 1) {
+    if (members.indexOf(members[index]!, index + 1) !== -1) {
+      fail("HC014", "Enum members must be unique.", source);
+    }
   }
   return { enum: Object.freeze([...members]) } satisfies EnumType;
 }
 
 function parseTarget(value: unknown, source?: string): PropTarget {
   const object = record(value, "HC017", "A prop target must be an object.", source);
-  rejectUnknownFields(object, new Set(["attribute", "property"]), source);
+  rejectUnknownFields(object, ["attribute", "property"], source);
   const keys = Object.keys(object);
   if (keys.length !== 1) {
     fail("HC017", "A prop target must declare exactly one attribute or property.", source);
@@ -219,8 +215,8 @@ export function defineContractWithNativeCheck(
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(tag)) {
     fail("HC005", "The `component` tag must be lowercase and contain a hyphen.", source);
   }
-  const name = deriveName(tag);
-  if (typeof object.status !== "string" || !STATUSES.has(object.status as ContractStatus)) {
+  const name = componentName(tag);
+  if (typeof object.status !== "string" || !STATUS_RE.test(object.status)) {
     fail("HC007", "Component `status` is not recognized.", source);
   }
   const summary = requiredString(object.summary, "summary", source);

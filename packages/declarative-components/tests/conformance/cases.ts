@@ -129,6 +129,17 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "invocation attributes named after Object prototype members pass through",
+    source: scene({
+      root: `<button><slot></slot></button>`,
+      use: `<x-t id="b" constructor="safe">Label</x-t>`,
+    }),
+    expect: {
+      probe: `const e = q('#b'); return { value: e.getAttribute('constructor'), text: e.textContent };`,
+      result: { value: "safe", text: "Label" },
+    },
+  },
+  {
     name: "bind: renders its initial state; declared on: bindings are consumed",
     source: scene({
       defs:

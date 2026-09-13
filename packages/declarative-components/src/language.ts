@@ -2,50 +2,17 @@ import { fail } from "./diagnostics.js";
 import { hasExecutableUrl, isUrlAttribute } from "./sanitize.js";
 import type { ComponentContract } from "./types.js";
 
-const RESERVED_ELEMENTS = new Set([
-  "if",
-  "else-if",
-  "else",
-  "for",
-  "with",
-  "value",
-  "state",
-  "computed",
-  "data",
-]);
-
-const UNSUPPORTED_LITERAL_ATTRIBUTE_PREFIXES = [
-  "@",
-  "v-",
-  "#",
-  "on:",
-  "use:",
-  "transition:",
-  "animate:",
-] as const;
-
-const UNSAFE_DOM_PROPERTY_NAMES = new Set([
-  "innerhtml",
-  "outerhtml",
-  "srcdoc",
-]);
-
-const UNSAFE_DEFINITION_ELEMENTS = new Set([
-  "base",
-  "embed",
-  "link",
-  "meta",
-  "object",
-  "script",
-  "style",
-]);
+const RESERVED_ELEMENT_RE = /^(?:if|else-if|else|for|with|value|state|computed|data)$/;
+const UNSUPPORTED_LITERAL_ATTRIBUTE_RE = /^(?:@|v-|#|on:|use:|transition:|animate:)/;
+const UNSAFE_DOM_PROPERTY_RE = /^(?:innerhtml|outerhtml|srcdoc)$/;
+const UNSAFE_DEFINITION_ELEMENT_RE = /^(?:base|embed|link|meta|object|script|style)$/;
 
 export function isReservedElement(name: string): boolean {
-  return RESERVED_ELEMENTS.has(name);
+  return RESERVED_ELEMENT_RE.test(name);
 }
 
 export function validateDefinitionElementName(name: string, source: string): string {
-  if (UNSAFE_DEFINITION_ELEMENTS.has(name.toLowerCase())) {
+  if (UNSAFE_DEFINITION_ELEMENT_RE.test(name.toLowerCase())) {
     fail("HT009", `<${name}> is not permitted in rendered component markup.`, source);
   }
   return name;
@@ -70,7 +37,7 @@ export function validateLiteralAttributeName(
   const lowerName = name.toLowerCase();
   if (
     lowerName.startsWith("on") ||
-    UNSUPPORTED_LITERAL_ATTRIBUTE_PREFIXES.some((prefix) => lowerName.startsWith(prefix))
+    UNSUPPORTED_LITERAL_ATTRIBUTE_RE.test(lowerName)
   ) {
     fail(
       "HT010",
@@ -89,7 +56,7 @@ export function validateLiteralAttributeName(
 
 export function validateMvpDomProperty(name: string, source: string): string {
   const lowerName = name.toLowerCase();
-  if (lowerName.startsWith("on") || UNSAFE_DOM_PROPERTY_NAMES.has(lowerName)) {
+  if (lowerName.startsWith("on") || UNSAFE_DOM_PROPERTY_RE.test(lowerName)) {
     fail("HT007", `Dynamic ${name} requires a future trusted-content type.`, source);
   }
   return name;

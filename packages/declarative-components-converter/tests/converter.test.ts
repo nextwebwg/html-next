@@ -76,7 +76,7 @@ describe("framework converter", () => {
           <computed name="double" from="count * 2"></computed>
           <handler name="increment"><set name="count" :value="count + 1"></set></handler>
         </defs>
-        <button on:click="increment"><output $value="double"></output></button>
+        <button :data-count="count" on:click="increment"><output $value="double"></output></button>
       </template>`);
       const outDirectory = join(root, "generated");
       await convertComponents({ entries: ["counter.html"], target, root, outDirectory });
@@ -94,6 +94,8 @@ describe("framework converter", () => {
       }
       if (target === "vue") {
         assert.match(source, /computed\(\(\) =>/);
+        assert.doesNotMatch(source, /:data-count="undefined"/);
+        assert.match(source, /:data-count="state0"/);
         const parsed = parseVue(source, { filename: path });
         assert.deepEqual(parsed.errors, []);
         compileScript(parsed.descriptor, { id: "x-counter" });

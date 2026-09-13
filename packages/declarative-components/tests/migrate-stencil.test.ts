@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 
 import { migrateStencilPackage } from "../src/cli.js";
 import { extractStencilInventory, scaffoldStencilComponent, stencilTypeToHtmlNext } from "../src/migrate/stencil.js";
 
-const fixtureRoot = new URL("./fixtures/stencil/", import.meta.url).pathname;
+const fixtureRoot = fileURLToPath(new URL("./fixtures/stencil/", import.meta.url));
 
 describe("Stencil migration inventory", () => {
   it("extracts public shape plus source-observable slots, styles, and capabilities", async () => {

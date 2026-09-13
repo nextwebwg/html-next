@@ -4,6 +4,7 @@ import { describe, it } from "vitest";
 import {
   ABSENT,
   UndeclaredName,
+  checkExpression,
   compileExpression,
   evaluate,
   getWritablePath,
@@ -69,19 +70,26 @@ describe("expression: reads and absent value", () => {
   });
 
   it("null literal and out-of-range index behave as absent for access", () => {
-    const s = scope({ items: [10, 20] });
+    const s = scope({ items: [10, 20, null], record: { value: null } });
     assert.equal(evaluate("items[5]", s), ABSENT);
     assert.equal(evaluate("items[0]", s), 10);
+    assert.equal(evaluate("items[2]", s), null);
+    assert.equal(evaluate("record.value", s), null);
   });
 });
 
 describe("expression: truthiness — the empty value of each type is false", () => {
   const s = scope({});
   it("empty values are falsy", () => {
-    for (const src of ["false", "null", '""', "0", "[]"]) {
+    for (const src of ["false", "null", '""', "0", "[]", "{}"]) {
       assert.equal(truthy(evaluate(src, s)), false, `${src} should be falsy`);
     }
     assert.equal(truthy(ABSENT), false);
+  });
+
+  it("ignores inherited properties when deciding whether a record is empty", () => {
+    const inherited = Object.create({ inherited: true }) as Record<string, never>;
+    assert.equal(truthy(inherited), false);
   });
   it("non-empty values are truthy", () => {
     for (const src of ["true", '"x"', "1", "[1]", "{ a: 1 }"]) {
@@ -124,10 +132,12 @@ describe("expression: operators, comparison, functions", () => {
   it("formats dynamic slot names with the standard format function", () => {
     assert.equal(evaluate("format('row-%s-%s', 'alpha', 2)", s), "row-alpha-2");
     assert.equal(evaluate("format(1, 'alpha')", s), ABSENT);
+    assert.throws(() => evaluate("format(1, undeclared)", s), UndeclaredName);
   });
   it("ordered comparison and precedence", () => {
     assert.equal(evaluate("(2 + 3) * 2 > 9", scope({})), true);
     assert.equal(evaluate("2 + 3 * 2", scope({})), 8);
+    assert.equal(evaluate("8 / 4 / 2", scope({})), 1);
   });
   it("the fixed CSS-style function set", () => {
     assert.equal(evaluate("abs(-4)", scope({})), 4);
@@ -146,12 +156,30 @@ describe("expression: object/array expressions", () => {
   });
 });
 
+describe("expression: syntax diagnostics", () => {
+  it("retains the public diagnostics for malformed input", () => {
+    assert.throws(() => checkExpression("'open"), /Unterminated string literal\./);
+    assert.throws(() => checkExpression("value."), /Expected a property name after `\.`\./);
+    assert.throws(() => checkExpression("{ 1: true }"), /Object keys must be identifiers or strings\./);
+    assert.throws(() => checkExpression("(1"), /Expected `\)`\./);
+    assert.throws(() => checkExpression("1 @ 2"), /Unexpected character `@`\./);
+    assert.throws(() => checkExpression("1 2"), /Unexpected trailing input in expression\./);
+  });
+
+  it("parses decimal and escaped string literals without JavaScript evaluation", () => {
+    assert.equal(evaluate(".5 + 1.", scope({})), 1.5);
+    assert.equal(evaluate("'it\\'s'", scope({})), "it's");
+    assert.throws(() => checkExpression("1.2.3"), SyntaxError);
+  });
+});
+
 describe("expression: serialization", () => {
   it("toText renders absent/null as empty and joins lists", () => {
     assert.equal(toText(ABSENT), "");
     assert.equal(toText(null), "");
     assert.equal(toText(42), "42");
     assert.equal(toText(["a", "b"]), "a b");
+    assert.equal(toText(["", "b"]), " b");
   });
   it("toAttribute removes on absent/false, empties on true, else stringifies", () => {
     assert.equal(toAttribute(ABSENT), null);

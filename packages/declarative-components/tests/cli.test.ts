@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 
 import { buildComponents, checkComponents, inspectComponents } from "../src/cli.js";
 
-const fixture = new URL("./fixtures/x-button.html", import.meta.url).pathname;
-const graphFixture = new URL("./fixtures/graph/app.html", import.meta.url).pathname;
+const fixture = fileURLToPath(new URL("./fixtures/x-button.html", import.meta.url));
+const graphFixture = fileURLToPath(new URL("./fixtures/graph/app.html", import.meta.url));
 
 async function snapshot(directory: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};

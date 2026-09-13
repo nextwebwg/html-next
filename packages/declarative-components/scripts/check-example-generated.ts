@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildComponents } from "../src/cli.js";
 
@@ -17,10 +18,10 @@ async function snapshot(root: string, current = "", result: Record<string, strin
 const temporary = await mkdtemp(join(tmpdir(), "html-next-generated-"));
 try {
   await buildComponents(
-    [new URL("../examples/x-button.html", import.meta.url).pathname],
+    [fileURLToPath(new URL("../examples/x-button.html", import.meta.url))],
     temporary,
   );
-  const expected = await snapshot(new URL("../examples/generated/", import.meta.url).pathname);
+  const expected = await snapshot(fileURLToPath(new URL("../examples/generated/", import.meta.url)));
   const actual = await snapshot(temporary);
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error("examples/generated is stale; run npm run build:example.");

@@ -183,6 +183,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const connected = [first, second].every(element => window.HtmlRuntime.getComponentHost(element) != null);
           const events = [];
           const host = window.HtmlRuntime.getComponentHost(first);
+          const privateState = first[Symbol.for("@nextwebwg/declarative-components.runtime.v1")] === undefined;
+          const frozenHost = Object.isFrozen(host);
           host.on("connect", () => events.push("connect"));
           host.on("disconnect", () => events.push("disconnect"));
           first.remove();
@@ -192,12 +194,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
           stopDocument();
           stopFirst();
           stopSecond();
-          return { documentObservers, connected, events };
+          return { documentObservers, connected, events, privateState, frozenHost };
         })()`);
         assert.deepEqual(result, {
           documentObservers: 1,
           connected: true,
           events: ["connect", "disconnect", "connect", "disconnect"],
+          privateState: true,
+          frozenHost: true,
         });
       } finally {
         await browser.close();

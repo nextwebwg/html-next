@@ -60,6 +60,21 @@ describe("parseComponent", () => {
       { name: "start", dynamic: false, required: false },
       { name: undefined, dynamic: true, required: true },
     ]);
+    assert.ok(Object.isFrozen(definition));
+    assert.ok(Object.isFrozen(definition.contract));
+    assert.ok(Object.isFrozen(definition.contract.props));
+  });
+
+  it("accepts prop names that exist on Object.prototype", () => {
+    const definition = parseComponent(
+      componentSource(
+        `<button :data-constructor="constructor"></button>`,
+        `<prop name="constructor" type="string" default="safe">Constructor label.</prop>`,
+      ),
+      "constructor-prop.html",
+    );
+    const propName: string = "constructor";
+    assert.equal(definition.contract.props[propName]?.default, "safe");
   });
 
   it("rejects declaration collisions across the flat component scope", () => {

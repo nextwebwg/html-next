@@ -4,6 +4,7 @@ import { DataResource } from "./data.js";
 import { fail } from "./diagnostics.js";
 import type { ComponentGraph } from "./graph.js";
 import {
+  ABSENT,
   UndeclaredName,
   evaluate,
   evaluateCompiled,
@@ -72,24 +73,48 @@ interface RuntimeInstance {
   readonly disconnectCallbacks: Set<() => void>;
   connected: boolean;
   controllerModule?: Promise<ControllerModule>;
+  host?: ComponentHost;
 }
 
 interface DocumentRegistry {
+  readonly root: Element | null;
   readonly definitions: Map<string, LiveDefinition>;
-  readonly instances: WeakMap<Element, ComponentDefinition>;
   discoverySelector: string | undefined;
 }
 
-const registries = new WeakMap<Document, DocumentRegistry>();
 const contentOnly = new WeakSet<Element>();
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
-const frameworkProjectedNodes = new WeakMap<Element, readonly Node[]>();
+const definitionAttributes = new WeakMap<ComponentDefinition, readonly [
+  Readonly<Record<string, string>>,
+  Readonly<Record<string, string>>,
+]>();
+const runtimeKey = Symbol.for("@nextwebwg/declarative-components.runtime.v1");
+const lifecycleKey = Symbol.for("@nextwebwg/declarative-components.lifecycle.v1");
+
+interface DocumentState {
+  registry?: DocumentRegistry;
+  mutationHub?: DocumentMutationHub;
+  lifecycle?: LifecycleCoordinator;
+  observer?: () => void;
+}
+
+type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
+type RuntimeElement = Element & { [lifecycleKey]?: ManagedComponentLifecycle };
+
+function documentState(root: Document): DocumentState {
+  return (root as RuntimeDocument)[runtimeKey] ??= {};
+}
+
+function runtimeInstance(element: Element): RuntimeInstance | undefined {
+  return runtimeInstances.get(element);
+}
 
 function registryFor(root: Document): DocumentRegistry {
-  let registry = registries.get(root);
-  if (registry === undefined) {
-    registry = { definitions: new Map(), instances: new WeakMap(), discoverySelector: undefined };
-    registries.set(root, registry);
+  const state = documentState(root);
+  let registry = state.registry;
+  if (registry === undefined || registry.root !== root.documentElement) {
+    registry = { root: root.documentElement, definitions: new Map(), discoverySelector: undefined };
+    state.registry = registry;
   }
   return registry;
 }
@@ -161,6 +186,26 @@ function invocationValue(prop: PropContract, input: unknown, attributePresent = 
   return parsed.value as PropValue;
 }
 
+function propAttributeNames(
+  definition: ComponentDefinition,
+  hydration: boolean,
+): Readonly<Record<string, string>> {
+  let names = definitionAttributes.get(definition);
+  if (names === undefined) {
+    const invocation = Object.create(null) as Record<string, string>;
+    const hydrated = Object.create(null) as Record<string, string>;
+    for (const name of Object.keys(definition.contract.props)) {
+      const attributeName = kebabCase(name);
+      invocation[attributeName] = name;
+      hydrated[`data-${attributeName}`] = name;
+      if (attributeName !== name.toLowerCase()) hydrated[`data-${name.toLowerCase()}`] = name;
+    }
+    names = [invocation, hydrated];
+    definitionAttributes.set(definition, names);
+  }
+  return names[hydration ? 1 : 0];
+}
+
 function readInvocation(
   invocation: Element,
   definition: ComponentDefinition,
@@ -172,18 +217,8 @@ function readInvocation(
   readonly rootName: string;
 } {
   const contract = definition.contract;
-  const names = new Map<string, string>();
-  for (const name of Object.keys(contract.props)) {
-    const attributeName = kebabCase(name);
-    names.set(hydration ? `data-${attributeName}` : attributeName, name);
-    // Adopt output emitted by pre-kebab-case versions without making that spelling
-    // part of the author-facing contract.
-    if (hydration && attributeName !== name.toLowerCase()) {
-      names.set(`data-${name.toLowerCase()}`, name);
-    }
-  }
-
-  const values: Record<string, PropValue | undefined> = {};
+  const names = propAttributeNames(definition, hydration);
+  const values = Object.create(null) as Record<string, PropValue | undefined>;
   const passThrough: Attr[] = [];
   let requestedRoot: string | undefined;
   for (const attribute of Array.from(invocation.attributes)) {
@@ -191,7 +226,7 @@ function readInvocation(
       requestedRoot = attribute.value.toLowerCase();
       continue;
     }
-    const propName = names.get(attribute.name.toLowerCase());
+    const propName = names[attribute.name.toLowerCase()];
     if (propName === undefined) {
       if (!hydration) passThrough.push(attribute);
       continue;
@@ -224,7 +259,12 @@ function readInvocation(
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
     // The effective value seen by expressions: passed value, default, or first-class absence.
-    scope.set(name, (values[name] !== undefined ? values[name]! : prop.default) as Value);
+    scope.set(
+      name,
+      (values[name] !== undefined
+        ? values[name]!
+        : prop.default === undefined ? ABSENT : prop.default) as Value,
+    );
   }
 
   const declarations = definition.declarations ?? [];
@@ -333,7 +373,8 @@ function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value)
     return;
   }
   let target = scope.get(root) as Record<PropertyKey, unknown> | undefined;
-  for (const segment of segments.slice(0, -1)) {
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index]!;
     const key = typeof segment === "object" ? evaluateCompiled(segment.expression, scope) : segment;
     if ((typeof key !== "string" && typeof key !== "number") || target == null) return;
     target = target[key] as Record<PropertyKey, unknown> | undefined;
@@ -450,13 +491,11 @@ function bindEvents(
   scope: ReactiveScope,
   context: RuntimeRenderContext,
 ): void {
-  const handlers = new Map(
-    (context.definition.declarations ?? [])
-      .filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler")
-      .map((declaration) => [declaration.name, declaration]),
-  );
   for (const binding of node.events ?? []) {
-    const declaration = handlers.get(binding.handler)!;
+    const declaration = (context.definition.declarations ?? []).find(
+      (candidate): candidate is HandlerDeclaration =>
+        candidate.kind === "handler" && candidate.name === binding.handler,
+    )!;
     const listener = (event: Event): void => {
       if (!eventPasses(event, element, binding.modifiers)) return;
       if (binding.modifiers.includes("prevent")) event.preventDefault();
@@ -725,23 +764,31 @@ function renderEachRegion(
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
     const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
-    const oldPositions = keyed
-      ? new Map([...blocks.keys()].map((key, index) => [key, index]))
-      : undefined;
+    let oldPositions: Map<unknown, number> | undefined;
+    if (keyed) {
+      oldPositions = new Map();
+      let position = 0;
+      for (const key of blocks.keys()) oldPositions.set(key, position++);
+    }
     const previous: number[] | undefined = keyed ? [] : undefined;
     const { flow: _flow, ...body } = node;
-    items.forEach((item, index) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]!;
       const locals: Record<string, Value> = {
         [flow.item]: item,
         loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
       };
       if (flow.index !== undefined) locals[flow.index] = index;
-      const probe = scope.fork(Object.entries(locals));
-      const key = flow.key === undefined ? index : evalValue(flow.key, probe);
+      let local: ReactiveScope | undefined;
+      let key: unknown = index;
+      if (flow.key !== undefined) {
+        local = scope.fork(Object.entries(locals));
+        key = evalValue(flow.key, local);
+      }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        const local = scope.fork(Object.entries(locals));
+        local ??= scope.fork(Object.entries(locals));
         const effectsStart = context.effects.length;
         const rendered = materialize(
           renderInstance(body, local, document, passThrough, context),
@@ -764,7 +811,7 @@ function renderEachRegion(
       next.set(key, block);
       ordered?.push(block);
       previous?.push(oldPositions?.get(key) ?? -1);
-    });
+    }
     for (const [key, block] of blocks) if (!next.has(key)) removeBlock(block);
     if (ordered !== undefined && previous !== undefined) {
       const stable = stableBlockPositions(previous);
@@ -1091,48 +1138,55 @@ function installInstanceValidity(root: Element, instance: RuntimeInstance): void
 
 function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const props = instance.definition.contract.props;
-  const attributeNames = new Map(
-    Object.entries(props).filter(([, prop]) => !isPropertyOnlyType(prop.type))
-      .map(([name]) => [`data-${kebabCase(name)}`, name]),
-  );
-  const reflected = new Map<string, string | null>();
+  const attributeNames: Record<string, string> = {};
+  const reflected: Record<string, string | null> = {};
 
   for (const [name, prop] of Object.entries(props)) {
     Object.defineProperty(root, name, {
       configurable: true,
       enumerable: true,
-      get: () => instance.scope.get(name),
+      get: () => {
+        const value = instance.scope.get(name);
+        return value === ABSENT ? undefined : value;
+      },
       set: (input: unknown) => instance.scope.set(name, invocationValue(prop, input) as Value),
     });
     if (isPropertyOnlyType(prop.type)) continue;
     const attributeName = `data-${kebabCase(name)}`;
+    attributeNames[attributeName] = name;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
-      const serialized = value === undefined ? null : serializeTypedValue(value, prop.type);
-      reflected.set(attributeName, serialized);
+      const serialized = value === undefined || value === ABSENT
+        ? null
+        : serializeTypedValue(value, prop.type);
+      reflected[attributeName] = serialized;
       if (serialized === null) root.removeAttribute(attributeName);
       else root.setAttribute(attributeName, serialized);
     }, 2));
   }
 
   const Observer = root.ownerDocument.defaultView?.MutationObserver;
-  if (Observer === undefined || attributeNames.size === 0) return;
+  const attributeFilter = Object.keys(attributeNames);
+  if (Observer === undefined || attributeFilter.length === 0) return;
   const observer = new Observer((records) => {
     for (const record of records) {
       const attributeName = record.attributeName;
       if (attributeName === null) continue;
-      const name = attributeNames.get(attributeName);
+      const name = attributeNames[attributeName];
       if (name === undefined) continue;
       const value = root.getAttribute(attributeName);
-      if (reflected.get(attributeName) === value && reflected.delete(attributeName)) continue;
-      reflected.delete(attributeName);
+      if (attributeName in reflected && reflected[attributeName] === value) {
+        delete reflected[attributeName];
+        continue;
+      }
+      delete reflected[attributeName];
       const prop = props[name]!;
       instance.scope.set(name, invocationValue(prop, value ?? undefined, value !== null) as Value);
     }
   });
   const connect = (): void => observer.observe(root, {
     attributes: true,
-    attributeFilter: [...attributeNames.keys()],
+    attributeFilter,
   });
   const disconnect = (): void => observer.disconnect();
   instance.connectCallbacks.add(connect);
@@ -1167,6 +1221,7 @@ function prepareRuntimeInvocation(
   invocation: Element,
   definition: ComponentDefinition,
   hydration: boolean,
+  projectedNodes?: readonly Node[],
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -1176,7 +1231,7 @@ function prepareRuntimeInvocation(
     : undefined;
   const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
   const children = hydration
-    ? [...(frameworkProjectedNodes.get(invocation) ?? invocation.querySelectorAll("[data-slotted]"))]
+    ? projectedNodes ?? [...invocation.querySelectorAll("[data-slotted]")]
     : Array.from(invocation.childNodes);
   const instance: RuntimeInstance = {
     definition,
@@ -1249,9 +1304,7 @@ function commitRuntimeInvocations(
     }
     if (invocation.replace) invocation.invocation.replaceWith(invocation.nativeRoot);
     invocation.context.committed = true;
-    registry.instances.set(invocation.nativeRoot, invocation.definition);
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
-    frameworkProjectedNodes.delete(invocation.nativeRoot);
     installPublicProps(invocation.nativeRoot, invocation.instance);
     installPublicMethods(invocation.nativeRoot, invocation.instance);
     installInstanceValidity(invocation.nativeRoot, invocation.instance);
@@ -1261,19 +1314,16 @@ function commitRuntimeInvocations(
 
 type QueryRoot = Node & ParentNode;
 
-function queryWithin(scope: QueryRoot, selector: string): Element[] {
-  const matches = scope.nodeType === 1 && (scope as Element).matches(selector)
-    ? [scope as Element]
-    : [];
-  return [...matches, ...scope.querySelectorAll(selector)];
+function collectWithin(scope: QueryRoot, selector: string, elements: Set<Element>): void {
+  if (scope.nodeType === 1 && (scope as Element).matches(selector)) elements.add(scope as Element);
+  for (const element of scope.querySelectorAll(selector)) elements.add(element);
 }
 
-function componentRootsWithin(scope: QueryRoot): Element[] {
+function visitComponentRoots(scope: QueryRoot, visit: (element: Element) => void): void {
   const element = scope.nodeType === 1 ? scope as Element : undefined;
-  const root = element?.matches("[data-component-root]") === true ? [element] : [];
-  return element?.childElementCount === 0
-    ? root
-    : [...root, ...scope.querySelectorAll("[data-component-root]")];
+  if (element?.matches("[data-component-root]") === true) visit(element);
+  if (element?.childElementCount === 0) return;
+  for (const descendant of scope.querySelectorAll("[data-component-root]")) visit(descendant);
 }
 
 interface LoweredScopes {
@@ -1283,12 +1333,15 @@ interface LoweredScopes {
 
 function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScopes {
   const registry = registryFor(root);
-  const discoveredElements = [...new Set(scopes.flatMap((scope) => queryWithin(scope, discoverySelector(registry))))];
-  const wrappers = discoveredElements.filter(
-    (element): element is HTMLTemplateElement =>
-      element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element),
-  );
-  const definitions = wrappers.map(parseDefinition);
+  const discovered = new Set<Element>();
+  const selector = discoverySelector(registry);
+  for (const scope of scopes) collectWithin(scope, selector, discovered);
+  const definitions: LiveDefinition[] = [];
+  for (const element of discovered) {
+    if (element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element)) {
+      definitions.push(parseDefinition(element as HTMLTemplateElement, definitions.length));
+    }
+  }
   const newDefinitions = new Map<string, LiveDefinition>();
   for (const live of definitions) {
     const tag = live.definition.contract.tag;
@@ -1308,27 +1361,29 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScope
     ) return;
     prepared.push(prepareRuntimeInvocation(element, definition, hydration));
   };
-  const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: readonly Element[]): void => {
+  const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
     for (const element of elements) {
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
       if (!element.hasAttribute("data-component-root")) continue;
       roots.add(element);
-      if (runtimeInstances.has(element)) continue;
+      if (runtimeInstance(element) !== undefined) continue;
       for (const tag of new Set((element.getAttribute("data-component-root") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
         if (owner !== undefined) prepare(owner, element, true);
       }
     }
   };
-  collect(registry.definitions, discoveredElements);
+  collect(registry.definitions, discovered);
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
     const selector = [
       "[data-component-root]",
       ...newDefinitions.keys(),
     ].join(",");
-    collect(newDefinitions, queryWithin(root, selector));
+    const existing = new Set<Element>();
+    collectWithin(root, selector, existing);
+    collect(newDefinitions, existing);
   }
 
   for (const live of definitions) {
@@ -1383,25 +1438,12 @@ interface DocumentMutationHub {
   readonly subscribers: Set<DocumentMutationSubscriber>;
 }
 
-const mutationHubKey = Symbol.for("@nextwebwg/declarative-components.mutation-hub.v1");
-const lifecycleCoordinatorKey = Symbol.for("@nextwebwg/declarative-components.lifecycle.v1");
-const documentObserversKey = Symbol.for("@nextwebwg/declarative-components.document-observers.v1");
-
-function globalDocumentMap<T>(key: symbol): WeakMap<Document, T> {
-  const host = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
-  const existing = host[key];
-  if (existing instanceof WeakMap) return existing as WeakMap<Document, T>;
-  const map = new WeakMap<Document, T>();
-  Object.defineProperty(host, key, { value: map });
-  return map;
-}
-
 function subscribeDocumentMutations(
   root: Document,
   subscriber: DocumentMutationSubscriber,
 ): () => void {
-  const hubs = globalDocumentMap<DocumentMutationHub>(mutationHubKey);
-  let hub = hubs.get(root);
+  const state = documentState(root);
+  let hub = state.mutationHub;
   if (hub === undefined) {
     const Observer = root.defaultView?.MutationObserver;
     if (Observer === undefined) {
@@ -1409,11 +1451,10 @@ function subscribeDocumentMutations(
     }
     const subscribers = new Set<DocumentMutationSubscriber>();
     const observer = new Observer((mutations) => {
-      // Snapshot so a callback can unsubscribe without changing this delivery pass.
       for (const notify of Array.from(subscribers)) notify(mutations);
     });
     hub = { observer, subscribers };
-    hubs.set(root, hub);
+    state.mutationHub = hub;
     observer.observe(root, { childList: true, subtree: true });
   }
   hub.subscribers.add(subscriber);
@@ -1424,19 +1465,18 @@ function subscribeDocumentMutations(
     hub.subscribers.delete(subscriber);
     if (hub.subscribers.size === 0) {
       hub.observer.disconnect();
-      hubs.delete(root);
+      delete state.mutationHub;
     }
   };
 }
 
 function coordinatorFor(root: Document): LifecycleCoordinator {
-  const coordinators = globalDocumentMap<LifecycleCoordinator>(lifecycleCoordinatorKey);
-  const existing = coordinators.get(root);
+  const state = documentState(root);
+  const existing = state.lifecycle;
   if (existing !== undefined) return existing;
-  const records = new WeakMap<Element, ManagedComponentLifecycle>();
   let size = 0;
   const synchronize = (element: Element): void => {
-    const record = records.get(element);
+    const record = (element as RuntimeElement)[lifecycleKey];
     if (record === undefined) return;
     if (element.isConnected && record.disconnect === undefined) {
       record.disconnect = record.connect(element);
@@ -1446,14 +1486,14 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
     }
   };
   const stopObservation = subscribeDocumentMutations(root, (mutations) => {
-    const changed = new Set<Element>();
+    const changed: Element[] = [];
     const collect = (node: Node): void => {
       if (node.nodeType !== 1) return;
       const element = node as Element;
-      if (records.has(element)) changed.add(element);
-      for (const descendant of componentRootsWithin(element)) {
-        if (records.has(descendant)) changed.add(descendant);
-      }
+      if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
+      visitComponentRoots(element, (descendant) => {
+        if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
+      });
     };
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) collect(node);
@@ -1463,25 +1503,27 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
   });
   const coordinator: LifecycleCoordinator = {
     add(element, record) {
-      const previous = records.get(element);
+      const target = element as RuntimeElement;
+      const previous = target[lifecycleKey];
       if (previous === record) return;
       previous?.disconnect?.();
       if (previous === undefined) size += 1;
-      records.set(element, record);
+      target[lifecycleKey] = record;
       synchronize(element);
     },
     remove(element, record) {
-      if (records.get(element) !== record) return;
+      const target = element as RuntimeElement;
+      if (target[lifecycleKey] !== record) return;
       record.disconnect?.();
-      records.delete(element);
+      delete target[lifecycleKey];
       size -= 1;
       if (size === 0) {
         stopObservation();
-        coordinators.delete(root);
+        delete state.lifecycle;
       }
     },
   };
-  coordinators.set(root, coordinator);
+  state.lifecycle = coordinator;
   return coordinator;
 }
 
@@ -1559,7 +1601,7 @@ export function attachComponent(
     fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
   }
 
-  const instance = runtimeInstances.get(element);
+  const instance = runtimeInstance(element);
   if (instance === undefined) {
     const projected: Node[] = [];
     const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
@@ -1592,7 +1634,6 @@ export function attachComponent(
       }
     };
     markFrameworkProjection(element, definition.template);
-    frameworkProjectedNodes.set(element, Object.freeze(projected));
     stampAuthoredElement(element, definition.contract.tag);
     stampComponentRoot(element, definition.contract.tag);
     for (const [name, prop] of Object.entries(definition.contract.props)) {
@@ -1604,10 +1645,10 @@ export function attachComponent(
         }
       }
     }
-    commitRuntimeInvocations(registry, [prepareRuntimeInvocation(element, definition, true)]);
+    commitRuntimeInvocations(registry, [prepareRuntimeInvocation(element, definition, true, projected)]);
   }
 
-  const attached = runtimeInstances.get(element);
+  const attached = runtimeInstance(element);
   if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
   for (const [name, value] of Object.entries(options.props ?? {})) {
     if (name in definition.contract.props) (element as unknown as Record<string, unknown>)[name] = value;
@@ -1661,15 +1702,20 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
 
 /** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
 export function getComponentHost(element: Element): ComponentHost | undefined {
-  const instance = runtimeInstances.get(element);
+  const instance = runtimeInstance(element);
   if (instance === undefined) return undefined;
+  if (instance.host !== undefined) return instance.host;
   const writable = new Set(
     (instance.definition.declarations ?? [])
       .filter((declaration) => declaration.kind === "state")
       .map((declaration) => declaration.name),
   );
   const state = new Proxy({}, {
-    get: (_target, key) => typeof key === "string" ? instance.scope.get(key) : undefined,
+    get: (_target, key) => {
+      if (typeof key !== "string") return undefined;
+      const value = instance.scope.get(key);
+      return value === ABSENT ? undefined : value;
+    },
     set: (_target, key, value) => {
       if (typeof key !== "string" || !writable.has(key)) {
         throw new TypeError(`Only declared state roots are writable; \`${String(key)}\` is read-only.`);
@@ -1698,13 +1744,15 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
     on(event, listener) {
       if (event === "connect") {
-        instance.connectCallbacks.add(listener as () => void);
+        const callback = listener as () => void;
+        instance.connectCallbacks.add(callback);
         if (instance.connected) (listener as () => void)();
-        return () => instance.connectCallbacks.delete(listener as () => void);
+        return () => instance.connectCallbacks.delete(callback);
       }
       if (event === "disconnect") {
-        instance.disconnectCallbacks.add(listener as () => void);
-        return () => instance.disconnectCallbacks.delete(listener as () => void);
+        const callback = listener as () => void;
+        instance.disconnectCallbacks.add(callback);
+        return () => instance.disconnectCallbacks.delete(callback);
       }
       element.addEventListener(event, listener);
       return () => element.removeEventListener(event, listener);
@@ -1713,7 +1761,8 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       return element.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }));
     },
   };
-  return Object.freeze(host);
+  instance.host = Object.freeze(host);
+  return instance.host;
 }
 
 /** Supplies the already application-approved controller module to a lowered instance. */
@@ -1721,7 +1770,7 @@ export function setControllerModule(
   element: Element,
   module: Promise<ControllerModule>,
 ): void {
-  const instance = runtimeInstances.get(element);
+  const instance = runtimeInstance(element);
   if (instance === undefined) fail("HJ003", "A controller can attach only to a lowered component root.");
   instance.controllerModule = module;
 }
@@ -1730,10 +1779,6 @@ export interface DocumentObservationOptions {
   /** Runtime lifecycle integration; the returned disposer runs on removal or stop. */
   readonly onConnect?: (element: Element, definition: ComponentDefinition) => void | (() => void);
   readonly onError?: (error: unknown) => void;
-}
-
-function activeDocumentObservers(): WeakMap<Document, () => void> {
-  return globalDocumentMap(documentObserversKey);
 }
 
 /**
@@ -1746,28 +1791,26 @@ export function observeDocument(
   root: Document = document,
   options: DocumentObservationOptions = {},
 ): () => void {
-  const documentObservers = activeDocumentObservers();
-  if (documentObservers.has(root)) fail("HR003", "This document is already being observed.");
-  const registry = registryFor(root);
+  const state = documentState(root);
+  if (state.observer !== undefined) fail("HR003", "This document is already being observed.");
   const connected = new Map<Element, void | (() => void)>();
   const report = options.onError ?? ((error: unknown) => console.error(error));
   let stopped = false;
   const disconnect = (element: Element): void => {
     const dispose = connected.get(element);
     connected.delete(element);
-    const instance = runtimeInstances.get(element);
+    const instance = runtimeInstance(element);
     if (instance !== undefined) disconnectRuntimeInstance(instance);
     try { dispose?.(); } catch (error) { report(error); }
   };
   const connect = (element: Element): void => {
-    const definition = registry.instances.get(element);
-    if (definition === undefined || connected.has(element) || !root.contains(element)) return;
+    const instance = runtimeInstance(element);
+    if (instance === undefined || connected.has(element) || !root.contains(element)) return;
     // Record first so callback mutations cannot connect an instance twice.
     connected.set(element, undefined);
     try {
-      const instance = runtimeInstances.get(element);
-      if (instance !== undefined) connectRuntimeInstance(instance);
-      const dispose = options.onConnect?.(element, definition);
+      connectRuntimeInstance(instance);
+      const dispose = options.onConnect?.(element, instance.definition);
       if (stopped) dispose?.();
       else connected.set(element, dispose);
     } catch (error) { report(error); }
@@ -1775,17 +1818,16 @@ export function observeDocument(
   const synchronize = (mutations?: readonly MutationRecord[]): void => {
     if (stopped) return;
     const scopes: QueryRoot[] = [];
-    const candidates = new Set<Element>();
     if (mutations === undefined) {
       scopes.push(root);
     } else {
-      const removed = new Set<Element>();
+      const removed: Element[] = [];
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) {
           if (node.nodeType !== 1) continue;
-          for (const element of componentRootsWithin(node as QueryRoot)) {
-            if (connected.has(element)) removed.add(element);
-          }
+          visitComponentRoots(node as QueryRoot, (element) => {
+            if (connected.has(element)) removed.push(element);
+          });
         }
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;
@@ -1797,13 +1839,10 @@ export function observeDocument(
     if (scopes.length > 0) {
       try {
         for (const element of lowerScopes(root, scopes).roots) {
-          if (registry.instances.has(element)) candidates.add(element);
+          if (stopped) break;
+          connect(element);
         }
       } catch (error) { report(error); }
-    }
-    for (const element of candidates) {
-      if (stopped) break;
-      connect(element);
     }
   };
   const stopObservation = subscribeDocumentMutations(root, synchronize);
@@ -1811,17 +1850,17 @@ export function observeDocument(
     if (stopped) return;
     stopped = true;
     stopObservation();
-    documentObservers.delete(root);
+    delete state.observer;
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
     }
     for (const element of connected.keys()) {
-      const instance = runtimeInstances.get(element);
+      const instance = runtimeInstance(element);
       if (instance !== undefined) disconnectRuntimeInstance(instance);
     }
     connected.clear();
   };
-  documentObservers.set(root, stop);
+  state.observer = stop;
   synchronize();
   return stop;
 }
