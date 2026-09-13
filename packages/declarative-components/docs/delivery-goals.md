@@ -34,14 +34,18 @@ graph-scoped support plan.
 - Input boundary: application entries or a concrete public library entry set
 - Primary metrics: whole application output; full library output; representative consumer subsets
 - Attribution metrics: isolated capability fixtures, reported separately from product output
-- Current evidence: static, basic-reactive, computed, and scalar-prop fixtures avoid the live parser
-  and general runtime; keyed lists, declared reads, and controller lifecycle still
-  enter the general fallback
+- Current evidence: the build plugin analyzes the linked component graph, emits one graph-scoped
+  support module, and exposes distinct application and library entry contracts. Empty static child
+  invocations compile to linked factories; unsupported invocation edges, cycles, and undeclared
+  boundaries fail with source-located diagnostics. Keyed lists, declared reads, controller
+  lifecycle, child inputs and projection, physical library artifacts, and hydration parity remain
+  incomplete.
 - Completion: graph capability union, shared support emission, application and library packaging,
   dynamic-boundary behavior, hydration, and live/native conformance all satisfy the delivery spec
 
-The next implementation milestone replaces per-fixture reasoning with graph-wide capability
-analysis and shared host generation.
+The next implementation milestone expands linked factory calls beyond empty static invocations,
+then turns the stable virtual library entries into publishable files with declarations and export
+metadata.
 
 ## Framework conversion
 
@@ -54,14 +58,17 @@ use target-native rendering, reactivity, lifecycle, lists, and hydration.
   production output
 - Required evidence: cross-target observable conformance, SSR/hydration identity, controller-host
   parity, request cleanup, and representative consumer bundles
-- Current evidence: target generators and conformance fixtures exist; adapters that import the
-  general component runtime remain implementation evidence rather than the completed target-native
-  architecture
+- Current evidence: conversion has explicit application and library modes, version and collision
+  diagnostics, stable entry files and output inventories, and target-native state, computed values,
+  updates, and declared event dispatch across React, Vue, and Svelte. Data/resources/effects,
+  controllers, richer handler operations, flow and keyed lists, two-way bindings, dynamic slots,
+  HTML injection, SSR/hydration, executable application bootstraps, and complete publishable
+  library metadata remain incomplete.
 - Completion: all supported capabilities map to target-native primitives or measured semantic
   bridges, and application and library outputs satisfy the framework conversion spec
 
-The next implementation milestone defines the common conversion plan, audits each target adapter's
-general-runtime imports, and moves shared cases onto target-native facilities.
+The next implementation milestone extends the shared conversion plan through lifecycle and flow,
+then proves server rendering and hydration identity for all three targets.
 
 ## Measurement rule
 

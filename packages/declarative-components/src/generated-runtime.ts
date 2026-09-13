@@ -1,5 +1,31 @@
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
+import { fail } from "./diagnostics.js";
+import { parseTypedValue, parseTypeExpression } from "./type-system.js";
+
+export interface GeneratedEvent {
+  readonly name: string;
+  readonly type: string;
+  readonly detail: unknown;
+  readonly bubbles: boolean;
+  readonly composed: boolean;
+  readonly cancelable: boolean;
+}
+
+/** Validates and dispatches an event emitted by target-native generated code. */
+export function dispatchGeneratedEvent(target: EventTarget | null | undefined, event: GeneratedEvent): boolean {
+  if (event.detail !== undefined) {
+    const parsed = parseTypedValue(event.detail, parseTypeExpression(event.type));
+    if (!parsed.ok) fail("HR002", `Event \`${event.name}\` detail does not satisfy its declared type.`);
+  }
+  return target?.dispatchEvent(new CustomEvent(event.name, {
+    detail: event.detail,
+    bubbles: event.bubbles,
+    composed: event.composed,
+    cancelable: event.cancelable,
+  })) ?? false;
+}
+
 interface ManagedComponentLifecycle {
   readonly connect: (element: Element) => () => void;
   disconnect: undefined | (() => void);
