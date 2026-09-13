@@ -1279,10 +1279,29 @@ function queryWithin(scope: QueryRoot, selector: string): Element[] {
   return [...matches, ...scope.querySelectorAll(selector)];
 }
 
-function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
+function componentRootsWithin(scope: QueryRoot): Element[] {
+  const element = scope.nodeType === 1 ? scope as Element : undefined;
+  const root = element?.matches("[data-component-root]") === true ? [element] : [];
+  return element?.childElementCount === 0
+    ? root
+    : [...root, ...scope.querySelectorAll("[data-component-root]")];
+}
+
+interface LoweredScopes {
+  readonly lowered: readonly Element[];
+  readonly roots: readonly Element[];
+}
+
+function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScopes {
   const registry = registryFor(root);
-  const wrappers = [...new Set(scopes.flatMap((scope) => queryWithin(scope, "template[component]")
-    .filter((element) => !contentOnly.has(element))))] as HTMLTemplateElement[];
+  const registered = [...registry.definitions.values()];
+  const registeredTags = registered.map(({ definition }) => definition.contract.tag);
+  const discoverySelector = ["template[component]", "[data-component-root]", ...registeredTags].join(",");
+  const discoveredElements = [...new Set(scopes.flatMap((scope) => queryWithin(scope, discoverySelector)))];
+  const wrappers = discoveredElements.filter(
+    (element): element is HTMLTemplateElement =>
+      element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element),
+  );
   const definitions = wrappers.map(parseDefinition);
   const discovered = new Set(definitions);
   const tags = new Set(registry.definitions.keys());
@@ -1294,32 +1313,37 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
   }
 
   const prepared: PreparedInvocation[] = [];
-  const lives = [...registry.definitions.values(), ...definitions].filter(
+  const lives = [...registered, ...definitions].filter(
     ({ definition }) => root.defaultView?.customElements.get(definition.contract.tag) === undefined,
   );
   const invocations = new Map(lives.map((live) => [live, new Set<Element>()]));
   const hydrationRoots = new Map(lives.map((live) => [live, new Set<Element>()]));
-  const collect = (search: readonly LiveDefinition[], searchScopes: readonly QueryRoot[]): void => {
-    if (search.length === 0 || searchScopes.length === 0) return;
+  const roots = new Set<Element>();
+  const collect = (search: readonly LiveDefinition[], elements: readonly Element[]): void => {
+    if (search.length === 0 || elements.length === 0) return;
     const byTag = new Map(search.map((live) => [live.definition.contract.tag, live]));
-    const invocationSelector = [...byTag.keys()].join(",");
-    for (const scope of searchScopes) {
-      for (const element of queryWithin(scope, invocationSelector)) {
-        const live = byTag.get(element.localName);
-        if (live !== undefined) invocations.get(live)!.add(element);
-      }
-      for (const element of queryWithin(scope, "[data-component-root]")) {
-        if (runtimeInstances.has(element)) continue;
-        for (const tag of (element.getAttribute("data-component-root") ?? "").split(/\s+/)) {
-          const live = byTag.get(tag);
-          if (live !== undefined) hydrationRoots.get(live)!.add(element);
-        }
+    for (const element of elements) {
+      const live = byTag.get(element.localName);
+      if (live !== undefined) invocations.get(live)!.add(element);
+      if (!element.hasAttribute("data-component-root")) continue;
+      roots.add(element);
+      if (runtimeInstances.has(element)) continue;
+      for (const tag of (element.getAttribute("data-component-root") ?? "").split(/\s+/)) {
+        const owner = byTag.get(tag);
+        if (owner !== undefined) hydrationRoots.get(owner)!.add(element);
       }
     }
   };
-  collect(lives.filter((live) => !discovered.has(live)), scopes);
+  collect(lives.filter((live) => !discovered.has(live)), discoveredElements);
   // A newly discovered definition also applies to matching invocations that predate it.
-  collect(lives.filter((live) => discovered.has(live)), [root]);
+  const newLives = lives.filter((live) => discovered.has(live));
+  if (newLives.length > 0) {
+    const selector = [
+      "[data-component-root]",
+      ...newLives.map(({ definition }) => definition.contract.tag),
+    ].join(",");
+    collect(newLives, queryWithin(root, selector));
+  }
 
   for (const live of lives) {
     const { definition } = live;
@@ -1351,7 +1375,9 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
   }
 
   commitRuntimeInvocations(registry, prepared);
-  return prepared.map((invocation) => invocation.nativeRoot);
+  const lowered = prepared.map((invocation) => invocation.nativeRoot);
+  for (const element of lowered) roots.add(element);
+  return { lowered, roots: [...roots] };
 }
 
 /**
@@ -1359,7 +1385,7 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): Element[] {
  * later passes. It does not observe mutations or register Custom Elements.
  */
 export function lowerDocument(root: Document = document): number {
-  return lowerScopes(root, [root]).length;
+  return lowerScopes(root, [root]).lowered.length;
 }
 
 export interface ComponentAttachmentOptions {
@@ -1452,7 +1478,7 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       if (node.nodeType !== 1) return;
       const element = node as Element;
       if (records.has(element)) changed.add(element);
-      for (const descendant of element.querySelectorAll("[data-component-root]")) {
+      for (const descendant of componentRootsWithin(element)) {
         if (records.has(descendant)) changed.add(descendant);
       }
     };
@@ -1786,30 +1812,23 @@ export function observeDocument(
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) {
           if (node.nodeType !== 1) continue;
-          for (const element of queryWithin(node as QueryRoot, "[data-component-root]")) {
+          for (const element of componentRootsWithin(node as QueryRoot)) {
             if (connected.has(element)) removed.add(element);
           }
         }
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;
-          const scope = node as QueryRoot;
-          scopes.push(scope);
-          for (const element of queryWithin(scope, "[data-component-root]")) {
-            if (registry.instances.has(element)) candidates.add(element);
-          }
+          scopes.push(node as QueryRoot);
         }
       }
       for (const element of removed) if (!root.contains(element)) disconnect(element);
     }
     if (scopes.length > 0) {
       try {
-        for (const element of lowerScopes(root, scopes)) candidates.add(element);
+        for (const element of lowerScopes(root, scopes).roots) {
+          if (registry.instances.has(element)) candidates.add(element);
+        }
       } catch (error) { report(error); }
-    }
-    if (mutations === undefined) {
-      for (const element of root.querySelectorAll("[data-component-root]")) {
-        if (registry.instances.has(element)) candidates.add(element);
-      }
     }
     for (const element of candidates) {
       if (stopped) break;
