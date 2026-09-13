@@ -695,12 +695,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-structure" status="early" summary="Structure.">` +
             `<defs>` +
             `<state name="show" :value="true"></state>` +
-            `<state name="rows" :value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>` +
+            `<state name="rows" :value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>` +
             `<state name="mode" :value="'a'"></state>` +
             `<state name="person" :value="{ name: 'Ada' }"></state>` +
             `<handler name="change">` +
             `<set name="show" :value="false"></set>` +
-            `<set name="rows" :value="[{ id: 2, label: 'B2' }, { id: 1, label: 'A' }]"></set>` +
+            `<set name="rows" :value="[{ id: 1, label: 'A' }, { id: 5, label: 'E' }, { id: 3, label: 'C2' }, { id: 4, label: 'D' }, { id: 2, label: 'B' }]"></set>` +
             `<set name="mode" :value="'b'"></set>` +
             `<set name="person" :value="{ name: 'Grace' }"></set>` +
             `</handler></defs>` +
@@ -716,27 +716,96 @@ describe.skipIf(!enabled)("browser runtime", () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector('#s');
           const before = Array.from(root.querySelectorAll('li'));
+          const list = root.querySelector('ul');
+          let movedRows = 0;
+          const observer = new MutationObserver(records => {
+            for (const record of records) {
+              movedRows += Array.from(record.addedNodes).filter(node => node instanceof HTMLLIElement).length;
+            }
+          });
+          observer.observe(list, { childList: true });
           root.querySelector('button').click();
           await Promise.resolve();
+          await Promise.resolve();
+          for (const record of observer.takeRecords()) {
+            movedRows += Array.from(record.addedNodes).filter(node => node instanceof HTMLLIElement).length;
+          }
+          observer.disconnect();
           const after = Array.from(root.querySelectorAll('li'));
           return {
             conditional: root.querySelector('.conditional') !== null,
             rows: after.map((row) => [row.dataset.id, row.textContent]),
-            firstPreserved: after[0] === before[1],
-            secondPreserved: after[1] === before[0],
+            identitiesPreserved: after.every((row) => before.includes(row)),
             arm: root.querySelector('.b')?.textContent,
             oldArmGone: root.querySelector('.a') === null,
             person: root.querySelector('.person')?.textContent,
+            movedRows,
           };
         })()`);
         assert.deepEqual(result, {
           conditional: false,
-          rows: [["2", "B2"], ["1", "A"]],
-          firstPreserved: true,
-          secondPreserved: true,
+          rows: [["1", "A"], ["5", "E"], ["3", "C2"], ["4", "D"], ["2", "B"]],
+          identitiesPreserved: true,
           arm: "B",
           oldArmGone: true,
           person: "Grace",
+          movedRows: 2,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} leaves ordered keyed blocks settled across insertion and deletion`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-key-order" status="early" summary="Key order.">` +
+            `<defs><state name="rows" :value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state></defs>` +
+            `<ul><li $each="row of rows" $key="row.id" :data-id="row.id" $value="row.id"></li></ul>` +
+            `</template><x-key-order id="keys"></x-key-order>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#keys');
+          const list = root;
+          const host = window.HtmlRuntime.getComponentHost(root);
+          const identities = new Map(Array.from(list.querySelectorAll('li'), row => [row.dataset.id, row]));
+          const update = async rows => {
+            const existing = new Set(list.querySelectorAll('li'));
+            let moved = 0;
+            const observer = new MutationObserver(records => {
+              for (const record of records) {
+                moved += Array.from(record.addedNodes).filter(node => existing.has(node)).length;
+              }
+            });
+            observer.observe(list, { childList: true });
+            host.state.rows = rows;
+            await Promise.resolve();
+            await Promise.resolve();
+            for (const record of observer.takeRecords()) {
+              moved += Array.from(record.addedNodes).filter(node => existing.has(node)).length;
+            }
+            observer.disconnect();
+            return moved;
+          };
+          const insertionMoves = await update([{ id: 1 }, { id: 4 }, { id: 2 }, { id: 3 }]);
+          const deletionMoves = await update([{ id: 1 }, { id: 4 }, { id: 3 }]);
+          const rows = Array.from(list.querySelectorAll('li'));
+          return {
+            insertionMoves,
+            deletionMoves,
+            order: rows.map(row => row.dataset.id),
+            retained: rows[0] === identities.get('1') && rows[2] === identities.get('3'),
+          };
+        })()`);
+        assert.deepEqual(result, {
+          insertionMoves: 0,
+          deletionMoves: 0,
+          order: ["1", "4", "3"],
+          retained: true,
         });
       } finally {
         await browser.close();

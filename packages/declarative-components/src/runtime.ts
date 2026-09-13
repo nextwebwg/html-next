@@ -713,6 +713,7 @@ interface EachBlock {
 }
 
 function moveBlockBefore(block: EachBlock, reference: Node): void {
+  if (block.end.nextSibling === reference) return;
   const nodes: Node[] = [];
   let current: Node | null = block.start;
   while (current !== null) {
@@ -736,6 +737,42 @@ function removeBlock(block: EachBlock): void {
   }
 }
 
+/** Mark the longest subsequence of retained blocks that is already in DOM order. */
+function stableBlockPositions(previous: readonly number[]): Uint8Array | undefined {
+  let last = -1;
+  let ordered = true;
+  for (const position of previous) {
+    if (position < 0) continue;
+    if (position < last) ordered = false;
+    last = position;
+  }
+  if (ordered) return undefined;
+
+  const tails: number[] = [];
+  const predecessors = new Int32Array(previous.length).fill(-1);
+  for (let index = 0; index < previous.length; index += 1) {
+    const position = previous[index]!;
+    if (position < 0) continue;
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (previous[tails[middle]!]! < position) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) predecessors[index] = tails[low - 1]!;
+    tails[low] = index;
+  }
+
+  const stable = new Uint8Array(previous.length);
+  let cursor = tails.at(-1) ?? -1;
+  while (cursor >= 0) {
+    stable[cursor] = 1;
+    cursor = predecessors[cursor]!;
+  }
+  return stable;
+}
+
 function renderEachRegion(
   node: ElementNode,
   scope: ReactiveScope,
@@ -753,6 +790,12 @@ function renderEachRegion(
     const value = evalValue(flow.list, scope);
     const items = Array.isArray(value) ? shapeList(value, flow, scope) : [];
     const next = new Map<unknown, EachBlock>();
+    const keyed = flow.key !== undefined;
+    const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
+    const oldPositions = keyed
+      ? new Map([...blocks.keys()].map((key, index) => [key, index]))
+      : undefined;
+    const previous: number[] | undefined = keyed ? [] : undefined;
     const { flow: _flow, ...body } = node;
     items.forEach((item, index) => {
       const locals: Record<string, Value> = {
@@ -786,9 +829,21 @@ function renderEachRegion(
         block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
-      moveBlockBefore(block, end);
+      ordered?.push(block);
+      previous?.push(oldPositions?.get(key) ?? -1);
     });
     for (const [key, block] of blocks) if (!next.has(key)) removeBlock(block);
+    if (ordered !== undefined && previous !== undefined) {
+      const stable = stableBlockPositions(previous);
+      let reference: Node = end;
+      for (let index = ordered.length - 1; index >= 0; index -= 1) {
+        const block = ordered[index]!;
+        if (previous[index]! < 0 || stable !== undefined && stable[index] !== 1) {
+          moveBlockBefore(block, reference);
+        }
+        reference = block.start;
+      }
+    }
     blocks = next;
   });
   return [fragment];
