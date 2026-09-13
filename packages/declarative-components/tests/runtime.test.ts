@@ -717,6 +717,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const root = document.querySelector('#s');
           const before = Array.from(root.querySelectorAll('li'));
           const list = root.querySelector('ul');
+          const nativeMoveBefore = typeof list.moveBefore === 'function';
+          let moveBeforeCalls = 0;
+          if (nativeMoveBefore) {
+            const moveBefore = list.moveBefore;
+            Object.defineProperty(list, 'moveBefore', { value(node, child) {
+              moveBeforeCalls += 1;
+              return moveBefore.call(this, node, child);
+            }});
+          }
           let movedRows = 0;
           const observer = new MutationObserver(records => {
             for (const record of records) {
@@ -740,9 +749,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
             oldArmGone: root.querySelector('.a') === null,
             person: root.querySelector('.person')?.textContent,
             movedRows,
+            nativeMoveBefore,
+            moveBeforeCalls,
           };
         })()`);
-        assert.deepEqual(result, {
+        const { nativeMoveBefore, moveBeforeCalls, ...behavior } = result as {
+          readonly nativeMoveBefore: boolean;
+          readonly moveBeforeCalls: number;
+        } & Readonly<Record<string, unknown>>;
+        assert.deepEqual(behavior, {
           conditional: false,
           rows: [["1", "A"], ["5", "E"], ["3", "C2"], ["4", "D"], ["2", "B"]],
           identitiesPreserved: true,
@@ -751,6 +766,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           person: "Grace",
           movedRows: 2,
         });
+        assert.equal(moveBeforeCalls > 0, nativeMoveBefore);
       } finally {
         await browser.close();
       }

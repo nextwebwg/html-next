@@ -723,7 +723,13 @@ function moveBlockBefore(block: EachBlock, reference: Node): void {
   }
   const parent = reference.parentNode;
   if (parent === null) return;
-  for (const node of nodes) parent.insertBefore(node, reference);
+  const moveBefore = (parent as Node & {
+    moveBefore?: (node: Node, child: Node | null) => void;
+  }).moveBefore;
+  for (const node of nodes) {
+    if (moveBefore === undefined) parent.insertBefore(node, reference);
+    else moveBefore.call(parent, node, reference);
+  }
 }
 
 function removeBlock(block: EachBlock): void {
