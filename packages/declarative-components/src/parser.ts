@@ -1,6 +1,6 @@
 import type { DefaultTreeAdapterTypes } from "parse5";
 
-import { coerceDefault, defineContract, parseTypeAttribute } from "./contract.js";
+import { coerceDefault, defineContractWithNativeCheck, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import {
@@ -9,7 +9,6 @@ import {
   validateLiteralAttributeName,
   validateMvpDomProperty,
 } from "./language.js";
-import { getDomInterface, resolveDomProperty } from "./platform.js";
 import type {
   ComponentDefinition,
   ComponentDeclaration,
@@ -29,6 +28,11 @@ type Element = DefaultTreeAdapterTypes.Element;
 type Template = DefaultTreeAdapterTypes.Template;
 
 export type ComponentSourceNode = ChildNode;
+
+export interface ComponentParserPlatform {
+  readonly isNativeElement: (name: string) => boolean;
+  readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
+}
 
 function isElement(node: ChildNode): node is Element {
   return "tagName" in node;
@@ -126,7 +130,11 @@ function validateCompiledExpression(
  * A prop's target is defined by where it is bound in the markup, not restated: a
  * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property.
  */
-function collectTargets(root: Element, source: string): Record<string, PropTarget> {
+function collectTargets(
+  root: Element,
+  source: string,
+  platform: ComponentParserPlatform,
+): Record<string, PropTarget> {
   const targets: Record<string, PropTarget> = {};
   const record = (name: string, target: PropTarget): void => {
     const prior = targets[name];
@@ -144,7 +152,7 @@ function collectTargets(root: Element, source: string): Record<string, PropTarge
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
         if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
-          record(attribute.value, { property: resolveDomProperty(element.tagName, key) ?? key });
+          record(attribute.value, { property: platform.resolveDomProperty(element.tagName, key) ?? key });
         }
       }
     }
@@ -459,6 +467,7 @@ function parseAttributes(
   contract: ComponentContract,
   scope: ParseScope,
   source: string,
+  platform: ComponentParserPlatform,
 ): TemplateAttribute[] {
   return element.attrs
     .filter(
@@ -542,7 +551,7 @@ function parseAttributes(
       if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
         fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
-      const name = resolveDomProperty(element.tagName, key) ??
+      const name = platform.resolveDomProperty(element.tagName, key) ??
         (prop !== undefined && "property" in prop.target ? prop.target.property : undefined);
       if (name === undefined) {
         fail("HP001", `\`${key}\` is not a known property of <${element.tagName}>.`, source);
@@ -692,6 +701,7 @@ function parseElement(
     contracts: SlotContract[];
     refs: Set<string>;
   },
+  platform: ComponentParserPlatform,
 ): ElementNode {
   if (isReservedElement(element.tagName)) {
     fail("HT009", `<${element.tagName}> is reserved but not supported by this profile.`, source);
@@ -705,7 +715,7 @@ function parseElement(
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
         : scope;
-  const attributes = parseAttributes(element, contract, nodeScope, source);
+  const attributes = parseAttributes(element, contract, nodeScope, source, platform);
   const events = parseEvents(element, nodeScope, source);
   const ref = parseRef(element, slotState.refs, source);
   const children: TemplateNode[] = [];
@@ -747,7 +757,7 @@ function parseElement(
         if (isText(fallbackNode)) {
           if (fallbackNode.value.trim() !== "") fallback.push({ kind: "text", value: fallbackNode.value });
         } else if (isElement(fallbackNode)) {
-          fallback.push(parseElement(fallbackNode, contract, nodeScope, source, slotState));
+          fallback.push(parseElement(fallbackNode, contract, nodeScope, source, slotState, platform));
         }
       }
       const dynamic = nameExpression !== undefined;
@@ -770,7 +780,7 @@ function parseElement(
       }
       continue;
     }
-    children.push(parseElement(child, contract, nodeScope, source, slotState));
+    children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
   }
 
   if (attributes.some((binding) => binding.kind === "directive") && children.length > 0) {
@@ -812,7 +822,8 @@ function parseElement(
 
 export function parseComponentNodes(
   childNodes: readonly ChildNode[],
-  source = "<source>",
+  source: string,
+  platform: ComponentParserPlatform,
 ): ComponentDefinition {
   const roots = significant(childNodes).filter(isElement);
   if (
@@ -850,7 +861,7 @@ export function parseComponentNodes(
     .split("|")
     .map((choice) => choice.trim())
     .filter((choice) => choice !== "");
-  const delegatedRoot = getDomInterface(root.tagName) === undefined;
+  const delegatedRoot = !platform.isNativeElement(root.tagName);
   if (delegatedRoot && attr(root, "as") !== undefined) {
     fail("HT021", "A delegated component root cannot also declare native `as` choices.", source);
   }
@@ -859,19 +870,19 @@ export function parseComponentNodes(
     (rootChoices.length === 0 ||
       !rootChoices.includes(root.tagName) ||
       new Set(rootChoices).size !== rootChoices.length ||
-      rootChoices.some((choice) => getDomInterface(choice) === undefined))
+      rootChoices.some((choice) => !platform.isNativeElement(choice)))
   ) {
     fail("HT021", "A polymorphic root must list unique native choices including its markup root.", source);
   }
 
-  const targets = collectTargets(root, source);
+  const targets = collectTargets(root, source, platform);
   const rawContract = {
     status: attr(wrapper, "status"),
     summary: attr(wrapper, "summary"),
     nativeElement: root.tagName,
     props: readProps(propGroups[0] ?? defGroups[0], targets, source, defGroups.length === 0),
   };
-  const contract = defineContract(rawContract, { source, tag });
+  const contract = defineContractWithNativeCheck(rawContract, { source, tag }, platform.isNativeElement);
 
   const forms = enhancedForms(root, source);
   const formNames = new Set(forms.map((form) => attr(form, "name")!));
@@ -920,7 +931,7 @@ export function parseComponentNodes(
     contracts: [] as SlotContract[],
     refs: new Set<string>(),
   };
-  const template = parseElement(root, contract, scope, source, slotState);
+  const template = parseElement(root, contract, scope, source, slotState, platform);
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 

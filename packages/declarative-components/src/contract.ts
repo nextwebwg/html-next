@@ -1,5 +1,4 @@
 import { fail } from "./diagnostics.js";
-import { getDomInterface } from "./platform.js";
 import {
   formatType,
   isPropertyOnlyType,
@@ -206,9 +205,10 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   return deepFreeze(normalized);
 }
 
-export function defineContract(
+export function defineContractWithNativeCheck(
   input: unknown,
-  options: DefineContractOptions = {},
+  options: DefineContractOptions,
+  isNativeElement: (name: string) => boolean,
 ): ComponentContract {
   const source = options.source;
   const object = record(input, "HC001", "A component contract must be an object.", source);
@@ -226,7 +226,7 @@ export function defineContract(
   const nativeElement = requiredString(object.nativeElement, "nativeElement", source);
   if (
     !/^[a-z][a-z0-9-]*$/.test(nativeElement) ||
-    (getDomInterface(nativeElement) === undefined &&
+    (!isNativeElement(nativeElement) &&
       !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(nativeElement))
   ) {
     fail("HC008", "`nativeElement` must be a lowercase HTML element or component tag.", source);

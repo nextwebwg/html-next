@@ -1,4 +1,4 @@
-export { defineContract, serializePropTarget } from "./contract.js";
+export { defineContract, serializePropTarget } from "./contract-platform.js";
 export { HtmlDiagnosticError } from "./diagnostics.js";
 export {
   generateComponent,

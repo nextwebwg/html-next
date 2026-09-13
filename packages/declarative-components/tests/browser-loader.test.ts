@@ -40,6 +40,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
 
   it("uses the browser's HTML parser instead of bundling parse5", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/parse5/")), false);
+    assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
   });
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {

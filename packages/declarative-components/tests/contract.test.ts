@@ -4,7 +4,7 @@ import { describe, it } from "vitest";
 import {
   defineContract,
   serializePropTarget,
-} from "../src/contract.js";
+} from "../src/contract-platform.js";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 
 // Deliberately loose: several tests mutate this fixture into invalid runtime data.

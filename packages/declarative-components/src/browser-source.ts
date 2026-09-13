@@ -3,6 +3,36 @@ import type { ParsedComponentResource } from "./graph.js";
 import { parseComponentNodes, type ComponentSourceNode } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
+function browserPlatform(root: Document) {
+  const propertyCache = new Map<string, ReadonlyMap<string, string>>();
+  const isNativeElement = (name: string): boolean => {
+    if (name.includes("-")) return false;
+    const element = root.createElement(name);
+    const Unknown = root.defaultView?.HTMLUnknownElement;
+    return Unknown === undefined
+      ? element.constructor.name !== "HTMLUnknownElement"
+      : !(element instanceof Unknown);
+  };
+  return {
+    isNativeElement,
+    resolveDomProperty(tagName: string, propertyName: string): string | undefined {
+      if (!isNativeElement(tagName)) return undefined;
+      let properties = propertyCache.get(tagName);
+      if (properties === undefined) {
+        const found = new Map<string, string>();
+        let object: object | null = root.createElement(tagName);
+        while (object !== null) {
+          for (const name of Object.getOwnPropertyNames(object)) found.set(name.toLowerCase(), name);
+          object = Object.getPrototypeOf(object) as object | null;
+        }
+        properties = found;
+        propertyCache.set(tagName, properties);
+      }
+      return properties.get(propertyName.toLowerCase());
+    },
+  };
+}
+
 function sourceNode(node: Node): ComponentSourceNode {
   if (node.nodeType === 1) {
     const element = node as Element;
@@ -43,7 +73,7 @@ export function parseBrowserComponent(
   if (carrier.localName !== "template" || !carrier.hasAttribute("component")) {
     fail("HS001", "A browser component carrier must be a <template component>.", source);
   }
-  return parseComponentNodes([sourceNode(carrier)], source);
+  return parseComponentNodes([sourceNode(carrier)], source, browserPlatform(carrier.ownerDocument));
 }
 
 function significant(nodes: readonly Node[]): Node[] {
