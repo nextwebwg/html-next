@@ -1,14 +1,6 @@
 {
   "bundles": [],
-  "exceptions": [
-    {
-      "controlId": "core.baseline",
-      "owner": "Next Web Working Group",
-      "reason": "The private repository has no selected open-source license yet; licensing must be an explicit owner decision before publication.",
-      "reviewDate": "2027-03-12",
-      "scope": "LICENSE"
-    }
-  ],
+  "exceptions": [],
   "freshness": {
     "holds": [
       {
@@ -92,6 +84,10 @@
     },
     {
       "mode": "managed",
+      "path": "LICENSE"
+    },
+    {
+      "mode": "managed",
       "path": "threadlabs.config.json"
     },
     {
@@ -101,10 +97,6 @@
     {
       "mode": "unmanaged",
       "path": "CHANGELOG.md"
-    },
-    {
-      "mode": "unmanaged",
-      "path": "LICENSE"
     },
     {
       "mode": "unmanaged",

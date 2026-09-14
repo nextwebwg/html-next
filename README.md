@@ -21,8 +21,8 @@ The HTML Forms package operates on native `HTMLFormElement` and submitter object
 Components consumes that API for its form declarations; the Forms package has no component,
 template, or reactive-runtime dependency.
 
-> Stage 0: the syntax and generated package shape may change. The repository and its
-> packages remain private until the project selects an open-source license and publication
+> Stage 0: the syntax and generated package shape may change. The repository is MIT-licensed,
+> but its packages remain private until the project selects a public-visibility and publication
 > policy.
 
 ## Declarative Components delivery modes
@@ -225,3 +225,7 @@ only application resolution and trust differ.
 
 The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
 motivates the proposal. This repository and its conformance corpus are library-agnostic.
+
+## License
+
+[MIT](LICENSE)

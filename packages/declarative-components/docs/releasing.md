@@ -27,12 +27,11 @@ file list, unpacked size, and integrity before publishing. The prerelease is con
 Do not publish while any of these conditions remains unresolved:
 
 - the repository is not publicly visible;
-- the owner has not selected and added an open-source license and matching package metadata;
 - `packages/declarative-components/package.json` still contains `"private": true`; or
 - npm ownership and the manual publisher's required authentication are not confirmed.
 
-Once the owner has made those decisions, keep their implementation isolated to the license and
-visibility policy change. Re-run both commands above, remove the package's `private` safeguard in
+Once the owner has made those decisions, keep their implementation isolated to the visibility and
+publication policy change. Re-run both commands above, remove the package's `private` safeguard in
 that policy change, then create and publish the reviewed archive explicitly:
 
 ```sh

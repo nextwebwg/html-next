@@ -6,6 +6,7 @@ import { GENERATOR_VERSION } from "../src/generate.js";
 interface PackageManifest {
   readonly name: string;
   readonly version: string;
+  readonly license: string;
   readonly files: readonly string[];
   readonly bin: Readonly<Record<string, string>>;
   readonly exports: Readonly<Record<string, { readonly types: string; readonly import: string }>>;
@@ -19,6 +20,8 @@ interface PackageManifest {
 const manifest = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as PackageManifest;
+const packageLicense = await readFile(new URL("../LICENSE", import.meta.url), "utf8");
+const repositoryLicense = await readFile(new URL("../../../LICENSE", import.meta.url), "utf8");
 const expectedExports = [
   ".",
   "./runtime",
@@ -31,6 +34,8 @@ const expectedExports = [
 
 assert.equal(manifest.name, "@nextwebwg/declarative-components");
 assert.equal(GENERATOR_VERSION, manifest.version, "Generator and package versions must match.");
+assert.equal(manifest.license, "MIT");
+assert.equal(packageLicense, repositoryLicense, "The packed MIT notice must match the repository.");
 assert.deepEqual(manifest.files, ["dist"]);
 assert.deepEqual(manifest.bin, { "html-next": "./dist/cli.js" });
 assert.deepEqual(Object.keys(manifest.exports), expectedExports);
