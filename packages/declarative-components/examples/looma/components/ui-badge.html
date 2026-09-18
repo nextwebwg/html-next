@@ -1,0 +1,7 @@
+<template component="ui-badge" status="early" summary="A compact status label.">
+  <defs>
+    <prop name="tone" type="string">Tone token.</prop>
+    <prop name="variant" type="string">Variant token.</prop>
+  </defs>
+  <span class="badge__surface" :data-tone="tone" :data-variant="variant"><slot></slot></span>
+</template>
