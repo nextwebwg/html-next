@@ -63,6 +63,11 @@ describe("transformComponentStyles", () => {
       transformComponentStyles(':scope[data-variant="solid"] :slotted(button) { background: blue; }', "x-card"),
       /\[data-component-root~="x-card"\]\[data-variant="solid"\] :where\(\[data-slotted\], \[data-slotted\] \*\):is\(button\) \{ background: blue; \}/,
     );
+    // complex root conditions (pseudo-classes, functional pseudos) fold too
+    assert.match(
+      transformComponentStyles(":scope:hover:not([data-open]) :slotted(button) { color: red; }", "x-card"),
+      /\[data-component-root~="x-card"\]:hover:not\(\[data-open\]\) :where\(\[data-slotted\], \[data-slotted\] \*\):is\(button\) \{ color: red; \}/,
+    );
   });
 
   it("emits :slotted() rules outside the component @scope in native mode", () => {
