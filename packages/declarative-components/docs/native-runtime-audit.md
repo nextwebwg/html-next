@@ -8,23 +8,24 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 95,580-byte bundle; its
-complete gzip size is 31,415 bytes, down from the 33,199-byte baseline. Compressed bytes cannot be
-attributed cleanly to individual modules.
+`live_distributable`. Values are minified raw bytes inside the current 95,429-byte bundle; its
+complete gzip size is 31,342 bytes, down from the 33,199-byte baseline. Compressed bytes cannot be
+attributed cleanly to individual modules. The typed-value and JSON-Schema layers now share one
+structured-value diagnostic path builder, so type and schema errors keep identical paths and codes.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
 the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 95,444 attributed minified raw bytes plus 136
+The production browser entry currently contains 95,293 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
 | Responsibility | Minified raw bytes | Native foundation under review |
 | --- | ---: | --- |
 | Reactive execution | 36,657 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
-| Types and validation | 26,157 | Native control validity, Web IDL conversion, platform value objects |
+| Types and validation | 26,006 | Native control validity, Web IDL conversion, platform value objects |
 | Parsing and contract | 20,330 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 6,181 | CSSOM, `@scope`, template parsing, safe HTML sinks |
 | Component resources | 3,958 | URL, Fetch, import maps, native ESM, CORS, CSP |
@@ -45,7 +46,7 @@ contains all of them for arbitrary later graphs.
 | Native form participation | Native `<form>`, form ownership, successful controls, constraint validation, and submission | Preserve component-rendered controls as ordinary DOM controls | Request enhancement is independently available from `@nextwebwg/html-forms`; Declarative Components does not import or re-export it. |
 | Validity | Native controls and `ValidityState` | Equivalent generalized-element validity and extension errors | Native controls always use browser validity. The pure generalized validator is checked against controls in Chromium, Firefox, and WebKit. Cached detached-control delegation was rejected: 168 gzip bytes saved did not justify an approximately 80x numeric microbenchmark regression. Owner approved the measured guardrail. |
 | Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the 696-byte minified raw `sanitize.ts` implementation across engines. Definition validation now imports this module's URL-attribute and executable-scheme policy instead of carrying a second copy. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
-| Component styling | CSS parser/CSSOM, selectors, cascade, native style elements | Build-time scoping and live-source selector transformation, including generalized validity compatibility | `style.ts` contributes 5,485 raw live-loader bytes; generated CSS pays no browser-runtime parser cost. Native `@scope` and the remaining compatibility transformations need a separate parity and size experiment before a retention decision. |
+| Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style elements | Build-time scoping and live-source selector transformation, including generalized validity compatibility | `style.ts` contributes 5,485 raw live-loader bytes; generated CSS pays no browser-runtime parser cost. The live runtime already emits native `@scope` when `CSSScopeRule` is present (`componentStyleMode`) and falls back to provenance-token scoping only for pre-`@scope` engines; `generate.ts` emits that same portable fallback. The retained selector rewriting — custom-element type selectors and `:valid`/`:invalid`/`:user-invalid` mirroring for generalized elements — is required in both modes because `@scope` bounds selectors without rewriting them. Chromium, Firefox, and WebKit conformance passes. Owner disposition: retain. No universal reduction exists without dropping supported pre-`@scope` engines (Safari <17.4, Chrome <118, Firefox <146), which the fallback also serves for generated CSS. |
 | Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 22,102 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
 | Resource graphs and import maps | `URL`, `fetch()`, native module loading, and application import-map markup | HTML component dependency graph, trust-root enforcement, redirect checks, and import-map snapshot resolution | `graph.ts`, `resolve.ts`, `browser-source.ts`, and `browser-loader.ts` contribute 6,953 raw live-loader bytes together. Browsers apply import maps to modules but expose no equivalent general component-resource resolver. Retention of the trust and graph policy remains pending owner review. |
 | Hydration and adoption | Existing DOM identity, selectors, control state, focus, and selection APIs | Matching server-lowered roots to definitions and attaching only authored behavior | Cross-browser tests preserve node identity and live form-control state. `pnpm measure:hydration` reports server-DOM adoption and fresh lowering separately while asserting identity, edit, focus, and selection preservation on every sample. |
@@ -77,7 +78,9 @@ approval of all runtime machinery:
    implementation from the capabilities used across the application or library graph.
 2. Declared reads: distinguish request behavior supplied directly by Fetch/URL/AbortController from
    proposal state and scheduling that generated output must retain.
-3. Styling: test native `@scope` against current selector, `:host`, nesting, and validity behavior.
+3. Styling: resolved. The runtime already selects native `@scope` where `CSSScopeRule` exists;
+   Chromium, Firefox, and WebKit conformance passes, and the retained selector rewriting plus the
+   pre-`@scope` fallback are both required. See the Component styling row.
 4. Live expressions and dependency tracking: quantify the irreducible live-authoring layer after
    generated paths have removed it from production components.
 5. Resource graphs: review the security/trust behavior separately from URL and import-map parsing.

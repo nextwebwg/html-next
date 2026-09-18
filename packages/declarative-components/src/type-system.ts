@@ -326,7 +326,8 @@ function issue(reason: TypeIssueReason, message: string, path: string): TypedRes
   return { ok: false, issues: [{ reason, message, path }] };
 }
 
-function childPath(path: string, key: string | number): string {
+/** Canonical structured-value path spelling shared by every typed and schema diagnostic. */
+export function childPath(path: string, key: string | number): string {
   if (typeof key === "number") return `${path}[${key}]`;
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
