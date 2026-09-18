@@ -1,12 +1,6 @@
-import type { TypeIssue } from "./type-system.js";
+import { childPath, type TypeIssue } from "./type-system.js";
 
 export type JsonSchema = boolean | Readonly<Record<string, unknown>>;
-
-function childPath(path: string, key: string | number): string {
-  return typeof key === "number" || /^[A-Za-z_$][\w$]*$/.test(key)
-    ? `${path}${typeof key === "number" ? `[${key}]` : `.${key}`}`
-    : `${path}[${JSON.stringify(key)}]`;
-}
 
 function sameValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
