@@ -380,9 +380,103 @@ export function transformValidityStyles(css: string): string {
   return rewriteRuleList(css, undefined, undefined, undefined);
 }
 
+/** Split top-level rules into those whose selector opts into projected content and the rest. */
+function partitionSlotted(css: string): { normal: string; slotted: string } {
+  let normal = "";
+  let slotted = "";
+  let ruleStart = 0;
+  let quote: "\"" | "'" | undefined;
+  let parentheses = 0;
+  let brackets = 0;
+  for (let index = 0; index < css.length; index += 1) {
+    const character = css[index]!;
+    if (quote !== undefined) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "\"" || character === "'") quote = character;
+    else if (character === "/" && css[index + 1] === "*") {
+      const end = css.indexOf("*/", index + 2);
+      if (end === -1) break;
+      index = end + 1;
+    } else if (character === "(") parentheses += 1;
+    else if (character === ")") parentheses = Math.max(0, parentheses - 1);
+    else if (character === "[") brackets += 1;
+    else if (character === "]") brackets = Math.max(0, brackets - 1);
+    else if (parentheses === 0 && brackets === 0 && character === ";") {
+      normal += css.slice(ruleStart, index + 1);
+      ruleStart = index + 1;
+    } else if (parentheses === 0 && brackets === 0 && character === "{") {
+      const blockEnd = findBlockEnd(css, index);
+      const prelude = css.slice(ruleStart, index);
+      const rule = css.slice(ruleStart, blockEnd + 1);
+      if (!/^\s*@/.test(prelude) && prelude.includes(":slotted(")) slotted += rule;
+      else normal += rule;
+      index = blockEnd;
+      ruleStart = blockEnd + 1;
+    }
+  }
+  return { normal: normal + css.slice(ruleStart), slotted };
+}
+
+/** Anchor one `:slotted(arg)` to a projected region rooted at `rootSel` as a self-contained selector. */
+function slottedSubject(arg: string, rootSel: string): string {
+  const trimmed = arg.trim();
+  if (trimmed.startsWith(">")) {
+    const rest = trimmed.slice(1).trim();
+    return rest === "" || rest === "*"
+      ? `${rootSel} [${PROJECTED_ROOT_ATTRIBUTE}]`
+      : `${rootSel} [${PROJECTED_ROOT_ATTRIBUTE}]:is(${rest})`;
+  }
+  const region = `:where([${PROJECTED_ROOT_ATTRIBUTE}], [${PROJECTED_ROOT_ATTRIBUTE}] *)`;
+  return trimmed === "" || trimmed === "*" ? `${rootSel} ${region}` : `${rootSel} ${region}:is(${trimmed})`;
+}
+
+/** Replace every `:slotted(...)` in one selector with its anchored light-DOM form. A leading
+ *  `:scope<conds>` state condition on the root folds into the projected anchor. */
+function rewriteSlottedSelector(selector: string, owner: string): string {
+  const root = `[${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]`;
+  const scoped = /^\s*:scope((?:\[[^\]]*\]|[.:#][\w-]+)*)\s+(?=:slotted\()/.exec(selector);
+  const rootSel = scoped ? `${root}${scoped[1]}` : root;
+  const body = scoped ? selector.slice(scoped[0].length) : selector;
+  let output = "";
+  let index = 0;
+  for (;;) {
+    const at = body.indexOf(":slotted(", index);
+    if (at === -1) { output += body.slice(index); return output; }
+    output += body.slice(index, at);
+    const open = at + ":slotted".length;
+    const close = matchingParenthesis(body, open);
+    output += slottedSubject(body.slice(open + 1, close), rootSel);
+    index = close + 1;
+  }
+}
+
+/** Rewrite the projected-content rules extracted by partitionSlotted. They are self-scoped, so
+ *  they are emitted outside the component's `@scope`, whose lower limit excludes projected roots. */
+function rewriteSlottedRuleList(css: string, owner: string): string {
+  let output = "";
+  let ruleStart = 0;
+  for (let index = 0; index < css.length; index += 1) {
+    if (css[index] === "{") {
+      const blockEnd = findBlockEnd(css, index);
+      const prelude = css.slice(ruleStart, index);
+      const body = css.slice(index + 1, blockEnd);
+      const selectors = splitSelectorList(prelude)
+        .map((part) => rewriteSlottedSelector(part, owner)).join(",");
+      output += `${selectors}{${body}}`;
+      index = blockEnd;
+      ruleStart = blockEnd + 1;
+    }
+  }
+  return output + css.slice(ruleStart);
+}
+
 /**
  * Compile one component style block. Native scope uses DOM boundaries; the fallback uses
- * the same authored-provenance tokens that converters emit.
+ * the same authored-provenance tokens that converters emit. `:slotted()` rules opt into the
+ * component's projected content and compile to self-contained selectors outside the scope.
  */
 export function transformComponentStyles(
   css: string,
@@ -391,9 +485,15 @@ export function transformComponentStyles(
 ): string {
   if (css === "") return "";
   const mode = options.mode ?? "attribute";
-  const rules = rewriteRuleList(css, owner, mode, options.rootElement);
-  if (mode === "attribute") return rules;
-  return `@scope ([${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]) to (:scope [${COMPONENT_ROOT_ATTRIBUTE}] > *, [${PROJECTED_ROOT_ATTRIBUTE}]) {\n${rules}\n}`;
+  const { normal, slotted } = partitionSlotted(css);
+  const normalRules = rewriteRuleList(normal, owner, mode, options.rootElement);
+  const scoped = normalRules.trim() === ""
+    ? ""
+    : mode === "attribute"
+      ? normalRules
+      : `@scope ([${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]) to (:scope [${COMPONENT_ROOT_ATTRIBUTE}] > *, [${PROJECTED_ROOT_ATTRIBUTE}]) {\n${normalRules}\n}`;
+  const slottedRules = slotted.trim() === "" ? "" : rewriteSlottedRuleList(slotted, owner);
+  return [scoped, slottedRules].filter((part) => part !== "").join("\n");
 }
 
 /** Rewrites custom-element and validity selectors in application/global CSS without scoping them. */
