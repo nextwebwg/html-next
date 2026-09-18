@@ -35,6 +35,46 @@ describe("transformComponentStyles", () => {
     assert.doesNotMatch(output, /\.child\[data-component~/);
   });
 
+  it("compiles :slotted() to a self-contained projected-subtree selector", () => {
+    const out = transformComponentStyles(":slotted(button) { color: red; }", "x-card", {
+      mode: "attribute",
+    });
+    assert.match(
+      out,
+      /\[data-component-root~="x-card"\] :where\(\[data-slotted\], \[data-slotted\] \*\):is\(button\) \{ color: red; \}/,
+    );
+    // projected content is not authored by x-card, so slotted rules carry no subject provenance
+    assert.doesNotMatch(out, /:where\(\[data-component~="x-card"\]\)/);
+  });
+
+  it("anchors :slotted(> ...) to the top-level projected roots", () => {
+    assert.match(
+      transformComponentStyles(":slotted(> *) { margin: 0; }", "x-card"),
+      /\[data-component-root~="x-card"\] \[data-slotted\] \{ margin: 0; \}/,
+    );
+    assert.match(
+      transformComponentStyles(":slotted(> button) { margin: 0; }", "x-card"),
+      /\[data-component-root~="x-card"\] \[data-slotted\]:is\(button\) \{ margin: 0; \}/,
+    );
+  });
+
+  it("folds a :scope state condition into the projected anchor", () => {
+    assert.match(
+      transformComponentStyles(':scope[data-variant="solid"] :slotted(button) { background: blue; }', "x-card"),
+      /\[data-component-root~="x-card"\]\[data-variant="solid"\] :where\(\[data-slotted\], \[data-slotted\] \*\):is\(button\) \{ background: blue; \}/,
+    );
+  });
+
+  it("emits :slotted() rules outside the component @scope in native mode", () => {
+    const out = transformComponentStyles(
+      ".lead { color: gray; } :slotted(button) { all: unset; }",
+      "x-card",
+      { mode: "scope" },
+    );
+    assert.match(out, /^@scope \([\s\S]*\.lead[\s\S]*\}\n\s*\[data-component-root~="x-card"\] /);
+    assert.match(out, /\}\n\s*\[data-component-root~="x-card"\] :where\(\[data-slotted\],[\s\S]*:is\(button\) \{ all: unset; \}$/);
+  });
+
   it("does not duplicate validity mirrors when transformed more than once", () => {
     const once = transformComponentStyles(".field:invalid { color: red; }", "x-field", {
       mode: "attribute",
