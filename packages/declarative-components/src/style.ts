@@ -437,7 +437,7 @@ function slottedSubject(arg: string, rootSel: string): string {
  *  `:scope<conds>` state condition on the root folds into the projected anchor. */
 function rewriteSlottedSelector(selector: string, owner: string): string {
   const root = `[${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]`;
-  const scoped = /^\s*:scope((?:\[[^\]]*\]|[.:#][\w-]+)*)\s+(?=:slotted\()/.exec(selector);
+  const scoped = /^\s*:scope((?:\[[^\]]*\]|:{1,2}[\w-]+(?:\([^)]*\))?|[.#][\w-]+)*)\s+(?=:slotted\()/.exec(selector);
   const rootSel = scoped ? `${root}${scoped[1]}` : root;
   const body = scoped ? selector.slice(scoped[0].length) : selector;
   let output = "";
