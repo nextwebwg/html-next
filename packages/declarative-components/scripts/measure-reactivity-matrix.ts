@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createEffect, ReactiveScope } from "../src/reactivity.js";
 import {
   type BenchmarkFramework,
@@ -10,8 +12,14 @@ interface Workload {
   readonly run: (framework: BenchmarkFramework, iterations: number) => number;
 }
 
+interface FrameworkResult {
+  readonly name: string;
+  readonly workloads: Record<string, number>;
+}
+
 const warmupSamples = 2;
 const measuredSamples = 5;
+const processSamples = 5;
 
 function htmlNextFramework(): BenchmarkFramework {
   const scope = new ReactiveScope();
@@ -221,7 +229,7 @@ function geometricMean(values: readonly number[]): number {
   return Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length);
 }
 
-function measureFramework(create: () => BenchmarkFramework) {
+function measureFramework(create: () => BenchmarkFramework): FrameworkResult {
   const name = create().name;
   const results: Record<string, number> = {};
   for (const workload of workloads) {
@@ -235,48 +243,129 @@ function measureFramework(create: () => BenchmarkFramework) {
   return { name, workloads: results };
 }
 
-const attempted = [htmlNextFramework, ...thirdPartyFrameworks];
-const measured: ReturnType<typeof measureFramework>[] = [];
-const excluded: Array<{ readonly name: string; readonly reason: string }> = [];
-for (const create of attempted) {
-  const name = create().name;
-  try { measured.push(measureFramework(create)); }
-  catch (error) {
-    if (name === "HTML Next") throw error;
-    excluded.push({ name, reason: error instanceof Error ? error.message : String(error) });
-  }
+function aggregateFramework(samples: readonly FrameworkResult[]): FrameworkResult {
+  const first = samples[0];
+  if (first === undefined) throw new Error("Cannot aggregate an empty framework sample set.");
+  return {
+    name: first.name,
+    workloads: Object.fromEntries(workloads.map(({ name }) => [
+      name,
+      median(samples.map((sample) => sample.workloads[name]!)),
+    ])),
+  };
 }
 
-const bestByWorkload = Object.fromEntries(workloads.map(({ name }) => [
-  name,
-  Math.min(...measured.map((framework) => framework.workloads[name]!)),
-]));
-const ranked = measured.map((framework) => ({
-  ...framework,
-  score: geometricMean(workloads.map(({ name }) =>
-    framework.workloads[name]! / bestByWorkload[name]!
-  )),
-})).sort((left, right) => left.score - right.score);
-const htmlNextIndex = ranked.findIndex(({ name }) => name === "HTML Next");
-const htmlNext = ranked[htmlNextIndex]!;
-const report = {
-  matrix_checks_pass: ranked.length >= 11 ? 1 : 0,
-  matrix_framework_count: attempted.length,
-  matrix_third_party_count: thirdPartyFrameworks.length,
-  matrix_ranked_count: ranked.length,
-  matrix_excluded_count: excluded.length,
-  html_next_matrix_rank: htmlNextIndex + 1,
-  html_next_matrix_score: htmlNext.score,
-  ...Object.fromEntries(Object.entries(htmlNext.workloads).map(([name, value]) => [
-    `html_next_${name.replaceAll("-", "_")}_ns`, value,
-  ])),
-  matrix: ranked.map((framework, index) => ({
-    name: framework.name,
-    rank: index + 1,
-    score: framework.score,
-    workloads_ns_per_iteration: framework.workloads,
-  })),
-  excluded,
-};
+const attempted = [htmlNextFramework, ...thirdPartyFrameworks];
+const frameworkIndexArgument = process.argv.find((argument) =>
+  argument.startsWith("--framework-index="));
 
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`, () => process.exit(0));
+if (frameworkIndexArgument !== undefined) {
+  const frameworkIndex = Number(frameworkIndexArgument.slice("--framework-index=".length));
+  const create = attempted[frameworkIndex];
+  if (create === undefined) throw new Error(`Unknown framework index ${frameworkIndex}.`);
+  const result = measureFramework(create);
+  process.stdout.write(`${JSON.stringify(result)}\n`, () => process.exit(0));
+} else {
+  const script = fileURLToPath(import.meta.url);
+  const measureInFreshProcess = (frameworkIndex: number): FrameworkResult => {
+    const output = execFileSync(process.execPath, [
+      "--import",
+      "tsx",
+      script,
+      `--framework-index=${frameworkIndex}`,
+    ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return JSON.parse(output) as FrameworkResult;
+  };
+  const childError = (error: unknown): string => {
+    if (typeof error === "object" && error !== null && "stderr" in error) {
+      const stderr = String((error as { readonly stderr: unknown }).stderr);
+      const message = stderr.match(/Error: Expected[^\n]*/)?.[0];
+      if (message !== undefined) return message;
+    }
+    return error instanceof Error ? error.message : String(error);
+  };
+  const rotation = process.pid % attempted.length;
+  const samples = new Map<number, FrameworkResult[]>();
+  const htmlNextControlSamples: FrameworkResult[] = [];
+  const excluded: Array<{ readonly name: string; readonly reason: string }> = [];
+  const excludedIndexes = new Set<number>();
+  for (let processSample = 0; processSample < processSamples; processSample += 1) {
+    const roundRotation = (rotation + processSample * 5) % attempted.length;
+    const measurementOrder = Array.from({ length: attempted.length }, (_, offset) =>
+      (roundRotation + offset) % attempted.length);
+    for (const frameworkIndex of measurementOrder) {
+      if (excludedIndexes.has(frameworkIndex)) continue;
+      const name = attempted[frameworkIndex]!().name;
+      try {
+        const result = measureInFreshProcess(frameworkIndex);
+        const frameworkSamples = samples.get(frameworkIndex) ?? [];
+        frameworkSamples.push(result);
+        samples.set(frameworkIndex, frameworkSamples);
+      } catch (error) {
+        if (name === "HTML Next") throw error;
+        excludedIndexes.add(frameworkIndex);
+        samples.delete(frameworkIndex);
+        excluded.push({ name, reason: childError(error) });
+      }
+    }
+    htmlNextControlSamples.push(measureInFreshProcess(0));
+  }
+
+  const measured = [...samples.values()].map(aggregateFramework);
+  const htmlNextControl = aggregateFramework(htmlNextControlSamples);
+  const htmlNextMeasured = measured.find(({ name }) => name === "HTML Next")!;
+  const aaRelativeSpreads = Object.fromEntries(workloads.map(({ name }) => {
+    const ratio = htmlNextControl.workloads[name]! / htmlNextMeasured.workloads[name]!;
+    return [name, Math.max(ratio, 1 / ratio) - 1];
+  }));
+  const aaScoreRatio = geometricMean(workloads.map(({ name }) =>
+    htmlNextControl.workloads[name]! / htmlNextMeasured.workloads[name]!));
+  const aaScoreRelativeSpread = Math.max(aaScoreRatio, 1 / aaScoreRatio) - 1;
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+    encoding: "utf8",
+  }).trim() === "" ? 0 : 1;
+  const bestByWorkload = Object.fromEntries(workloads.map(({ name }) => [
+    name,
+    Math.min(...measured.map((framework) => framework.workloads[name]!)),
+  ]));
+  const ranked = measured.map((framework) => ({
+    ...framework,
+    score: geometricMean(workloads.map(({ name }) =>
+      framework.workloads[name]! / bestByWorkload[name]!
+    )),
+  })).sort((left, right) => left.score - right.score);
+  const htmlNextIndex = ranked.findIndex(({ name }) => name === "HTML Next");
+  const htmlNext = ranked[htmlNextIndex]!;
+  const report = {
+    matrix_checks_pass: ranked.length >= 11 && aaScoreRelativeSpread <= 0.05 ? 1 : 0,
+    matrix_framework_count: attempted.length,
+    matrix_third_party_count: thirdPartyFrameworks.length,
+    matrix_ranked_count: ranked.length,
+    matrix_excluded_count: excluded.length,
+    matrix_process_isolation: 1,
+    matrix_process_samples_per_framework: processSamples,
+    matrix_rotation: rotation,
+    matrix_revision: revision,
+    matrix_revision_dirty: dirty,
+    matrix_node_version: process.version,
+    matrix_platform: `${process.platform}-${process.arch}`,
+    matrix_aa_score_relative_spread: aaScoreRelativeSpread,
+    matrix_aa_max_relative_spread: Math.max(...Object.values(aaRelativeSpreads)),
+    matrix_aa_workloads_relative_spread: aaRelativeSpreads,
+    html_next_matrix_rank: htmlNextIndex + 1,
+    html_next_matrix_score: htmlNext.score,
+    ...Object.fromEntries(Object.entries(htmlNext.workloads).map(([name, value]) => [
+      `html_next_${name.replaceAll("-", "_")}_ns`, value,
+    ])),
+    matrix: ranked.map((framework, index) => ({
+      name: framework.name,
+      rank: index + 1,
+      score: framework.score,
+      workloads_ns_per_iteration: framework.workloads,
+    })),
+    excluded,
+  };
+
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`, () => process.exit(0));
+}
