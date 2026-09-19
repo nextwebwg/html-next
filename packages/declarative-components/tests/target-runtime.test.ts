@@ -22,6 +22,8 @@ const computedFixtureUrl = new URL("../benchmarks/fixtures/computed-counter.html
 const source = `<template component="demo-counter" status="early" summary="Target parity fixture.">
   <defs>
     <prop name="email" type="string" default="invalid">Email.</prop>
+    <prop name="optionalCount" type="number">Optional count.</prop>
+    <prop name="optionalItems" type="list(string)">Optional items.</prop>
     <state name="count" :value="0"></state>
     <event name="count-change" type="number"></event>
     <event name="invalid-change" type="number"></event>
