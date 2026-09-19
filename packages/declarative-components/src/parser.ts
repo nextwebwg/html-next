@@ -194,7 +194,9 @@ function collectTargets(
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
         if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
-          record(attribute.value, { property: platform.resolveDomProperty(sourceTag(element), key) ?? key });
+          const property = platform.resolveDomProperty(sourceTag(element), key) ??
+            (attribute.value.toLowerCase() === key ? attribute.value : key);
+          record(attribute.value, { property });
         }
       }
     }
