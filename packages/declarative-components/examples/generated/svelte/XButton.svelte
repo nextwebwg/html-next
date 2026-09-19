@@ -2,6 +2,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { SvelteHTMLElements } from "svelte/elements";
+  import { manageGeneratedProps } from "@nextwebwg/declarative-components/generated-runtime";
   import "../styles/x-button.css";
 
   interface OwnProps {
@@ -14,10 +15,14 @@
   let { "size": prop0 = "md", "variant": prop1 = "outline", slots, children, ...nativeProps }: Props = $props();
   let root: Element;
   function htmlNext(node: Element, props: Record<string, unknown>) {
-    Object.assign(node, props);
+    const detach = manageGeneratedProps(node, [
+      { name: "size", attribute: "data-size", value: prop0, type: ["sm","md","lg"], required: false },
+      { name: "variant", attribute: "data-variant", value: prop1, type: ["outline","solid","destructive","ghost"], required: false },
+    ]);
     return {
       update(next: Record<string, unknown>) { Object.assign(node, next); },
       destroy() {
+        detach();
       },
     };
   }

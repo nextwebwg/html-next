@@ -2,6 +2,8 @@ import type { ComponentDefinition, TemplateNode } from "../template.js";
 import {
   escapeHtml,
   frameworkBindingExpression,
+  generatedPropDescriptor,
+  hasUnsupportedPropertyBindings,
   isVoidElement,
   literalAttribute,
   provenanceAttributes,
@@ -26,10 +28,13 @@ function renderNode(
   definition: ComponentDefinition,
   depth: number,
   reactive?: NativeReactivePlan,
+  omitPropertyBindings = false,
 ): string {
   if (node.kind === "text") return escapeHtml(node.value);
   if (node.kind === "slot") {
-    const fallback = node.fallback?.map((child) => renderNode(child, aliases, definition, depth + 1, reactive)).join("\n") ?? "";
+    const fallback = node.fallback?.map((child) =>
+      renderNode(child, aliases, definition, depth + 1, reactive, omitPropertyBindings)
+    ).join("\n") ?? "";
     const render = node.name === undefined
       ? "{@render children?.()}"
       : `{@render slots?.[${quote(node.name)}]?.()}`;
@@ -39,6 +44,7 @@ function renderNode(
   const attributes = node.attributes.map((attribute) => {
     if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
     if (attribute.kind === "directive") return "";
+    if (omitPropertyBindings && attribute.kind === "property") return "";
     const value = aliases.get(attribute.expression) ?? "undefined";
     const expression = frameworkBindingExpression(
       attribute,
@@ -64,7 +70,9 @@ function renderNode(
     : "";
   const children = [
     valueChild,
-    ...node.children.map((child) => renderNode(child, aliases, definition, depth + 1, reactive)),
+    ...node.children.map((child) =>
+      renderNode(child, aliases, definition, depth + 1, reactive, omitPropertyBindings)
+    ),
   ].filter(Boolean).join("\n");
   return children === "" ? `${open}</${node.name}>` : `${open}\n${indent}  ${children}\n${indent}</${node.name}>`;
 }
@@ -75,9 +83,17 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
   const props = target.props.map(({ name, contract }) => [name, contract] as const);
   const aliases = new Map(target.props.map(({ name, local }) => [name, local]));
   const polymorphic = target.polymorphic;
-  const reactive = nativeReactivePlan(definition);
+  const generatedProps = props.map(([name, prop], index) =>
+    generatedPropDescriptor(name, prop, `prop${index}`)
+  );
+  const supportsGeneratedProps = !hasUnsupportedPropertyBindings(template) &&
+    generatedProps.every((prop) => prop !== undefined);
+  const reactive = supportsGeneratedProps ? nativeReactivePlan(definition) : undefined;
   const dispatchesEvents = hasNativeDispatch(reactive);
-  const needsBridge = ((definition.declarations?.length ?? 0) > 0 && reactive === undefined) || definition.controller !== undefined;
+  const needsBridge = !supportsGeneratedProps ||
+    ((definition.declarations?.length ?? 0) > 0 && reactive === undefined) ||
+    definition.controller !== undefined;
+  const usesGeneratedProps = props.length > 0 && !needsBridge;
   if (reactive !== undefined) {
     for (const [name, variable] of reactive.values) aliases.set(name, variable);
   }
@@ -91,6 +107,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     ...template.attributes.map((attribute) => {
       if (attribute.kind === "literal") return `${attribute.name}=${literalAttribute(attribute.value)}`;
       if (attribute.kind === "directive") return "";
+      if (needsBridge && attribute.kind === "property") return "";
       const value = aliases.get(attribute.expression) ?? "undefined";
       const expression = frameworkBindingExpression(
         attribute,
@@ -115,7 +132,9 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     rootValue?.kind === "directive" && rootValue.expressionPlan !== undefined
       ? `{${nativeExpression(rootValue.expressionPlan.ast, aliases)}}`
       : "",
-    ...template.children.map((child) => renderNode(child, aliases, definition, 0, reactive)),
+    ...template.children.map((child) =>
+      renderNode(child, aliases, definition, 0, reactive, needsBridge)
+    ),
   ].filter(Boolean).join("\n");
 
   return [
@@ -123,8 +142,11 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     '<script lang="ts">',
     '  import type { Snippet } from "svelte";',
     '  import type { SvelteHTMLElements } from "svelte/elements";',
-    ...(dispatchesEvents
-      ? ['  import { dispatchGeneratedEvent } from "@nextwebwg/declarative-components/generated-runtime";']
+    ...(dispatchesEvents || usesGeneratedProps
+      ? [`  import { ${[
+        ...(dispatchesEvents ? ["dispatchGeneratedEvent"] : []),
+        ...(usesGeneratedProps ? ["manageGeneratedProps"] : []),
+      ].join(", ")} } from "@nextwebwg/declarative-components/generated-runtime";`]
       : []),
     ...(needsBridge ? [
       '  import { attachComponent } from "@nextwebwg/declarative-components/runtime";',
@@ -171,6 +193,10 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
       "    const detach = attachComponent(node, definition, { props,",
       ...(definition.controller === undefined ? [] : ["      controller,"]),
       "    });",
+    ] : usesGeneratedProps ? [
+      "    const detach = manageGeneratedProps(node, [",
+      ...generatedProps.map((prop) => `      ${prop},`),
+      "    ]);",
     ] : ["    Object.assign(node, props);"]),
     ...target.events.flatMap((event, index) => [
       `    const listener${index} = (event: Event) => ${event.callbackName}?.((event as CustomEvent<${event.detailType}>).detail, event as CustomEvent<${event.detailType}>);`,
@@ -182,7 +208,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     ...target.events.map((event, index) =>
       `        node.removeEventListener(${quote(event.name)}, listener${index});`
     ),
-    ...(needsBridge ? ["        detach();"] : []),
+    ...(needsBridge || usesGeneratedProps ? ["        detach();"] : []),
     "      },",
     "    };",
     "  }",

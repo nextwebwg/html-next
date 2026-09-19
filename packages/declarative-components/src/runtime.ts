@@ -1160,7 +1160,11 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
         const value = instance.scope.get(name);
         return value === ABSENT ? undefined : value;
       },
-      set: (input: unknown) => instance.scope.set(name, assignedPropValue(name, prop, input)),
+      set: (input: unknown) => {
+        const current = instance.scope.get(name);
+        if (Object.is(current === ABSENT ? undefined : current, input)) return;
+        instance.scope.set(name, assignedPropValue(name, prop, input));
+      },
     });
     if (isPropertyOnlyType(prop.type)) continue;
     const attributeName = `data-${kebabCase(name)}`;

@@ -190,19 +190,23 @@ function propValue(input: unknown, type: GeneratedPropType, attributePresent = f
   throw new TypeError("HR002: A prop invocation value does not satisfy its declared type.");
 }
 
+function assignedGeneratedProp(
+  prop: GeneratedProp,
+  input: unknown,
+  attributePresent = false,
+): unknown {
+  if (input !== undefined) return propValue(input, prop.type, attributePresent);
+  if (prop.required) throw new TypeError(`HC020: Required prop \`${prop.name}\` was not provided.`);
+  return undefined;
+}
+
 /** Installs the scalar prop boundary used by a directly compiled component. */
 export function manageGeneratedProps(
   element: Element,
   props: readonly GeneratedProp[],
   apply?: (name: string, value: unknown) => void,
 ): () => void {
-  const values = props.map((prop) => {
-    if (prop.value === undefined) {
-      if (prop.required) throw new TypeError(`HC020: Required prop \`${prop.name}\` was not provided.`);
-      return undefined;
-    }
-    return propValue(prop.value, prop.type);
-  });
+  const values = props.map((prop) => assignedGeneratedProp(prop, prop.value));
   const byAttribute = new Map(props.map((prop, index) => [prop.attribute, index]));
   const reflected = new Map<string, string | null>();
   const dirty = new Set(props.map((_, index) => index));
@@ -236,7 +240,7 @@ export function manageGeneratedProps(
       enumerable: true,
       get: () => values[index],
       set: (input: unknown) => {
-        const value = propValue(input, prop.type);
+        const value = assignedGeneratedProp(prop, input);
         if (Object.is(values[index], value)) return;
         values[index] = value;
         schedule(index);
@@ -256,7 +260,7 @@ export function manageGeneratedProps(
       reflected.delete(attribute);
       const prop = props[index]!;
       const present = current !== null;
-      const value = propValue(present ? current : undefined, prop.type, present);
+      const value = assignedGeneratedProp(prop, present ? current : undefined, present);
       if (Object.is(values[index], value)) continue;
       values[index] = value;
       schedule(index);
