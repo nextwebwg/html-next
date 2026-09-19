@@ -72,6 +72,38 @@ describe("official target compilers", () => {
     }
   });
 
+  it("installs the declarative prop boundary when framework templates do not bind public props", () => {
+    const output = generated(componentSource(
+      "demo-panel",
+      `<prop name="align" type="start | center | end">Alignment.</prop>
+       <prop name="label" type="string">Label.</prop>`,
+      `<div><span :data-align="align" :data-label="label"></span><slot></slot></div>`,
+    ));
+
+    for (const path of ["react/DemoPanel.tsx", "vue/DemoPanel.vue", "svelte/DemoPanel.svelte"]) {
+      const module = output.get(path)!;
+      assert.match(module, /manageGeneratedProps/);
+      assert.match(module, /data-align/);
+      assert.match(module, /data-label/);
+      assert.doesNotMatch(module, /declarative-components\/runtime|attachComponent/);
+    }
+  });
+
+  it("keeps property-only structured framework props on the complete runtime path", () => {
+    const output = generated(componentSource(
+      "demo-list",
+      `<prop name="items" type="list(unknown)">Items.</prop>`,
+      `<div><span .items="items"></span><slot></slot></div>`,
+    ));
+
+    for (const path of ["react/DemoList.tsx", "vue/DemoList.vue", "svelte/DemoList.svelte"]) {
+      const module = output.get(path)!;
+      assert.match(module, /declarative-components\/runtime|attachComponent/);
+      assert.doesNotMatch(module, /manageGeneratedProps/);
+      assert.doesNotMatch(module, /(?:^|\s)(?::)?items=/m);
+    }
+  });
+
   it("compiles non-button and native-boolean target projections", async () => {
     const audio = generated(componentSource(
       "demo-player",

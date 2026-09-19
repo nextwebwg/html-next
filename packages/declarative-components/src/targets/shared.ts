@@ -1,5 +1,6 @@
-import type { ComponentDefinition, TemplateAttribute } from "../template.js";
+import type { ComponentDefinition, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
+import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
 import { typeScriptType } from "../type-system.js";
 
@@ -50,6 +51,28 @@ export function propKey(name: string): string {
 
 export function typeSource(type: PropType): string {
   return typeScriptType(type);
+}
+
+export function generatedPropDescriptor(
+  name: string,
+  prop: PropContract,
+  value: string,
+): string | undefined {
+  const type = prop.type === "string" || prop.type === "boolean" || prop.type === "number"
+    ? quote(prop.type)
+    : "enum" in prop.type ? JSON.stringify(prop.type.enum) : undefined;
+  if (type === undefined) return undefined;
+  return `{ name: ${quote(name)}, attribute: ${quote(`data-${kebabCase(name)}`)}, value: ${value}, type: ${type}, required: ${String(prop.required)} }`;
+}
+
+export function hasUnsupportedPropertyBindings(node: TemplateNode): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot") {
+    return node.fallback?.some(hasUnsupportedPropertyBindings) ?? false;
+  }
+  return node.attributes.some((attribute) =>
+    attribute.kind === "property" && resolveDomProperty(node.name, attribute.name) === undefined
+  ) || node.children.some(hasUnsupportedPropertyBindings);
 }
 
 export function escapeHtml(value: string): string {
