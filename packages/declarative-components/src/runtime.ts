@@ -255,6 +255,11 @@ function readInvocation(
 
   for (const [name, prop] of Object.entries(contract.props)) {
     if (values[name] !== undefined) continue;
+    // A framework-owned native root can expose unrelated built-in properties
+    // with the same name (for example HTMLDivElement.align === ""). Only own
+    // properties were explicitly supplied as property-only inputs before
+    // hydration; scalar inputs arrive through their data-* attributes.
+    if (hydration && !Object.hasOwn(invocation, name)) continue;
     const propertyValue = (invocation as unknown as Record<string, unknown>)[name];
     if (propertyValue !== undefined) values[name] = invocationValue(prop, propertyValue);
   }
