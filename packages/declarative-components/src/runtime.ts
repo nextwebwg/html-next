@@ -1349,7 +1349,11 @@ interface LoweredScopes {
   readonly roots: readonly Element[];
 }
 
-function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScopes {
+function lowerScopes(
+  root: Document,
+  scopes: readonly QueryRoot[],
+  shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+): LoweredScopes {
   const registry = registryFor(root);
   const discovered = new Set<Element>();
   const selector = discoverySelector(registry);
@@ -1371,25 +1375,31 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScope
 
   const prepared: PreparedInvocation[] = [];
   const roots = new Set<Element>();
-  const prepare = (live: LiveDefinition, element: Element, hydration: boolean): void => {
+  const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
       contentOnly.has(element) ||
-      root.defaultView?.customElements.get(definition.contract.tag) !== undefined
-    ) return;
+      root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
+      shouldLower?.(element, definition, hydration) === false
+    ) return false;
     prepared.push(prepareRuntimeInvocation(element, definition, hydration));
+    return true;
   };
   const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
     for (const element of elements) {
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
       if (!element.hasAttribute("data-component-root")) continue;
-      roots.add(element);
-      if (runtimeInstance(element) !== undefined) continue;
+      if (runtimeInstance(element) !== undefined) {
+        roots.add(element);
+        continue;
+      }
+      let accepted = false;
       for (const tag of new Set((element.getAttribute("data-component-root") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
-        if (owner !== undefined) prepare(owner, element, true);
+        if (owner !== undefined && prepare(owner, element, true)) accepted = true;
       }
+      if (accepted) roots.add(element);
     }
   };
   collect(registry.definitions, discovered);
@@ -1807,6 +1817,12 @@ export function setControllerModule(
 }
 
 export interface DocumentObservationOptions {
+  /** Return false to leave a discovered invocation or hydration root under application ownership. */
+  readonly shouldLower?: (
+    element: Element,
+    definition: ComponentDefinition,
+    hydration: boolean,
+  ) => boolean;
   /** Runtime lifecycle integration; the returned disposer runs on removal or stop. */
   readonly onConnect?: (element: Element, definition: ComponentDefinition) => void | (() => void);
   readonly onError?: (error: unknown) => void;
@@ -1869,7 +1885,7 @@ export function observeDocument(
     }
     if (scopes.length > 0) {
       try {
-        for (const element of lowerScopes(root, scopes).roots) {
+        for (const element of lowerScopes(root, scopes, options.shouldLower).roots) {
           if (stopped) break;
           connect(element);
         }
