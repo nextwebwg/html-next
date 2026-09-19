@@ -40,13 +40,15 @@ export class ReactiveScheduler {
     this.#pending.add(effect);
     if (!this.#scheduled && !this.#flushing) {
       this.#scheduled = true;
-      queueMicrotask(() => this.flush());
+      queueMicrotask(() => {
+        this.#scheduled = false;
+        this.flush();
+      });
     }
   }
 
   flush(): void {
     if (this.#flushing) return;
-    this.#scheduled = false;
     this.#flushing = true;
     const flushId = ++this.#flushId;
     try {
