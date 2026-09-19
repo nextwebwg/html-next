@@ -159,6 +159,9 @@ definitions it loads:
 | Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
 | Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
 
+The live runtime requires native CSS `@scope` support (Chrome 118+, Safari 17.4+, and Firefox
+146+). Ahead-of-time generated targets retain provenance-attribute scoping for older browsers.
+
 The native build currently specializes static markup, basic reactivity, numeric-computed state, and
 scalar props. CI records zero live-parser and full-runtime contribution for those four capability
 fixtures. Keyed lists, declared reads, and controller lifecycle currently use the

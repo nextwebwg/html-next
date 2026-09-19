@@ -40,8 +40,8 @@ write them.
 
 ## Native `@scope`
 
-When `CSSScopeRule` is available, the browser runtime emits a native scope for a definition's own
-styles:
+The live browser runtime requires `CSSScopeRule` and emits a native scope for a definition's own
+styles. Its support floor is Chrome 118+, Safari 17.4+, and Firefox 146+:
 
 ```css
 @scope ([data-component-root~="x-card"])
@@ -103,10 +103,10 @@ the projected region, bounded by the same authorship rule:
 
 The converter maps a Shadow-DOM `::slotted(x)` to `:slotted(x)` unchanged.
 
-## Attribute fallback and generated targets
+## Generated-target attribute mapping
 
-Browsers without `@scope`, and ahead-of-time framework targets, use the same selector pipeline in
-attribute mode. It appends a zero-specificity provenance condition to each selector subject:
+Ahead-of-time framework targets keep a portable attribute-mode selector pipeline for browsers
+without `@scope`. It appends a zero-specificity provenance condition to each selector subject:
 
 ```css
 .lead:where([data-component~="x-card"]) { color: gray; }

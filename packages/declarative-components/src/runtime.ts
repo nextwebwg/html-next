@@ -18,11 +18,10 @@ import { kebabCase } from "./names.js";
 import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 import {
-  componentStyleMode,
   markProjectedRoot,
   stampAuthoredElement,
   stampComponentRoot,
-  transformComponentStyles,
+  transformNativeComponentStyles,
 } from "./style.js";
 import { isPropertyOnlyType, parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
 import {
@@ -160,10 +159,11 @@ export function installComponentGraph(
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
     const style = node.definition.css === "" ? undefined : root.createElement("style");
     if (style !== undefined) {
-      style.textContent = transformComponentStyles(node.definition.css, tag, {
-        mode: componentStyleMode(root),
-        rootElement: node.definition.template.name,
-      });
+      style.textContent = transformNativeComponentStyles(
+        node.definition.css,
+        tag,
+        node.definition.template.name,
+      );
       style.dataset.htmlNextComponent = tag;
       root.head.append(style);
     }
@@ -1389,13 +1389,10 @@ function lowerScopes(root: Document, scopes: readonly QueryRoot[]): LoweredScope
   for (const live of definitions) {
     registerDefinition(registry, live.definition.contract.tag, live);
     if (live.style !== undefined) {
-      live.style.textContent = transformComponentStyles(
+      live.style.textContent = transformNativeComponentStyles(
         live.style.textContent ?? "",
         live.definition.contract.tag,
-        {
-          mode: componentStyleMode(live.wrapper!.ownerDocument),
-          rootElement: live.definition.template.name,
-        },
+        live.definition.template.name,
       );
       live.wrapper!.ownerDocument.head.append(live.style);
     }
@@ -1571,10 +1568,11 @@ export function registerComponentDefinitions(
     if (definition.css !== "") {
       const style = root.createElement("style");
       style.dataset.htmlNextPackage = definition.contract.tag;
-      style.textContent = transformComponentStyles(definition.css, definition.contract.tag, {
-        mode: componentStyleMode(root),
-        rootElement: definition.template.name,
-      });
+      style.textContent = transformNativeComponentStyles(
+        definition.css,
+        definition.contract.tag,
+        definition.template.name,
+      );
       root.head.append(style);
     }
   }
