@@ -57,12 +57,13 @@ export class ReactiveScheduler {
 
 export class ReactiveEffect {
   readonly id = nextEffectId++;
-  readonly dependencies = new Set<SubscriberSet>();
+  dependencies = new Set<SubscriberSet>();
   flushCount = 0;
   flushId = 0;
   stopped = false;
   paused = false;
   #cleanup: Cleanup = undefined;
+  #nextDependencies = new Set<SubscriberSet>();
 
   constructor(
     readonly scheduler: ReactiveScheduler,
@@ -72,7 +73,7 @@ export class ReactiveEffect {
 
   execute(): void {
     if (this.stopped || this.paused) return;
-    this.#unsubscribe();
+    this.#nextDependencies.clear();
     this.#cleanup?.();
     this.#cleanup = undefined;
     const previous = activeEffect;
@@ -82,7 +83,19 @@ export class ReactiveEffect {
       this.#cleanup = this.run();
     } finally {
       activeEffect = previous;
+      for (const dependency of this.dependencies) {
+        if (!this.#nextDependencies.has(dependency)) dependency.delete(this);
+      }
+      const dependencies = this.dependencies;
+      this.dependencies = this.#nextDependencies;
+      this.#nextDependencies = dependencies;
     }
+  }
+
+  track(subscribers: SubscriberSet): void {
+    if (this.#nextDependencies.has(subscribers)) return;
+    this.#nextDependencies.add(subscribers);
+    if (!this.dependencies.has(subscribers)) subscribers.add(this);
   }
 
   schedule(): void {
@@ -114,13 +127,13 @@ export class ReactiveEffect {
   #unsubscribe(): void {
     for (const dependency of this.dependencies) dependency.delete(this);
     this.dependencies.clear();
+    this.#nextDependencies.clear();
   }
 }
 
 function track(subscribers: SubscriberSet): void {
   if (activeEffect === undefined || activeEffect.stopped) return;
-  subscribers.add(activeEffect);
-  activeEffect.dependencies.add(subscribers);
+  activeEffect.track(subscribers);
 }
 
 function trigger(subscribers: SubscriberSet | undefined): void {
