@@ -1692,6 +1692,19 @@ export function attachComponent(
   };
 }
 
+/** Adopts a framework-owned native root using a definition already installed in its document. */
+export function attachRegisteredComponent(
+  element: Element,
+  tag: string,
+  options: ComponentAttachmentOptions = {},
+): () => void {
+  const registered = registryFor(element.ownerDocument).definitions.get(tag);
+  if (registered === undefined) {
+    fail("HR005", `No registered definition declares <${tag}>.`);
+  }
+  return attachComponent(element, registered.definition, options);
+}
+
 export interface ComponentHost {
   readonly element: Element;
   readonly state: Record<string, unknown>;

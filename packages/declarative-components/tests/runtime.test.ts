@@ -49,6 +49,46 @@ describe.skipIf(!enabled)("browser runtime", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} attaches framework roots through the registered declarative contract`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="registered-button" status="early" summary="Registered adapter fixture.">' +
+          '<defs><prop name="label" type="string" default="">Accessible label.</prop></defs>' +
+          '<button :aria-label="label"><slot></slot></button></template><main></main>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.createElement("button");
+          root.textContent = "Save";
+          document.querySelector("main").append(root);
+          const detach = window.HtmlRuntime.attachRegisteredComponent(
+            root,
+            "registered-button",
+            { props: { label: "Save changes" } },
+          );
+          const result = {
+            root: root.localName,
+            label: root.getAttribute("aria-label"),
+            text: root.textContent,
+            customElement: customElements.get("registered-button") !== undefined,
+          };
+          detach();
+          return result;
+        })()`);
+        assert.deepEqual(result, {
+          root: "button",
+          label: "Save changes",
+          text: "Save",
+          customElement: false,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} parses and lowers components owned by another browser realm`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
