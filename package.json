@@ -21,6 +21,7 @@
     "lint": "oxlint --config oxlint.json --deny-warnings .",
     "measure:runtime": "pnpm --filter @nextwebwg/declarative-components measure:runtime",
     "measure:hydration": "pnpm --filter @nextwebwg/declarative-components measure:hydration",
+    "measure:reactivity": "pnpm --filter @nextwebwg/declarative-components measure:reactivity",
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:consumer": "vitest run --config vitest.consumer.config.ts",

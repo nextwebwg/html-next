@@ -77,7 +77,8 @@ each element carries which definition authored it, projected roots are marked co
 a delegated root carries every owning definition's lineage so each style block applies once.
 Provenance is implementation metadata, not an authoring hook — components never read or write it.
 
-Native `@scope` is used only as an optimization where it produces the identical result; authors
-never see or depend on either mechanism. The canonical matching algorithm, the `@scope` mapping,
-`:slotted()` compilation, and projection placement are in
+The live runtime uses native `@scope` and therefore requires Chrome 118+, Safari 17.4+, or Firefox
+146+. Ahead-of-time generated targets use the equivalent provenance-attribute mapping for older
+browsers. Authors never see or select either mechanism. The canonical matching algorithm, the
+`@scope` mapping, `:slotted()` compilation, and projection placement are in
 [`../style-scoping.md`](../style-scoping.md).

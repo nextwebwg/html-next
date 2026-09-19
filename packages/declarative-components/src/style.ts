@@ -496,6 +496,22 @@ export function transformComponentStyles(
   return [scoped, slottedRules].filter((part) => part !== "").join("\n");
 }
 
+/** Compile live-runtime styles for browsers with native `@scope` support. */
+export function transformNativeComponentStyles(
+  css: string,
+  owner: string,
+  rootElement?: string,
+): string {
+  if (css === "") return "";
+  const { normal, slotted } = partitionSlotted(css);
+  const normalRules = rewriteRuleList(normal, owner, "scope", rootElement);
+  const scoped = normalRules.trim() === ""
+    ? ""
+    : `@scope ([${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]) to (:scope [${COMPONENT_ROOT_ATTRIBUTE}] > *, [${PROJECTED_ROOT_ATTRIBUTE}]) {\n${normalRules}\n}`;
+  const slottedRules = slotted.trim() === "" ? "" : rewriteSlottedRuleList(slotted, owner);
+  return [scoped, slottedRules].filter((part) => part !== "").join("\n");
+}
+
 /** Rewrites custom-element and validity selectors in application/global CSS without scoping them. */
 export function transformGlobalStyles(css: string): string {
   return rewriteRuleList(css, undefined, undefined);
