@@ -19,11 +19,12 @@ const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
 const computedFixtureUrl = new URL("../benchmarks/fixtures/computed-counter.html", import.meta.url);
 
-const source = `<template component="demo-counter" status="early" summary="Target parity fixture.">
+const source = `<template component="demo-counter" controller="./demo-controller.js" status="early" summary="Target parity fixture.">
   <defs>
     <prop name="email" type="string" default="invalid">Email.</prop>
     <prop name="optionalCount" type="number">Optional count.</prop>
     <prop name="optionalItems" type="list(string)">Optional items.</prop>
+    <prop name="title" type="string">Optional title colliding with HTMLElement.title.</prop>
     <state name="count" :value="0"></state>
     <event name="count-change" type="number"></event>
     <event name="invalid-change" type="number"></event>
@@ -58,6 +59,9 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       const parent = path.split("/").slice(0, -1).join("/");
       if (parent !== "") await mkdir(join(directory, parent), { recursive: true });
       await writeFile(join(directory, path), content);
+    }
+    for (const target of ["vanilla", "react", "vue", "svelte"]) {
+      await writeFile(join(directory, target, "demo-controller.js"), "export default function controller() {}\n");
     }
 
     const vueSource = artifacts.get("vue/DemoCounter.vue")!;
@@ -142,7 +146,7 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
         assert.deepEqual(pageErrors, []);
         await page.waitForSelector('[data-component-root~="demo-counter"] output', { state: "attached", timeout: 3_000 });
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component-root~="demo-counter"]')!;
+          const root = document.querySelector('[data-component-root~="demo-counter"]') as HTMLElement;
           const output = root.querySelector("output")!;
           const input = root.querySelector("input") as HTMLInputElement;
           const before = output;
@@ -158,6 +162,7 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
             identity: output === before,
             events: (window as unknown as { targetEvents: unknown[] }).targetEvents,
             invalid: input.validity.typeMismatch && input.matches(":invalid"),
+            optionalTitle: root.title,
             provenance: root.getAttribute("data-component-root"),
           };
         });
@@ -170,6 +175,7 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
           identity: true,
           events: [1],
           invalid: true,
+          optionalTitle: undefined,
           provenance: "demo-counter",
         });
         const invalidError = page.waitForEvent("pageerror");
