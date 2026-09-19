@@ -30,14 +30,14 @@ function unsubscribe(subscription: Subscription): void {
 }
 
 export class ReactiveScheduler {
-  readonly #pending = new Set<ReactiveEffect>();
+  #pending: ReactiveEffect[] = [];
   #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
   enqueue(effect: ReactiveEffect): void {
-    if (effect.stopped) return;
-    this.#pending.add(effect);
+    if (effect.stopped || this.#pending.includes(effect)) return;
+    this.#pending.push(effect);
     if (!this.#scheduled && !this.#flushing) {
       this.#scheduled = true;
       queueMicrotask(() => {
@@ -52,11 +52,11 @@ export class ReactiveScheduler {
     this.#flushing = true;
     const flushId = ++this.#flushId;
     try {
-      while (this.#pending.size > 0) {
-        const effects = [...this.#pending].sort(
+      while (this.#pending.length > 0) {
+        const effects = this.#pending.sort(
           (left, right) => left.priority - right.priority || left.id - right.id,
         );
-        this.#pending.clear();
+        this.#pending = [];
         for (const effect of effects) {
           if (effect.flushId === flushId) effect.flushCount += 1;
           else {
@@ -64,7 +64,7 @@ export class ReactiveScheduler {
             effect.flushCount = 1;
           }
           if (effect.flushCount > maximumExecutionsPerFlush) {
-            this.#pending.clear();
+            this.#pending = [];
             fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
           }
           effect.execute();
