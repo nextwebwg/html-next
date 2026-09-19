@@ -125,7 +125,11 @@ function registerDefinition(registry: DocumentRegistry, tag: string, definition:
 
 function discoverySelector(registry: DocumentRegistry): string {
   return registry.discoverySelector ??=
-    ["template[component]", "[data-component-root]", ...registry.definitions.keys()].join(",");
+    [
+      "template[component]",
+      "[data-component-root]",
+      ...Array.from(registry.definitions.keys()),
+    ].join(",");
 }
 
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
