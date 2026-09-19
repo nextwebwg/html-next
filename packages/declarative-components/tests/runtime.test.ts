@@ -49,6 +49,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} can leave application-owned roots out of document observation`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="observed-card" status="early" summary="Observation filter fixture.">' +
+          '<article><slot></slot></article></template>' +
+          '<main><article id="owned" data-component-root="observed-card" data-owned>Owned</article></main>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            shouldLower: (element, _definition, hydration) =>
+              !(hydration && element.hasAttribute("data-owned")),
+          });
+          const live = document.createElement("observed-card");
+          live.textContent = "Live";
+          document.querySelector("main").append(live);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const owned = document.querySelector("#owned");
+          const lowered = document.querySelector("main > article:not(#owned)");
+          const result = {
+            ownedText: owned.textContent,
+            ownedMarked: owned.hasAttribute("data-owned"),
+            loweredTag: lowered?.localName,
+            loweredText: lowered?.textContent,
+          };
+          stop();
+          return result;
+        })()`);
+        assert.deepEqual(result, {
+          ownedText: "Owned",
+          ownedMarked: true,
+          loweredTag: "article",
+          loweredText: "Live",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} attaches framework roots through the registered declarative contract`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
