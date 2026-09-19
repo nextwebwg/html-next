@@ -186,6 +186,12 @@ function invocationValue(prop: PropContract, input: unknown, attributePresent = 
   return parsed.value as PropValue;
 }
 
+function assignedPropValue(name: string, prop: PropContract, input: unknown): Value {
+  if (input !== undefined) return invocationValue(prop, input) as Value;
+  if (prop.required) fail("HC020", `Required prop \`${name}\` was not provided.`);
+  return (prop.default === undefined ? ABSENT : prop.default) as Value;
+}
+
 function propAttributeNames(
   definition: ComponentDefinition,
   hydration: boolean,
@@ -249,6 +255,11 @@ function readInvocation(
 
   for (const [name, prop] of Object.entries(contract.props)) {
     if (values[name] !== undefined) continue;
+    // A framework-owned native root can expose unrelated built-in properties
+    // with the same name (for example HTMLDivElement.align === ""). Only own
+    // properties were explicitly supplied as property-only inputs before
+    // hydration; scalar inputs arrive through their data-* attributes.
+    if (hydration && !Object.hasOwn(invocation, name)) continue;
     const propertyValue = (invocation as unknown as Record<string, unknown>)[name];
     if (propertyValue !== undefined) values[name] = invocationValue(prop, propertyValue);
   }
@@ -1149,7 +1160,11 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
         const value = instance.scope.get(name);
         return value === ABSENT ? undefined : value;
       },
-      set: (input: unknown) => instance.scope.set(name, invocationValue(prop, input) as Value),
+      set: (input: unknown) => {
+        const current = instance.scope.get(name);
+        if (Object.is(current === ABSENT ? undefined : current, input)) return;
+        instance.scope.set(name, assignedPropValue(name, prop, input));
+      },
     });
     if (isPropertyOnlyType(prop.type)) continue;
     const attributeName = `data-${kebabCase(name)}`;
@@ -1181,7 +1196,10 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
       }
       delete reflected[attributeName];
       const prop = props[name]!;
-      instance.scope.set(name, invocationValue(prop, value ?? undefined, value !== null) as Value);
+      instance.scope.set(
+        name,
+        value === null ? assignedPropValue(name, prop, undefined) : invocationValue(prop, value, true) as Value,
+      );
     }
   });
   const connect = (): void => observer.observe(root, {
@@ -1635,7 +1653,7 @@ export function attachComponent(
     stampAuthoredElement(element, definition.contract.tag);
     stampComponentRoot(element, definition.contract.tag);
     for (const [name, prop] of Object.entries(definition.contract.props)) {
-      const value = options.props?.[name] ?? prop.default;
+      const value = Object.hasOwn(options.props ?? {}, name) ? options.props?.[name] : prop.default;
       if (value !== undefined) {
         (element as unknown as Record<string, unknown>)[name] = value;
         if (!isPropertyOnlyType(prop.type)) {

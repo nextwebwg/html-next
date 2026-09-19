@@ -150,6 +150,23 @@ describe("parseComponent", () => {
     });
   });
 
+  it("preserves property casing when a component prop names a non-native target", () => {
+    const definition = parseComponent(
+      componentSource(
+        `<div .anchorRect="anchorRect"></div>`,
+        `<prop name="anchorRect" type="unknown">Anchor geometry.</prop>`,
+      ),
+      "structured-property.html",
+    );
+    const property = definition.template.attributes[0];
+    assert.ok(property?.kind === "property");
+    assert.equal(property.key, "anchorrect");
+    assert.equal(property.name, "anchorRect");
+    assert.deepEqual(definition.contract.props.anchorRect?.target, {
+      property: "anchorRect",
+    });
+  });
+
   it("rejects missing, duplicate, and malformed carriers", () => {
     expectDiagnostic("HS001", `<p>not a definition</p>`);
     expectDiagnostic(

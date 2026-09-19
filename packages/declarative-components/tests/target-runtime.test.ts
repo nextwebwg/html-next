@@ -19,9 +19,12 @@ const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
 const computedFixtureUrl = new URL("../benchmarks/fixtures/computed-counter.html", import.meta.url);
 
-const source = `<template component="demo-counter" status="early" summary="Target parity fixture.">
+const source = `<template component="demo-counter" controller="./demo-controller.js" status="early" summary="Target parity fixture.">
   <defs>
     <prop name="email" type="string" default="invalid">Email.</prop>
+    <prop name="optionalCount" type="number">Optional count.</prop>
+    <prop name="items" type="list(string)">Optional items.</prop>
+    <prop name="title" type="string">Optional title colliding with HTMLElement.title.</prop>
     <state name="count" :value="0"></state>
     <event name="count-change" type="number"></event>
     <event name="invalid-change" type="number"></event>
@@ -33,7 +36,7 @@ const source = `<template component="demo-counter" status="early" summary="Targe
       <dispatch event="invalid-change" :value="'not-a-number'"></dispatch>
     </handler>
   </defs>
-  <section>
+  <section .items="items">
     <header><slot name="title"><h2>Untitled</h2></slot></header>
     <button type="button" on:click="increment"><output $value="count"></output></button>
     <button type="button" data-invalid on:click="invalid">Invalid event</button>
@@ -42,20 +45,31 @@ const source = `<template component="demo-counter" status="early" summary="Targe
   </section>
 </template>`;
 
+const panelSource = `<template component="demo-panel" status="early" summary="Direct prop boundary fixture.">
+  <props>
+    <prop name="align" type="start | center | end">Alignment.</prop>
+    <prop name="label" type="string">Label.</prop>
+  </props>
+  <div><span :data-align="align" :data-label="label"></span></div>
+</template>`;
+
 describe.skipIf(!enabled)("generated target runtime parity", () => {
   let directory = "";
   const bundles = new Map<string, string>();
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-targets-"));
-    const artifacts = new Map(
-      generateComponent(parseComponent(source, "demo-counter.html"))
-        .map((artifact) => [artifact.path, artifact.content]),
-    );
+    const artifacts = new Map([
+      ...generateComponent(parseComponent(source, "demo-counter.html")),
+      ...generateComponent(parseComponent(panelSource, "demo-panel.html")),
+    ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
       if (parent !== "") await mkdir(join(directory, parent), { recursive: true });
       await writeFile(join(directory, path), content);
+    }
+    for (const target of ["vanilla", "react", "vue", "svelte"]) {
+      await writeFile(join(directory, target, "demo-controller.js"), "export default function controller() {}\n");
     }
 
     const vueSource = artifacts.get("vue/DemoCounter.vue")!;
@@ -66,36 +80,55 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       inlineTemplate: true,
     }).content;
     await writeFile(join(directory, "vue/DemoCounter.ts"), vueModule);
+    const panelVueSource = artifacts.get("vue/DemoPanel.vue")!;
+    const panelVueParsed = parseVue(panelVueSource, { filename: "DemoPanel.vue" });
+    assert.deepEqual(panelVueParsed.errors, []);
+    await writeFile(join(directory, "vue/DemoPanel.ts"), compileScript(panelVueParsed.descriptor, {
+      id: "demo-panel",
+      inlineTemplate: true,
+    }).content);
 
     const svelteModule = compileSvelte(artifacts.get("svelte/DemoCounter.svelte")!, {
       filename: "DemoCounter.svelte",
       generate: "client",
     }).js.code;
     await writeFile(join(directory, "svelte/DemoCounter.js"), svelteModule);
+    await writeFile(
+      join(directory, "svelte/DemoPanel.js"),
+      compileSvelte(artifacts.get("svelte/DemoPanel.svelte")!, {
+        filename: "DemoPanel.svelte",
+        generate: "client",
+      }).js.code,
+    );
 
     const entries: Record<string, string> = {
       vanilla: `import { createDemoCounter } from "./vanilla/DemoCounter.js";
+import { createDemoPanel } from "./vanilla/DemoPanel.js";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
-const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
+const component = createDemoCounter({ items: ["first"], children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
-document.querySelector("main").append(component);`,
+document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready" }));`,
       react: `import React from "react";
 import { createRoot } from "react-dom/client";
 import { DemoCounter } from "./react/DemoCounter";
+import { DemoPanel } from "./react/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createRoot(document.querySelector("main")).render(<DemoCounter onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter>);`,
+createRoot(document.querySelector("main")).render(<><DemoCounter items={["first"]} onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter><DemoPanel align="end" label="Ready" /></>);`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
+import DemoPanel from "./vue/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { items: ["first"], onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready" })]) }).mount(document.querySelector("main"));`,
       svelte: `import { createRawSnippet, mount } from "svelte";
 import DemoCounter from "./svelte/DemoCounter";
+import DemoPanel from "./svelte/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = createRawSnippet(() => ({ render: () => '<h1 slot="title">Title</h1>' }));
 const children = createRawSnippet(() => ({ render: () => 'Projected' }));
-mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });`,
+mount(DemoCounter, { target: document.querySelector("main"), props: { items: ["first"], onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });
+mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end", label: "Ready" } });`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -140,10 +173,13 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
         assert.deepEqual(pageErrors, []);
         await page.waitForSelector('[data-component-root~="demo-counter"] output', { state: "attached", timeout: 3_000 });
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component-root~="demo-counter"]')!;
+          const root = document.querySelector('[data-component-root~="demo-counter"]') as HTMLElement;
           const output = root.querySelector("output")!;
           const input = root.querySelector("input") as HTMLInputElement;
+          const panel = document.querySelector('[data-component-root~="demo-panel"]') as HTMLElement & { align?: string };
           const before = output;
+          (root as unknown as { items: string[] }).items = ["second"];
+          panel.align = "center";
           (root.querySelector("button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
@@ -156,6 +192,13 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
             identity: output === before,
             events: (window as unknown as { targetEvents: unknown[] }).targetEvents,
             invalid: input.validity.typeMismatch && input.matches(":invalid"),
+            optionalTitle: root.title,
+            items: (root as unknown as { items?: string[] }).items,
+            panel: {
+              align: panel.align,
+              dataAlign: panel.getAttribute("data-align"),
+              dataLabel: panel.getAttribute("data-label"),
+            },
             provenance: root.getAttribute("data-component-root"),
           };
         });
@@ -168,6 +211,9 @@ mount(DemoCounter, { target: document.querySelector("main"), props: { onCountCha
           identity: true,
           events: [1],
           invalid: true,
+          optionalTitle: undefined,
+          items: ["second"],
+          panel: { align: "center", dataAlign: "center", dataLabel: "Ready" },
           provenance: "demo-counter",
         });
         const invalidError = page.waitForEvent("pageerror");
