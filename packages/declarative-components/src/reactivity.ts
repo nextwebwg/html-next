@@ -12,6 +12,7 @@ const objectSubscribers = new WeakMap<object, Map<PropertyKey, SubscriberSet>>()
 
 export class ReactiveScheduler {
   readonly #pending = new Set<ReactiveEffect>();
+  #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
@@ -28,7 +29,7 @@ export class ReactiveScheduler {
     if (this.#flushing) return;
     this.#scheduled = false;
     this.#flushing = true;
-    const executions = new Map<ReactiveEffect, number>();
+    const flushId = ++this.#flushId;
     try {
       while (this.#pending.size > 0) {
         const effects = [...this.#pending].sort(
@@ -36,12 +37,15 @@ export class ReactiveScheduler {
         );
         this.#pending.clear();
         for (const effect of effects) {
-          const count = (executions.get(effect) ?? 0) + 1;
-          if (count > maximumExecutionsPerFlush) {
+          if (effect.flushId === flushId) effect.flushCount += 1;
+          else {
+            effect.flushId = flushId;
+            effect.flushCount = 1;
+          }
+          if (effect.flushCount > maximumExecutionsPerFlush) {
             this.#pending.clear();
             fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
           }
-          executions.set(effect, count);
           effect.execute();
         }
       }
@@ -54,6 +58,8 @@ export class ReactiveScheduler {
 export class ReactiveEffect {
   readonly id = nextEffectId++;
   readonly dependencies = new Set<SubscriberSet>();
+  flushCount = 0;
+  flushId = 0;
   stopped = false;
   paused = false;
   #cleanup: Cleanup = undefined;
