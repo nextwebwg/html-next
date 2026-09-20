@@ -8,8 +8,8 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 80,201-byte bundle; its
-complete gzip size is 26,930 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
+`live_distributable`. Values are minified raw bytes inside the current 80,213-byte bundle; its
+complete gzip size is 26,932 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
 attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
@@ -17,13 +17,13 @@ the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 80,065 attributed minified raw bytes plus 136
+The production browser entry currently contains 80,077 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
 | Responsibility | Minified raw bytes | Native foundation under review |
 | --- | ---: | --- |
-| Reactive execution | 35,988 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
+| Reactive execution | 36,000 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
 | Declared types | 10,483 | Web IDL conversion and platform value objects |
 | Parsing and contract | 20,337 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 7,479 | CSSOM, `@scope`, template parsing, safe HTML sinks |
@@ -58,9 +58,9 @@ contains all of them for arbitrary later graphs.
 | Numeric state and handler | 412 | Direct variables, native event, microtask update |
 | Numeric computed state | 419 | Direct arithmetic in the same update |
 | Scalar and enum props | 1,715 | Generated prop boundary and shared lifecycle helper |
-| Keyed list | 16,108 | Shared general-runtime support |
-| Declared read | 16,009 | Shared general-runtime support |
-| Controller lifecycle | 15,924 | Shared general-runtime support |
+| Keyed list | 16,044 | Shared general-runtime support |
+| Declared read | 15,937 | Shared general-runtime support |
+| Controller lifecycle | 15,852 | Shared general-runtime support |
 
 The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
 They are not separate per-component runtimes. An application or library build combines the complete

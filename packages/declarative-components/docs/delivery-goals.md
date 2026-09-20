@@ -11,7 +11,7 @@ and removing universally redundant runtime machinery.
 - Contract: [live browser distributable](spec/live-browser-distributable.md)
 - Input boundary: any conforming component graph introduced during the document lifetime
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
-- Current result: 80,201 minified raw bytes and 26,930 gzip bytes
+- Current result: 80,213 minified raw bytes and 26,932 gzip bytes
 - Primary metrics: reactive-matrix execution time and production-minified bytes for the public
   browser-loader entry; gzip remains a reported transport metric
 - Required evidence: complete-capability assertion, module attribution, cross-browser conformance,
