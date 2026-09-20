@@ -8,8 +8,8 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 76,569-byte bundle; its
-complete gzip size is 25,947 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
+`live_distributable`. Values are minified raw bytes inside the current 76,223-byte bundle; its
+complete gzip size is 25,854 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
 attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
@@ -17,7 +17,7 @@ the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 76,433 attributed minified raw bytes plus 136
+The production browser entry currently contains 76,087 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
@@ -27,7 +27,7 @@ unclassified dependency fails `measure:runtime`.
 | Declared types | 7,434 | JavaScript primitives, Trusted Types, and platform value objects |
 | Parsing and contract | 20,337 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 7,479 | CSSOM, `@scope`, template parsing, safe HTML sinks |
-| Component resources | 3,022 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Component resources | 2,676 | URL, Fetch, import maps, native ESM, CORS, CSP |
 | Discovery and lifecycle | 2,161 | Shared MutationObserver, selector matching, node identity, connection state |
 
 These groups are cost attribution, not separately shipped runtimes. The complete live distributable
