@@ -35,8 +35,8 @@ field-name    = identifier | quoted-string
 keyword       = identifier | quoted-string
 ```
 
-`?` adds both `null` and the absence of a value to the preceding type. Thus `email?` is
-equivalent to `email | null | absent`. A `?` after an object field name makes that field
+`?` adds both `null` and the absence of a value to the preceding type. Thus `string?` is
+equivalent to `string | null | absent`. A `?` after an object field name makes that field
 optional; it does not change the field's value type. `...` must be the last member and makes
 an object shape open. Without it, the object is closed and undeclared fields are errors.
 
@@ -45,10 +45,10 @@ identifier is a literal string keyword. Quoting is required when a keyword conta
 or punctuation that would otherwise be grammar. Duplicate object fields and an `...` member
 that is not last are syntax errors.
 
-Examples of canonical expressions include `outline | solid | ghost`, `list(email)`,
+Examples of canonical expressions include `outline | solid | ghost`, `list(string)`,
 `record(number)`, `object({ id: integer, label?: string })`, and
 `object({ id: integer, ... })`. The expected outcome of parsing each is, respectively: a
-three-keyword union; a list of valid email strings; a string-keyed numeric record; a closed
+three-keyword union; a list of strings; a string-keyed numeric record; a closed
 object with one required and one optional field; and an open object with a required `id`.
 
 ## Terminal types
@@ -61,31 +61,16 @@ object with one required and one optional field; and an open object with a requi
 | `integer` | a finite integer or complete integer string | a number with no fractional part | base-10 integer text |
 | `null` | `null` | `null` | `null` |
 | `absent` | no supplied value | absence | no attribute/value |
-| `email` | one HTML email-address value | the address string | unchanged |
-| `url` | an absolute URL | its parsed absolute URL serialization | URL serialization |
-| `date` | a valid `YYYY-MM-DD` HTML date string | the same string | unchanged |
-| `time` | a valid HTML time string | the same string | unchanged |
-| `datetime-local` | a valid local date and time joined by `T` | the same string | unchanged |
-| `month` | a valid `YYYY-MM` HTML month string | the same string | unchanged |
-| `week` | a valid ISO week string such as `2020-W53` | the same string | unchanged |
-| `color` | a six-digit simple-color string | lowercase `#rrggbb` | the canonical color |
-| `token` | one non-empty string containing no HTML space | the same token | unchanged |
-| `ident` | an identifier, including a custom identifier beginning `--` | the same identifier | unchanged |
-| `url-value` | one non-empty, control-character-free URL value | the same string | unchanged |
-| `token-list` | a space-separated string or string array of tokens | an ordered string array | tokens joined by one space |
 | `trusted-html` | a platform `TrustedHTML` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
 | `trusted-script` | a platform `TrustedScript` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
 | `function` | a JavaScript callable supplied through a property | the same callable | property-only; serialization is an error |
 | `unknown` | any JavaScript value supplied through a property | the same value | property-only; serialization is an error |
 
-The `email`, `url`, `date`, `time`, `datetime-local`, `month`, `week`, `number`, and `color`
-spaces intentionally follow HTML input value spaces. `multiple` changes an `email` boundary
-from one address to a comma-separated ordered list. It does not change unrelated terminals.
-
-`color` is the HTML simple-color value space used by `input[type=color]`; it is not the full CSS
-`<color>` grammar. `url` is an HTML absolute URL string; `url-value` is the serializable URL
-value used where a later URL-resolution step has a base. These distinctions prevent the phrase
-“web-native type” from hiding different parsers behind one name.
+Formats such as email addresses, URLs, dates, colors, identifiers, and token lists are not
+component-contract terminals. A component declares their representation as `string` or a
+structured type and puts format constraints on the native control that owns the value. Domain
+validation and coercion can instead be supplied by an application adapter. This avoids embedding
+a second implementation of browser and application value spaces in every live component loader.
 
 `function` is the explicit callback or provider boundary. `unknown` is an escape hatch for a
 package type whose shape is owned by a separately published TypeScript contract. Both are
@@ -120,13 +105,13 @@ text boundary use JSON; they are never parsed through JavaScript object-literal 
 never serialized with implicit `String(object)` coercion.
 
 A closed object reports every unknown own field. An open object preserves unknown fields without
-claiming a type for them. A missing required field reports `schemaMismatch`; an optional field is
+claiming a type for them. A missing required field reports `typeMismatch`; an optional field is
 omitted from the canonical value. Parsing continues after a member failure, so one result can
 identify every invalid path.
 
 Paths begin at `$`, use `.name` for identifier keys, bracketed JSON strings for other keys, and
-zero-based brackets for list positions. For example, a bad second tag and absent account email
-produce `$.tags[1]` and `$.account.email`. Paths are stable across runtimes and generated targets.
+zero-based brackets for list positions. For example, a bad second tag and absent account name
+produce `$.tags[1]` and `$.account.name`. Paths are stable across runtimes and generated targets.
 
 ## Data validation and coercion
 
@@ -144,14 +129,14 @@ not interpret or fetch that description.
 
 Parsing returns either `{ ok: true, value }` or `{ ok: false, issues }`. Each issue has a stable
 `reason`, human-readable `message`, and `path`. The type-layer reasons are `typeMismatch`,
-`badInput`, `schemaMismatch`, and `untrustedValue`.
+`badInput`, and `untrustedValue`.
 
-Serialization first validates and canonicalizes. Scalars use the terminal rule above;
-`token-list` joins with one HTML space; and list, record, and object values use JSON. Trusted
+Serialization first validates and canonicalizes. Scalars use the terminal rule above; list,
+record, and object values use JSON. Trusted
 content is property-only. A serializer must reject an invalid value rather than silently coerce
 it.
 
-TypeScript projections are mechanical: strings and web string spaces project to `string`;
+TypeScript projections are mechanical: strings project to `string`;
 numeric terminals to `number`; `function` to a callable of unknown arguments and result;
 `unknown` to `unknown`; keywords to string literals; unions to TypeScript unions;
 `list(T)` to `readonly T[]`; `record(T)` to `Readonly<Record<string, T>>`; and object shapes to
