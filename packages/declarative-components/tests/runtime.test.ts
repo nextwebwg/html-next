@@ -96,8 +96,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           '<template component="registered-button" status="early" summary="Registered adapter fixture.">' +
-          '<defs><prop name="label" type="string" default="">Accessible label.</prop></defs>' +
-          '<button :aria-label="label"><slot></slot></button></template><main></main>',
+          '<defs><prop name="label" type="string" default="">Accessible label.</prop>' +
+          '<prop name="payload" type="object({ value: string }) | null">Structured payload.</prop></defs>' +
+          '<button :aria-label="label" .payload="payload"><slot></slot></button></template><main></main>',
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(() => {
@@ -108,11 +109,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const detach = window.HtmlRuntime.attachRegisteredComponent(
             root,
             "registered-button",
-            { props: { label: "Save changes" } },
+            { props: { label: "Save changes", payload: null } },
           );
           const result = {
             root: root.localName,
             label: root.getAttribute("aria-label"),
+            payload: root.payload,
+            reflectedPayload: root.hasAttribute("data-payload"),
             text: root.textContent,
             customElement: customElements.get("registered-button") !== undefined,
           };
@@ -122,6 +125,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         assert.deepEqual(result, {
           root: "button",
           label: "Save changes",
+          payload: null,
+          reflectedPayload: false,
           text: "Save",
           customElement: false,
         });
