@@ -6,9 +6,10 @@ State is per component instance. Computed values are pure expressions over decla
 
 External property changes, controller writes, control bindings, data transitions, and declarative handlers enter the same scheduler. Disconnect runs owned cleanup. Reconnection creates no duplicate listener, observer, timer, or request.
 
-Each effect may execute at most 100 times while one change set is being drained. Crossing
-that bound clears pending work and reports `HR006`. Cyclic write graphs therefore terminate
-with a stable diagnostic while independent wide fan-out continues normally.
+One change set may propagate through at most 100 dependency-ordered queue rounds. Crossing that
+depth clears pending work and reports `HR006`. Cyclic write graphs therefore terminate with a
+stable diagnostic while independent wide fan-out continues normally. This bounds causality depth,
+not the number of independent effects in one round.
 
 ## Structural regions
 

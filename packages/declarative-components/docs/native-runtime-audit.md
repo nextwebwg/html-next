@@ -8,8 +8,8 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 79,648-byte bundle; its
-complete gzip size is 26,768 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
+`live_distributable`. Values are minified raw bytes inside the current 80,201-byte bundle; its
+complete gzip size is 26,930 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
 attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
@@ -17,17 +17,17 @@ the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 79,512 attributed minified raw bytes plus 136
+The production browser entry currently contains 80,065 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
 | Responsibility | Minified raw bytes | Native foundation under review |
 | --- | ---: | --- |
-| Reactive execution | 35,470 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
-| Declared types | 10,484 | Web IDL conversion and platform value objects |
+| Reactive execution | 35,988 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
+| Declared types | 10,483 | Web IDL conversion and platform value objects |
 | Parsing and contract | 20,337 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
-| Style and content policy | 7,472 | CSSOM, `@scope`, template parsing, safe HTML sinks |
-| Component resources | 3,588 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Style and content policy | 7,479 | CSSOM, `@scope`, template parsing, safe HTML sinks |
+| Component resources | 3,617 | URL, Fetch, import maps, native ESM, CORS, CSP |
 | Discovery and lifecycle | 2,161 | Shared MutationObserver, selector matching, node identity, connection state |
 
 These groups are cost attribution, not separately shipped runtimes. The complete live distributable
@@ -37,7 +37,7 @@ contains all of them for arbitrary later graphs.
 | --- | --- | --- | --- |
 | Component HTML parsing | `<template>`, the HTML parser, DOM traversal, native element/property introspection | Proposal grammar, declarations, diagnostics, and contract construction | The live parser reads the browser's inert DOM directly instead of cloning a parse5-shaped tree. Shared parsing owns definition safety, so live mounting avoids a second recursive safety traversal. Attribute reads use `getAttribute()` and traverse the browser's `NamedNodeMap`; traversal-only child passes iterate native `NodeList` objects. A 200-element attribute-read/scan microbenchmark measured the native path at 3.8x in Chromium, 3.9x in Firefox, and 4.1x in WebKit; source-adapter parity passes all three engines. These parser cuts remove 534 raw and 101 gzip bytes from the complete baseline while browser bundles contain zero `parse5` and zero generated DOM-property inventory modules. |
 | Component discovery and lifecycle | `MutationObserver`, selector matching, `Node.isConnected`, native `connect`/`disconnect` events | One realm-global document subscriber hub and one component lifecycle coordinator | Owner-approved shape: definition changes update one cached tag selector; added scopes are queried against it, and matching elements resolve through the registry map. Mutation batches allocate work only for actual matches instead of every registered component. Removed scopes are queried only for marked component roots, and connected instances own their cleanup and reconnect work. Definitions retain only runtime-consumed data. |
-| Reactive scheduling | Native events, property access, `queueMicrotask()` | Dependency collection for proposal state, computed values, and effects | `reactivity.ts` contributes 3,796 raw live-loader bytes. Static, numeric state, numeric computed, and scalar-prop generated components compile this layer away. Retention for dynamic live expressions remains pending owner review. |
+| Reactive scheduling | Native events, property access, `queueMicrotask()` | Dependency collection for proposal state, computed values, and effects | `reactivity.ts` contributes 4,264 raw live-loader bytes. The measured scheduler resolves local cells once, avoids empty cleanup writes, batches uncontended fan-out, skips sorting already ordered queues, and bounds cycles by propagation depth. Static, numeric state, numeric computed, and scalar-prop generated components compile this layer away. Retention for dynamic live expressions remains pending owner review. |
 | Expressions | JavaScript primitives and native string/number operations | CSP-safe parser, typed operations, missing-value semantics, dependency paths, and diagnostics | `expression.ts` contributes 6,699 raw live-loader bytes. Its direct regex/precedence parser eliminates token arrays and improves the measured unique-compile and compiled-evaluation workloads while preserving the public AST. Generated output emits only expressions whose semantics it can prove; all other shapes retain the interpreter. |
 | Public props | Element properties, attributes, `MutationObserver`, native scalar conversion | Declared type boundary, reflection batching, and property-only values | Direct scalar and enum props produce a 1,715-byte gzip fixture. The contract and type boundary share one recursive-freeze implementation. Complex prop codecs still pull the full runtime and are an active generated-output target. |
 | Keyed lists | `Map`, comment range markers, `ParentNode.moveBefore()` where implemented, and `insertBefore()` compatibility | Duplicate-key diagnostics and a longest-increasing-subsequence choice of which blocks to move | Owner approved the LIS layer for keyed `$each`. A distant 1,000-row swap moves two blocks instead of roughly 1,000. Chromium and Firefox use state-preserving `moveBefore()`; WebKit currently uses `insertBefore()`. |
@@ -58,9 +58,9 @@ contains all of them for arbitrary later graphs.
 | Numeric state and handler | 412 | Direct variables, native event, microtask update |
 | Numeric computed state | 419 | Direct arithmetic in the same update |
 | Scalar and enum props | 1,715 | Generated prop boundary and shared lifecycle helper |
-| Keyed list | 15,944 | Shared general-runtime support |
-| Declared read | 15,846 | Shared general-runtime support |
-| Controller lifecycle | 15,761 | Shared general-runtime support |
+| Keyed list | 16,108 | Shared general-runtime support |
+| Declared read | 16,009 | Shared general-runtime support |
+| Controller lifecycle | 15,924 | Shared general-runtime support |
 
 The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
 They are not separate per-component runtimes. An application or library build combines the complete
