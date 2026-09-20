@@ -54,10 +54,12 @@ export class ReactiveScheduler {
     if (this.#flushing || this.#pending.length > 0) return false;
     for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
       subscription = subscription.nextSubscriber) {
-      if (subscription.effect.scheduler !== this) return false;
-    }
-    for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
-      subscription = subscription.nextSubscriber) {
+      if (subscription.effect.scheduler !== this) {
+        // Entry requires an empty queue and scheduling starts only after this loop, so the
+        // partially collected batch is private and can be discarded before the safe fallback.
+        this.#pending = [];
+        return false;
+      }
       this.#pending.push(subscription.effect);
     }
     if (!this.#scheduled) {

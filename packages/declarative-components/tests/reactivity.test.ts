@@ -103,4 +103,26 @@ describe("reactive scope", () => {
     scope.scheduler.flush();
     assert.equal(runs, 400);
   });
+
+  it("falls back without duplicating effects when one dependency spans schedulers", async () => {
+    const shared = { value: 0 };
+    const first = new ReactiveScope([["shared", shared]]);
+    const second = new ReactiveScope([["shared", shared]]);
+    let firstRuns = 0;
+    let secondRuns = 0;
+    createEffect(first.scheduler, () => {
+      void (first.get("shared") as typeof shared).value;
+      firstRuns += 1;
+    });
+    createEffect(second.scheduler, () => {
+      void (second.get("shared") as typeof shared).value;
+      secondRuns += 1;
+    });
+
+    (first.get("shared") as typeof shared).value = 1;
+    await Promise.resolve();
+
+    assert.equal(firstRuns, 2);
+    assert.equal(secondRuns, 2);
+  });
 });
