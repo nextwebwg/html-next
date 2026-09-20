@@ -36,8 +36,7 @@ export class ReactiveScheduler {
   #flushing = false;
 
   enqueue(effect: ReactiveEffect): void {
-    if (effect.stopped || effect.queued) return;
-    effect.queued = true;
+    if (effect.stopped || this.#pending.includes(effect)) return;
     this.#pending.push(effect);
     if (!this.#scheduled && !this.#flushing) {
       this.#scheduled = true;
@@ -58,7 +57,6 @@ export class ReactiveScheduler {
           (left, right) => left.priority - right.priority || left.id - right.id,
         );
         this.#pending = [];
-        for (const effect of effects) effect.queued = false;
         for (const effect of effects) {
           if (effect.flushId === flushId) effect.flushCount += 1;
           else {
@@ -66,7 +64,6 @@ export class ReactiveScheduler {
             effect.flushCount = 1;
           }
           if (effect.flushCount > maximumExecutionsPerFlush) {
-            for (const pending of this.#pending) pending.queued = false;
             this.#pending = [];
             fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
           }
@@ -86,7 +83,6 @@ export class ReactiveEffect {
   flushId = 0;
   stopped = false;
   paused = false;
-  queued = false;
   #cleanup: Cleanup = undefined;
   #dependencyTail: Subscription | undefined = undefined;
 
