@@ -1,7 +1,11 @@
 import { fail } from "./diagnostics.js";
 import type { ComponentGraphNode } from "./graph.js";
+import type { ComponentHost } from "./runtime.js";
 
-export type Controller = (host: unknown) => void | (() => void) | Promise<void | (() => void)>;
+/** A component controller invoked with the instance's lifecycle-owned host. */
+export type Controller = (
+  host: ComponentHost,
+) => void | (() => void) | Promise<void | (() => void)>;
 export type ModuleImporter = (url: string) => Promise<unknown>;
 export interface ControllerModule {
   readonly default: Controller;

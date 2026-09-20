@@ -2,9 +2,135 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import { evaluate } from "../src/expression.js";
-import { createEffect, ReactiveScope } from "../src/reactivity.js";
+import {
+  createComputed,
+  createEffect,
+  createSignal,
+  ReactiveScope,
+} from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("leaves unobserved computed values unevaluated until they are read", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(0);
+    let runs = 0;
+    const doubled = createComputed(scheduler, () => {
+      runs += 1;
+      return source.get() * 2;
+    });
+
+    source.set(1);
+    source.set(2);
+    scheduler.flush();
+    assert.equal(runs, 0);
+
+    assert.equal(doubled.get(), 4);
+    assert.equal(doubled.get(), 4);
+    assert.equal(runs, 1);
+
+    source.set(3);
+    scheduler.flush();
+    assert.equal(runs, 1);
+    assert.equal(doubled.get(), 6);
+    assert.equal(runs, 2);
+  });
+
+  it("keeps named scope computations lazy", () => {
+    const scope = new ReactiveScope([["source", 1]]);
+    let runs = 0;
+    scope.defineComputed("doubled", () => {
+      runs += 1;
+      return Number(scope.get("source")) * 2;
+    });
+
+    scope.set("source", 2);
+    scope.scheduler.flush();
+    assert.equal(runs, 0);
+    assert.equal(scope.get("doubled"), 4);
+    assert.equal(runs, 1);
+  });
+
+  it("validates an observed chain without rerunning effects for an equal final result", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(0);
+    let bucketRuns = 0;
+    let labelRuns = 0;
+    let effectRuns = 0;
+    const bucket = createComputed(scheduler, () => {
+      bucketRuns += 1;
+      return source.get() === 0 ? "empty" : "ready";
+    });
+    const label = createComputed(scheduler, () => {
+      labelRuns += 1;
+      return `Status: ${bucket.get()}`;
+    });
+    createEffect(scheduler, () => {
+      effectRuns += 1;
+      label.get();
+    });
+
+    source.set(1);
+    scheduler.flush();
+    assert.deepEqual([bucketRuns, labelRuns, effectRuns], [2, 2, 2]);
+
+    source.set(2);
+    scheduler.flush();
+    assert.deepEqual([bucketRuns, labelRuns, effectRuns], [3, 3, 2]);
+  });
+
+  it("deduplicates a demanded computed diamond", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(1);
+    const left = createComputed(scheduler, () => source.get() + 1);
+    const right = createComputed(scheduler, () => source.get() * 2);
+    let joinedRuns = 0;
+    const joined = createComputed(scheduler, () => {
+      joinedRuns += 1;
+      return left.get() + right.get();
+    });
+    let observed = 0;
+    createEffect(scheduler, () => { observed = joined.get(); });
+
+    source.set(2);
+    scheduler.flush();
+    assert.equal(observed, 7);
+    assert.equal(joinedRuns, 2);
+  });
+
+  it("reports a lazy computed cycle when the value is demanded", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    let left!: { get(): number };
+    let right!: { get(): number };
+    left = createComputed(scheduler, () => right.get() + 1);
+    right = createComputed(scheduler, () => left.get() + 1);
+
+    assert.throws(
+      () => left.get(),
+      (error: unknown) => error instanceof Error && error.message.includes("HR006"),
+    );
+  });
+
+  it("allows an explicit read while paused without reattaching reactive work", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(1);
+    let runs = 0;
+    const doubled = createComputed(scheduler, () => {
+      runs += 1;
+      return source.get() * 2;
+    });
+
+    doubled.pause();
+    assert.equal(doubled.get(), 2);
+    source.set(2);
+    scheduler.flush();
+    assert.equal(doubled.get(), 4);
+    assert.equal(runs, 2);
+
+    doubled.resume();
+    assert.equal(doubled.get(), 4);
+    assert.equal(runs, 3);
+  });
+
   it("coalesces writes, propagates computed values first, and skips unrelated effects", async () => {
     const scope = new ReactiveScope([
       ["state", { count: 1, unrelated: 0 }],

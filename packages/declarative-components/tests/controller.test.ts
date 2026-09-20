@@ -5,6 +5,7 @@ import { clearControllerCache, loadController } from "../src/controller.js";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { buildComponentGraph } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
+import type { ComponentHost } from "../src/runtime.js";
 
 async function controllerNode() {
   const root = "https://cdn.example/ui/";
@@ -30,8 +31,9 @@ describe("controller loading", () => {
     };
     const first = await loadController(node, importer);
     const second = await loadController(node, importer);
-    first({});
-    second({});
+    const host = {} as ComponentHost;
+    first(host);
+    second(host);
     assert.equal(imports, 1);
     assert.equal(calls, 2);
   });
