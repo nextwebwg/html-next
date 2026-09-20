@@ -20,6 +20,16 @@ interface FrameworkResult {
 const warmupSamples = 2;
 const measuredSamples = 5;
 const processSamples = 5;
+// Longer timed sections reduce scheduler noise; stability is still established by comparing
+// independent fresh-process matrix runs rather than these repeated in-process samples.
+const iterationScaleArgument = process.argv.find((argument) =>
+  argument.startsWith("--iteration-scale="));
+const iterationScale = iterationScaleArgument === undefined
+  ? 1
+  : Number(iterationScaleArgument.slice("--iteration-scale=".length));
+if (!Number.isSafeInteger(iterationScale) || iterationScale < 1) {
+  throw new Error("Iteration scale must be a positive integer.");
+}
 
 function htmlNextFramework(): BenchmarkFramework {
   const scope = new ReactiveScope();
@@ -235,7 +245,7 @@ function measureFramework(create: () => BenchmarkFramework): FrameworkResult {
   for (const workload of workloads) {
     const samples: number[] = [];
     for (let sample = 0; sample < warmupSamples + measuredSamples; sample += 1) {
-      const value = workload.run(create(), workload.iterations);
+      const value = workload.run(create(), workload.iterations * iterationScale);
       if (sample >= warmupSamples) samples.push(value);
     }
     results[workload.name] = median(samples);
@@ -273,6 +283,7 @@ if (frameworkIndexArgument !== undefined) {
       "tsx",
       script,
       `--framework-index=${frameworkIndex}`,
+      ...(iterationScaleArgument === undefined ? [] : [iterationScaleArgument]),
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return JSON.parse(output) as FrameworkResult;
   };
