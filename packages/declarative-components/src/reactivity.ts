@@ -79,7 +79,14 @@ export class ReactiveScheduler {
       while (this.#pending.length > 0) {
         const effects = this.#pending;
         if (effects.length > 1) {
-          effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
+          let index = 1;
+          while (index < effects.length &&
+            (effects[index - 1]!.priority < effects[index]!.priority ||
+              (effects[index - 1]!.priority === effects[index]!.priority &&
+                effects[index - 1]!.id < effects[index]!.id))) index += 1;
+          if (index < effects.length) {
+            effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
+          }
         }
         this.#pending = [];
         let index = 0;
