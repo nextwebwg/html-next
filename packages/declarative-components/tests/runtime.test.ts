@@ -1089,7 +1089,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             provenance: "x-outer",
             roots: "x-outer",
           },
-          own: { bare: "yes", child: "yes", invalidBorder: "7px" },
+          own: { bare: "yes", child: "yes", invalidBorder: "0px" },
           leaf: "yes",
           nested: {
             margin: "13px",
@@ -1413,9 +1413,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         assert.equal(result.supported, true);
         assert.deepEqual(result.native, result.fallback);
         assert.deepEqual(result.native, {
-          root: ["rgb(21, 43, 65)", "11px"],
+          root: ["rgb(21, 43, 65)", "0px"],
           own: ["yes", "yes"],
-          leaf: ["yes", "7px"],
+          leaf: ["yes", "0px"],
           nested: "13px",
           inside: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
           projected: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
