@@ -1,9 +1,5 @@
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
-import {
-  isWithinTrustRoot,
-  type ComponentResourceResolver,
-  type ResolvedResource,
-} from "./resolve.js";
+import type { ComponentResourceResolver, ResolvedResource } from "./resolve.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface FetchedComponent {
@@ -60,25 +56,6 @@ interface DraftNode {
   complete: boolean;
 }
 
-class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
-  readonly #map: Map<K, V>;
-
-  constructor(entries: Iterable<readonly [K, V]>) {
-    this.#map = new Map(entries);
-  }
-
-  get size(): number { return this.#map.size; }
-  get(key: K): V | undefined { return this.#map.get(key); }
-  has(key: K): boolean { return this.#map.has(key); }
-  entries(): MapIterator<[K, V]> { return this.#map.entries(); }
-  keys(): MapIterator<K> { return this.#map.keys(); }
-  values(): MapIterator<V> { return this.#map.values(); }
-  [Symbol.iterator](): MapIterator<[K, V]> { return this.#map[Symbol.iterator](); }
-  forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-    this.#map.forEach((value, key) => callbackfn.call(thisArg, value, key, this));
-  }
-}
-
 export async function buildComponentGraph(
   rootSpecifiers: readonly string[],
   options: BuildGraphOptions,
@@ -132,30 +109,11 @@ export async function buildComponentGraph(
     drafts.set(finalURL, draft);
 
     if (definition.controller !== undefined) {
-      let controller: ResolvedResource;
-      try {
-        controller = options.resolver.resolveDependency(
-          definition.controller,
-          finalURL,
-          resource.trustRoot,
-        );
-      } catch (error) {
-        if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
-          fail(
-            "HL005",
-            `Controller \`${definition.controller}\` is outside the component's approved root.`,
-            finalURL,
-          );
-        }
-        throw error;
-      }
-      if (!isWithinTrustRoot(controller.url, resource.trustRoot)) {
-        fail(
-          "HL005",
-          `Controller \`${definition.controller}\` is outside the component's approved root.`,
-          finalURL,
-        );
-      }
+      const controller = options.resolver.resolveDependency(
+        definition.controller,
+        finalURL,
+        resource.trustRoot,
+      );
       draft.controller = Object.freeze({ specifier: definition.controller, url: controller.url });
     }
 
@@ -187,7 +145,7 @@ export async function buildComponentGraph(
   }
   return Object.freeze({
     roots: Object.freeze(roots),
-    nodes: new ImmutableMap(nodeEntries),
-    tags: new ImmutableMap(Array.from(tags).sort(([left], [right]) => left.localeCompare(right))),
+    nodes: new Map(nodeEntries),
+    tags: new Map(Array.from(tags).sort(([left], [right]) => left.localeCompare(right))),
   });
 }

@@ -78,15 +78,19 @@ describe("component graph", () => {
     assert.equal(graph.nodes.get(`${root}b.html`)?.shadowedByCustomElement, true);
   });
 
-  it("rejects trust-root escapes before registration", async () => {
-    await expectDiagnostic("HL003", () => buildComponentGraph(["@ui/app.html"], {
+  it("leaves dependency, redirect, and controller authority to URL resolution and the platform", async () => {
+    const escaped = await buildComponentGraph(["@ui/app.html"], {
       resolver: resolver(),
       fetchComponent: fetcher({
         [`${root}app.html`]: component("x-app", `<link rel="component" href="../escape.html">`),
+        ["https://cdn.example/ui/escape.html"]: component("x-escape"),
       }).fetchComponent,
-    }));
+    });
+    assert.deepEqual(escaped.nodes.get(`${root}app.html`)?.dependencies, [
+      "https://cdn.example/ui/escape.html",
+    ]);
 
-    await expectDiagnostic("HL004", () => buildComponentGraph(["@ui/app.html"], {
+    const redirected = await buildComponentGraph(["@ui/app.html"], {
       resolver: resolver(),
       fetchComponent: fetcher({
         [`${root}app.html`]: {
@@ -94,14 +98,19 @@ describe("component graph", () => {
           source: component("x-app"),
         },
       }).fetchComponent,
-    }));
+    });
+    assert.deepEqual(redirected.roots, ["https://evil.example/app.html"]);
 
-    await expectDiagnostic("HL005", () => buildComponentGraph(["@ui/app.html"], {
+    const controlled = await buildComponentGraph(["@ui/app.html"], {
       resolver: resolver(),
       fetchComponent: fetcher({
         [`${root}app.html`]: component("x-app", "", "https://evil.example/app.js"),
       }).fetchComponent,
-    }));
+    });
+    assert.equal(
+      controlled.nodes.get(`${root}app.html`)?.controller?.url,
+      "https://evil.example/app.js",
+    );
   });
 
   it("rejects tag collisions and active or policy-changing resource markup", async () => {

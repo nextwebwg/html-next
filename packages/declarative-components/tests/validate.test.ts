@@ -52,14 +52,14 @@ describe("shared validation", () => {
   });
 
   it("returns multiple failures with stable paths", () => {
-    const validity = validate({ contact: "bad", count: 1.5, extra: true }, {
-      type: "object({ contact: email, count: integer })",
+    const validity = validate({ contact: 42, count: 1.5, extra: true }, {
+      type: "object({ contact: string, count: integer })",
     });
     assert.equal(validity.valid, false);
     assert.deepEqual(validity.errors.map((error) => [error.reason, error.path]), [
       ["typeMismatch", "$.contact"],
       ["typeMismatch", "$.count"],
-      ["schemaMismatch", "$.extra"],
+      ["typeMismatch", "$.extra"],
     ]);
   });
 

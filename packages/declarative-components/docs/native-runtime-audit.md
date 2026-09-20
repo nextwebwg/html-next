@@ -8,8 +8,8 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 80,213-byte bundle; its
-complete gzip size is 26,932 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
+`live_distributable`. Values are minified raw bytes inside the current 76,223-byte bundle; its
+complete gzip size is 25,854 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
 attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
@@ -17,17 +17,17 @@ the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 80,077 attributed minified raw bytes plus 136
+The production browser entry currently contains 76,087 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
 | Responsibility | Minified raw bytes | Native foundation under review |
 | --- | ---: | --- |
 | Reactive execution | 36,000 | DOM identity and updates, events, microtasks, connection state, Fetch, cancellation, native ESM |
-| Declared types | 10,483 | Web IDL conversion and platform value objects |
+| Declared types | 7,434 | JavaScript primitives, Trusted Types, and platform value objects |
 | Parsing and contract | 20,337 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 7,479 | CSSOM, `@scope`, template parsing, safe HTML sinks |
-| Component resources | 3,617 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Component resources | 2,676 | URL, Fetch, import maps, native ESM, CORS, CSP |
 | Discovery and lifecycle | 2,161 | Shared MutationObserver, selector matching, node identity, connection state |
 
 These groups are cost attribution, not separately shipped runtimes. The complete live distributable
@@ -43,11 +43,11 @@ contains all of them for arbitrary later graphs.
 | Keyed lists | `Map`, comment range markers, `ParentNode.moveBefore()` where implemented, and `insertBefore()` compatibility | Duplicate-key diagnostics and a longest-increasing-subsequence choice of which blocks to move | Owner approved the LIS layer for keyed `$each`. A distant 1,000-row swap moves two blocks instead of roughly 1,000. Chromium and Firefox use state-preserving `moveBefore()`; WebKit currently uses `insertBefore()`. |
 | Declared reads | `fetch()`, `URL`, `URLSearchParams`, `AbortController`, response body readers, and timers | Parameter dependency updates, debounce/poll policy, stale-result suppression, state projection, and an optional application adaptation hook | Response-schema enforcement is not a core component concern. The runtime publishes decoded values directly unless a low-level `DataResource` consumer supplies an `adapt` callback; JSON Schema and domain codecs remain optional application or build-tool adapters. |
 | Native form participation | Native `<form>`, form ownership, successful controls, constraint validation, and submission | Preserve component-rendered controls as ordinary DOM controls | Request enhancement is independently available from `@nextwebwg/html-forms`; Declarative Components does not import or re-export it. |
-| Declared type enforcement | Element properties, attributes, native scalar conversion | Parse and serialize types explicitly authored by a component contract | Type enforcement remains at prop, event, and other declared contract boundaries. External response validation is available through `DataResource.adapt`; opt-in validation utilities remain package APIs but are not installed by the browser runtime. Removing JSON Schema and generalized-element validity from core cut 18,370 minified raw bytes and 5,456 gzip bytes from the measured baseline. |
+| Declared type enforcement | Element properties, attributes, native scalar conversion and constraint validation | Parse and serialize structural types explicitly authored by a component contract | Type enforcement remains at prop, event, and other declared contract boundaries. HTML formats such as email, URL, date, color, identifier, and token syntax use native-control constraints or an opt-in validation adapter rather than being universal contract terminals. External response validation is available through `DataResource.adapt`; opt-in validation utilities remain package APIs but are not installed by the browser runtime. These boundary corrections cut 20,854 minified raw bytes and 6,147 gzip bytes from the measured baseline. |
 | Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the 696-byte minified raw `sanitize.ts` implementation across engines. Definition validation now imports this module's URL-attribute and executable-scheme policy instead of carrying a second copy. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
 | Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style elements | Live-source selector transformation and portable generated-target scoping | The live runtime requires native `@scope` (Chrome 118+, Safari 17.4+, Firefox 146+) and uses a scope-only compiler path. Generated targets retain provenance-attribute scoping for older engines. Native validity selectors retain their browser meaning; the component transformer no longer expands them to private mirrored attributes. |
-| Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 15,761 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
-| Resource graphs and import maps | `URL`, `fetch()`, native module loading, and application import-map markup | HTML component dependency graph, trust-root enforcement, redirect checks, and import-map snapshot resolution | `graph.ts`, `resolve.ts`, `browser-source.ts`, and `browser-loader.ts` contribute 6,583 raw live-loader bytes together. Browsers apply import maps to modules but expose no equivalent general component-resource resolver. Retention of the trust and graph policy remains pending owner review. |
+| Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 14,983 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
+| Resource graphs and import maps | `URL`, `fetch()`, CORS, CSP, native module loading, and application import-map markup | HTML component dependency graph, duplicate-tag checks, and import-map snapshot resolution | The live path no longer imposes a directory-prefix trust root or second redirect policy: relative paths, cross-origin responses, and controllers use the same platform authority boundaries as Fetch and ESM. Browsers apply import maps to modules but expose no equivalent general component-resource resolver, so graph construction and the application-owned map snapshot remain. |
 | Hydration and adoption | Existing DOM identity, selectors, control state, focus, and selection APIs | Matching server-lowered roots to definitions and attaching only authored behavior | Cross-browser tests preserve node identity and live form-control state. `pnpm measure:hydration` reports server-DOM adoption and fresh lowering separately while asserting identity, edit, focus, and selection preservation on every sample. |
 
 ## Native-build capability fixtures
@@ -58,9 +58,9 @@ contains all of them for arbitrary later graphs.
 | Numeric state and handler | 412 | Direct variables, native event, microtask update |
 | Numeric computed state | 419 | Direct arithmetic in the same update |
 | Scalar and enum props | 1,715 | Generated prop boundary and shared lifecycle helper |
-| Keyed list | 16,044 | Shared general-runtime support |
-| Declared read | 15,937 | Shared general-runtime support |
-| Controller lifecycle | 15,852 | Shared general-runtime support |
+| Keyed list | 15,178 | Shared general-runtime support |
+| Declared read | 15,070 | Shared general-runtime support |
+| Controller lifecycle | 14,983 | Shared general-runtime support |
 
 The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
 They are not separate per-component runtimes. An application or library build combines the complete

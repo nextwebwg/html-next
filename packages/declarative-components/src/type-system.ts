@@ -9,18 +9,6 @@ export type TerminalTypeName =
   | "integer"
   | "null"
   | "absent"
-  | "email"
-  | "url"
-  | "date"
-  | "time"
-  | "datetime-local"
-  | "month"
-  | "week"
-  | "color"
-  | "token"
-  | "ident"
-  | "url-value"
-  | "token-list"
   | "trusted-html"
   | "trusted-script"
   | "function"
@@ -78,7 +66,7 @@ export type TypeInput =
   | "number"
   | { readonly enum: readonly string[] };
 
-export type TypeIssueReason = "typeMismatch" | "badInput" | "schemaMismatch" | "untrustedValue";
+export type TypeIssueReason = "typeMismatch" | "badInput" | "untrustedValue";
 
 export interface TypeIssue {
   readonly reason: TypeIssueReason;
@@ -96,9 +84,8 @@ export interface TrustedContentValue {
 }
 
 const TERMINALS = new Set<TerminalTypeName>([
-  "string", "boolean", "number", "integer", "null", "absent", "email", "url",
-  "date", "time", "datetime-local", "month", "week", "color", "token", "ident",
-  "url-value", "token-list", "trusted-html", "trusted-script", "function", "unknown",
+  "string", "boolean", "number", "integer", "null", "absent",
+  "trusted-html", "trusted-script", "function", "unknown",
 ]);
 
 export class TypeSyntaxError extends SyntaxError {
@@ -296,10 +283,7 @@ export function typeScriptType(type: TypeInput): string {
     case "terminal": {
       const values: Readonly<Record<TerminalTypeName, string>> = {
         string: "string", boolean: "boolean", number: "number", integer: "number",
-        null: "null", absent: "undefined", email: "string", url: "string", date: "string",
-        time: "string", "datetime-local": "string", month: "string", week: "string",
-        color: "string", token: "string", ident: "string", "url-value": "string",
-        "token-list": "readonly string[]", "trusted-html": "TrustedHTML",
+        null: "null", absent: "undefined", "trusted-html": "TrustedHTML",
         "trusted-script": "TrustedScript", "function": "(...args: readonly unknown[]) => unknown",
         unknown: "unknown",
       };
@@ -345,41 +329,6 @@ function structuredInput(value: unknown): unknown {
   catch { return Symbol.for("html-next.bad-json"); }
 }
 
-function validEmail(value: string): boolean {
-  if (value.length > 254 || /\s/.test(value)) return false;
-  const match = /^([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+)@([A-Za-z0-9.-]+)$/.exec(value);
-  if (match === null || match[1]!.length > 64) return false;
-  return match[2]!.split(".").every((label) =>
-    label !== "" && label.length <= 63 && !label.startsWith("-") && !label.endsWith("-"),
-  );
-}
-
-function validDate(value: string): boolean {
-  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null || match[1] === "0000") return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
-
-function validTime(value: string): boolean {
-  const match = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
-  return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60 && Number(match[3] ?? 0) < 60;
-}
-
-function validWeek(value: string): boolean {
-  const match = /^(\d{4,})-W(\d{2})$/.exec(value);
-  if (match === null || match[1] === "0000") return false;
-  const year = Number(match[1]);
-  const week = Number(match[2]);
-  if (week < 1 || week > 53) return false;
-  if (week < 53) return true;
-  const jan1 = new Date(Date.UTC(year, 0, 1)).getUTCDay();
-  return jan1 === 4 || (jan1 === 3 && new Date(Date.UTC(year, 1, 29)).getUTCDate() === 29);
-}
-
 function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
   if (typeof value !== "object" || value === null) return false;
   if ((value as { kind?: unknown }).kind === type && "value" in value) return true;
@@ -407,54 +356,6 @@ function parseTerminal(value: unknown, name: TerminalTypeName, path: string): Ty
     }
     case "null": return value === null ? { ok: true, value: null } : issue("typeMismatch", "Must be null.", path);
     case "absent": return value === undefined ? { ok: true, value: undefined } : issue("typeMismatch", "Must be absent.", path);
-    case "email":
-      return typeof value === "string" && validEmail(value)
-        ? { ok: true, value }
-        : issue("typeMismatch", "Must be a valid email address.", path);
-    case "url": {
-      if (typeof value !== "string") return issue("typeMismatch", "Must be a URL.", path);
-      try {
-        const parsed = new URL(value);
-        return parsed.protocol !== "" ? { ok: true, value: parsed.href } : issue("typeMismatch", "Must be an absolute URL.", path);
-      } catch { return issue("typeMismatch", "Must be a valid absolute URL.", path); }
-    }
-    case "date": return typeof value === "string" && validDate(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be a valid date (YYYY-MM-DD).", path);
-    case "time": return typeof value === "string" && validTime(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be a valid time.", path);
-    case "datetime-local": {
-      if (typeof value !== "string") return issue("typeMismatch", "Must be a local date and time.", path);
-      const parts = value.split("T");
-      return parts.length === 2 && validDate(parts[0]!) && validTime(parts[1]!)
-        ? { ok: true, value }
-        : issue("typeMismatch", "Must be a valid local date and time.", path);
-    }
-    case "month": return typeof value === "string" && /^(?!0000)\d{4,}-(?:0[1-9]|1[0-2])$/.test(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be a valid month.", path);
-    case "week": return typeof value === "string" && validWeek(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be a valid ISO week.", path);
-    case "color": return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)
-      ? { ok: true, value: value.toLowerCase() } : issue("typeMismatch", "Must be a six-digit sRGB color.", path);
-    case "token": return typeof value === "string" && value !== "" && !/[\t\n\f\r ]/.test(value)
-      ? { ok: true, value } : issue("typeMismatch", "Must be one non-empty HTML token.", path);
-    case "ident": {
-      // Non-ASCII code points are valid identifier characters in this conservative projection.
-      // oxlint-disable-next-line eslint/no-control-regex
-      return typeof value === "string" && /^-?(?:-?[A-Za-z_]|[^\0-\x7f])(?:[A-Za-z0-9_-]|[^\0-\x7f])*$/.test(value) && !/^--$/.test(value)
-        ? { ok: true, value } : issue("typeMismatch", "Must be an identifier.", path);
-    }
-    case "url-value": {
-      // URL values reject all ASCII control characters.
-      // oxlint-disable-next-line eslint/no-control-regex
-      return typeof value === "string" && value.trim() !== "" && !/[\u0000-\u001f\u007f]/.test(value)
-        ? { ok: true, value } : issue("typeMismatch", "Must be a URL value.", path);
-    }
-    case "token-list": {
-      const tokens = Array.isArray(value) ? value : typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean) : undefined;
-      return tokens !== undefined && tokens.every((token) => typeof token === "string" && token !== "" && !/\s/.test(token))
-        ? { ok: true, value: tokens }
-        : issue("typeMismatch", "Must be a space-separated token list.", path);
-    }
     case "trusted-html":
     case "trusted-script": return browserTrusted(value, name)
       ? { ok: true, value }
@@ -511,7 +412,7 @@ function parseNode(value: unknown, node: TypeNode, path: string): TypedResult {
       const fields = new Map(node.fields.map((field) => [field.name, field]));
       for (const field of node.fields) {
         if (!(field.name in input)) {
-          if (!field.optional) issues.push({ reason: "schemaMismatch", message: "Required field is absent.", path: childPath(path, field.name) });
+          if (!field.optional) issues.push({ reason: "typeMismatch", message: "Required field is absent.", path: childPath(path, field.name) });
           continue;
         }
         const result = parseNode(input[field.name], field.type, childPath(path, field.name));
@@ -521,7 +422,7 @@ function parseNode(value: unknown, node: TypeNode, path: string): TypedResult {
       for (const [key, item] of Object.entries(input)) {
         if (fields.has(key)) continue;
         if (node.open) output[key] = item;
-        else issues.push({ reason: "schemaMismatch", message: "Field is not declared by this closed object type.", path: childPath(path, key) });
+        else issues.push({ reason: "typeMismatch", message: "Field is not declared by this closed object type.", path: childPath(path, key) });
       }
       return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
     }
@@ -545,7 +446,6 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
       (node.kind === "union" && typeof parsed.value === "object" && parsed.value !== null)) {
     return JSON.stringify(parsed.value);
   }
-  if (node.kind === "terminal" && node.name === "token-list") return (parsed.value as string[]).join(" ");
   if (parsed.value === null) return "null";
   if (parsed.value === undefined) return "";
   return String(parsed.value);
