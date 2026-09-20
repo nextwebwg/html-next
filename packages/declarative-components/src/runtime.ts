@@ -346,7 +346,7 @@ function readInvocation(
 function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveScope;
 function layer(parent: Scope, locals: Record<string, Value>): Scope {
   if (parent instanceof ReactiveScope) return parent.fork(Object.entries(locals));
-  return new Map<string, Value>([...parent, ...Object.entries(locals)]);
+  return new Map<string, Value>([...Array.from(parent), ...Object.entries(locals)]);
 }
 
 function evalValue(expression: string, scope: Scope): Value {
@@ -1090,7 +1090,7 @@ const VALIDITY_ATTRIBUTES = new Set([
 ]);
 const VALIDITY_SELECTOR = [
   "button", "fieldset", "input", "object", "output", "select", "textarea",
-  ...[...VALIDITY_ATTRIBUTES].map((name) => `[${name}]`),
+  ...Array.from(VALIDITY_ATTRIBUTES, (name) => `[${name}]`),
 ].join(",");
 
 function nativeValidatableElement(element: Element): boolean {
@@ -1253,7 +1253,7 @@ function prepareRuntimeInvocation(
     : undefined;
   const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
   const children = hydration
-    ? projectedNodes ?? [...invocation.querySelectorAll("[data-slotted]")]
+    ? projectedNodes ?? Array.from(invocation.querySelectorAll("[data-slotted]"))
     : Array.from(invocation.childNodes);
   const instance: RuntimeInstance = {
     definition,
@@ -1411,7 +1411,7 @@ function lowerScopes(
   if (newDefinitions.size > 0) {
     const selector = [
       "[data-component-root]",
-      ...newDefinitions.keys(),
+      ...Array.from(newDefinitions.keys()),
     ].join(",");
     const existing = new Set<Element>();
     collectWithin(root, selector, existing);
@@ -1434,7 +1434,7 @@ function lowerScopes(
   commitRuntimeInvocations(registry, prepared);
   const lowered = prepared.map((invocation) => invocation.nativeRoot);
   for (const element of lowered) roots.add(element);
-  return { lowered, roots: [...roots] };
+  return { lowered, roots: Array.from(roots) };
 }
 
 /**

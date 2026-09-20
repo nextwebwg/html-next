@@ -249,7 +249,8 @@ class Parser {
 function union(members: readonly TypeNode[]): TypeNode {
   const flat = members.flatMap((member) => member.kind === "union" ? member.members : [member]);
   const unique = new Map(flat.map((member) => [formatType(member), member]));
-  return unique.size === 1 ? [...unique.values()][0]! : { kind: "union", members: [...unique.values()] };
+  const values = Array.from(unique.values());
+  return values.length === 1 ? values[0]! : { kind: "union", members: values };
 }
 
 /** Parse an HTML Next type expression into an immutable semantic node. */

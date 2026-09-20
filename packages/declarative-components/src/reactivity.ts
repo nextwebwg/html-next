@@ -252,15 +252,24 @@ export class ReactiveScope implements Scope {
   }
 
   entries(): MapIterator<[string, Value]> {
-    return new Map([...this.parent?.entries() ?? [], ...this.#values]).entries();
+    return new Map([
+      ...Array.from(this.parent?.entries() ?? []),
+      ...Array.from(this.#values),
+    ]).entries();
   }
 
   keys(): MapIterator<string> {
-    return new Map([...this.parent?.entries() ?? [], ...this.#values]).keys();
+    return new Map([
+      ...Array.from(this.parent?.entries() ?? []),
+      ...Array.from(this.#values),
+    ]).keys();
   }
 
   values(): MapIterator<Value> {
-    return new Map([...this.parent?.entries() ?? [], ...this.#values]).values();
+    return new Map([
+      ...Array.from(this.parent?.entries() ?? []),
+      ...Array.from(this.#values),
+    ]).values();
   }
 
   [Symbol.iterator](): MapIterator<[string, Value]> {

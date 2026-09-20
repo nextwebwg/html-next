@@ -84,7 +84,7 @@ export class ResourceResolver implements ComponentResourceResolver {
         mapping: specifier,
       });
     }
-    const prefix = [...this.#imports.keys()]
+    const prefix = Array.from(this.#imports.keys())
       .filter((key) => key.endsWith("/") && specifier.startsWith(key))
       .sort((left, right) => right.length - left.length)[0];
     if (prefix === undefined) {

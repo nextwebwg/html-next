@@ -200,14 +200,14 @@ export async function buildComponentGraph(
   }
 
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
-  for (const [url, draft] of [...drafts].sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [url, draft] of Array.from(drafts).sort(([left], [right]) => left.localeCompare(right))) {
     if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${url}\`.`);
     nodeEntries.push([url, Object.freeze({
       url,
       trustRoot: draft.trustRoot,
       definition: draft.definition,
-      dependencies: Object.freeze([...draft.dependencies]),
-      resources: Object.freeze([...draft.resources].sort((left, right) => left.url.localeCompare(right.url))),
+      dependencies: Object.freeze(Array.from(draft.dependencies)),
+      resources: Object.freeze(Array.from(draft.resources).sort((left, right) => left.url.localeCompare(right.url))),
       ...(draft.controller === undefined ? {} : { controller: draft.controller }),
       shadowedByCustomElement: draft.shadowedByCustomElement,
     })]);
@@ -215,6 +215,6 @@ export async function buildComponentGraph(
   return Object.freeze({
     roots: Object.freeze(roots),
     nodes: new ImmutableMap(nodeEntries),
-    tags: new ImmutableMap([...tags].sort(([left], [right]) => left.localeCompare(right))),
+    tags: new ImmutableMap(Array.from(tags).sort(([left], [right]) => left.localeCompare(right))),
   });
 }

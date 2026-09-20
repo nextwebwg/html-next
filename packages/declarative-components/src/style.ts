@@ -524,7 +524,7 @@ export function componentStyleMode(document: Document): ComponentStyleMode {
 export function addAttributeToken(element: Element, attribute: string, token: string): void {
   const tokens = new Set((element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean));
   tokens.add(token);
-  element.setAttribute(attribute, [...tokens].join(" "));
+  element.setAttribute(attribute, Array.from(tokens).join(" "));
 }
 
 export function stampAuthoredElement(element: Element, owner: string): void {
