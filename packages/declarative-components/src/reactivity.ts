@@ -120,13 +120,17 @@ export class ReactiveEffect {
   execute(): void {
     if (this.stopped || this.paused) return;
     this.#dependencyTail = undefined;
-    this.#cleanup?.();
-    this.#cleanup = undefined;
+    if (this.#cleanup !== undefined) {
+      const cleanup = this.#cleanup;
+      this.#cleanup = undefined;
+      cleanup();
+    }
     const previous = activeEffect;
     // oxlint-disable-next-line typescript/no-this-alias
     activeEffect = this;
     try {
-      this.#cleanup = this.run();
+      const cleanup = this.run();
+      if (cleanup !== undefined) this.#cleanup = cleanup;
     } finally {
       activeEffect = previous;
       const tail = this.#dependencyTail as Subscription | undefined;
