@@ -35,7 +35,6 @@ function unsubscribe(subscription: Subscription): void {
 
 export class ReactiveScheduler {
   #pending: ReactiveEffect[] = [];
-  #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
@@ -74,9 +73,14 @@ export class ReactiveScheduler {
   flush(): void {
     if (this.#flushing) return;
     this.#flushing = true;
-    const flushId = ++this.#flushId;
+    let rounds = 0;
     try {
       while (this.#pending.length > 0) {
+        rounds += 1;
+        if (rounds > maximumExecutionsPerFlush) {
+          this.#pending = [];
+          fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
+        }
         const effects = this.#pending;
         if (effects.length > 1) {
           let index = 1;
@@ -92,15 +96,6 @@ export class ReactiveScheduler {
         let index = 0;
         do {
           const effect = effects[index]!;
-          if (effect.flushId === flushId) effect.flushCount += 1;
-          else {
-            effect.flushId = flushId;
-            effect.flushCount = 1;
-          }
-          if (effect.flushCount > maximumExecutionsPerFlush) {
-            this.#pending = [];
-            fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
-          }
           effect.execute();
           index += 1;
         } while (index < effects.length);
@@ -114,8 +109,6 @@ export class ReactiveScheduler {
 export class ReactiveEffect {
   readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
-  flushCount = 0;
-  flushId = 0;
   stopped = false;
   paused = false;
   #cleanup: Cleanup = undefined;
