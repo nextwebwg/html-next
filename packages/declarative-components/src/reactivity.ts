@@ -82,7 +82,9 @@ export class ReactiveScheduler {
           effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
         }
         this.#pending = [];
-        for (const effect of effects) {
+        let index = 0;
+        do {
+          const effect = effects[index]!;
           if (effect.flushId === flushId) effect.flushCount += 1;
           else {
             effect.flushId = flushId;
@@ -93,7 +95,8 @@ export class ReactiveScheduler {
             fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
           }
           effect.execute();
-        }
+          index += 1;
+        } while (index < effects.length);
       }
     } finally {
       this.#flushing = false;
