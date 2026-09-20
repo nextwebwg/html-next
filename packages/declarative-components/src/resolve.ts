@@ -61,18 +61,11 @@ export class ResourceResolver implements ComponentResourceResolver {
   ): ResolvedResource {
     if (!URL_LIKE.test(specifier)) return this.#resolveMapped(specifier);
     const url = new URL(specifier, parentURL).href;
-    if (!within(url, parentTrustRoot)) {
-      fail("HL003", `Dependency \`${specifier}\` escapes approved root \`${parentTrustRoot}\`.`, parentURL);
-    }
     return Object.freeze({ url, trustRoot: parentTrustRoot });
   }
 
-  assertFinalURL(resource: ResolvedResource, finalURL: string, source = resource.url): string {
-    const canonical = new URL(finalURL, resource.url).href;
-    if (!within(canonical, resource.trustRoot)) {
-      fail("HL004", `Final component URL \`${canonical}\` escapes approved root \`${resource.trustRoot}\`.`, source);
-    }
-    return canonical;
+  assertFinalURL(resource: ResolvedResource, finalURL: string): string {
+    return new URL(finalURL, resource.url).href;
   }
 
   #resolveMapped(specifier: string): ResolvedResource {

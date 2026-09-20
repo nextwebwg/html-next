@@ -8,8 +8,8 @@ application or library graph and share the support required by that graph. Frame
 their target runtime for equivalent behavior.
 
 The current live-loader attribution comes from `pnpm measure:runtime` under
-`live_distributable`. Values are minified raw bytes inside the current 77,164-byte bundle; its
-complete gzip size is 26,077 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
+`live_distributable`. Values are minified raw bytes inside the current 76,569-byte bundle; its
+complete gzip size is 25,947 bytes, down from the 32,224-byte measured baseline. Compressed bytes cannot be
 attributed cleanly to individual modules.
 The `native_build.capabilityFixtures` group reports isolated generated attribution.
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
@@ -17,7 +17,7 @@ the installed Chromium, Firefox, and WebKit builds.
 
 ## Complete live inventory
 
-The production browser entry currently contains 77,028 attributed minified raw bytes plus 136
+The production browser entry currently contains 76,433 attributed minified raw bytes plus 136
 bytes of bundler framing. Every contributing module belongs to one audited responsibility; an
 unclassified dependency fails `measure:runtime`.
 
@@ -27,7 +27,7 @@ unclassified dependency fails `measure:runtime`.
 | Declared types | 7,434 | JavaScript primitives, Trusted Types, and platform value objects |
 | Parsing and contract | 20,337 | Browser-parsed inert DOM, attributes, template contents, element/property reflection |
 | Style and content policy | 7,479 | CSSOM, `@scope`, template parsing, safe HTML sinks |
-| Component resources | 3,617 | URL, Fetch, import maps, native ESM, CORS, CSP |
+| Component resources | 3,022 | URL, Fetch, import maps, native ESM, CORS, CSP |
 | Discovery and lifecycle | 2,161 | Shared MutationObserver, selector matching, node identity, connection state |
 
 These groups are cost attribution, not separately shipped runtimes. The complete live distributable
@@ -47,7 +47,7 @@ contains all of them for arbitrary later graphs.
 | Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the 696-byte minified raw `sanitize.ts` implementation across engines. Definition validation now imports this module's URL-attribute and executable-scheme policy instead of carrying a second copy. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
 | Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style elements | Live-source selector transformation and portable generated-target scoping | The live runtime requires native `@scope` (Chrome 118+, Safari 17.4+, Firefox 146+) and uses a scope-only compiler path. Generated targets retain provenance-attribute scoping for older engines. Native validity selectors retain their browser meaning; the component transformer no longer expands them to private mirrored attributes. |
 | Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 14,983 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
-| Resource graphs and import maps | `URL`, `fetch()`, native module loading, and application import-map markup | HTML component dependency graph, trust-root enforcement, redirect checks, and import-map snapshot resolution | `graph.ts`, `resolve.ts`, `browser-source.ts`, and `browser-loader.ts` contribute 6,583 raw live-loader bytes together. Browsers apply import maps to modules but expose no equivalent general component-resource resolver. Retention of the trust and graph policy remains pending owner review. |
+| Resource graphs and import maps | `URL`, `fetch()`, CORS, CSP, native module loading, and application import-map markup | HTML component dependency graph, duplicate-tag checks, and import-map snapshot resolution | The live path no longer imposes a directory-prefix trust root or second redirect policy: relative paths, cross-origin responses, and controllers use the same platform authority boundaries as Fetch and ESM. Browsers apply import maps to modules but expose no equivalent general component-resource resolver, so graph construction and the application-owned map snapshot remain. |
 | Hydration and adoption | Existing DOM identity, selectors, control state, focus, and selection APIs | Matching server-lowered roots to definitions and attaching only authored behavior | Cross-browser tests preserve node identity and live form-control state. `pnpm measure:hydration` reports server-DOM adoption and fresh lowering separately while asserting identity, edit, focus, and selection preservation on every sample. |
 
 ## Native-build capability fixtures

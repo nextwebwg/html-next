@@ -15,7 +15,7 @@ The resolver canonicalizes and deduplicates component URLs, detects tag collisio
 
 Installed-package builds walk the same concrete HTML, controller, and static ESM edges ahead of time. They do not require a browser import map or an author-written registration manifest.
 
-Browser discovery remains active after startup. An inline carrier or component instance inserted later enters the same registration, duplicate detection, custom-element precedence, and demand-driven dependency process as initial document content. Discovery timing does not grant resolution authority: a new definition's downstream live/imported dependencies still use application-owned mappings and the established trust roots. A definition cannot introduce its own import map by being inserted later.
+Browser discovery remains active after startup. An inline carrier or component instance inserted later enters the same registration, duplicate detection, custom-element precedence, and demand-driven dependency process as initial document content. A new definition's downstream live/imported dependencies use the document's application-owned import-map snapshot. A definition cannot introduce its own import map by being inserted later.
 
 ## Controller module protocol
 
@@ -34,11 +34,11 @@ Importing a controller module is idempotent under normal ESM semantics, while in
 
 ## Live trust policy
 
-Live cross-origin use is an application opt-in. The top-level application maps a bare prefix to a versioned HTTPS root using an ordinary import map and directly links a concrete component entry. Component HTML dependencies must resolve within that mapped prefix after URL normalization and final-response redirects.
+The top-level application selects concrete component roots and may map bare prefixes using an ordinary import map. Relative component and controller references use standard URL resolution. Bare references must be present in the application-owned import-map snapshot.
 
-A declared controller entry must initially resolve within the same approved prefix. After native `import()` begins, redirects and transitive ESM imports are governed by the browser module loader, CORS, and CSP: the platform provides no pre-execution final-response hook to the polyfill. This is not weaker than trusting bytes served at the already approved controller URL, and the specification does not claim an unenforceable second module sandbox.
+Fetch redirects, cross-origin component responses, and native controller imports are governed by URL, Fetch, CORS, CSP, and the browser module loader. Declarative Components does not add a directory-prefix trust root on top of those mechanisms. A path segment such as `../` is location, not authority, and restricting it would diverge from ordinary HTML and ESM composition without creating a sandbox.
 
-Imported definitions cannot install or alter import maps, base URLs, CSP, trust roots, or application policy. A dependency that intentionally moves to another package/origin uses another application-owned mapping and direct root decision.
+Imported definitions cannot install or alter import maps, base URLs, CSP, or application policy. Build tools may impose filesystem-output constraints, but those are tool constraints rather than browser-runtime security semantics.
 
 ## Controller authority
 

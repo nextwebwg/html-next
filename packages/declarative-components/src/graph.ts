@@ -1,9 +1,5 @@
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
-import {
-  isWithinTrustRoot,
-  type ComponentResourceResolver,
-  type ResolvedResource,
-} from "./resolve.js";
+import type { ComponentResourceResolver, ResolvedResource } from "./resolve.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface FetchedComponent {
@@ -132,30 +128,11 @@ export async function buildComponentGraph(
     drafts.set(finalURL, draft);
 
     if (definition.controller !== undefined) {
-      let controller: ResolvedResource;
-      try {
-        controller = options.resolver.resolveDependency(
-          definition.controller,
-          finalURL,
-          resource.trustRoot,
-        );
-      } catch (error) {
-        if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
-          fail(
-            "HL005",
-            `Controller \`${definition.controller}\` is outside the component's approved root.`,
-            finalURL,
-          );
-        }
-        throw error;
-      }
-      if (!isWithinTrustRoot(controller.url, resource.trustRoot)) {
-        fail(
-          "HL005",
-          `Controller \`${definition.controller}\` is outside the component's approved root.`,
-          finalURL,
-        );
-      }
+      const controller = options.resolver.resolveDependency(
+        definition.controller,
+        finalURL,
+        resource.trustRoot,
+      );
       draft.controller = Object.freeze({ specifier: definition.controller, url: controller.url });
     }
 
