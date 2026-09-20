@@ -53,6 +53,18 @@ export function typeSource(type: PropType): string {
   return typeScriptType(type);
 }
 
+function includesNull(type: PropType): boolean {
+  if (typeof type === "string" || "enum" in type) return false;
+  if (type.kind === "terminal") return type.name === "null";
+  return type.kind === "union" && type.members.some(includesNull);
+}
+
+/** Optional component inputs accept an explicit null unless their declared type already does. */
+export function propTypeSource(prop: PropContract): string {
+  const source = typeSource(prop.type);
+  return prop.required || includesNull(prop.type) ? source : `${source} | null`;
+}
+
 export function generatedPropDescriptor(
   name: string,
   prop: PropContract,

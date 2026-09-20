@@ -8,9 +8,9 @@ import {
   literalAttribute,
   provenanceAttributes,
   propKey,
+  propTypeSource,
   quote,
   serializedDefinition,
-  typeSource,
 } from "./shared.js";
 import { targetComponent } from "./backend.js";
 import {
@@ -156,7 +156,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     `  import "../styles/${contract.tag}.css";`,
     "",
     `  interface OwnProps {`,
-    ...props.map(([name, prop]) => `    ${propKey(name)}${prop.required ? "" : "?"}: ${typeSource(prop.type)}${prop.required ? "" : " | null"};`),
+    ...props.map(([name, prop]) => `    ${propKey(name)}${prop.required ? "" : "?"}: ${propTypeSource(prop)};`),
     ...target.events.map((event) =>
       `    ${event.callbackName}?: (detail: ${event.detailType}, event: CustomEvent<${event.detailType}>) => void;`
     ),

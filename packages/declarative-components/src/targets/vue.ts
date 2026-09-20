@@ -8,9 +8,9 @@ import {
   literalAttribute,
   provenanceAttributes,
   propKey,
+  propTypeSource,
   quote,
   serializedDefinition,
-  typeSource,
 } from "./shared.js";
 import { targetComponent } from "./backend.js";
 import {
@@ -107,7 +107,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const needsLifecycle = needsBridge || usesGeneratedProps || target.events.length > 0;
   const define = [
     "defineProps<{",
-    ...props.map(([name, prop]) => `  ${propKey(name)}${prop.required ? "" : "?"}: ${typeSource(prop.type)}${prop.required ? "" : " | null"};`),
+    ...props.map(([name, prop]) => `  ${propKey(name)}${prop.required ? "" : "?"}: ${propTypeSource(prop)};`),
     ...(polymorphic ? [`  as?: ${definition.root!.kind === "native" ? definition.root!.choices.map(quote).join(" | ") : "never"};`] : []),
     "}>()",
   ].join("\n");
