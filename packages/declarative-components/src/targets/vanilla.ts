@@ -7,11 +7,10 @@ import type {
   SlotNode,
   TemplateNode,
 } from "../template.js";
-import type { PropContract, PropType } from "../types.js";
+import type { PropContract } from "../types.js";
 import { getDomInterface } from "../platform.js";
 import { kebabCase } from "../names.js";
-import { typeScriptType } from "../type-system.js";
-import { serializedDefinition } from "./shared.js";
+import { propTypeSource, serializedDefinition } from "./shared.js";
 import { targetComponent } from "./backend.js";
 
 function js(value: string): string {
@@ -22,16 +21,8 @@ function tsKey(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : js(name);
 }
 
-function tsType(type: PropType): string {
-  return typeScriptType(type);
-}
-
 function optional(prop: PropContract): string {
   return prop.required ? "" : "?";
-}
-
-function nullable(prop: PropContract): string {
-  return prop.required ? "" : " | null";
 }
 
 interface DirectBinding {
@@ -539,7 +530,7 @@ export function generateVanilla(
     "}",
     `export interface ${contract.name}Props {`,
     ...props.map(
-      ([name, prop]) => `  ${tsKey(name)}${optional(prop)}: ${tsType(prop.type)}${nullable(prop)};`,
+      ([name, prop]) => `  ${tsKey(name)}${optional(prop)}: ${propTypeSource(prop)};`,
     ),
     "  attributes?: Readonly<Record<string, string | number | boolean | null | undefined>>;",
     "  children?: readonly (string | Node)[];",
