@@ -104,6 +104,24 @@ describe("official target compilers", () => {
     }
   });
 
+  it("does not duplicate null in optional nullable target types", () => {
+    const output = generated(componentSource(
+      "demo-anchor",
+      `<prop name="anchor" type="object({ left: number }) | null">Anchor.</prop>`,
+      `<div .anchor="anchor"></div>`,
+    ));
+
+    for (const path of [
+      "vanilla/DemoAnchor.d.ts",
+      "react/DemoAnchor.tsx",
+      "vue/DemoAnchor.vue",
+      "svelte/DemoAnchor.svelte",
+    ]) {
+      assert.match(output.get(path)!, /anchor\?: \{ readonly left: number \} \| null;/);
+      assert.doesNotMatch(output.get(path)!, /null \| null/);
+    }
+  });
+
   it("compiles non-button and native-boolean target projections", async () => {
     const audio = generated(componentSource(
       "demo-player",

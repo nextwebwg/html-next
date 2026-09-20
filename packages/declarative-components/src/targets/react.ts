@@ -16,9 +16,9 @@ import {
   isVoidElement,
   provenanceAttributes,
   propKey,
+  propTypeSource,
   quote,
   serializedDefinition,
-  typeSource,
 } from "./shared.js";
 
 function htmlAttributeName(name: string): string {
@@ -189,7 +189,7 @@ export function generateReact(definition: ComponentDefinition, version: string):
       : []),
     `interface ${contract.name}OwnProps {`,
     ...props.map(([name, prop]) =>
-      `  ${propKey(name)}${prop.required ? "" : "?"}: ${typeSource(prop.type)}${prop.required ? "" : " | null"};`,
+      `  ${propKey(name)}${prop.required ? "" : "?"}: ${propTypeSource(prop)};`,
     ),
     ...target.events.map((event) =>
       `  ${event.callbackName}?: (detail: ${event.detailType}, event: CustomEvent<${event.detailType}>) => void;`
