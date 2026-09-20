@@ -222,10 +222,10 @@ export class ReactiveEffect {
 }
 
 function trigger(dependency: Dependency | undefined): void {
-  if (dependency?.first === undefined) return;
-  if (dependency.first !== dependency.last &&
-    dependency.first.effect.scheduler.enqueueDependency(dependency)) return;
-  for (let subscription: Subscription | undefined = dependency.first;
+  const first = dependency?.first;
+  if (first === undefined) return;
+  if (first !== dependency!.last && first.effect.scheduler.enqueueDependency(dependency!)) return;
+  for (let subscription: Subscription | undefined = first;
     subscription !== undefined; ) {
     const next: Subscription | undefined = subscription.nextSubscriber;
     subscription.effect.schedule();
