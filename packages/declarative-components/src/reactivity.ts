@@ -252,24 +252,15 @@ export class ReactiveScope implements Scope {
   }
 
   entries(): MapIterator<[string, Value]> {
-    return new Map([
-      ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#values),
-    ]).entries();
+    return this.#snapshot().entries();
   }
 
   keys(): MapIterator<string> {
-    return new Map([
-      ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#values),
-    ]).keys();
+    return this.#snapshot().keys();
   }
 
   values(): MapIterator<Value> {
-    return new Map([
-      ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#values),
-    ]).values();
+    return this.#snapshot().values();
   }
 
   [Symbol.iterator](): MapIterator<[string, Value]> {
@@ -281,6 +272,13 @@ export class ReactiveScope implements Scope {
     thisArg?: unknown,
   ): void {
     for (const [key, value] of this.entries()) callbackfn.call(thisArg, value, key, this);
+  }
+
+  #snapshot(): Map<string, Value> {
+    return new Map([
+      ...Array.from(this.parent?.entries() ?? []),
+      ...Array.from(this.#values),
+    ]);
   }
 
   #wrap(value: Value): Value {
