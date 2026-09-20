@@ -57,9 +57,10 @@ export class ReactiveScheduler {
     const flushId = ++this.#flushId;
     try {
       while (this.#pending.length > 0) {
-        const effects = this.#pending.sort(
-          (left, right) => left.priority - right.priority || left.id - right.id,
-        );
+        const effects = this.#pending;
+        if (effects.length > 1) {
+          effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
+        }
         this.#pending = [];
         for (const effect of effects) {
           if (effect.flushId === flushId) effect.flushCount += 1;
