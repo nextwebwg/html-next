@@ -23,7 +23,7 @@ import {
   stampComponentRoot,
   transformNativeComponentStyles,
 } from "./style.js";
-import { isPropertyOnlyType, parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
+import { parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
 import type {
   ComponentDefinition,
   DataDeclaration,
@@ -1094,7 +1094,7 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
         instance.scope.set(name, assignedPropValue(name, prop, input));
       },
     });
-    if (isPropertyOnlyType(prop.type)) continue;
+    if ("property" in prop.target) continue;
     const attributeName = `data-${kebabCase(name)}`;
     attributeNames[attributeName] = name;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
@@ -1593,7 +1593,7 @@ export function attachComponent(
       const value = Object.hasOwn(options.props ?? {}, name) ? options.props?.[name] : prop.default;
       if (value !== undefined) {
         (element as unknown as Record<string, unknown>)[name] = value;
-        if (!isPropertyOnlyType(prop.type)) {
+        if ("attribute" in prop.target) {
           element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
         }
       }

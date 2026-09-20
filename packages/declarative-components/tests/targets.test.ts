@@ -99,6 +99,7 @@ describe("official target compilers", () => {
     for (const path of ["react/DemoList.tsx", "vue/DemoList.vue", "svelte/DemoList.svelte"]) {
       const module = output.get(path)!;
       assert.match(module, /declarative-components\/runtime|attachComponent/);
+      assert.match(module, /"target":\{"property":"items"\}/);
       assert.doesNotMatch(module, /manageGeneratedProps/);
       assert.doesNotMatch(module, /(?:^|\s)(?::)?items=/m);
     }
