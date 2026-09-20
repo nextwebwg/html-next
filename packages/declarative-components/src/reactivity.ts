@@ -51,6 +51,26 @@ export class ReactiveScheduler {
     }
   }
 
+  enqueueDependency(dependency: Dependency): boolean {
+    if (this.#flushing || this.#pending.length > 0) return false;
+    for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
+      subscription = subscription.nextSubscriber) {
+      if (subscription.effect.scheduler !== this) return false;
+    }
+    for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
+      subscription = subscription.nextSubscriber) {
+      this.#pending.push(subscription.effect);
+    }
+    if (!this.#scheduled) {
+      this.#scheduled = true;
+      queueMicrotask(() => {
+        this.#scheduled = false;
+        this.flush();
+      });
+    }
+    return true;
+  }
+
   flush(): void {
     if (this.#flushing) return;
     this.#flushing = true;
@@ -189,8 +209,12 @@ export class ReactiveEffect {
 }
 
 function trigger(dependency: Dependency | undefined): void {
-  for (let subscription = dependency?.first; subscription !== undefined; ) {
-    const next = subscription.nextSubscriber;
+  if (dependency?.first === undefined) return;
+  if (dependency.first !== dependency.last &&
+    dependency.first.effect.scheduler.enqueueDependency(dependency)) return;
+  for (let subscription: Subscription | undefined = dependency.first;
+    subscription !== undefined; ) {
+    const next: Subscription | undefined = subscription.nextSubscriber;
     subscription.effect.schedule();
     subscription = next;
   }
