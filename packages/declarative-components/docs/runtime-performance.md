@@ -24,7 +24,12 @@ stand alone when an operation can run for every input event, list row, or DOM mu
 Correctness, accessibility, security, and interoperability are hard gates. Among conforming
 implementations:
 
-- Treat changes below 5% as measurement noise unless repeated samples demonstrate otherwise.
+- Calibrate candidate results against independent whole-set A/A runs. When the observed difference
+  cannot be distinguished from that run-to-run variance, record it as inconclusive and keep the
+  candidate available for a quieter measurement; uncertainty is not a rejection.
+- Keep a repeatable improvement even when it is small when tests are stable, no workload has an
+  established regression, and the implementation does not add significant code or bundle size.
+  There is no fixed minimum percentage for a real win.
 - Reject a change that makes a representative hot path more than 25% slower while saving less
   than both 1 KB gzip and 5% of the affected bundle.
 - A greater than 2x hot-path regression needs a unique correctness or interoperability benefit and
