@@ -114,6 +114,7 @@ export function serializedDefinition(definition: ComponentDefinition): string {
     {
       type: prop.type,
       required: prop.required,
+      target: prop.target,
       ...("default" in prop ? { default: prop.default } : {}),
     },
   ]));
