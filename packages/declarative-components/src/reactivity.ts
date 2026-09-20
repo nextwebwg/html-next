@@ -33,16 +33,28 @@ function unsubscribe(subscription: Subscription): void {
   else nextSubscriber.previousSubscriber = previousSubscriber;
 }
 
+function compareEffects(left: ReactiveEffect, right: ReactiveEffect): number {
+  return left.priority - right.priority || left.id - right.id;
+}
+
 export class ReactiveScheduler {
   #pending: ReactiveEffect[] = [];
+  #cursor = 0;
   #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
   enqueue(effect: ReactiveEffect): void {
-    if (effect.stopped || this.#pending.includes(effect)) return;
+    const start = this.#flushing ? this.#cursor : 0;
+    if (effect.stopped || this.#pending.includes(effect, start)) return;
+    if (this.#flushing) {
+      let index = this.#pending.length;
+      while (index > start && compareEffects(effect, this.#pending[index - 1]!) < 0) index -= 1;
+      this.#pending.splice(index, 0, effect);
+      return;
+    }
     this.#pending.push(effect);
-    if (!this.#scheduled && !this.#flushing) {
+    if (!this.#scheduled) {
       this.#scheduled = true;
       queueMicrotask(() => {
         this.#scheduled = false;
@@ -56,26 +68,22 @@ export class ReactiveScheduler {
     this.#flushing = true;
     const flushId = ++this.#flushId;
     try {
-      while (this.#pending.length > 0) {
-        const effects = this.#pending;
-        if (effects.length > 1) {
-          effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
+      if (this.#pending.length > 1) this.#pending.sort(compareEffects);
+      while (this.#cursor < this.#pending.length) {
+        const effect = this.#pending[this.#cursor++]!;
+        if (effect.flushId === flushId) effect.flushCount += 1;
+        else {
+          effect.flushId = flushId;
+          effect.flushCount = 1;
         }
-        this.#pending = [];
-        for (const effect of effects) {
-          if (effect.flushId === flushId) effect.flushCount += 1;
-          else {
-            effect.flushId = flushId;
-            effect.flushCount = 1;
-          }
-          if (effect.flushCount > maximumExecutionsPerFlush) {
-            this.#pending = [];
-            fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
-          }
-          effect.execute();
+        if (effect.flushCount > maximumExecutionsPerFlush) {
+          fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
         }
+        effect.execute();
       }
     } finally {
+      this.#pending = [];
+      this.#cursor = 0;
       this.#flushing = false;
     }
   }
