@@ -7,6 +7,10 @@ interface Dependency {
   last: Subscription | undefined;
 }
 
+interface ReactiveCell extends Dependency {
+  value: Value;
+}
+
 interface Subscription {
   readonly dependency: Dependency;
   readonly effect: ReactiveEffect;
@@ -208,15 +212,16 @@ export function createEffect(
 
 /** A scope layer whose root reads and nested object/array paths are dependency tracked. */
 export class ReactiveScope implements Scope {
-  readonly #values = new Map<string, Value>();
-  readonly #subscribers = new Map<string, Dependency>();
+  readonly #cells = new Map<string, ReactiveCell>();
+  #cachedName: string | undefined;
+  #cachedCell: ReactiveCell | undefined;
 
   constructor(
     values: Iterable<readonly [string, Value]> = [],
     readonly scheduler = new ReactiveScheduler(),
     readonly parent?: ReactiveScope,
   ) {
-    for (const [name, value] of values) this.#values.set(name, this.#wrap(value));
+    for (const [name, value] of values) this.set(name, value);
   }
 
   get size(): number {
@@ -224,27 +229,28 @@ export class ReactiveScope implements Scope {
   }
 
   has(name: string): boolean {
-    return this.#values.has(name) || this.parent?.has(name) === true;
+    return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
 
   get(name: string): Value | undefined {
-    if (!this.#values.has(name)) return this.parent?.get(name);
-    if (activeEffect !== undefined) {
-      let subscribers = this.#subscribers.get(name);
-      if (subscribers === undefined) {
-        subscribers = { first: undefined, last: undefined };
-        this.#subscribers.set(name, subscribers);
-      }
-      track(subscribers);
-    }
-    return this.#values.get(name);
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.get(name);
+    if (activeEffect !== undefined) track(cell);
+    return cell.value;
   }
 
   set(name: string, value: Value): void {
     const wrapped = this.#wrap(value);
-    if (Object.is(this.#values.get(name), wrapped) && this.#values.has(name)) return;
-    this.#values.set(name, wrapped);
-    trigger(this.#subscribers.get(name));
+    let cell = this.#local(name);
+    if (cell === undefined) {
+      cell = { value: wrapped, first: undefined, last: undefined };
+      this.#cells.set(name, cell);
+      this.#cachedCell = cell;
+      return;
+    }
+    if (Object.is(cell.value, wrapped)) return;
+    cell.value = wrapped;
+    trigger(cell);
   }
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
@@ -277,8 +283,16 @@ export class ReactiveScope implements Scope {
   #snapshot(): Map<string, Value> {
     return new Map([
       ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#values),
+      ...Array.from(this.#cells, ([name, cell]) => [name, cell.value] as const),
     ]);
+  }
+
+  #local(name: string): ReactiveCell | undefined {
+    if (name !== this.#cachedName) {
+      this.#cachedName = name;
+      this.#cachedCell = this.#cells.get(name);
+    }
+    return this.#cachedCell;
   }
 
   #wrap(value: Value): Value {
