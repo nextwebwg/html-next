@@ -15,7 +15,13 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
-import { createEffect, ReactiveScope, type ReactiveEffect } from "./reactivity.js";
+import {
+  createComputed,
+  createEffect,
+  createSignal,
+  ReactiveScope,
+  type ReactiveOwner,
+} from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 import {
   markProjectedRoot,
@@ -63,7 +69,7 @@ interface RuntimeInstance {
   readonly definition: ComponentDefinition;
   readonly scope: ReactiveScope;
   readonly refs: Record<string, Element>;
-  readonly effects: ReactiveEffect[];
+  readonly effects: ReactiveOwner[];
   readonly connectCallbacks: Set<() => void>;
   readonly disconnectCallbacks: Set<() => void>;
   connected: boolean;
@@ -221,7 +227,7 @@ function readInvocation(
 ): {
   readonly scope: ReactiveScope;
   readonly passThrough: readonly Attr[];
-  readonly effects: ReactiveEffect[];
+  readonly effects: ReactiveOwner[];
   readonly rootName: string;
 } {
   const contract = definition.contract;
@@ -297,12 +303,13 @@ function readInvocation(
       );
     }
   }
-  const effects: ReactiveEffect[] = [];
+  const effects: ReactiveOwner[] = [];
   for (const declaration of declarations) {
     if (declaration.kind !== "computed" || declaration.expression === undefined) continue;
-    effects.push(createEffect(scope.scheduler, () => {
-      scope.set(declaration.name, evalValue(declaration.expression!.source, scope));
-    }, 0));
+    effects.push(scope.defineComputed(
+      declaration.name,
+      () => evaluateCompiled(declaration.expression!, scope),
+    ));
   }
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
@@ -352,7 +359,7 @@ function evalValue(expression: string, scope: Scope): Value {
 
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
-  readonly effects: ReactiveEffect[];
+  readonly effects: ReactiveOwner[];
   readonly refs: Record<string, Element>;
   readonly connectCallbacks: Set<() => void>;
   readonly disconnectCallbacks: Set<() => void>;
@@ -653,7 +660,7 @@ function renderDynamicNode(
   const end = document.createComment("html-next:end");
   const fragment = document.createDocumentFragment();
   fragment.append(start, end);
-  let childEffects: ReactiveEffect[] = [];
+  let childEffects: ReactiveOwner[] = [];
   ownEffect(context, scope, () => {
     for (const effect of childEffects) effect.stop();
     childEffects = [];
@@ -682,7 +689,7 @@ interface EachBlock {
   readonly start: Comment;
   readonly end: Comment;
   readonly scope: ReactiveScope;
-  readonly effects: readonly ReactiveEffect[];
+  readonly effects: readonly ReactiveOwner[];
 }
 
 function moveBlockBefore(block: EachBlock, reference: Node): void {
@@ -1647,9 +1654,36 @@ export interface ComponentHost {
   readonly state: Record<string, unknown>;
   readonly refs: Readonly<Record<string, Element>>;
   readonly elements: Record<string, Element | RadioNodeList | undefined>;
+  /**
+   * Creates controller-local writable state. Equal writes use `Object.is` and do not notify
+   * consumers. The value is private to controller code unless an effect copies it into a declared
+   * state root.
+   */
+  signal<T>(initialValue: T): ControllerSignal<T>;
+  /**
+   * Creates a lazy, cached derived value. The synchronous callback dynamically tracks the signals,
+   * computed values, and host state paths it reads; reads after an `await` are not dependencies.
+   */
+  computed<T>(compute: () => T): ControllerComputed<T>;
+  /**
+   * Runs a lifecycle-owned reaction and reruns it after a tracked read changes. A returned cleanup
+   * runs before the next execution and when the component disconnects.
+   */
   effect(run: () => void | (() => void)): () => void;
   on(event: string, listener: EventListener): () => void;
   dispatch(event: string, detail?: unknown): boolean;
+}
+
+export interface ControllerComputed<T> {
+  /** Evaluates on first demand, then returns the cached value until a dependency changes. */
+  get(): T;
+}
+
+export interface ControllerSignal<T> extends ControllerComputed<T> {
+  /** Replaces the value, notifying consumers only when it is not `Object.is`-equal. */
+  set(value: T): void;
+  /** Computes and writes the next value from the current value. */
+  update(update: (value: T) => T): void;
 }
 
 function connectRuntimeInstance(instance: RuntimeInstance): void {
@@ -1705,6 +1739,14 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     state,
     refs: instance.refs,
     elements,
+    signal(initialValue) {
+      return createSignal(initialValue);
+    },
+    computed(compute) {
+      const computed = createComputed(instance.scope.scheduler, compute);
+      instance.effects.push(computed);
+      return computed;
+    },
     effect(run) {
       const effect = createEffect(instance.scope.scheduler, run, 2);
       instance.effects.push(effect);

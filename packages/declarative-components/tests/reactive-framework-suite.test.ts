@@ -7,50 +7,45 @@ import {
   type Signal,
 } from "reactive-framework-test-suite";
 
-import { createEffect, ReactiveScope } from "../src/reactivity.js";
+import {
+  createComputed,
+  createEffect,
+  createSignal,
+  ReactiveScheduler,
+} from "../src/reactivity.js";
 
 function htmlNextAdapter(): ReactiveFramework {
-  const scope = new ReactiveScope();
+  const scheduler = new ReactiveScheduler();
   const owned = new Set<() => void>();
-  let nextSignal = 0;
-  let nextComputed = 0;
   let runningEffects = 0;
 
   const flushOutsideEffect = (): void => {
-    if (runningEffects === 0) scope.scheduler.flush();
+    if (runningEffects === 0) scheduler.flush();
   };
 
   return {
     name: "HTML Next",
     signal<T>(initialValue: T): Signal<T> {
-      const name = `suiteSignal${nextSignal++}`;
-      scope.set(name, initialValue as never);
+      const signal = createSignal<T>(initialValue);
       return {
-        read: () => scope.get(name) as T,
-        write(value) {
-          scope.set(name, value as never);
+        read: () => signal.get(),
+        write(value: T) {
+          signal.set(value);
           flushOutsideEffect();
         },
       };
     },
     computed<T>(compute: () => T): Computed<T> {
-      const name = `suiteComputed${nextComputed++}`;
-      scope.set(name, undefined as never);
-      const effect = createEffect(scope.scheduler, () => {
-        runningEffects += 1;
-        try { scope.set(name, compute() as never); }
-        finally { runningEffects -= 1; }
-      }, 0);
+      const effect = createComputed<T>(scheduler, compute);
       const dispose = () => {
         effect.stop();
         owned.delete(dispose);
       };
       owned.add(dispose);
-      flushOutsideEffect();
-      return { read: () => scope.get(name) as T };
+      return { read: () => effect.get() };
     },
     effect(run) {
-      const effect = createEffect(scope.scheduler, () => {
+      const effect = createEffect(scheduler, () => {
         runningEffects += 1;
         try { return run(); }
         finally { runningEffects -= 1; }

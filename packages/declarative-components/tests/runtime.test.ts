@@ -808,6 +808,54 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} provides lazy controller signals and computed values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-controller-reactivity" status="early" summary="Controller reactivity.">` +
+            `<p>Ready</p></template><x-controller-reactivity id="controller-reactivity"></x-controller-reactivity>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#controller-reactivity');
+          const host = window.HtmlRuntime.getComponentHost(root);
+          const source = host.signal(0);
+          let computedRuns = 0;
+          let effectRuns = 0;
+          let observed = '';
+          const bucket = host.computed(() => {
+            computedRuns += 1;
+            return source.get() === 0 ? 'empty' : 'ready';
+          });
+          source.set(1);
+          source.set(2);
+          await Promise.resolve();
+          const beforeRead = computedRuns;
+          const first = bucket.get();
+          const second = bucket.get();
+          host.effect(() => {
+            effectRuns += 1;
+            observed = bucket.get();
+          });
+          source.set(3);
+          await Promise.resolve();
+          return { beforeRead, first, second, computedRuns, effectRuns, observed };
+        })()`);
+        assert.deepEqual(result, {
+          beforeRead: 0,
+          first: "ready",
+          second: "ready",
+          computedRuns: 2,
+          effectRuns: 1,
+          observed: "ready",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} writes text, checkbox, radio, select, and number controls back to state`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -2,12 +2,17 @@ import type { Scope, Value } from "./expression.js";
 import { fail } from "./diagnostics.js";
 
 type Cleanup = void | (() => void);
+interface ComputedEffectOwner {
+  invalidate(): void;
+  refresh(): void;
+}
 interface Dependency {
   first: Subscription | undefined;
   last: Subscription | undefined;
 }
 
 interface ReactiveCell extends Dependency {
+  computed?: ReactiveComputed<Value>;
   value: Value;
 }
 
@@ -20,6 +25,8 @@ interface Subscription {
 }
 
 let activeEffect: ReactiveEffect | undefined;
+let invalidationDepth = 0;
+let pendingComputeds: ComputedEffectOwner[] = [];
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
@@ -54,13 +61,14 @@ export class ReactiveScheduler {
     if (this.#flushing || this.#pending.length > 0) return false;
     for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
       subscription = subscription.nextSubscriber) {
-      if (subscription.effect.scheduler !== this) {
+      const effect = subscription.effect;
+      if (effect.scheduler !== this) {
         // Entry requires an empty queue and scheduling starts only after this loop, so the
         // partially collected batch is private and can be discarded before the safe fallback.
         this.#pending = [];
         return false;
       }
-      this.#pending.push(subscription.effect);
+      this.#pending.push(effect);
     }
     if (!this.#scheduled) {
       this.#scheduled = true;
@@ -124,6 +132,7 @@ export class ReactiveEffect {
     readonly scheduler: ReactiveScheduler,
     readonly run: () => Cleanup,
     readonly priority: number,
+    readonly computed?: ComputedEffectOwner,
   ) {}
 
   execute(): void {
@@ -176,14 +185,27 @@ export class ReactiveEffect {
     if (this.#dependencyTail === undefined) this.dependencies = subscription;
     else this.#dependencyTail.nextDependency = subscription;
     this.#dependencyTail = subscription;
-    const last = dependency.last;
-    subscription.previousSubscriber = last;
-    if (last === undefined) dependency.first = subscription;
-    else last.nextSubscriber = subscription;
-    dependency.last = subscription;
+    const first = dependency.first;
+    // Computeds lead the subscriber list so invalidation can dirty the derived graph before an
+    // ordinary effect observes it. Priority-zero data effects still use normal scheduler ordering.
+    if (this.computed !== undefined && first !== undefined) {
+      subscription.nextSubscriber = first;
+      first.previousSubscriber = subscription;
+      dependency.first = subscription;
+    } else {
+      const last = dependency.last;
+      subscription.previousSubscriber = last;
+      if (last === undefined) dependency.first = subscription;
+      else last.nextSubscriber = subscription;
+      dependency.last = subscription;
+    }
   }
 
   schedule(): void {
+    if (this.computed !== undefined) {
+      this.computed.invalidate();
+      return;
+    }
     if (!this.paused) this.scheduler.enqueue(this);
   }
 
@@ -221,16 +243,177 @@ export class ReactiveEffect {
   }
 }
 
-function trigger(dependency: Dependency | undefined): void {
+/** A writable controller-local value that participates in the same dependency graph as scopes. */
+export class ReactiveSignal<T> {
+  readonly #dependency: Dependency = { first: undefined, last: undefined };
+  #value: T;
+
+  constructor(value: T) {
+    this.#value = value;
+  }
+
+  get(): T {
+    if (activeEffect !== undefined) activeEffect.track(this.#dependency);
+    return this.#value;
+  }
+
+  set(value: T): void {
+    if (Object.is(this.#value, value)) return;
+    this.#value = value;
+    trigger(this.#dependency);
+  }
+
+  update(update: (value: T) => T): void {
+    this.set(update(this.#value));
+  }
+}
+
+export interface ReactiveOwner {
+  pause(): void;
+  resume(): void;
+  stop(): void;
+}
+
+/**
+ * A cached derived value. Invalidations stay lazy unless a live effect consumes the value; in that
+ * case the computed refreshes after the whole upstream change has been marked dirty, so equality
+ * can stop downstream work without evaluating abandoned branches.
+ */
+export class ReactiveComputed<T> implements ReactiveOwner {
+  readonly #dependency: Dependency;
+  readonly #compute: () => T;
+  readonly #effect: ReactiveEffect;
+  #value!: T;
+  #initialized = false;
+  #dirty = true;
+  #evaluating = false;
+  #changed = false;
+
+  constructor(
+    scheduler: ReactiveScheduler,
+    compute: () => T,
+    dependency: Dependency = { first: undefined, last: undefined },
+  ) {
+    this.#dependency = dependency;
+    this.#compute = compute;
+    this.#effect = new ReactiveEffect(scheduler, () => this.#evaluate(), 0, this);
+  }
+
+  get(): T {
+    if (this.#effect.paused || this.#effect.stopped) return this.#readDetached();
+    this.#refresh();
+    if (activeEffect !== undefined) activeEffect.track(this.#dependency);
+    return this.#value;
+  }
+
+  invalidate(): void {
+    if (this.#effect.stopped || this.#dirty) return;
+    this.#dirty = true;
+    for (let subscription = this.#dependency.first; subscription !== undefined;
+      subscription = subscription.nextSubscriber) {
+      if (subscription.effect.computed === undefined) {
+        if (invalidationDepth === 0) this.#refresh();
+        else pendingComputeds.push(this);
+        return;
+      }
+    }
+    trigger(this.#dependency);
+  }
+
+  refresh(): void {
+    this.#refresh();
+  }
+
+  pause(): void {
+    if (this.#effect.stopped || this.#effect.paused) return;
+    this.#dirty = true;
+    this.#effect.pause();
+  }
+
+  resume(): void {
+    if (this.#effect.stopped || !this.#effect.paused) return;
+    this.#effect.paused = false;
+  }
+
+  stop(): void {
+    this.#effect.stop();
+  }
+
+  #refresh(): void {
+    if (this.#evaluating) fail("HR006", "A reactive computed value depends on itself.");
+    if (!this.#dirty || this.#effect.stopped || this.#effect.paused) return;
+    const initialized = this.#initialized;
+    this.#effect.execute();
+    if (initialized && this.#changed) {
+      trigger(this.#dependency, activeEffect?.computed === undefined ? undefined : activeEffect);
+    }
+  }
+
+  #readDetached(): T {
+    if (this.#evaluating) fail("HR006", "A reactive computed value depends on itself.");
+    const previous = activeEffect;
+    this.#evaluating = true;
+    activeEffect = undefined;
+    try {
+      return this.#compute();
+    } finally {
+      activeEffect = previous;
+      this.#evaluating = false;
+    }
+  }
+
+  #evaluate(): void {
+    this.#evaluating = true;
+    this.#dirty = false;
+    try {
+      const value = this.#compute();
+      this.#changed = !this.#initialized || !Object.is(this.#value, value);
+      this.#value = value;
+      this.#initialized = true;
+    } catch (error) {
+      this.#dirty = true;
+      throw error;
+    } finally {
+      this.#evaluating = false;
+    }
+  }
+}
+
+function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): void {
   const first = dependency?.first;
   if (first === undefined) return;
-  if (first !== dependency!.last && first.effect.scheduler.enqueueDependency(dependency!)) return;
+  const multiple = first !== dependency!.last;
+  if (first.effect.computed === undefined) {
+    if (skip === undefined && multiple && first.effect.scheduler.enqueueDependency(dependency!)) return;
+    for (let subscription: Subscription | undefined = first;
+      subscription !== undefined; ) {
+      const next: Subscription | undefined = subscription.nextSubscriber;
+      if (subscription.effect !== skip) subscription.effect.schedule();
+      subscription = next;
+    }
+    return;
+  }
+  if (multiple) invalidationDepth += 1;
   for (let subscription: Subscription | undefined = first;
     subscription !== undefined; ) {
     const next: Subscription | undefined = subscription.nextSubscriber;
-    subscription.effect.schedule();
+    if (subscription.effect !== skip) subscription.effect.schedule();
     subscription = next;
   }
+  if (multiple) invalidationDepth -= 1;
+  if (multiple && invalidationDepth === 0 && pendingComputeds.length > 0) {
+    const pending = pendingComputeds;
+    pendingComputeds = [];
+    for (const computed of pending) computed.refresh();
+  }
+}
+
+export function createSignal<T>(initialValue: T): ReactiveSignal<T> {
+  return new ReactiveSignal(initialValue);
+}
+
+export function createComputed<T>(scheduler: ReactiveScheduler, compute: () => T): ReactiveComputed<T> {
+  return new ReactiveComputed(scheduler, compute);
 }
 
 export function createEffect(
@@ -286,6 +469,26 @@ export class ReactiveScope implements Scope {
     trigger(cell);
   }
 
+  /** Defines a named derived scope value without evaluating it until a consumer reads it. */
+  defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
+    let cell = this.#local(name);
+    if (cell === undefined) {
+      cell = { value: null, first: undefined, last: undefined };
+      this.#cells.set(name, cell);
+      this.#cachedCell = cell;
+    }
+    const computed = new ReactiveComputed(
+      this.scheduler,
+      () => this.#wrap(compute()),
+      cell,
+    );
+    cell.computed = computed;
+    // Most scopes contain only writable values. Install the extra computed lookup only on scopes
+    // that need it so ordinary state reads retain the minimal hot path.
+    if (!Object.hasOwn(this, "get")) this.get = this.#getWithComputed;
+    return computed;
+  }
+
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
     return new ReactiveScope(values, this.scheduler, this);
   }
@@ -316,7 +519,10 @@ export class ReactiveScope implements Scope {
   #snapshot(): Map<string, Value> {
     return new Map([
       ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#cells, ([name, cell]) => [name, cell.value] as const),
+      ...Array.from(this.#cells, ([name, cell]) => [
+        name,
+        cell.computed === undefined ? cell.value : cell.computed.get(),
+      ] as const),
     ]);
   }
 
@@ -326,6 +532,14 @@ export class ReactiveScope implements Scope {
       this.#cachedCell = this.#cells.get(name);
     }
     return this.#cachedCell;
+  }
+
+  #getWithComputed(name: string): Value | undefined {
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.get(name);
+    if (cell.computed !== undefined) return cell.computed.get();
+    if (activeEffect !== undefined) activeEffect.track(cell);
+    return cell.value;
   }
 
   #wrap(value: Value): Value {

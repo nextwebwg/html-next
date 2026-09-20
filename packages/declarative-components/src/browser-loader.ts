@@ -90,7 +90,7 @@ export async function startBrowserComponents(
       let disconnected = false;
       let cleanup: void | (() => void);
       void module
-        .then((loaded) => loaded.default(getComponentHost(element) ?? { element }))
+        .then((loaded) => loaded.default(getComponentHost(element)!))
         .then((result) => {
           if (typeof result !== "function") return;
           if (disconnected) result();

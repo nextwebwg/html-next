@@ -101,6 +101,15 @@ function words(value: string): string {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
+const workloadDescriptions: Readonly<Record<string, string>> = {
+  "signal-write-read": "Write one signal, flush any work, then read it back.",
+  "effect-propagation": "Write one signal observed by one effect and verify the effect sees it.",
+  "computed-chain": "Update the source of ten chained computed values observed by one effect.",
+  diamond: "Update one source feeding two computed branches that join before one effect.",
+  "dynamic-dependencies": "Switch a computed between two source branches, then update the active branch.",
+  "fan-out-32": "Update one source observed by 32 independent effects.",
+};
+
 function renderReport(runtime: RuntimeReport, reactivity: ReactivityReport): string {
   const live = runtime.live_distributable;
   const workloads = Object.keys(reactivity.matrix[0]?.workloads_ns_per_iteration ?? {});
@@ -166,10 +175,16 @@ function renderReport(runtime: RuntimeReport, reactivity: ReactivityReport): str
   </div>
 
   <h2>Reactive framework matrix</h2>
-  <p>Workload cells are nanoseconds per benchmark iteration; lower is better. The score is relative to the best result in each column, so it summarizes balanced performance rather than rewarding one unusually fast workload.</p>
+  <p>Workload cells are nanoseconds per benchmark iteration; lower is better. Each framework is measured through its direct signal, computed, and effect primitives. The score is relative to the best result in each column, so it summarizes balanced performance rather than rewarding one unusually fast workload.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Framework</th><th>Score</th>${workloads.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}</tr></thead>
     <tbody>${matrixRows}</tbody>
+  </table></div>
+
+  <h2>What each reactive workload measures</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Workload</th><th>Measured operation</th></tr></thead>
+    <tbody>${workloads.map((name) => `<tr><th scope="row"><code>${escapeHtml(name)}</code></th><td>${escapeHtml(workloadDescriptions[name] ?? "")}</td></tr>`).join("")}</tbody>
   </table></div>
 
   <h2>Live runtime by subsystem</h2>
