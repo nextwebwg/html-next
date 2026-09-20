@@ -177,7 +177,9 @@ export function installComponentGraph(
 }
 
 function invocationValue(prop: PropContract, input: unknown, attributePresent = false): PropValue {
-  const candidate = prop.type === "boolean" && attributePresent ? true : input;
+  // Bare boolean attributes retain HTML presence semantics. Explicit values
+  // are invocation strings and must still pass through the declared type.
+  const candidate = prop.type === "boolean" && attributePresent && input === "" ? true : input;
   const parsed = parseTypedValue(candidate, prop.type);
   if (!parsed.ok) {
     const detail = parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");

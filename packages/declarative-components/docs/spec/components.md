@@ -18,7 +18,7 @@ This observation is a browser-runtime responsibility. Ahead-of-time compilation 
 
 ## Properties
 
-A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from invocation attributes. Structured values and functions are property-only inputs. Changes made through the lowered root's public property participate in the same update batch as local state writes.
+A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from invocation attributes; their HTML strings are parsed through the declared type as specified by [Invocation attribute parsing](types-and-validation.md#invocation-attribute-parsing). Structured values and functions are property-only inputs. Changes made through the lowered root's public property participate in the same update batch as local state writes.
 
 A controlled property is authoritative while present. Its paired `default-*` value initializes local state only when the controlled property is absent. User interaction updates local state and dispatches the declared change event; it does not mutate an externally controlled property.
 

@@ -176,7 +176,7 @@ export interface GeneratedProp {
 function propValue(input: unknown, type: GeneratedPropType, attributePresent = false): unknown {
   if (type === "string" && typeof input === "string") return input;
   if (type === "boolean") {
-    if (attributePresent) return true;
+    if (attributePresent && input === "") return true;
     if (typeof input === "boolean") return input;
     if (input === "" || input === "true") return true;
     if (input === "false") return false;

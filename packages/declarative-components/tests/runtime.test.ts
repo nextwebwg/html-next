@@ -12,9 +12,11 @@ import { transformComponentStyles } from "../src/style.js";
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
 const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
+const generatedRuntimeUrl = new URL("../src/generated-runtime.ts", import.meta.url);
 
 describe.skipIf(!enabled)("browser runtime", () => {
   let bundlePath = "";
+  let generatedBundlePath = "";
   let temporaryDirectory = "";
   let source = "";
 
@@ -25,12 +27,22 @@ describe.skipIf(!enabled)("browser runtime", () => {
 
     temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-runtime-"));
     bundlePath = join(temporaryDirectory, "runtime.js");
+    generatedBundlePath = join(temporaryDirectory, "generated-runtime.js");
     await build({
       entryPoints: [runtimeUrl.pathname],
       bundle: true,
       format: "iife",
       globalName: "HtmlRuntime",
       outfile: bundlePath,
+      platform: "browser",
+      target: ["es2022"],
+    });
+    await build({
+      entryPoints: [generatedRuntimeUrl.pathname],
+      bundle: true,
+      format: "iife",
+      globalName: "HtmlGeneratedRuntime",
+      outfile: generatedBundlePath,
       platform: "browser",
       target: ["es2022"],
     });
@@ -692,6 +704,49 @@ describe.skipIf(!enabled)("browser runtime", () => {
           tier: "Pro",
           tierCount: 1, // only the winning arm renders
           who: "Ada",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} coerces explicit boolean invocation strings in both runtimes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-boolean" status="early" summary="Boolean attributes.">` +
+            `<defs><prop name="enabled" type="boolean" default="true">Enabled.</prop></defs>` +
+            `<output :data-enabled="enabled"></output></template>` +
+            `<x-boolean id="bare" enabled></x-boolean>` +
+            `<x-boolean id="explicit-true" enabled="true"></x-boolean>` +
+            `<x-boolean id="explicit-false" enabled="false"></x-boolean>` +
+            `<x-boolean id="default"></x-boolean>` +
+            `<div id="generated"></div>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.addScriptTag({ path: generatedBundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const interpreted = ["bare", "explicit-true", "explicit-false", "default"].map(id =>
+            document.getElementById(id).getAttribute("data-enabled")
+          );
+          const generated = document.getElementById("generated");
+          window.HtmlGeneratedRuntime.manageGeneratedProps(generated, [{
+            name: "enabled", attribute: "data-enabled", value: false, type: "boolean", required: false
+          }]);
+          const values = [];
+          for (const value of ["", "true", "false"]) {
+            generated.setAttribute("data-enabled", value);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            values.push(generated.enabled);
+          }
+          return { interpreted, generated: values };
+        })()`);
+
+        assert.deepEqual(result, {
+          interpreted: ["true", "true", "false", "true"],
+          generated: [true, true, false],
         });
       } finally {
         await browser.close();

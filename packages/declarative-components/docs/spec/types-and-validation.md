@@ -51,6 +51,27 @@ Examples of canonical expressions include `outline | solid | ghost`, `list(strin
 three-keyword union; a list of strings; a string-keyed numeric record; a closed
 object with one required and one optional field; and an open object with a required `id`.
 
+## Invocation attribute parsing
+
+An attribute on a component invocation is HTML source text. Before the component receives that
+value, the user agent must parse it through the invoked property's declared type and expose the
+resulting canonical value. The declaration therefore gives a component attribute the same kind
+of defined value semantics that native HTML controls give their content attributes; individual
+components must not each reimplement string coercion.
+
+This rule applies at the page boundary. The `:` prefix is template expression-binding syntax and
+is not required on an invocation. Given a property declared as `boolean`, all of the following are
+well-typed invocations: a bare attribute has the canonical value `true`, `enabled="true"` has the
+canonical value `true`, and `enabled="false"` has the canonical value `false`. Omitting the
+attribute supplies no invocation value, so the property's declared default or absence semantics
+apply. A non-empty value other than `true` or `false` is a type error; it does not become true by
+presence alone.
+
+Number and integer attributes are likewise parsed from their complete strings. Keyword unions
+select their matching declared string value. Structured and callable types remain property-only
+unless another section explicitly defines a text encoding. Ahead-of-time targets and the live
+browser runtime must produce the same canonical value for the same invocation.
+
 ## Terminal types
 
 | Terminal | Accepted input | Canonical value | Serialization |
