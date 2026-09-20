@@ -12,8 +12,8 @@ loader starts, so the input graph remains open for the lifetime of the document.
 
 The loader must accept every conforming source construct in the current support profile without an
 application manifest or a build-time capability inventory. Application-selected roots establish
-the resource trust boundary; relative component resources remain inside their canonical component
-root.
+the resource entry set; relative component resources use ordinary URL resolution while Fetch,
+CORS, CSP, and native ESM enforce the platform's loading policy.
 
 ## Capability contract
 
@@ -95,7 +95,7 @@ hot-path performance guardrail.
    graph without a manifest or restart.
 3. Detach, move, adopt, and reconnect lowered roots; identity and authored state are preserved where
    specified, and cleanup remains balanced.
-4. Reject invalid or untrusted resources before activation with the specified diagnostic and no
-   leaked live work.
+4. Reject invalid resources and platform-denied loads before activation with the specified
+   diagnostic and no leaked live work.
 5. Hydrate server-lowered DOM while preserving node identity, edits, focus, selection, and current
    control state.
