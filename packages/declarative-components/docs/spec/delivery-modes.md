@@ -18,14 +18,14 @@ different modes, provided their public component contracts do not collide.
 ## Shared semantic model
 
 Every mode must normalize source according to [syntax and diagnostics](syntax.md), then preserve
-the behavior defined by the component, expression, reactivity, loading, type, validation, and style
+the behavior defined by the component, expression, reactivity, loading, type, and style
 modules. Normalization may happen in the browser, during a native build, or during framework
 conversion.
 
 For the same definition and inputs, conforming modes must agree on:
 
 - the authored native root and projected-content identity;
-- public attributes, properties, events, methods, slots, and validation;
+- public attributes, properties, events, methods, slots, declared types, and native form behavior;
 - state, computed values, effects, and declared request results;
 - connection, disconnection, reconnection, controller cleanup, and hydration;
 - scoped styles and observable diagnostics.
@@ -46,7 +46,7 @@ bridges.
 
 ## Graph boundaries
 
-The application selects trusted graph roots. Relative component, controller, style, schema, and
+The application selects trusted graph roots. Relative component, controller, style, and
 static module edges extend the graph under the loading and security rules.
 
 The live mode resolves edges as definitions arrive. Build modes resolve concrete edges before

@@ -6,9 +6,10 @@ State is per component instance. Computed values are pure expressions over decla
 
 External property changes, controller writes, control bindings, data transitions, and declarative handlers enter the same scheduler. Disconnect runs owned cleanup. Reconnection creates no duplicate listener, observer, timer, or request.
 
-Each effect may execute at most 100 times while one change set is being drained. Crossing
-that bound clears pending work and reports `HR006`. Cyclic write graphs therefore terminate
-with a stable diagnostic while independent wide fan-out continues normally.
+One change set may propagate through at most 100 dependency-ordered queue rounds. Crossing that
+depth clears pending work and reports `HR006`. Cyclic write graphs therefore terminate with a
+stable diagnostic while independent wide fan-out continues normally. This bounds causality depth,
+not the number of independent effects in one round.
 
 ## Structural regions
 
@@ -40,7 +41,7 @@ The public contract exposes values and lifetime-bound reactions, not raw `Signal
 
 ## Data resources
 
-A declared read serializes URI-template and query parameters, cancels stale work, and exposes `pending`, `value`, `error`, and `ok`. Debounce and polling use owned timers and stop on disconnect. Typed response validation happens before the value becomes observable.
+A declared read serializes URI-template and query parameters, cancels stale work, and exposes `pending`, `value`, `error`, and `ok`. Debounce and polling use owned timers and stop on disconnect. The core decodes the response without imposing an application schema. A host-provided adapter may validate, coerce, or project the decoded value before publication; a thrown adapter error becomes the resource error and no value is published.
 
 ## Native form participation
 

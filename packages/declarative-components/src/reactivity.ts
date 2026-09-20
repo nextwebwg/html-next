@@ -7,6 +7,10 @@ interface Dependency {
   last: Subscription | undefined;
 }
 
+interface ReactiveCell extends Dependency {
+  value: Value;
+}
+
 interface Subscription {
   readonly dependency: Dependency;
   readonly effect: ReactiveEffect;
@@ -31,7 +35,6 @@ function unsubscribe(subscription: Subscription): void {
 
 export class ReactiveScheduler {
   #pending: ReactiveEffect[] = [];
-  #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
@@ -47,28 +50,59 @@ export class ReactiveScheduler {
     }
   }
 
+  enqueueDependency(dependency: Dependency): boolean {
+    if (this.#flushing || this.#pending.length > 0) return false;
+    for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
+      subscription = subscription.nextSubscriber) {
+      if (subscription.effect.scheduler !== this) return false;
+    }
+    for (let subscription: Subscription | undefined = dependency.first; subscription !== undefined;
+      subscription = subscription.nextSubscriber) {
+      this.#pending.push(subscription.effect);
+    }
+    if (!this.#scheduled) {
+      this.#scheduled = true;
+      queueMicrotask(() => {
+        this.#scheduled = false;
+        this.flush();
+      });
+    }
+    return true;
+  }
+
   flush(): void {
     if (this.#flushing) return;
     this.#flushing = true;
-    const flushId = ++this.#flushId;
+    let rounds = 0;
     try {
       while (this.#pending.length > 0) {
-        const effects = this.#pending.sort(
-          (left, right) => left.priority - right.priority || left.id - right.id,
-        );
-        this.#pending = [];
-        for (const effect of effects) {
-          if (effect.flushId === flushId) effect.flushCount += 1;
-          else {
-            effect.flushId = flushId;
-            effect.flushCount = 1;
-          }
-          if (effect.flushCount > maximumExecutionsPerFlush) {
-            this.#pending = [];
-            fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
-          }
-          effect.execute();
+        rounds += 1;
+        if (rounds > maximumExecutionsPerFlush) {
+          this.#pending = [];
+          fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
         }
+        const effects = this.#pending;
+        if (effects.length > 1) {
+          let index = 1;
+          let previous = effects[0]!;
+          while (index < effects.length) {
+            const current = effects[index]!;
+            if (previous.priority > current.priority ||
+              (previous.priority === current.priority && previous.id > current.id)) break;
+            previous = current;
+            index += 1;
+          }
+          if (index < effects.length) {
+            effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
+          }
+        }
+        this.#pending = [];
+        let index = 0;
+        do {
+          const effect = effects[index]!;
+          effect.execute();
+          index += 1;
+        } while (index < effects.length);
       }
     } finally {
       this.#flushing = false;
@@ -79,8 +113,6 @@ export class ReactiveScheduler {
 export class ReactiveEffect {
   readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
-  flushCount = 0;
-  flushId = 0;
   stopped = false;
   paused = false;
   #cleanup: Cleanup = undefined;
@@ -95,13 +127,17 @@ export class ReactiveEffect {
   execute(): void {
     if (this.stopped || this.paused) return;
     this.#dependencyTail = undefined;
-    this.#cleanup?.();
-    this.#cleanup = undefined;
+    if (this.#cleanup !== undefined) {
+      const cleanup = this.#cleanup;
+      this.#cleanup = undefined;
+      cleanup();
+    }
     const previous = activeEffect;
     // oxlint-disable-next-line typescript/no-this-alias
     activeEffect = this;
     try {
-      this.#cleanup = this.run();
+      const cleanup = this.run();
+      if (cleanup !== undefined) this.#cleanup = cleanup;
     } finally {
       activeEffect = previous;
       const tail = this.#dependencyTail as Subscription | undefined;
@@ -183,14 +219,13 @@ export class ReactiveEffect {
   }
 }
 
-function track(dependency: Dependency): void {
-  if (activeEffect === undefined || activeEffect.stopped) return;
-  activeEffect.track(dependency);
-}
-
 function trigger(dependency: Dependency | undefined): void {
-  for (let subscription = dependency?.first; subscription !== undefined; ) {
-    const next = subscription.nextSubscriber;
+  if (dependency?.first === undefined) return;
+  if (dependency.first !== dependency.last &&
+    dependency.first.effect.scheduler.enqueueDependency(dependency)) return;
+  for (let subscription: Subscription | undefined = dependency.first;
+    subscription !== undefined; ) {
+    const next: Subscription | undefined = subscription.nextSubscriber;
     subscription.effect.schedule();
     subscription = next;
   }
@@ -208,15 +243,16 @@ export function createEffect(
 
 /** A scope layer whose root reads and nested object/array paths are dependency tracked. */
 export class ReactiveScope implements Scope {
-  readonly #values = new Map<string, Value>();
-  readonly #subscribers = new Map<string, Dependency>();
+  readonly #cells = new Map<string, ReactiveCell>();
+  #cachedName: string | undefined;
+  #cachedCell: ReactiveCell | undefined;
 
   constructor(
     values: Iterable<readonly [string, Value]> = [],
     readonly scheduler = new ReactiveScheduler(),
     readonly parent?: ReactiveScope,
   ) {
-    for (const [name, value] of values) this.#values.set(name, this.#wrap(value));
+    for (const [name, value] of values) this.set(name, value);
   }
 
   get size(): number {
@@ -224,27 +260,28 @@ export class ReactiveScope implements Scope {
   }
 
   has(name: string): boolean {
-    return this.#values.has(name) || this.parent?.has(name) === true;
+    return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
 
   get(name: string): Value | undefined {
-    if (!this.#values.has(name)) return this.parent?.get(name);
-    if (activeEffect !== undefined) {
-      let subscribers = this.#subscribers.get(name);
-      if (subscribers === undefined) {
-        subscribers = { first: undefined, last: undefined };
-        this.#subscribers.set(name, subscribers);
-      }
-      track(subscribers);
-    }
-    return this.#values.get(name);
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.get(name);
+    if (activeEffect !== undefined) activeEffect.track(cell);
+    return cell.value;
   }
 
   set(name: string, value: Value): void {
     const wrapped = this.#wrap(value);
-    if (Object.is(this.#values.get(name), wrapped) && this.#values.has(name)) return;
-    this.#values.set(name, wrapped);
-    trigger(this.#subscribers.get(name));
+    let cell = this.#local(name);
+    if (cell === undefined) {
+      cell = { value: wrapped, first: undefined, last: undefined };
+      this.#cells.set(name, cell);
+      this.#cachedCell = cell;
+      return;
+    }
+    if (Object.is(cell.value, wrapped)) return;
+    cell.value = wrapped;
+    trigger(cell);
   }
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
@@ -277,8 +314,16 @@ export class ReactiveScope implements Scope {
   #snapshot(): Map<string, Value> {
     return new Map([
       ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#values),
+      ...Array.from(this.#cells, ([name, cell]) => [name, cell.value] as const),
     ]);
+  }
+
+  #local(name: string): ReactiveCell | undefined {
+    if (name !== this.#cachedName) {
+      this.#cachedName = name;
+      this.#cachedCell = this.#cells.get(name);
+    }
+    return this.#cachedCell;
   }
 
   #wrap(value: Value): Value {
@@ -298,7 +343,7 @@ export class ReactiveScope implements Scope {
             subscribers = { first: undefined, last: undefined };
             properties.set(key, subscribers);
           }
-          track(subscribers);
+          activeEffect.track(subscribers);
         }
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },

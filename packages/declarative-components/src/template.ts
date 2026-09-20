@@ -42,7 +42,6 @@ export interface DataDeclaration {
   readonly name: string;
   readonly source?: string;
   readonly type?: string;
-  readonly schema?: string;
   readonly debounce?: string;
   readonly poll?: string;
   readonly parameters: readonly DataParameter[];

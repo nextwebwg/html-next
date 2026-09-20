@@ -19,7 +19,7 @@ root.
 
 One public browser entry must make the complete implemented capability profile available,
 including component discovery, native-root lowering, projection, props, state, computed values,
-effects, handlers, structural directives, declared requests, validation, scoped styles,
+effects, handlers, structural directives, declared requests, declared type enforcement, scoped styles,
 controllers, resource graphs, and hydration.
 
 The implementation may load an internal module only when a definition needs its capability. The
@@ -33,7 +33,7 @@ controls, constraint validation for native controls, URL resolution, Fetch, nati
 microtask scheduling, cancellation, and connection state.
 
 The distributable owns proposal grammar, normalized semantics, dependency tracking that the
-platform does not express, structural reconciliation, generalized-element validity, component
+platform does not express, structural reconciliation, component
 style transformation, controller hosting, component-resource policy, stable diagnostics, and
 balanced component lifecycle.
 

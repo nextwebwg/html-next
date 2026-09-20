@@ -153,9 +153,9 @@ definitions it loads:
 | Component discovery and lifecycle | One shared `MutationObserver` discovers registered component tags and balances connection cleanup for lowered roots. |
 | Component parsing | The browser's HTML parser creates the inert DOM; the library reads declarations, validates the proposal grammar, and reports component diagnostics. |
 | Reactive declarations | Native events and microtasks drive a small dependency layer for live state, computed values, bindings, and effects. |
-| Generalized validity | Native controls keep `ValidityState`; managed ordinary elements receive the corresponding validity methods, flags, invalid events, and selector-state bridge. |
+| Declared types | Component-authored prop and event types are parsed and enforced at their public boundaries; external data may use an application adapter. |
 | Dynamic `$html` | A 696-byte minified DOM sanitizer preserves the proposal's cross-browser content policy. It is retained until native `setHTML()` is available in every target engine with equivalent policy control. |
-| Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, projected content, and generalized validity selectors. |
+| Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, and projected content. |
 | Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
 | Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
 
@@ -186,7 +186,7 @@ html-next build components/app.html --out-dir generated --target vue --target st
 
 Until the package is published, substitute
 `corepack pnpm exec tsx packages/declarative-components/src/cli.ts` for `html-next`.
-`inspect` reports component, controller, schema, and transitive module edges. `build`
+`inspect` reports component, controller, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
 

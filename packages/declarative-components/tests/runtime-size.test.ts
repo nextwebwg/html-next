@@ -48,14 +48,12 @@ describe("runtime size measurement", () => {
       "declaredData",
       "expressionEvaluation",
       "generalRuntime",
-      "jsonSchema",
       "liveSource",
       "proposalParser",
       "reactivity",
       "sanitization",
       "scopedStyles",
       "typeSystem",
-      "validation",
     ]);
 
     const native = report.native_build as {

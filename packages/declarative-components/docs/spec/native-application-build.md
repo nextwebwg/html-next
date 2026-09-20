@@ -9,7 +9,7 @@ An application build receives one or more application entries. A library build r
 public component entries and ordinary module, type, style, and asset exports the package intends to
 publish.
 
-The build follows component, controller, style, schema, and statically discoverable module edges
+The build follows component, controller, style, and statically discoverable module edges
 without executing authored code. An unknown runtime component boundary must be declared as a
 universal-runtime boundary, a dynamic capability chunk, or a diagnostic condition.
 
@@ -21,7 +21,7 @@ support every capability reachable from each published entry while keeping those
 independently consumable.
 
 The generated result preserves the shared semantic model: native roots, projection, public
-properties and methods, reactivity, requests, forms, validation, styles, controllers, lifecycle,
+properties and methods, reactivity, requests, native forms, declared types, styles, controllers, lifecycle,
 and hydration must match the live distributable for the same graph and inputs.
 
 ## Runtime ownership
@@ -88,4 +88,3 @@ attribution group.
    with the specified policy and failure behavior.
 5. Reject an undeclared dynamic component edge with a source-located diagnostic before publishing
    partial output.
-

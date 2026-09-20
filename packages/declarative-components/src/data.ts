@@ -1,11 +1,3 @@
-import { validateJsonSchema, type JsonSchema } from "./json-schema.js";
-import {
-  parseTypedValue,
-  parseTypeExpression,
-  type TypeInput,
-  type TypeIssue,
-} from "./type-system.js";
-
 export interface DataState<T = unknown> {
   readonly pending: boolean;
   readonly value: T | null;
@@ -17,24 +9,14 @@ export interface DataRequestOptions<T = unknown> {
   readonly source: string;
   readonly baseURL: string;
   readonly type?: string;
-  /** Inline parsed type/schema for the decoded response value. */
-  readonly schema?: TypeInput | string;
-  /** Resolved external JSON Schema URL. */
-  readonly schemaURL?: string;
   readonly debounce?: number;
   readonly poll?: number;
   readonly fetch?: typeof fetch;
   readonly setTimer?: (callback: () => void, delay: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
-  readonly validate?: (value: unknown) => T;
+  /** Optional application adapter for validation, coercion, or projection before publication. */
+  readonly adapt?: (value: unknown) => T;
   readonly onState: (state: DataState<T>) => void;
-}
-
-export class DataValidationError extends TypeError {
-  constructor(readonly issues: readonly TypeIssue[]) {
-    super(issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
-    this.name = "DataValidationError";
-  }
 }
 
 function requestURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
@@ -64,7 +46,6 @@ export class DataResource<T = unknown> {
   #parameters: Readonly<Record<string, unknown>> = {};
   #abort: AbortController | undefined;
   #timer?: unknown;
-  #loadedSchema: JsonSchema | undefined;
   #generation = 0;
   #connected = false;
 
@@ -113,27 +94,8 @@ export class DataResource<T = unknown> {
         { signal: abort.signal },
       );
       if (!response.ok) throw new TypeError(`Request failed with ${response.status}.`);
-      const externalSchema = previous.schemaURL === undefined
-        ? undefined
-        : this.#loadedSchema ?? await this.#loadSchema(previous.schemaURL, abort.signal);
       const raw = previous.type === "text" ? await response.text() : await response.json();
-      let value: T;
-      if (previous.validate !== undefined) {
-        value = previous.validate(raw);
-      } else if (previous.schema !== undefined) {
-        const schema = typeof previous.schema === "string"
-          ? parseTypeExpression(previous.schema)
-          : previous.schema;
-        const parsed = parseTypedValue(raw, schema);
-        if (!parsed.ok) throw new DataValidationError(parsed.issues);
-        value = parsed.value as T;
-      } else if (externalSchema !== undefined) {
-        const issues = validateJsonSchema(raw, externalSchema);
-        if (issues.length > 0) throw new DataValidationError(issues);
-        value = raw as T;
-      } else {
-        value = raw as T;
-      }
+      const value = previous.adapt === undefined ? raw as T : previous.adapt(raw);
       if (!this.#connected || generation !== this.#generation) return;
       previous.onState({ pending: false, value, error: null, ok: true });
     } catch (error) {
@@ -147,14 +109,4 @@ export class DataResource<T = unknown> {
     }
   }
 
-  async #loadSchema(source: string, signal: AbortSignal): Promise<JsonSchema> {
-    const response = await this.#fetch(new URL(source, this.options.baseURL), { signal });
-    if (!response.ok) throw new TypeError(`Schema request failed with ${response.status}.`);
-    const schema = await response.json() as unknown;
-    if (typeof schema !== "boolean" && (schema === null || typeof schema !== "object" || Array.isArray(schema))) {
-      throw new TypeError("A JSON Schema resource must contain a boolean or object schema.");
-    }
-    this.#loadedSchema = schema as JsonSchema;
-    return this.#loadedSchema;
-  }
 }

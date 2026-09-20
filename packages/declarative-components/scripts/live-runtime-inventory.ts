@@ -21,7 +21,6 @@ export const liveRuntimeSubsystemModules = {
   ],
   typesAndValidation: [
     "packages/declarative-components/src/freeze.ts",
-    "packages/declarative-components/src/json-schema.ts",
     "packages/declarative-components/src/type-system.ts",
     "packages/declarative-components/src/validate.ts",
     "packages/declarative-components/src/validity-css.ts",

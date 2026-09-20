@@ -269,7 +269,7 @@ describe("parseComponent", () => {
         `<prop name="query" type="string" required>Search query.</prop>` +
         `<state name="form" :value="{ selected: 0 }"></state>` +
         `<computed name="hasQuery" from="query != ''"></computed>` +
-        `<data name="results" src="/api/search" type="json" schema="./result.schema.json" debounce="150" poll="30000">` +
+        `<data name="results" src="/api/search" type="json" debounce="150" poll="30000">` +
         `<param name="q" :value="query"></param></data>` +
         `<event name="selection-change" type="number" bubbles="false" composed="false" cancelable="true"></event>` +
         `<method name="refresh" export="refresh" returns="promise(undefined)"></method>` +
@@ -300,7 +300,6 @@ describe("parseComponent", () => {
       {
         source: data.source,
         type: data.type,
-        schema: data.schema,
         debounce: data.debounce,
         poll: data.poll,
         parameters: data.parameters.map((parameter) => ({
@@ -311,7 +310,6 @@ describe("parseComponent", () => {
       {
         source: "/api/search",
         type: "json",
-        schema: "./result.schema.json",
         debounce: "150",
         poll: "30000",
         parameters: [{ name: "q", dependencies: ["query"] }],

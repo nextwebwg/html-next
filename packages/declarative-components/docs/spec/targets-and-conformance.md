@@ -20,7 +20,7 @@ application or library graph.
 
 ## Target equivalence
 
-The browser runtime, Vanilla DOM, React, Vue, and Svelte targets consume one normalized semantic model. For the same inputs they must agree on the public native root, effective attributes and properties, projected content and identity, text/HTML output, events, public methods, validation, styles, lifecycle, component lineage, and hydration result.
+The browser runtime, Vanilla DOM, React, Vue, and Svelte targets consume one normalized semantic model. For the same inputs they must agree on the public native root, effective attributes and properties, projected content and identity, text/HTML output, events, public methods, declared type behavior, native form behavior, styles, lifecycle, component lineage, and hydration result.
 
 Target-native reactivity and typing are encouraged; target-private language semantics are forbidden. A target adapter may provide a small runtime helper where its framework has no equivalent primitive.
 

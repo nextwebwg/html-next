@@ -97,7 +97,7 @@ describe("generateComponent", () => {
     assert.match(docs, /State, computed values, handlers, structural rendering, data, validation/);
   });
 
-  it("makes authored validity pseudo-classes work in generated CSS", () => {
+  it("preserves native validity pseudo-classes in generated CSS", () => {
     const source =
       `<template component="demo-action" status="experimental" summary="An action fixture.">` +
       `<style>button:invalid { outline: 2px solid red; }</style><button>Save</button></template>`;
@@ -107,7 +107,7 @@ describe("generateComponent", () => {
 
     assert.match(
       byPath.get("styles/demo-action.css")!,
-      /button:is\(:invalid, \[data-invalid\]\)/,
+      /button:invalid/,
     );
   });
 

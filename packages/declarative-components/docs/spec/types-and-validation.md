@@ -1,8 +1,8 @@
 # Types and validation
 
 HTML Next types define parsing, serialization, comparison, TypeScript projection, and
-validation at declared boundaries. They are used by component properties, data responses,
-bound values, and generalized validation. The grammar is deliberately small enough to parse
+validation at declared component boundaries. They are used by component properties,
+event payloads, and other explicitly typed contract values. The grammar is deliberately small enough to parse
 without JavaScript execution.
 
 CSS value-definition syntax is relevant prior art, not an imported grammar. HTML Next uses
@@ -128,35 +128,23 @@ Paths begin at `$`, use `.name` for identifier keys, bracketed JSON strings for 
 zero-based brackets for list positions. For example, a bad second tag and absent account email
 produce `$.tags[1]` and `$.account.email`. Paths are stable across runtimes and generated targets.
 
-## External JSON Schema
+## Data validation and coercion
 
-A `data` declaration may use `schema="<URL>"` instead of an inline HTML Next type expression.
-The URL is a statically discoverable dependency resolved relative to the component definition.
-The fetched resource must be a JSON boolean or object schema. It is cached after a successful
-load, applied before response data becomes observable, and reports `schemaMismatch` issues using
-the same paths as HTML Next structured types.
+The Declarative Components proposal does not define a response-schema language or fetch schema
+resources. Data decoding produces the transport value. An application or adapter may validate,
+coerce, or project that value before publishing it, and a rejected adaptation must not publish a
+value. JSON Schema, generated clients, application validators, and domain codecs are adapter
+choices rather than transitive requirements of every component runtime.
 
-The implemented baseline is the deterministic validation subset needed at component boundaries:
-`type`, `enum`, `const`, local JSON-Pointer `$ref`, `$defs`, `allOf`, `anyOf`, `oneOf`, `not`,
-`required`, `properties`, `additionalProperties`, `items`, string length and pattern, `email` and
-absolute-URL formats, numeric bounds and multiples, and array length and uniqueness. Annotation,
-vocabulary negotiation, remote `$ref`, unevaluated-member keywords, conditional schemas, and
-schema-driven mutation are not accepted as implied behavior. A tool must report those as outside
-the supported profile rather than claiming full JSON Schema conformance.
-
-```html conforming
-<data name="profile" src="/api/me" schema="./profile.schema.json"></data>
-```
-
-Expected outcome: the schema URL is visible in the component graph, fetched as inert JSON, and a
-response becomes `profile.value` only after it passes the supported schema constraints.
+The reference library exposes this boundary as `DataResource`'s `adapt` callback. Build tools may
+compile a chosen schema or type description into an adapter, but the live component loader does
+not interpret or fetch that description.
 
 ## Typed result and serialization
 
 Parsing returns either `{ ok: true, value }` or `{ ok: false, issues }`. Each issue has a stable
 `reason`, human-readable `message`, and `path`. The type-layer reasons are `typeMismatch`,
-`badInput`, `schemaMismatch`, and `untrustedValue`. Validation maps them into the richer validity
-model below without losing their paths.
+`badInput`, `schemaMismatch`, and `untrustedValue`.
 
 Serialization first validates and canonicalizes. Scalars use the terminal rule above;
 `token-list` joins with one HTML space; and list, record, and object values use JSON. Trusted
@@ -170,29 +158,19 @@ numeric terminals to `number`; `function` to a callable of unknown arguments and
 readonly object properties. `null` and `absent` project to `null` and `undefined`. Trusted types
 project to their corresponding Trusted Types interfaces.
 
-## Native constraints
+## Native form validation
 
-Native controls retain the browser's Constraint Validation API. The reference library reads their
-native validity directly, including submission blocking and the browser's rules for controls
-barred from constraint validation. Ordinary managed elements expose the same contract through the
-generalized validity adapter described below; its supported scalar behavior is tested against
-native controls in Chromium, Firefox, and WebKit.
+Native controls retain the browser's Constraint Validation API. The component runtime leaves
+their `type`, `required`, `multiple`, `pattern`, length, range, and step behavior to the browser,
+including submission blocking and the rules for controls barred from constraint validation.
+It does not scan component DOM, duplicate native results, or install validation methods on
+ordinary elements.
 
-| Constraint | Applicable value spaces | Failure reason |
-| --- | --- | --- |
-| `required` | every boundary with a defined empty state | `valueMissing` |
-| `multiple` | email and list-valued native controls | changes parsing cardinality |
-| `pattern` | string, email, URL, and token-like strings | `patternMismatch` |
-| `minlength` | string-valued boundaries | `tooShort` |
-| `maxlength` | string-valued boundaries | `tooLong` |
-| `min` | number, integer, date, time, datetime-local, month, and week | `rangeUnderflow` |
-| `max` | the same ordered value spaces | `rangeOverflow` |
-| `step` | the same ordered value spaces | `stepMismatch` |
-
-An empty optional value is valid and no remaining constraint applies. `false` and `0` are not
-empty. Invalid or inapplicable constraint attributes do not invent a failure. Pattern matching
-is anchored to the complete string. Numeric step uses `min` as its base when present and zero
-otherwise; date/time families use their corresponding HTML units.
+A component that needs native form participation authors a native control or uses a
+form-associated custom element with `ElementInternals`. Application validation that is not part
+of a declared component type remains an adapter concern; it may call the platform's
+`setCustomValidity()` or `ElementInternals.setValidity()` APIs when it needs to affect form
+submission.
 
 The authoritative platform algorithms are in WHATWG HTML's
 [Constraint Validation API](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#the-constraint-validation-api)
@@ -200,67 +178,6 @@ and [input-type sections](https://html.spec.whatwg.org/multipage/input.html). MD
 [Constraint Validation API](https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation)
 and the practical behavior of [`ValidityState`](https://developer.mozilla.org/en-US/docs/Web/API/ValidityState).
 
-## Generalized validity
-
-The platform proposal makes a native-shaped validity surface available to any managed element:
-
-- `validity` exposes `valid`, the native reason flags, extension flags, and the complete ordered
-  `errors` list;
-- `validationMessage` is empty when valid and otherwise contains the first issue's message;
-- `checkValidity()` recomputes and dispatches a cancelable `invalid` event when invalid;
-- `reportValidity()` also marks the element as interacted and permits a user agent to present UI;
-- `validate()` explicitly recomputes, returns the rich result, marks interaction, and dispatches
-  `invalid` when invalid; and
-- `setValidity(errors)` supplies or clears issues that cannot be derived from the declared type,
-  such as a server rejection.
-
-Derived issues and `setValidity()` issues occupy independent channels. Revalidation replaces only
-derived issues. `setValidity()` with no arguments clears only externally supplied issues. This is
-why a valid edit does not accidentally erase an asynchronous server error, and why clearing a
-server error does not discard a current type failure.
-
-The open validity reasons are `valueMissing`, `typeMismatch`, `patternMismatch`, `tooLong`,
-`tooShort`, `rangeUnderflow`, `rangeOverflow`, `stepMismatch`, `badInput`, `schemaMismatch`, and
-`untrustedValue`. `customError` exists only when interoperating with the legacy closed native
-flag set through `setCustomValidity()`; HTML Next callers use a meaningful external reason with
-`setValidity()`.
-
-Validity is current from the moment an element is managed. Interaction state is separate:
-`:invalid` may match immediately, while `:user-invalid` begins false, becomes eligible after
-input, change, blur, explicit reporting, or a submission attempt, and clears after a valid edit.
-Form reset returns interaction state to untouched and recomputes derived validity. It does not
-silently erase an independently supplied external issue.
-
-Form submission traverses managed non-control elements as well as native successful controls.
-Any invalid member receives `invalid`, submission is prevented, and focus moves to the first
-focusable invalid member. Native controls continue participating through the browser's own form
-algorithm. Form-associated custom elements delegate to `ElementInternals.setValidity()`.
-
-## Reference-library adaptation
-
-The official `@nextwebwg/declarative-components` library exports the pure type parser/serializer and validator as
-well as the DOM adapter. Inside managed component roots it installs non-enumerable compatibility
-members only where the browser has no native member. Native controls remain authoritative and
-receive `setCustomValidity()` only when an HTML Next-derived or external issue must bridge into
-native form submission. Form-associated custom elements use `ElementInternals`. Ordinary
-elements receive the proposed facade plus the appropriate `aria-invalid` signal.
-
-## Validity selectors
-
-Authors write `:valid`, `:invalid`, and `:user-invalid`; they do not target internal attributes.
-The library mirrors those states only for ordinary elements and transforms authored selectors to
-match either the native pseudo-class or the internal state. The transformation covers selector
-functions, CSS nesting, grouping at-rules, inline and dynamically inserted styles, constructed
-stylesheets, and generated package CSS. Same-origin external styles are mirrored after load.
-
-Script cannot read a cross-origin stylesheet whose CSSOM is blocked by the same-origin policy.
-The live adapter emits diagnostic `HV001` for that case; the package compiler transforms such CSS
-ahead of time. This is a packaging boundary, not work delegated to the application author. When
-browsers expose generalized validity directly, the internal state and selector transform disappear
-without changing authored component markup or CSS.
-
-The proposed pseudo-class behavior follows Selectors Level 4's
-[validity pseudo-classes](https://www.w3.org/TR/selectors-4/#validity-pseudos). The accessibility
-bridge follows WAI-ARIA's [`aria-invalid`](https://www.w3.org/TR/wai-aria-1.2/#aria-invalid), and
-the custom-element bridge follows HTML's
-[`ElementInternals.setValidity()`](https://html.spec.whatwg.org/multipage/custom-elements.html#dom-elementinternals-setvalidity).
+The reference package may expose opt-in validation utilities for applications that want a common
+result shape. Those utilities are not installed by the component runtime and are not part of the
+Declarative Components contract.
