@@ -18,19 +18,12 @@ export interface ControllerEdge {
   readonly url: string;
 }
 
-export interface ResourceEdge {
-  readonly kind: "schema";
-  readonly specifier: string;
-  readonly url: string;
-}
-
 export interface ComponentGraphNode {
   readonly url: string;
   readonly trustRoot: string;
   readonly definition: ComponentDefinition;
   readonly dependencies: readonly string[];
   readonly controller?: ControllerEdge;
-  readonly resources: readonly ResourceEdge[];
   readonly shadowedByCustomElement: boolean;
 }
 
@@ -63,7 +56,6 @@ interface DraftNode {
   definition: ComponentDefinition;
   dependencies: string[];
   controller?: ControllerEdge;
-  resources: ResourceEdge[];
   shadowedByCustomElement: boolean;
   complete: boolean;
 }
@@ -134,7 +126,6 @@ export async function buildComponentGraph(
       trustRoot: resource.trustRoot,
       definition,
       dependencies: [],
-      resources: [],
       shadowedByCustomElement: options.isCustomElementRegistered?.(definition.contract.tag) ?? false,
       complete: false,
     };
@@ -168,23 +159,6 @@ export async function buildComponentGraph(
       draft.controller = Object.freeze({ specifier: definition.controller, url: controller.url });
     }
 
-    for (const declaration of definition.declarations ?? []) {
-      if (
-        declaration.kind !== "data" || declaration.schema === undefined ||
-        !/^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(declaration.schema)
-      ) continue;
-      const schema = options.resolver.resolveDependency(
-        declaration.schema,
-        finalURL,
-        resource.trustRoot,
-      );
-      draft.resources.push(Object.freeze({
-        kind: "schema",
-        specifier: declaration.schema,
-        url: schema.url,
-      }));
-    }
-
     for (const specifier of parsed.dependencies) {
       const dependency = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
       const dependencyURL = await load(dependency);
@@ -207,7 +181,6 @@ export async function buildComponentGraph(
       trustRoot: draft.trustRoot,
       definition: draft.definition,
       dependencies: Object.freeze([...draft.dependencies]),
-      resources: Object.freeze([...draft.resources].sort((left, right) => left.url.localeCompare(right.url))),
       ...(draft.controller === undefined ? {} : { controller: draft.controller }),
       shadowedByCustomElement: draft.shadowedByCustomElement,
     })]);

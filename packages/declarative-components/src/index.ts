@@ -26,8 +26,7 @@ export {
   type Controller,
   type ControllerModule,
 } from "./controller.js";
-export { validateJsonSchema, type JsonSchema } from "./json-schema.js";
-export { DataResource, DataValidationError } from "./data.js";
+export { DataResource } from "./data.js";
 export { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 export type * from "./graph.js";
 export type * from "./resolve.js";

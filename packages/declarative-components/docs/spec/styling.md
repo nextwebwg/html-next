@@ -67,8 +67,10 @@ Rarely, a rule is meant to apply document-wide. `:global(sel)` opts that one rul
 
 ## Validity selectors
 
-`:valid`, `:invalid`, and `:user-invalid` are mirrored to the runtime's internal validity state
-in the same transformation pass, so scoping and mirrored validation state can never disagree.
+`:valid`, `:invalid`, and `:user-invalid` keep their native browser meaning. Component style
+scoping does not broaden them to ordinary elements or mirror them through private attributes.
+Authors that need form participation use native controls or form-associated custom elements with
+`ElementInternals`.
 
 ## Provenance
 

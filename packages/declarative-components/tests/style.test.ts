@@ -18,8 +18,8 @@ describe("transformComponentStyles", () => {
     assert.match(output, /data-component-root~="x-card"[\s\S]*data-component~="x-card"/);
     assert.match(output, /article:where\(\[data-component~="x-card"\]\)/);
     assert.match(output, /data-component-root~="x-badge"[\s\S]*:hover:where\(\[data-component~="x-card"\]\)/);
-    assert.match(output, /:has\(\.lead > [\s\S]*data-component-root~="x-icon"[\s\S]*:is\(:invalid, \[data-invalid\]\):where\(\[data-component~="x-card"\]\)\)/);
-    assert.match(output, /@media[\s\S]*\.lead:is\(:user-invalid, \[data-user-invalid\]\):where\(\[data-component~="x-card"\]\)/);
+    assert.match(output, /:has\(\.lead > [\s\S]*data-component-root~="x-icon"[\s\S]*:invalid:where\(\[data-component~="x-card"\]\)\)/);
+    assert.match(output, /@media[\s\S]*\.lead:user-invalid:where\(\[data-component~="x-card"\]\)/);
     assert.match(output, /@keyframes pulse \{ from \{ opacity: 0 \} to \{ opacity: 1 \} \}/);
   });
 
@@ -31,7 +31,7 @@ describe("transformComponentStyles", () => {
     );
 
     assert.match(output, /^@scope \(\[data-component-root~="x-parent"\]\) to \(:scope \[data-component-root\] > \*, \[data-slotted\]\) \{/);
-    assert.match(output, /data-component-root~="x-nested"[\s\S]*:is\(:invalid, \[data-invalid\]\)/);
+    assert.match(output, /data-component-root~="x-nested"[\s\S]*:invalid/);
     assert.doesNotMatch(output, /\.child\[data-component~/);
   });
 
@@ -80,7 +80,7 @@ describe("transformComponentStyles", () => {
     assert.match(out, /\}\n\s*\[data-component-root~="x-card"\] :where\(\[data-slotted\],[\s\S]*:is\(button\) \{ all: unset; \}$/);
   });
 
-  it("does not duplicate validity mirrors when transformed more than once", () => {
+  it("preserves native validity selectors when transformed more than once", () => {
     const once = transformComponentStyles(".field:invalid { color: red; }", "x-field", {
       mode: "attribute",
     });
@@ -89,7 +89,7 @@ describe("transformComponentStyles", () => {
     assert.equal(twice, once);
     assert.match(
       transformComponentStyles(".field:invalid:hover { color: red; }", "x-field"),
-      /:is\(:invalid, \[data-invalid\]\):hover:where\(\[data-component~/,
+      /:invalid:hover:where\(\[data-component~/,
     );
   });
 });

@@ -167,6 +167,7 @@ function rewriteSelectorSyntax(
   owner: string | undefined,
   mode: ComponentStyleMode | undefined,
   rootElement: string | undefined,
+  mirrorValidity: boolean,
 ): string {
   let output = "";
   let compoundStart = true;
@@ -218,24 +219,26 @@ function rewriteSelectorSyntax(
       let nameEnd = index + 1;
       while (isIdentifierCharacter(selector[nameEnd])) nameEnd += 1;
       const name = selector.slice(index + 1, nameEnd).toLowerCase();
-      let validityMatched = false;
-      for (const [pseudo, mirror] of VALIDITY_PSEUDOS) {
-        if (selector.startsWith(mirror, index)) {
-          output += mirror;
-          index += mirror.length;
-          compoundStart = false;
-          validityMatched = true;
-          break;
+      if (mirrorValidity) {
+        let validityMatched = false;
+        for (const [pseudo, mirror] of VALIDITY_PSEUDOS) {
+          if (selector.startsWith(mirror, index)) {
+            output += mirror;
+            index += mirror.length;
+            compoundStart = false;
+            validityMatched = true;
+            break;
+          }
+          if (selector.startsWith(pseudo, index) && !isIdentifierCharacter(selector[index + pseudo.length])) {
+            output += mirror;
+            index += pseudo.length;
+            compoundStart = false;
+            validityMatched = true;
+            break;
+          }
         }
-        if (selector.startsWith(pseudo, index) && !isIdentifierCharacter(selector[index + pseudo.length])) {
-          output += mirror;
-          index += pseudo.length;
-          compoundStart = false;
-          validityMatched = true;
-          break;
-        }
+        if (validityMatched) continue;
       }
-      if (validityMatched) continue;
       if (name === "scope" && owner !== undefined && mode === "attribute") {
         output += `:is(:where([${COMPONENT_ROOT_ATTRIBUTE}~="${owner}"]), ${owner})`;
         index = nameEnd;
@@ -246,7 +249,14 @@ function rewriteSelectorSyntax(
         const end = matchingParenthesis(selector, nameEnd);
         const body = selector.slice(nameEnd + 1, end);
         const rewritten = SELECTOR_FUNCTIONS.has(name)
-          ? rewriteSelectorList(body, owner, mode, rootElement, name === "has" && owner !== undefined)
+          ? rewriteSelectorList(
+              body,
+              owner,
+              mode,
+              rootElement,
+              name === "has" && owner !== undefined,
+              mirrorValidity,
+            )
           : body;
         output += `${selector.slice(index, nameEnd + 1)}${rewritten})`;
         index = end + 1;
@@ -288,13 +298,14 @@ function rewriteSelectorList(
   mode: ComponentStyleMode | undefined,
   rootElement: string | undefined,
   addProvenance: boolean,
+  mirrorValidity = false,
 ): string {
   return splitSelectorList(selectors).map((part) => {
     const leading = /^\s*/.exec(part)![0];
     const trailing = /\s*$/.exec(part)![0];
     const body = part.slice(leading.length, part.length - trailing.length);
     if (body === "") return part;
-    const rewritten = rewriteSelectorSyntax(body, owner, mode, rootElement);
+    const rewritten = rewriteSelectorSyntax(body, owner, mode, rootElement, mirrorValidity);
     return `${leading}${addProvenance && owner !== undefined ? addSubjectProvenance(rewritten, owner) : rewritten}${trailing}`;
   }).join(",");
 }
@@ -325,6 +336,7 @@ function rewriteRuleList(
   owner: string | undefined,
   mode: ComponentStyleMode | undefined,
   rootElement?: string,
+  mirrorValidity = false,
 ): string {
   let output = "";
   let ruleStart = 0;
@@ -362,10 +374,11 @@ function rewriteRuleList(
             mode,
             rootElement,
             owner !== undefined && mode === "attribute",
+            mirrorValidity,
           )
         : prelude;
       const nextBody = atRule === undefined || GROUPING_AT_RULES.has(atRule)
-        ? rewriteRuleList(body, owner, mode, rootElement)
+        ? rewriteRuleList(body, owner, mode, rootElement, mirrorValidity)
         : body;
       output += `${nextPrelude}{${nextBody}}`;
       index = blockEnd;
@@ -377,7 +390,7 @@ function rewriteRuleList(
 
 /** Mirror proposed validity selectors without changing selector scope. */
 export function transformValidityStyles(css: string): string {
-  return rewriteRuleList(css, undefined, undefined, undefined);
+  return rewriteRuleList(css, undefined, undefined, undefined, true);
 }
 
 /** Split top-level rules into those whose selector opts into projected content and the rest. */

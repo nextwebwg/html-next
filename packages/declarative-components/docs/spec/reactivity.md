@@ -40,7 +40,7 @@ The public contract exposes values and lifetime-bound reactions, not raw `Signal
 
 ## Data resources
 
-A declared read serializes URI-template and query parameters, cancels stale work, and exposes `pending`, `value`, `error`, and `ok`. Debounce and polling use owned timers and stop on disconnect. Typed response validation happens before the value becomes observable.
+A declared read serializes URI-template and query parameters, cancels stale work, and exposes `pending`, `value`, `error`, and `ok`. Debounce and polling use owned timers and stop on disconnect. The core decodes the response without imposing an application schema. A host-provided adapter may validate, coerce, or project the decoded value before publication; a thrown adapter error becomes the resource error and no value is published.
 
 ## Native form participation
 

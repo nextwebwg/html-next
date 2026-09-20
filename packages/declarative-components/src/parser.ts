@@ -496,7 +496,6 @@ function readDeclarations(
     if (kind === "data") {
       const dataSource = attr(element, "src");
       const dataType = attr(element, "type");
-      const dataSchema = attr(element, "schema");
       const dataDebounce = attr(element, "debounce");
       const dataPoll = attr(element, "poll");
       const parameters = [];
@@ -521,7 +520,6 @@ function readDeclarations(
         name: string;
         source?: string;
         type?: string;
-        schema?: string;
         debounce?: string;
         poll?: string;
         parameters: typeof parameters;
@@ -532,7 +530,6 @@ function readDeclarations(
       };
       if (dataSource !== undefined) declaration.source = dataSource;
       if (dataType !== undefined) declaration.type = dataType;
-      if (dataSchema !== undefined) declaration.schema = dataSchema;
       if (dataDebounce !== undefined) declaration.debounce = dataDebounce;
       if (dataPoll !== undefined) declaration.poll = dataPoll;
       declarations.push(declaration);

@@ -33,14 +33,12 @@ const liveCapabilityModules = {
   declaredData: "packages/declarative-components/src/data.ts",
   expressionEvaluation: "packages/declarative-components/src/expression.ts",
   generalRuntime: "packages/declarative-components/src/runtime.ts",
-  jsonSchema: "packages/declarative-components/src/json-schema.ts",
   liveSource: "packages/declarative-components/src/browser-source.ts",
   proposalParser: "packages/declarative-components/src/parser.ts",
   reactivity: "packages/declarative-components/src/reactivity.ts",
   sanitization: "packages/declarative-components/src/sanitize.ts",
   scopedStyles: "packages/declarative-components/src/style.ts",
   typeSystem: "packages/declarative-components/src/type-system.ts",
-  validation: "packages/declarative-components/src/validity.ts",
 } as const;
 
 async function bundle(options: BuildOptions): Promise<BuildResult> {

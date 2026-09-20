@@ -149,5 +149,5 @@ The conformance tests render and compare:
 - `:slotted(*) { all: unset }` normalization that a consumer rule can still override;
 - inherited properties and custom properties across both boundaries;
 - delegated provenance lineages;
-- validity selectors inside grouping rules; and
+- native validity selectors inside grouping rules; and
 - native-`@scope` and attribute-fallback computed styles in Chromium, Firefox, and WebKit.

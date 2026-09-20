@@ -24,10 +24,6 @@ import {
   transformNativeComponentStyles,
 } from "./style.js";
 import { isPropertyOnlyType, parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
-import {
-  manageElementValidity,
-} from "./validity.js";
-import type { Constraint } from "./validate.js";
 import type {
   ComponentDefinition,
   DataDeclaration,
@@ -314,12 +310,6 @@ function readInvocation(
       source: dataSource,
       baseURL: definitionBase,
       ...(data.type === undefined ? {} : { type: data.type }),
-      ...(data.schema === undefined || /^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(data.schema)
-        ? {}
-        : { schema: data.schema }),
-      ...(data.schema !== undefined && /^(?:\.?\.?\/|\/|[A-Za-z][A-Za-z+.-]*:)/.test(data.schema)
-        ? { schemaURL: new URL(data.schema, definitionBase).href }
-        : {}),
       ...(data.debounce === undefined ? {} : { debounce: Number(data.debounce) }),
       ...(data.poll === undefined ? {} : { poll: Number(data.poll) }),
       onState: (state) => scope.set(data.name, state as unknown as Value),
@@ -1081,72 +1071,6 @@ function renderTemplateNode(
   return renderNode(node, scope, document, [], context, candidate);
 }
 
-const VALIDITY_ATTRIBUTES = new Set([
-  "type", "required", "multiple", "min", "max", "minlength", "maxlength", "pattern", "step",
-]);
-const VALIDITY_SELECTOR = [
-  "button", "fieldset", "input", "object", "output", "select", "textarea",
-  ...[...VALIDITY_ATTRIBUTES].map((name) => `[${name}]`),
-].join(",");
-
-function nativeValidatableElement(element: Element): boolean {
-  return "validity" in element && typeof (element as { checkValidity?: unknown }).checkValidity === "function";
-}
-
-function numberConstraint(element: Element, name: string): number | undefined {
-  const raw = element.getAttribute(name);
-  if (raw === null || raw.trim() === "") return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function constraintFromElement(element: Element): Constraint {
-  const type = element.getAttribute("type") ?? undefined;
-  const min = element.getAttribute("min") ?? undefined;
-  const max = element.getAttribute("max") ?? undefined;
-  const stepValue = element.getAttribute("step");
-  const step = stepValue === "any" ? "any" : numberConstraint(element, "step");
-  return {
-    ...(type === undefined ? {} : { type }),
-    ...(element.hasAttribute("required") ? { required: true } : {}),
-    ...(element.hasAttribute("multiple") ? { multiple: true } : {}),
-    ...(min === undefined ? {} : { min }),
-    ...(max === undefined ? {} : { max }),
-    ...(numberConstraint(element, "minlength") === undefined
-      ? {}
-      : { minLength: numberConstraint(element, "minlength")! }),
-    ...(numberConstraint(element, "maxlength") === undefined
-      ? {}
-      : { maxLength: numberConstraint(element, "maxlength")! }),
-    ...(element.getAttribute("pattern") === null ? {} : { pattern: element.getAttribute("pattern")! }),
-    ...(step === undefined ? {} : { step }),
-  };
-}
-
-function installInstanceValidity(root: Element, instance: RuntimeInstance): void {
-  let cleanups: Array<() => void> = [];
-  const connect = (): void => {
-    if (cleanups.length > 0) return;
-    const elements = root.matches(VALIDITY_SELECTOR)
-      ? [root, ...Array.from(root.querySelectorAll(VALIDITY_SELECTOR))]
-      : Array.from(root.querySelectorAll(VALIDITY_SELECTOR));
-    for (const element of elements) {
-      const native = nativeValidatableElement(element);
-      const generalized = Array.from(element.attributes).some((attribute) =>
-        VALIDITY_ATTRIBUTES.has(attribute.name.toLowerCase()),
-      );
-      if (!native && !generalized) continue;
-      cleanups.push(manageElementValidity(element, native ? {} : constraintFromElement(element)));
-    }
-  };
-  const disconnect = (): void => {
-    for (const cleanup of cleanups) cleanup();
-    cleanups = [];
-  };
-  instance.connectCallbacks.add(connect);
-  instance.disconnectCallbacks.add(disconnect);
-}
-
 function installPublicProps(root: Element, instance: RuntimeInstance): void {
   const props = instance.definition.contract.props;
   const attributeNames: Record<string, string> = {};
@@ -1325,7 +1249,6 @@ function commitRuntimeInvocations(
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
     installPublicProps(invocation.nativeRoot, invocation.instance);
     installPublicMethods(invocation.nativeRoot, invocation.instance);
-    installInstanceValidity(invocation.nativeRoot, invocation.instance);
     connectRuntimeInstance(invocation.instance);
   }
 }

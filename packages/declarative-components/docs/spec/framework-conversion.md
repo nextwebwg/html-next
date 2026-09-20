@@ -7,7 +7,7 @@ Vue, or Svelte components while that target owns rendering, reactivity, lifecycl
 
 The converter receives application entries or component-library entries, a target framework and
 supported version, and output/package settings. It follows the same component, controller, style,
-schema, and static module graph as the native build.
+and static module graph as the native build.
 
 Unknown runtime component edges require a declared target-native dynamic import, a universal
 interop boundary, or a build diagnostic. The converter records the target and graph boundary in its
@@ -16,7 +16,7 @@ output inventory.
 ## Capability contract
 
 Generated target components must preserve the shared semantic model: the same native root,
-projected-content identity, public properties, events, methods, validation, state results,
+projected-content identity, public properties, events, methods, declared type behavior, state results,
 requests, styles, lifecycle, controller behavior, and hydration outcome.
 
 Target-native conventions may shape private implementation and generated source. They must not add
@@ -30,7 +30,7 @@ reconciliation, component lifecycle, SSR attachment, and hydration. The converte
 normalized component plan through those facilities.
 
 HTML Next bridge code owns only semantic differences the target cannot express directly, including
-stable diagnostics, generalized-element validity, resource-policy rules, or a controller-host
+stable diagnostics, resource-policy rules, or a controller-host
 adapter when needed. Controllers keep one public host contract; each target adapter maps that
 contract to target-native state and lifecycle.
 
@@ -50,7 +50,7 @@ Conversion reports source-located diagnostics for unsupported target versions, u
 language semantics, unsafe resource edges, output collisions, and target package conflicts. It must
 not silently approximate behavior.
 
-Runtime failures preserve the shared public error, event, validation, cancellation, and cleanup
+Runtime failures preserve the shared public error, event, type, cancellation, and cleanup
 contract. Target error boundaries may observe those failures but cannot replace required component
 events or leave effects, requests, or controllers active after disposal.
 
@@ -77,7 +77,7 @@ multi-entry consumer bundles.
 ## Conformance scenarios
 
 1. Convert one shared fixture graph to React, Vue, and Svelte and compare native roots, projection,
-   props, events, methods, state results, validation, styles, and diagnostics.
+   props, events, methods, state results, declared types, native form behavior, styles, and diagnostics.
 2. Server-render and hydrate each target while preserving DOM identity, form edits, focus, and
    selection.
 3. Exercise target-native reactive updates, keyed reorders, controller cleanup, and request

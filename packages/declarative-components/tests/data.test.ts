@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
-import { DataResource, DataValidationError, type DataState } from "../src/data.js";
+import { DataResource, type DataState } from "../src/data.js";
 
 describe("declared data resource", () => {
   it("expands URI parameters, appends query values, and exposes state transitions", async () => {
@@ -62,62 +62,26 @@ describe("declared data resource", () => {
     assert.deepEqual(aborted, []);
   });
 
-  it("validates decoded responses before publishing them", async () => {
+  it("adapts decoded responses before publishing them", async () => {
     const states: DataState[] = [];
     const resource = new DataResource({
       source: "/account",
       baseURL: "https://api.example/",
-      schema: "object({ email: email, age: integer })",
-      fetch: async () => new Response(JSON.stringify({ email: "bad", age: 1.5 })),
+      adapt(value) {
+        const record = value as { email?: unknown; age?: unknown };
+        if (typeof record.email !== "string" || typeof record.age !== "number") {
+          throw new TypeError("Invalid account response.");
+        }
+        return { email: record.email.trim(), age: Math.trunc(record.age) };
+      },
+      fetch: async () => new Response(JSON.stringify({ email: " ada@example.com ", age: 37.5 })),
       onState: (state) => states.push(state),
     });
     resource.update({});
     await new Promise((resolve) => setTimeout(resolve, 0));
     const final = states.at(-1)!;
-    assert.equal(final.ok, false);
-    assert.equal(final.value, null);
-    assert.ok(final.error instanceof DataValidationError);
-    assert.deepEqual((final.error as DataValidationError).issues.map((issue) => issue.path), [
-      "$.email", "$.age",
-    ]);
+    assert.equal(final.ok, true);
+    assert.deepEqual(final.value, { email: "ada@example.com", age: 37 });
   });
 
-  it("fetches and caches an external JSON Schema before publishing data", async () => {
-    const states: DataState[] = [];
-    const requests: string[] = [];
-    const resource = new DataResource({
-      source: "/profile",
-      baseURL: "https://api.example/",
-      schemaURL: "https://api.example/schemas/profile.json",
-      fetch: async (input) => {
-        const url = String(input);
-        requests.push(url);
-        if (url.endsWith("profile.json")) {
-          return new Response(JSON.stringify({
-            type: "object",
-            required: ["email", "roles"],
-            properties: {
-              email: { type: "string", format: "email" },
-              roles: { type: "array", minItems: 1, items: { type: "string" } },
-            },
-            additionalProperties: false,
-          }));
-        }
-        return new Response(JSON.stringify({ email: "not-an-email", roles: [] }));
-      },
-      onState: (state) => states.push(state),
-    });
-    resource.update({});
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const first = states.at(-1)!;
-    assert.equal(first.ok, false);
-    assert.ok(first.error instanceof DataValidationError);
-    assert.deepEqual((first.error as DataValidationError).issues.map((item) => item.path), [
-      "$.email", "$.roles",
-    ]);
-
-    resource.update({ retry: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(requests.filter((url) => url.endsWith("profile.json")).length, 1);
-  });
 });
