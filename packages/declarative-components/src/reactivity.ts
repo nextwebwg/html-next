@@ -188,11 +188,6 @@ export class ReactiveEffect {
   }
 }
 
-function track(dependency: Dependency): void {
-  if (activeEffect === undefined || activeEffect.stopped) return;
-  activeEffect.track(dependency);
-}
-
 function trigger(dependency: Dependency | undefined): void {
   for (let subscription = dependency?.first; subscription !== undefined; ) {
     const next = subscription.nextSubscriber;
@@ -236,7 +231,7 @@ export class ReactiveScope implements Scope {
   get(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
-    if (activeEffect !== undefined) track(cell);
+    if (activeEffect !== undefined) activeEffect.track(cell);
     return cell.value;
   }
 
@@ -313,7 +308,7 @@ export class ReactiveScope implements Scope {
             subscribers = { first: undefined, last: undefined };
             properties.set(key, subscribers);
           }
-          track(subscribers);
+          activeEffect.track(subscribers);
         }
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },
