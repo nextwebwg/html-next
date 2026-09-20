@@ -1,5 +1,5 @@
 {
-  "revision": "2026-09-12",
+  "revision": "2026-09-20",
   "features": [
     { "id": "HN-SYN-001", "title": "Component definition grammar", "status": "required", "spec": "syntax.md", "owner": "Component definition grammar" },
     { "id": "HN-SYN-002", "title": "Stable diagnostics", "status": "required", "spec": "syntax.md", "owner": "Diagnostics" },
@@ -23,6 +23,7 @@
     { "id": "HN-LOD-003", "title": "Controller authority", "status": "required", "spec": "loading-and-security.md", "owner": "Controller authority" },
     { "id": "HN-SEC-001", "title": "Inert definition parsing", "status": "required", "spec": "loading-and-security.md", "owner": "Inert definitions" },
     { "id": "HN-TYP-001", "title": "HTML Next type grammar", "status": "required", "spec": "types-and-validation.md", "owner": "Type grammar" },
+    { "id": "HN-TYP-002", "title": "Typed invocation attribute parsing", "status": "required", "spec": "types-and-validation.md", "owner": "Invocation attribute parsing" },
     { "id": "HN-VAL-001", "title": "Native form validation", "status": "required", "spec": "types-and-validation.md", "owner": "Native form validation" },
     { "id": "HN-STY-001", "title": "Light-DOM style scoping", "status": "required", "spec": "styling.md", "owner": "Scoped component styles" },
     { "id": "HN-STY-002", "title": "Provenance boundaries", "status": "required", "spec": "styling.md", "owner": "Provenance" },
