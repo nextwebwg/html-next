@@ -10,6 +10,34 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("does not notify consumers for Object.is-equal signal writes", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const object = {};
+    const source = createSignal<unknown>(object);
+    let runs = 0;
+    createEffect(scheduler, () => {
+      runs += 1;
+      source.get();
+    });
+
+    source.set(object);
+    source.update((value) => value);
+    scheduler.flush();
+    assert.equal(runs, 1);
+
+    source.set(Number.NaN);
+    scheduler.flush();
+    source.set(Number.NaN);
+    scheduler.flush();
+    assert.equal(runs, 2);
+
+    source.set(0);
+    scheduler.flush();
+    source.set(-0);
+    scheduler.flush();
+    assert.equal(runs, 4);
+  });
+
   it("leaves unobserved computed values unevaluated until they are read", () => {
     const scheduler = new ReactiveScope().scheduler;
     const source = createSignal(0);
@@ -50,6 +78,20 @@ describe("reactive scope", () => {
     assert.equal(runs, 1);
   });
 
+  it("does not evaluate named computations for key metadata", () => {
+    const scope = new ReactiveScope([["source", 1]]);
+    let runs = 0;
+    scope.defineComputed("doubled", () => {
+      runs += 1;
+      return Number(scope.get("source")) * 2;
+    });
+
+    assert.equal(scope.has("doubled"), true);
+    assert.equal(scope.size, 2);
+    assert.deepEqual(Array.from(scope.keys()), ["source", "doubled"]);
+    assert.equal(runs, 0);
+  });
+
   it("validates an observed chain without rerunning effects for an equal final result", () => {
     const scheduler = new ReactiveScope().scheduler;
     const source = createSignal(0);
@@ -76,6 +118,114 @@ describe("reactive scope", () => {
     source.set(2);
     scheduler.flush();
     assert.deepEqual([bucketRuns, labelRuns, effectRuns], [3, 3, 2]);
+  });
+
+  it("coalesces observed computed refreshes and compares only the batch-final value", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(0);
+    let computedRuns = 0;
+    let effectRuns = 0;
+    let observed = -1;
+    const value = createComputed(scheduler, () => {
+      computedRuns += 1;
+      return source.get();
+    });
+    createEffect(scheduler, () => {
+      effectRuns += 1;
+      observed = value.get();
+    });
+
+    source.set(1);
+    source.set(0);
+    assert.deepEqual([computedRuns, effectRuns], [1, 1]);
+    scheduler.flush();
+    assert.deepEqual([computedRuns, effectRuns, observed], [2, 1, 0]);
+
+    source.set(1);
+    source.set(2);
+    assert.deepEqual([computedRuns, effectRuns], [2, 1]);
+    scheduler.flush();
+    assert.deepEqual([computedRuns, effectRuns, observed], [3, 2, 2]);
+  });
+
+  it("runs a consumer once when it reads both a source and its computed value", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(0);
+    const doubled = createComputed(scheduler, () => source.get() * 2);
+    let runs = 0;
+    createEffect(scheduler, () => {
+      runs += 1;
+      source.get();
+      doubled.get();
+    });
+
+    source.set(1);
+    scheduler.flush();
+    assert.equal(runs, 2);
+  });
+
+  it("runs a consumer once when it reads both ancestor and descendant computeds", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(1);
+    const ancestor = createComputed(scheduler, () => source.get() + 1);
+    const descendant = createComputed(scheduler, () => ancestor.get() * 2);
+    let runs = 0;
+    createEffect(scheduler, () => {
+      runs += 1;
+      ancestor.get();
+      descendant.get();
+    });
+
+    source.set(2);
+    scheduler.flush();
+    assert.equal(runs, 2);
+  });
+
+  it("settles descendant computeds before a consumer shared with their source", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(1);
+    const ancestor = createComputed(scheduler, () => source.get() + 1);
+    const descendant = createComputed(scheduler, () => ancestor.get() * 2);
+    let runs = 0;
+    createEffect(scheduler, () => {
+      runs += 1;
+      source.get();
+      ancestor.get();
+      descendant.get();
+    });
+
+    source.set(2);
+    scheduler.flush();
+    assert.equal(runs, 2);
+  });
+
+  it("settles computed work released by an earlier ordinary effect", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(1);
+    const kick = createSignal(0);
+    const derived = createComputed(scheduler, () => source.get() * 2);
+    let writerRuns = 0;
+    let consumerRuns = 0;
+    let consumerCleanups = 0;
+    createEffect(scheduler, () => {
+      writerRuns += 1;
+      const value = kick.get();
+      if (value > 0) source.set(value + 1);
+    });
+    createEffect(scheduler, () => {
+      consumerRuns += 1;
+      kick.get();
+      derived.get();
+      return () => { consumerCleanups += 1; };
+    });
+
+    kick.set(1);
+    scheduler.flush();
+    assert.deepEqual({ writerRuns, consumerRuns, consumerCleanups }, {
+      writerRuns: 2,
+      consumerRuns: 2,
+      consumerCleanups: 1,
+    });
   });
 
   it("deduplicates a demanded computed diamond", () => {
@@ -229,7 +379,8 @@ describe("reactive scope", () => {
       () => scheduler.flush(),
       (error: unknown) => error instanceof Error && error.message.includes("HR006"),
     );
-    assert.equal(runs, 101);
+    // Each invalid cycle step occupies one computed-refresh round and one consumer-effect round.
+    assert.equal(runs, 51);
   });
 
   it("allows wide fan-out because the loop bound is per effect", () => {

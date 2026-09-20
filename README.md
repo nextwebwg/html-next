@@ -95,10 +95,10 @@ component dependency graph, not a registration script.
 
 ```js
 // counter.js
-export default function controller(host) {
-  const increment = () => { host.state.count += 1; };
-  host.refs.button.addEventListener("click", increment);
-  return () => host.refs.button.removeEventListener("click", increment);
+export default function controller({ refs, state }) {
+  const increment = () => { state.count += 1; };
+  refs.button.addEventListener("click", increment);
+  return () => refs.button.removeEventListener("click", increment);
 }
 ```
 

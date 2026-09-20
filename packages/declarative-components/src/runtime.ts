@@ -1649,6 +1649,10 @@ export function attachRegisteredComponent(
   return attachComponent(element, registered.definition, options);
 }
 
+/**
+ * Capabilities owned by one component instance. Properties and methods are receiver-independent,
+ * so controllers may destructure only the capabilities they use in their parameter list.
+ */
 export interface ComponentHost {
   readonly element: Element;
   readonly state: Record<string, unknown>;
@@ -1661,8 +1665,10 @@ export interface ComponentHost {
    */
   signal<T>(initialValue: T): ControllerSignal<T>;
   /**
-   * Creates a lazy, cached derived value. The synchronous callback dynamically tracks the signals,
-   * computed values, and host state paths it reads; reads after an `await` are not dependencies.
+   * Creates a lazy, cached derived value. The callback must return its value synchronously and
+   * dynamically tracks the signals, computed values, and host state paths it reads. Returning a
+   * Promise is unsupported: the Promise itself would be cached and reads after `await` cannot be
+   * dependencies. Put asynchronous work in an effect instead.
    */
   computed<T>(compute: () => T): ControllerComputed<T>;
   /**
@@ -1744,11 +1750,15 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
     computed(compute) {
       const computed = createComputed(instance.scope.scheduler, compute);
-      instance.effects.push(computed);
+      // A controller may finish asynchronous setup after its element disconnects. Keep any
+      // owner created during that gap dormant, and put computed owners before effects so every
+      // derived value can track normally when the instance reconnects.
+      if (!instance.connected) computed.pause();
+      instance.effects.unshift(computed);
       return computed;
     },
     effect(run) {
-      const effect = createEffect(instance.scope.scheduler, run, 2);
+      const effect = createEffect(instance.scope.scheduler, run, 2, instance.connected);
       instance.effects.push(effect);
       return () => effect.stop();
     },
