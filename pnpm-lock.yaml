@@ -10,8 +10,8 @@ catalogs:
       specifier: 2.0.0
       version: 2.0.0
     '@angular/compiler':
-      specifier: 20.3.20
-      version: 20.3.20
+      specifier: 22.1.3
+      version: 22.1.3
     '@angular/core':
       specifier: 20.3.20
       version: 20.3.20
@@ -143,10 +143,10 @@ importers:
         version: 2.0.0
       '@angular/compiler':
         specifier: 'catalog:'
-        version: 20.3.20
+        version: 22.1.3
       '@angular/core':
         specifier: 'catalog:'
-        version: 20.3.20(@angular/compiler@20.3.20)(rxjs@7.8.2)
+        version: 20.3.20(@angular/compiler@22.1.3)(rxjs@7.8.2)
       '@preact/signals-core':
         specifier: 'catalog:'
         version: 1.14.2
@@ -299,9 +299,9 @@ packages:
   '@amadeus-it-group/tansu@2.0.0':
     resolution: {integrity: sha512-KebRcEFWkdKix1vN12Y8cuGWdWKqkCzXiesXnxSAZbEULBDlPwm0sey+ygP98PudM1gBygtiWyWzGTeAL5+jIw==}
 
-  '@angular/compiler@20.3.20':
-    resolution: {integrity: sha512-wLzXAtBdRH7LsgHSUmeGqFpkiGutr/Y8cpq4rhcX1J/OHQIWgFTW6+3LltMpKSfJn4wqHj8IIWc+TqrPHfkhKg==}
-    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+  '@angular/compiler@22.1.3':
+    resolution: {integrity: sha512-L8Mw2r7bGG/obqgQC+RU3mdFJ3NtLgO5gWhEC1ylcHpLCMPIAXYsMKJIL8dnS78S1wXo/omXwmJ4FiIlCwWahg==}
+    engines: {node: ^22.22.3 || ^24.15.0 || >=26.0.0}
 
   '@angular/core@20.3.20':
     resolution: {integrity: sha512-LwUFAGGlqFiu81Umf+oFmAS+swHR9xumNVradrFkDpmy4zkhveO2N2L4QUIm6ZcV0YBkNyoIa/IrJqyVAmwdWQ==}
@@ -1556,16 +1556,16 @@ snapshots:
 
   '@amadeus-it-group/tansu@2.0.0': {}
 
-  '@angular/compiler@20.3.20':
+  '@angular/compiler@22.1.3':
     dependencies:
       tslib: 2.8.1
 
-  '@angular/core@20.3.20(@angular/compiler@20.3.20)(rxjs@7.8.2)':
+  '@angular/core@20.3.20(@angular/compiler@22.1.3)(rxjs@7.8.2)':
     dependencies:
       rxjs: 7.8.2
       tslib: 2.8.1
     optionalDependencies:
-      '@angular/compiler': 20.3.20
+      '@angular/compiler': 22.1.3
 
   '@babel/code-frame@7.29.7':
     dependencies:
