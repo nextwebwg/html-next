@@ -90,7 +90,10 @@ export async function startBrowserComponents(
       let disconnected = false;
       let cleanup: void | (() => void);
       void module
-        .then((loaded) => loaded.default(getComponentHost(element)!))
+        // A module import may outlive the connection that requested it. Reconnection starts a
+        // fresh lifecycle attempt; invoking this stale one would duplicate controller work and
+        // let asynchronous setup attach owners to an already disconnected instance.
+        .then((loaded) => disconnected ? undefined : loaded.default(getComponentHost(element)!))
         .then((result) => {
           if (typeof result !== "function") return;
           if (disconnected) result();

@@ -144,6 +144,88 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", methodCalled: "yes" });
   });
 
+  it("does not invoke a controller whose module resolves after disconnection", async () => {
+    const page = await browser.newPage();
+    let controllerRequested!: () => void;
+    const requested = new Promise<void>((resolve) => { controllerRequested = resolve; });
+    let releaseController!: () => void;
+    const released = new Promise<void>((resolve) => { releaseController = resolve; });
+    await page.route("https://delayed.example/**", async (route) => {
+      const url = route.request().url();
+      if (url.endsWith("/delayed.html")) {
+        await route.fulfill({
+          contentType: "text/html",
+          body: `<template component="x-delayed" status="early" summary="Delayed." controller="./delayed.js"><main>ready</main></template>`,
+        });
+      } else if (url.endsWith("/delayed.js")) {
+        controllerRequested();
+        await released;
+        await route.fulfill({
+          contentType: "text/javascript",
+          body:
+            `window.moduleLoads = (window.moduleLoads ?? 0) + 1;` +
+            `export default ({ effect }) => {` +
+            ` window.controllerRuns = (window.controllerRuns ?? 0) + 1;` +
+            ` effect(() => { window.effectRuns = (window.effectRuns ?? 0) + 1; });` +
+            `};`,
+        });
+      } else {
+        await route.fulfill({
+          contentType: "text/html",
+          body:
+            `<link rel="component" href="/delayed.html">` +
+            `<x-delayed id="delayed"></x-delayed>`,
+        });
+      }
+    });
+    await page.goto("https://delayed.example/");
+    await page.addScriptTag({ path: bundlePath });
+    await page.evaluate(async () => {
+      const api = (window as unknown as {
+        HtmlNextLoader: { startBrowserComponents(): Promise<{ stop(): void }> };
+      }).HtmlNextLoader;
+      (window as unknown as { started: { stop(): void } }).started = await api.startBrowserComponents();
+    });
+    await requested;
+    await page.evaluate(async () => {
+      const root = document.querySelector("#delayed")!;
+      (window as unknown as { detachedRoot: Element }).detachedRoot = root;
+      root.remove();
+      await new Promise((resolve) => setTimeout(resolve));
+    });
+    releaseController();
+    await page.waitForFunction(() => (window as unknown as { moduleLoads?: number }).moduleLoads === 1);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve)));
+    const whileDisconnected = await page.evaluate(() => ({
+      controllerRuns: (window as unknown as { controllerRuns?: number }).controllerRuns ?? 0,
+      effectRuns: (window as unknown as { effectRuns?: number }).effectRuns ?? 0,
+    }));
+    await page.evaluate(() => {
+      const task = window as unknown as {
+        detachedRoot: Element;
+        started: { stop(): void };
+      };
+      document.body.append(task.detachedRoot);
+    });
+    await page.waitForFunction(() => (window as unknown as { effectRuns?: number }).effectRuns !== undefined);
+    const afterReconnect = await page.evaluate(() => {
+      const task = window as unknown as {
+        controllerRuns?: number;
+        effectRuns?: number;
+        started: { stop(): void };
+      };
+      const value = {
+        controllerRuns: task.controllerRuns ?? 0,
+        effectRuns: task.effectRuns ?? 0,
+      };
+      task.started.stop();
+      return value;
+    });
+    await page.close();
+    assert.deepEqual(whileDisconnected, { controllerRuns: 0, effectRuns: 0 });
+    assert.deepEqual(afterReconnect, { controllerRuns: 1, effectRuns: 1 });
+  });
+
   it("keeps declarative output connected when a controller module is invalid", async () => {
     const page = await browser.newPage();
     await page.route("https://bad.example/**", async (route) => {

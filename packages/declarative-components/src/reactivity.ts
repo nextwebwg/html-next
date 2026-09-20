@@ -25,8 +25,6 @@ interface Subscription {
 }
 
 let activeEffect: ReactiveEffect | undefined;
-let invalidationDepth = 0;
-let pendingComputeds: ComputedEffectOwner[] = [];
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
@@ -46,7 +44,8 @@ export class ReactiveScheduler {
   #flushing = false;
 
   enqueue(effect: ReactiveEffect): void {
-    if (effect.stopped || this.#pending.includes(effect)) return;
+    if (effect.stopped || effect.queued) return;
+    effect.queued = true;
     this.#pending.push(effect);
     if (!this.#scheduled && !this.#flushing) {
       this.#scheduled = true;
@@ -65,10 +64,14 @@ export class ReactiveScheduler {
       if (effect.scheduler !== this) {
         // Entry requires an empty queue and scheduling starts only after this loop, so the
         // partially collected batch is private and can be discarded before the safe fallback.
+        for (const pending of this.#pending) pending.queued = false;
         this.#pending = [];
         return false;
       }
-      this.#pending.push(effect);
+      if (!effect.queued) {
+        effect.queued = true;
+        this.#pending.push(effect);
+      }
     }
     if (!this.#scheduled) {
       this.#scheduled = true;
@@ -81,17 +84,25 @@ export class ReactiveScheduler {
   }
 
   flush(): void {
-    if (this.#flushing) return;
+    if (this.#flushing || this.#pending.length === 0) return;
+    this.#drain();
+  }
+
+  /** Drains dependency-ordered work after the empty-queue fast path has been ruled out. */
+  #drain(): void {
     this.#flushing = true;
     let rounds = 0;
+    let effects: ReactiveEffect[] | undefined;
+    let index = 0;
     try {
       while (this.#pending.length > 0) {
         rounds += 1;
         if (rounds > maximumExecutionsPerFlush) {
+          for (const pending of this.#pending) pending.queued = false;
           this.#pending = [];
           fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
         }
-        const effects = this.#pending;
+        effects = this.#pending;
         if (effects.length > 1) {
           let index = 1;
           let previous = effects[0]!;
@@ -107,15 +118,41 @@ export class ReactiveScheduler {
           }
         }
         this.#pending = [];
-        let index = 0;
+        index = 0;
         do {
           const effect = effects[index]!;
-          effect.execute();
+          effect.queued = false;
           index += 1;
+          if (effect.computed === undefined) effect.execute();
+          else effect.computed.refresh();
+          if (this.#pending.length > 0) this.#deferConsumersBehindComputeds(effects, index);
         } while (index < effects.length);
+        effects = undefined;
       }
     } finally {
+      if (effects !== undefined) {
+        while (index < effects.length) effects[index++]!.queued = false;
+      }
+      for (const pending of this.#pending) pending.queued = false;
+      this.#pending = [];
       this.#flushing = false;
+    }
+  }
+
+  /**
+   * Any owner may reveal dirty computed work that was not in the current batch: computed refreshes
+   * can expose a descendant, while an ordinary effect can write an upstream source. No remaining
+   * ordinary effect may run ahead of that work, because it could demand the dirty value and then
+   * be queued a second time when the computed settles. Move only ordinary owners into the next
+   * sortable round; already-queued computeds may continue in dependency order.
+   */
+  #deferConsumersBehindComputeds(effects: ReactiveEffect[], start: number): void {
+    if (!this.#pending.some((effect) => effect.computed !== undefined)) return;
+    for (let index = effects.length - 1; index >= start; index -= 1) {
+      const effect = effects[index]!;
+      if (effect.computed !== undefined) continue;
+      effects.splice(index, 1);
+      this.#pending.push(effect);
     }
   }
 }
@@ -125,6 +162,7 @@ export class ReactiveEffect {
   dependencies: Subscription | undefined = undefined;
   stopped = false;
   paused = false;
+  queued = false;
   #cleanup: Cleanup = undefined;
   #dependencyTail: Subscription | undefined = undefined;
 
@@ -312,8 +350,7 @@ export class ReactiveComputed<T> implements ReactiveOwner {
     for (let subscription = this.#dependency.first; subscription !== undefined;
       subscription = subscription.nextSubscriber) {
       if (subscription.effect.computed === undefined) {
-        if (invalidationDepth === 0) this.#refresh();
-        else pendingComputeds.push(this);
+        this.#effect.scheduler.enqueue(this.#effect);
         return;
       }
     }
@@ -393,18 +430,11 @@ function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): voi
     }
     return;
   }
-  if (multiple) invalidationDepth += 1;
   for (let subscription: Subscription | undefined = first;
     subscription !== undefined; ) {
     const next: Subscription | undefined = subscription.nextSubscriber;
     if (subscription.effect !== skip) subscription.effect.schedule();
     subscription = next;
-  }
-  if (multiple) invalidationDepth -= 1;
-  if (multiple && invalidationDepth === 0 && pendingComputeds.length > 0) {
-    const pending = pendingComputeds;
-    pendingComputeds = [];
-    for (const computed of pending) computed.refresh();
   }
 }
 
@@ -420,9 +450,11 @@ export function createEffect(
   scheduler: ReactiveScheduler,
   run: () => Cleanup,
   priority = 1,
+  active = true,
 ): ReactiveEffect {
   const effect = new ReactiveEffect(scheduler, run, priority);
-  effect.execute();
+  if (active) effect.execute();
+  else effect.paused = true;
   return effect;
 }
 
@@ -441,7 +473,7 @@ export class ReactiveScope implements Scope {
   }
 
   get size(): number {
-    return new Set(this.keys()).size;
+    return this.#keySnapshot().size;
   }
 
   has(name: string): boolean {
@@ -498,7 +530,7 @@ export class ReactiveScope implements Scope {
   }
 
   keys(): MapIterator<string> {
-    return this.#snapshot().keys();
+    return this.#keySnapshot().keys();
   }
 
   values(): MapIterator<Value> {
@@ -524,6 +556,13 @@ export class ReactiveScope implements Scope {
         cell.computed === undefined ? cell.value : cell.computed.get(),
       ] as const),
     ]);
+  }
+
+  #keySnapshot(): Map<string, undefined> {
+    const keys = new Map<string, undefined>();
+    for (const name of this.parent?.keys() ?? []) keys.set(name, undefined);
+    for (const name of this.#cells.keys()) keys.set(name, undefined);
+    return keys;
   }
 
   #local(name: string): ReactiveCell | undefined {

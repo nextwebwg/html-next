@@ -45,6 +45,8 @@ creates a lazy cached getter whose dependencies are the signals, computed getter
 paths read during its latest evaluation. Both participate in `host.effect` dependency tracking, and
 computed values are paused, resumed, and disposed with the component. These primitives let ordinary
 ES modules build lifecycle-owned controller composables without importing a second reactive runtime.
+The computed callback must return an ordinary value synchronously. Promises are unsupported because
+the Promise rather than its eventual value would be cached, and reads after `await` cannot be tracked.
 Signals own no scheduled work; their storage remains readable while disconnected. Pausing a computed
 removes its subscriptions and automatic work, while an explicit `get()` still performs an untracked
 read. Reconnection makes the next tracked read rebuild the dependency set.
@@ -60,8 +62,10 @@ An effect runs once while connecting and tracks the `host.state` paths read duri
 ### Resource composables
 
 Controller-local primitives are sufficient for an SWR-style resource without making requests part
-of computed evaluation. The computed request key remains lazy and pure; the effect owns the request
-and returns its cancellation; signals publish the request state.
+of computed evaluation. Calling `useResource` is this composable's activation boundary: its effect
+runs on connection, reads the otherwise-lazy key, and starts a request when that key is non-null.
+Reading the returned signals is not what activates remote work. The effect owns each request and
+returns its cancellation; signals publish request state.
 
 ```ts
 import type {
@@ -134,6 +138,7 @@ into state roots that its template is allowed to read:
 ```ts
 export default function controller(host: ComponentHost) {
   const { computed, effect, state } = host;
+  const emptyResults: readonly SearchResult[] = [];
   const key = computed(() => {
     const query = String(state.query ?? "").trim();
     return query === "" ? null : `/api/search?q=${encodeURIComponent(query)}`;
@@ -145,7 +150,7 @@ export default function controller(host: ComponentHost) {
   });
 
   effect(() => {
-    state.results = result.data.get() ?? [];
+    state.results = result.data.get() ?? emptyResults;
     state.loading = result.isLoading.get();
     state.refreshing = result.isValidating.get();
     const error = result.error.get();

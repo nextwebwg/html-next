@@ -820,11 +820,18 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector('#controller-reactivity');
-          const { computed, effect, signal } = window.HtmlRuntime.getComponentHost(root);
+          const { computed, dispatch, effect, on, signal } = window.HtmlRuntime.getComponentHost(root);
           const source = signal(0);
           let computedRuns = 0;
           let effectRuns = 0;
           let observed = '';
+          let eventTotal = 0;
+          const stopListening = on('controller-value', (event) => {
+            eventTotal += event.detail.value;
+          });
+          const dispatched = dispatch('controller-value', { value: 2 });
+          stopListening();
+          dispatch('controller-value', { value: 10 });
           const bucket = computed(() => {
             computedRuns += 1;
             return source.get() === 0 ? 'empty' : 'ready';
@@ -841,7 +848,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           });
           source.set(3);
           await Promise.resolve();
-          return { beforeRead, first, second, computedRuns, effectRuns, observed };
+          return { beforeRead, first, second, computedRuns, effectRuns, observed, dispatched, eventTotal };
         })()`);
         assert.deepEqual(result, {
           beforeRead: 0,
@@ -850,6 +857,102 @@ describe.skipIf(!enabled)("browser runtime", () => {
           computedRuns: 2,
           effectRuns: 1,
           observed: "ready",
+          dispatched: true,
+          eventTotal: 2,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} reconnects controller effects after later computeds and pauses detached creation`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<main><div id="controller-order"></div></main>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const stopDocument = window.HtmlRuntime.observeDocument();
+          const root = document.querySelector('#controller-order');
+          const definition = {
+            contract: { version: 1, name: 'ControllerOrder', tag: 'controller-order', status: 'early',
+              summary: 'Controller order fixture.', nativeElement: 'div', props: {} },
+            template: { kind: 'element', name: 'div', attributes: [], children: [] },
+            css: '', declarations: [], slots: [],
+            root: { kind: 'native', element: 'div', choices: ['div'] },
+          };
+          const stopRoot = window.HtmlRuntime.manageComponentLifecycle(root, definition);
+          const { computed, effect, signal } = window.HtmlRuntime.getComponentHost(root);
+          const gate = signal(false);
+          const source = signal(1);
+          let derived;
+          let observed = 0;
+          let computedRuns = 0;
+          let effectRuns = 0;
+          let effectCleanups = 0;
+          effect(() => {
+            effectRuns += 1;
+            gate.get();
+            if (derived) observed = derived.get();
+            return () => { effectCleanups += 1; };
+          });
+          derived = computed(() => {
+            computedRuns += 1;
+            return source.get() * 2;
+          });
+          gate.set(true);
+          await Promise.resolve();
+
+          root.remove();
+          await tick();
+          let detachedRuns = 0;
+          effect(() => { detachedRuns += 1; });
+          const detachedRunsBeforeReconnect = detachedRuns;
+          source.set(10);
+          await Promise.resolve();
+          const whileDetached = {
+            signalValue: source.get(),
+            computedRuns,
+            effectRuns,
+            effectCleanups,
+          };
+
+          document.querySelector('main').append(root);
+          await tick();
+          source.set(2);
+          await Promise.resolve();
+          await Promise.resolve();
+          const beforeStop = { detachedRuns, computedRuns, effectRuns, effectCleanups, observed };
+          stopRoot();
+          source.set(3);
+          await Promise.resolve();
+          const afterStop = { detachedRuns, computedRuns, effectRuns, effectCleanups, observed };
+          stopDocument();
+          return { detachedRunsBeforeReconnect, whileDetached, beforeStop, afterStop };
+        })()`);
+        assert.deepEqual(result, {
+          detachedRunsBeforeReconnect: 0,
+          whileDetached: {
+            signalValue: 10,
+            computedRuns: 1,
+            effectRuns: 2,
+            effectCleanups: 2,
+          },
+          beforeStop: {
+            detachedRuns: 1,
+            computedRuns: 3,
+            effectRuns: 4,
+            effectCleanups: 3,
+            observed: 4,
+          },
+          afterStop: {
+            detachedRuns: 1,
+            computedRuns: 3,
+            effectRuns: 4,
+            effectCleanups: 4,
+            observed: 4,
+          },
         });
       } finally {
         await browser.close();
