@@ -23,8 +23,8 @@ The `controller` attribute binds its owning component definition to one ES modul
 
 ```js conforming
 // chart.js
-export default function controller(host) {
-  host.effect(() => renderChart(host.refs.canvas, host.state.series));
+export default function controller({ effect, refs, state }) {
+  effect(() => renderChart(refs.canvas, state.series));
 }
 ```
 

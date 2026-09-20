@@ -133,22 +133,23 @@ into state roots that its template is allowed to read:
 
 ```ts
 export default function controller(host: ComponentHost) {
-  const key = host.computed(() => {
-    const query = String(host.state.query ?? "").trim();
+  const { computed, effect, state } = host;
+  const key = computed(() => {
+    const query = String(state.query ?? "").trim();
     return query === "" ? null : `/api/search?q=${encodeURIComponent(query)}`;
   });
-  const result = useResource(host, key, async (url, signal) => {
-    const response = await fetch(url, { signal });
+  const result = useResource(host, key, async (url, abortSignal) => {
+    const response = await fetch(url, { signal: abortSignal });
     if (!response.ok) throw new Error(`Search failed (${response.status})`);
     return await response.json() as readonly SearchResult[];
   });
 
-  host.effect(() => {
-    host.state.results = result.data.get() ?? [];
-    host.state.loading = result.isLoading.get();
-    host.state.refreshing = result.isValidating.get();
+  effect(() => {
+    state.results = result.data.get() ?? [];
+    state.loading = result.isLoading.get();
+    state.refreshing = result.isValidating.get();
     const error = result.error.get();
-    host.state.error = error instanceof Error ? error.message : null;
+    state.error = error instanceof Error ? error.message : null;
   });
 }
 ```

@@ -8,8 +8,8 @@ function draw(canvas, bars) {
   bars.forEach((h, i) => ctx.fillRect(i * 42 + 8, canvas.height - h * 10, 32, h * 10));
 }
 
-export default function controller(host) {
+export default function controller({ effect, refs, state }) {
   // The library owns the canvas (its own, unbound subtree). The effect re-runs if
-  // host.state.bars changes; here it simply draws once.
-  host.effect(() => draw(host.refs.surface, host.state.bars));
+  // state.bars changes; here it simply draws once.
+  effect(() => draw(refs.surface, state.bars));
 }

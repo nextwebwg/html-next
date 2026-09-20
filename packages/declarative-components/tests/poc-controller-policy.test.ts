@@ -17,8 +17,8 @@ describe("live component graph example", () => {
 
     assert.match(counter, /<template component="x-counter" controller="\.\/counter\.js"/);
     assert.match(chart, /<template component="x-chart" controller="\.\/chart\.js"/);
-    assert.match(counterController, /export default function controller\(host\)/);
-    assert.match(chartController, /export default function controller\(host\)/);
+    assert.match(counterController, /export default function controller\(\{ refs, state \}\)/);
+    assert.match(chartController, /export default function controller\(\{ effect, refs, state \}\)/);
     assert.doesNotMatch(counterController, /from ["'][^"']*poc\.js["']/);
     assert.doesNotMatch(chartController, /from ["'][^"']*poc\.js["']/);
     assert.doesNotMatch(counterController, /defineController/);

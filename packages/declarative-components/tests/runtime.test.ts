@@ -820,12 +820,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector('#controller-reactivity');
-          const host = window.HtmlRuntime.getComponentHost(root);
-          const source = host.signal(0);
+          const { computed, effect, signal } = window.HtmlRuntime.getComponentHost(root);
+          const source = signal(0);
           let computedRuns = 0;
           let effectRuns = 0;
           let observed = '';
-          const bucket = host.computed(() => {
+          const bucket = computed(() => {
             computedRuns += 1;
             return source.get() === 0 ? 'empty' : 'ready';
           });
@@ -835,7 +835,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const beforeRead = computedRuns;
           const first = bucket.get();
           const second = bucket.get();
-          host.effect(() => {
+          effect(() => {
             effectRuns += 1;
             observed = bucket.get();
           });

@@ -1649,6 +1649,10 @@ export function attachRegisteredComponent(
   return attachComponent(element, registered.definition, options);
 }
 
+/**
+ * Capabilities owned by one component instance. Properties and methods are receiver-independent,
+ * so controllers may destructure only the capabilities they use in their parameter list.
+ */
 export interface ComponentHost {
   readonly element: Element;
   readonly state: Record<string, unknown>;
