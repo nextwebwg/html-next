@@ -50,7 +50,9 @@ function validateNode(
     if (references.has(reference)) return [];
     const target = pointer(root, reference);
     if (target === undefined) return [issue(path, `Schema reference \`${reference}\` cannot be resolved.`)];
-    return validateNode(value, target, root, path, new Set([...references, reference]));
+    const nestedReferences = new Set(references);
+    nestedReferences.add(reference);
+    return validateNode(value, target, root, path, nestedReferences);
   }
 
   if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => sameValue(value, candidate))) {
@@ -84,10 +86,11 @@ function validateNode(
   }
 
   if (typeof value === "string") {
-    if (typeof schema.minLength === "number" && [...value].length < schema.minLength) {
+    const length = Array.from(value).length;
+    if (typeof schema.minLength === "number" && length < schema.minLength) {
       errors.push(issue(path, `Use at least ${schema.minLength} characters.`));
     }
-    if (typeof schema.maxLength === "number" && [...value].length > schema.maxLength) {
+    if (typeof schema.maxLength === "number" && length > schema.maxLength) {
       errors.push(issue(path, `Use no more than ${schema.maxLength} characters.`));
     }
     if (typeof schema.pattern === "string") {
