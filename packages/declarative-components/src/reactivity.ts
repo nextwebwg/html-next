@@ -12,7 +12,7 @@ interface Dependency {
 }
 
 interface ReactiveCell extends Dependency {
-  computed: ReactiveComputed<Value> | undefined;
+  computed?: ReactiveComputed<Value>;
   value: Value;
 }
 
@@ -344,7 +344,9 @@ export class ReactiveComputed<T> implements ReactiveOwner {
     if (!this.#dirty || this.#effect.stopped || this.#effect.paused) return;
     const initialized = this.#initialized;
     this.#effect.execute();
-    if (initialized && this.#changed) trigger(this.#dependency, activeEffect);
+    if (initialized && this.#changed) {
+      trigger(this.#dependency, activeEffect?.computed === undefined ? undefined : activeEffect);
+    }
   }
 
   #readDetached(): T {
@@ -457,7 +459,7 @@ export class ReactiveScope implements Scope {
     const wrapped = this.#wrap(value);
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: wrapped, first: undefined, last: undefined, computed: undefined };
+      cell = { value: wrapped, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
       return;
@@ -471,7 +473,7 @@ export class ReactiveScope implements Scope {
   defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: null, first: undefined, last: undefined, computed: undefined };
+      cell = { value: null, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
     }

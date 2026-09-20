@@ -215,6 +215,23 @@ describe("reactive scope", () => {
     assert.equal(runs, 101);
   });
 
+  it("bounds a write cycle that passes through a computed value", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const source = createSignal(0);
+    const next = createComputed(scheduler, () => source.get() + 1);
+    let runs = 0;
+    createEffect(scheduler, () => {
+      runs += 1;
+      source.set(next.get());
+    });
+
+    assert.throws(
+      () => scheduler.flush(),
+      (error: unknown) => error instanceof Error && error.message.includes("HR006"),
+    );
+    assert.equal(runs, 101);
+  });
+
   it("allows wide fan-out because the loop bound is per effect", () => {
     const scope = new ReactiveScope([["value", 0]]);
     let runs = 0;
