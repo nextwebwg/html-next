@@ -365,7 +365,7 @@ function ownEffect(
   context: RuntimeRenderContext,
   scope: ReactiveScope,
   run: () => void | (() => void),
-  priority: 0 | 1 | 2 = 1,
+  priority = 1,
 ): void {
   context.effects.push(createEffect(scope.scheduler, run, priority));
 }

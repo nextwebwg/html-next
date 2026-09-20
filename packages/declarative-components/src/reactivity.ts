@@ -16,6 +16,7 @@ interface Subscription {
 }
 
 let activeEffect: ReactiveEffect | undefined;
+let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
@@ -29,15 +30,14 @@ function unsubscribe(subscription: Subscription): void {
 }
 
 export class ReactiveScheduler {
-  #pending: [ReactiveEffect[], ReactiveEffect[], ReactiveEffect[]] = [[], [], []];
+  #pending: ReactiveEffect[] = [];
   #flushId = 0;
   #scheduled = false;
   #flushing = false;
 
   enqueue(effect: ReactiveEffect): void {
-    const pending = this.#pending[effect.priority];
-    if (effect.stopped || pending.includes(effect)) return;
-    pending.push(effect);
+    if (effect.stopped || this.#pending.includes(effect)) return;
+    this.#pending.push(effect);
     if (!this.#scheduled && !this.#flushing) {
       this.#scheduled = true;
       queueMicrotask(() => {
@@ -52,22 +52,22 @@ export class ReactiveScheduler {
     this.#flushing = true;
     const flushId = ++this.#flushId;
     try {
-      while (this.#pending.some((lane) => lane.length > 0)) {
-        const lanes = this.#pending;
-        this.#pending = [[], [], []];
-        for (const effects of lanes) {
-          for (const effect of effects) {
-            if (effect.flushId === flushId) effect.flushCount += 1;
-            else {
-              effect.flushId = flushId;
-              effect.flushCount = 1;
-            }
-            if (effect.flushCount > maximumExecutionsPerFlush) {
-              this.#pending = [[], [], []];
-              fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
-            }
-            effect.execute();
+      while (this.#pending.length > 0) {
+        const effects = this.#pending.sort(
+          (left, right) => left.priority - right.priority || left.id - right.id,
+        );
+        this.#pending = [];
+        for (const effect of effects) {
+          if (effect.flushId === flushId) effect.flushCount += 1;
+          else {
+            effect.flushId = flushId;
+            effect.flushCount = 1;
           }
+          if (effect.flushCount > maximumExecutionsPerFlush) {
+            this.#pending = [];
+            fail("HR006", "A reactive effect exceeded the per-flush execution limit.");
+          }
+          effect.execute();
         }
       }
     } finally {
@@ -77,6 +77,7 @@ export class ReactiveScheduler {
 }
 
 export class ReactiveEffect {
+  readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
   flushCount = 0;
   flushId = 0;
@@ -88,7 +89,7 @@ export class ReactiveEffect {
   constructor(
     readonly scheduler: ReactiveScheduler,
     readonly run: () => Cleanup,
-    readonly priority: 0 | 1 | 2,
+    readonly priority: number,
   ) {}
 
   execute(): void {
@@ -198,7 +199,7 @@ function trigger(dependency: Dependency | undefined): void {
 export function createEffect(
   scheduler: ReactiveScheduler,
   run: () => Cleanup,
-  priority: 0 | 1 | 2 = 1,
+  priority = 1,
 ): ReactiveEffect {
   const effect = new ReactiveEffect(scheduler, run, priority);
   effect.execute();
