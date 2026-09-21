@@ -201,6 +201,46 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} preserves nested framework components rendered as native roots`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="framework-menu" status="early" summary="Nested framework fixture.">' +
+          '<ul><slot></slot></ul></template>' +
+          '<template component="framework-shell" status="early" summary="Framework composition fixture.">' +
+          '<section><div><framework-menu><slot></slot></framework-menu></div></section></template>' +
+          '<main><section id="root"><div>' +
+          '<ul id="menu" data-component="framework-menu">' +
+          '<li id="item">Rename</li></ul></div></section></main>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#root");
+          const menu = root.querySelector("#menu");
+          const item = root.querySelector("#item");
+          const detachMenu = window.HtmlRuntime.attachRegisteredComponent(menu, "framework-menu");
+          const detach = window.HtmlRuntime.attachRegisteredComponent(root, "framework-shell");
+          const result = {
+            menuRetained: root.querySelector('[data-component-root~="framework-menu"]') === menu,
+            itemRetained: root.querySelector("#item") === item,
+            text: menu?.textContent,
+          };
+          detach();
+          detachMenu();
+          return result;
+        })()`);
+        assert.deepEqual(result, {
+          menuRetained: true,
+          itemRetained: true,
+          text: "Rename",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} parses and lowers components owned by another browser realm`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
