@@ -250,7 +250,7 @@ function collectDirectEvents(node: ElementNode, variable: string, context: Direc
 function renderNode(
   node: TemplateNode,
   lines: string[],
-  counter: { value: number },
+  counter: RenderCounter,
   parent: string,
   props: Readonly<Record<string, PropContract>>,
   valueCounter: { value: number },
@@ -269,7 +269,12 @@ function renderNode(
   }
 
   const variable = `element${counter.value++}`;
-  lines.push(`  const ${variable} = document.createElement(${js(node.name)});`);
+  // SVG subtrees must be created in the SVG namespace; <foreignObject> children return to HTML.
+  const svg = node.name === "svg" || counter.svgParents.has(parent);
+  lines.push(svg
+    ? `  const ${variable} = document.createElementNS("http://www.w3.org/2000/svg", ${js(node.name)});`
+    : `  const ${variable} = document.createElement(${js(node.name)});`);
+  if (svg && node.name !== "foreignObject") counter.svgParents.add(variable);
   renderAttributes(node, variable, lines, props, valueCounter, "  ", direct, directProps);
   if (direct !== undefined) collectDirectEvents(node, variable, direct);
   lines.push(`  ${variable}.setAttribute("data-component", ${js(owner)});`);
@@ -279,10 +284,16 @@ function renderNode(
   lines.push(`  ${parent}.append(${variable});`);
 }
 
+interface RenderCounter {
+  value: number;
+  /** Generated variables naming SVG elements whose children are also SVG. */
+  readonly svgParents: Set<string>;
+}
+
 function renderSlot(
   node: SlotNode,
   lines: string[],
-  counter: { value: number },
+  counter: RenderCounter,
   parent: string,
   props: Readonly<Record<string, PropContract>>,
   valueCounter: { value: number },
@@ -426,7 +437,7 @@ export function generateVanilla(
     `  element.setAttribute("data-component", ${js(contract.tag)});`,
     `  element.setAttribute("data-component-root", ${js(contract.tag)});`,
   );
-  const counter = { value: 0 };
+  const counter: RenderCounter = { value: 0, svgParents: new Set() };
   for (const child of template.children) {
     renderNode(
       child,
