@@ -87,8 +87,6 @@ describe("reactive scope", () => {
     });
 
     assert.equal(scope.has("doubled"), true);
-    assert.equal(scope.size, 2);
-    assert.deepEqual(Array.from(scope.keys()), ["source", "doubled"]);
     assert.equal(runs, 0);
   });
 

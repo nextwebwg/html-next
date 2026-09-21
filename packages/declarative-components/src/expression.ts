@@ -11,7 +11,10 @@ export type Value =
   | readonly Value[]
   | { readonly [key: string]: Value };
 
-export type Scope = ReadonlyMap<string, Value>;
+/** Expressions only look names up, so any `Map` or reactive scope layer can supply them. */
+export interface Scope {
+  get(name: string): Value | undefined;
+}
 
 export class UndeclaredName extends Error {
   constructor(readonly identifier: string) {
@@ -48,35 +51,17 @@ type TokenKind = 0 | 1 | 2 | 3 | 4;
 const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.:{}[\]-])|$)/y;
 const ESCAPE = /\\([\s\S])/g;
 const FORMAT_TOKEN = /%s/g;
-const atoms = new Map<string, string>();
 
-function atom(value: string): string {
-  const stored = atoms.get(value);
-  if (stored !== undefined) return stored;
-  atoms.set(value, value);
-  return value;
-}
+const PRECEDENCE: Readonly<Record<string, number>> = {
+  or: 1, and: 2,
+  "=": 3, "!=": 3, "^=": 3, "$=": 3, "*=": 3,
+  "<": 4, "<=": 4, ">": 4, ">=": 4,
+  "+": 5, "-": 5,
+  "*": 6, "/": 6, "%": 6,
+};
 
 function precedence(token: string | number): number {
-  switch (token) {
-    case "or": return 1;
-    case "and": return 2;
-    case "=":
-    case "!=":
-    case "^=":
-    case "$=":
-    case "*=": return 3;
-    case "<":
-    case "<=":
-    case ">":
-    case ">=": return 4;
-    case "+":
-    case "-": return 5;
-    case "*":
-    case "/":
-    case "%": return 6;
-    default: return 0;
-  }
+  return PRECEDENCE[token as string] ?? 0;
 }
 
 function isFunction(name: string): boolean {
@@ -116,7 +101,7 @@ function parse(source: string): ExpressionNode {
       token = match[3].slice(1, -1).replace(ESCAPE, "$1");
     } else if (match[4] !== undefined) {
       kind = 3;
-      token = atom(match[4]);
+      token = match[4]!;
     } else {
       kind = 0;
       token = "";
@@ -137,7 +122,7 @@ function parse(source: string): ExpressionNode {
     let left = unary();
     let power = precedence(token);
     while (power >= minimum) {
-      const op = String(token);
+      const op = token as string;
       next();
       left = { kind: "binary", op, left, right: binary(power + 1) };
       power = precedence(token);
@@ -158,7 +143,7 @@ function parse(source: string): ExpressionNode {
         if ((kind as TokenKind) !== 3) {
           throw new SyntaxError("Expected a property name after `.`.");
         }
-        const key = String(token);
+        const key = token as string;
         next();
         object = { kind: "member", object, key };
       } else if (eat("[")) {
@@ -194,7 +179,7 @@ function parse(source: string): ExpressionNode {
           if (kind !== 3 && kind !== 2) {
             throw new SyntaxError("Object keys must be identifiers or strings.");
           }
-          const key = String(token);
+          const key = token as string;
           next();
           expect(":");
           pairs.push({ key, value: binary(1) });
@@ -216,7 +201,7 @@ function parse(source: string): ExpressionNode {
       return { kind: "array", items };
     }
     if (currentKind === 3) {
-      const name = String(currentToken);
+      const name = currentToken as string;
       next();
       if (name === "true") return { kind: "literal", value: true };
       if (name === "false") return { kind: "literal", value: false };
@@ -270,7 +255,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     }
     case "member": {
       const object = evalNode(node.object, scope);
-      if (object === null || object === ABSENT || typeof object !== "object" || Array.isArray(object)) {
+      if (isAbsent(object) || typeof object !== "object" || Array.isArray(object)) {
         return ABSENT;
       }
       const value = (object as { readonly [key: string]: Value })[node.key];
@@ -279,7 +264,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     case "index": {
       const object = evalNode(node.object, scope);
       const index = evalNode(node.index, scope);
-      if (object === null || object === ABSENT || isAbsent(index)) return ABSENT;
+      if (isAbsent(object) || isAbsent(index)) return ABSENT;
       if (Array.isArray(object) && typeof index === "number") {
         const value = object[index];
         return value === undefined ? ABSENT : value;
@@ -459,7 +444,7 @@ export function getWritablePath(
 ): WritablePath | undefined {
   const result: WritablePathSegment[] = [];
   if (!appendWritable(compileExpression(source).ast, result)
-    || !writableRoots.has(String(result[0]))) return undefined;
+    || !writableRoots.has(result[0] as string)) return undefined;
   return result;
 }
 
@@ -481,15 +466,7 @@ export function evaluateCompiled(expression: CompiledExpression | ExpressionNode
 /** Escaped-text form: absence and null render as empty text. */
 export function toText(value: Value): string {
   if (isAbsent(value)) return "";
-  if (Array.isArray(value)) {
-    let text = "";
-    let separator = "";
-    for (const item of value) {
-      text += separator + toText(item);
-      separator = " ";
-    }
-    return text;
-  }
+  if (Array.isArray(value)) return value.map(toText).join(" ");
   if (typeof value === "object") return "";
   return String(value);
 }

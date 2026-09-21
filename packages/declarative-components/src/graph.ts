@@ -46,6 +46,10 @@ export type ComponentResourceParser = (
   source: string,
 ) => ParsedComponentResource;
 
+function byKey([left]: readonly [string, unknown], [right]: readonly [string, unknown]): number {
+  return left.localeCompare(right);
+}
+
 interface DraftNode {
   url: string;
   trustRoot: string;
@@ -132,7 +136,7 @@ export async function buildComponentGraph(
   }
 
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
-  for (const [url, draft] of Array.from(drafts).sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [url, draft] of Array.from(drafts).sort(byKey)) {
     if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${url}\`.`);
     nodeEntries.push([url, Object.freeze({
       url,
@@ -146,6 +150,6 @@ export async function buildComponentGraph(
   return Object.freeze({
     roots: Object.freeze(roots),
     nodes: new Map(nodeEntries),
-    tags: new Map(Array.from(tags).sort(([left], [right]) => left.localeCompare(right))),
+    tags: new Map(Array.from(tags).sort(byKey)),
   });
 }
