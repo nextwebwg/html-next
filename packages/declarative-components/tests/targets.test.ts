@@ -191,6 +191,22 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
+  it("creates vanilla SVG subtrees in the SVG namespace", async () => {
+    const module = generated(componentSource(
+      "demo-icon",
+      `<prop name="label" type="string" default="Close">Label.</prop>`,
+      `<button :aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path>` +
+        `<foreignObject><span>html</span></foreignObject></svg></button>`,
+    )).get("vanilla/DemoIcon.js")!;
+
+    assert.match(module, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "svg"\)/);
+    assert.match(module, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "path"\)/);
+    assert.match(module, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "foreignObject"\)/);
+    assert.match(module, /createElement\("span"\)/);
+    assert.match(module, /createElement\("button"\)/);
+    await transform(module, { loader: "js" });
+  });
+
   it("keeps unsafe attribute sinks on the complete runtime path", () => {
     const module = generated(componentSource(
       "demo-link",

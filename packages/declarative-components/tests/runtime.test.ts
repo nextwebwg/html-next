@@ -102,6 +102,44 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} renders template SVG in the SVG namespace with camelCase names`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="icon-close" status="early" summary="SVG namespace fixture.">' +
+          '<button type="button"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">' +
+          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g"></linearGradient>' +
+          '<foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button></template>' +
+          '<main><icon-close></icon-close></main>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const svg = document.querySelector("main svg");
+          const path = svg.querySelector("path");
+          return {
+            svg: svg.namespaceURI,
+            viewBox: svg.getAttribute("viewBox"),
+            path: path.namespaceURI,
+            pathWidth: Math.round(path.getBBox().width),
+            gradient: svg.querySelector("linearGradient")?.namespaceURI ?? null,
+            foreignChild: svg.querySelector("foreignObject > span")?.namespaceURI ?? null,
+          };
+        })()`);
+        assert.deepEqual(result, {
+          svg: "http://www.w3.org/2000/svg",
+          viewBox: "0 0 24 24",
+          path: "http://www.w3.org/2000/svg",
+          pathWidth: 12,
+          gradient: "http://www.w3.org/2000/svg",
+          foreignChild: "http://www.w3.org/1999/xhtml",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} attaches framework roots through the registered declarative contract`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
