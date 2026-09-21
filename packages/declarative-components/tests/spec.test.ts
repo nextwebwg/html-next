@@ -24,6 +24,7 @@ const requiredModules = [
   "framework-conversion.md",
   "syntax.md",
   "components.md",
+  "rendered-form.md",
   "expressions.md",
   "reactivity.md",
   "loading-and-security.md",

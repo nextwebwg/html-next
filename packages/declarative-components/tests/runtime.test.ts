@@ -206,6 +206,152 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} rebuilds the same instance from its rendered form`, async () => {
+      // Spec: live-browser-distributable.md, "Rendered form". Authored markup lowered in the browser and
+      // the same instance's serialized rendered form hydrated must build equal instances, and behave the
+      // same after the same later change.
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="rf-card" status="early" summary="Rendered form fixture.">' +
+          '<defs><prop name="tone" type="string" default="info">Tone.</prop></defs>' +
+          '<article><header><slot name="title">Untitled</slot></header><div><slot></slot></div></article></template>' +
+          '<template component="rf-adj" status="early" summary="Rendered form fixture."><p>Hello <slot></slot>!</p></template>' +
+          '<template component="rf-if" status="early" summary="Rendered form fixture.">' +
+          '<defs><prop name="open" type="boolean" default="false">Open.</prop></defs>' +
+          '<div><section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
+          '<template component="rf-toggle" status="early" summary="Rendered form fixture."><defs>' +
+          '<state name="open" :value="false"></state>' +
+          '<handler name="toggle"><set name="open" :value="not open"></set></handler></defs>' +
+          '<div><button type="button" on:click="toggle">More</button>' +
+          '<section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
+          '<template component="rf-list" status="early" summary="Rendered form fixture.">' +
+          '<defs><prop name="rows" type="list(string)" default="[]">Rows.</prop></defs>' +
+          `<ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>` +
+          '<template component="rf-wrap" status="early" summary="Rendered form fixture.">' +
+          '<section><rf-card><span slot="title"><slot name="heading"></slot></span><slot></slot></rf-card></section></template>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const R = window.HtmlRuntime;
+          const tick = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const tags = "rf-card,rf-adj,rf-if,rf-toggle,rf-list,rf-wrap";
+          const cases = [
+            { name: "named and default slots", html: '<rf-card><b slot="title">T</b>Body <i>x</i></rf-card>', change: ["attr", "data-tone", "warn"] },
+            { name: "text beside template text", html: '<rf-adj>world</rf-adj>' },
+            { name: "slot under $if opened by a prop", html: '<rf-if><i slot="extra">E</i>main</rf-if>', change: ["attr", "data-open", "true"] },
+            { name: "slot under $if opened by a handler", html: '<rf-toggle><i slot="extra">E</i>main</rf-toggle>', change: ["click"] },
+            { name: "$each row added later", html: '<rf-list rows="[&quot;a&quot;]"><span slot="row-b">B</span></rf-list>', change: ["attr", "data-rows", '["a","b"]'] },
+            { name: "slot passthrough into a nested component", html: '<rf-wrap><em slot="heading">H</em>Inner</rf-wrap>' },
+          ];
+          const shapes = (box) => JSON.stringify([...box.querySelectorAll("[data-component-root]")].map((el) => R.inspectInstance(el)));
+          const failures = [];
+          for (const { name, html, change } of cases) {
+            const lowered = document.createElement("div");
+            lowered.setHTMLUnsafe(html);
+            document.body.append(lowered);
+            for (let pass = 0; pass < 10 && lowered.querySelector(tags); pass += 1) { R.lowerDocument(); await tick(); }
+            const hydrated = document.createElement("div");
+            hydrated.setHTMLUnsafe(R.serializeRenderedForm(lowered));
+            document.body.append(hydrated);
+            R.lowerDocument();
+            await tick();
+            if (shapes(lowered) !== shapes(hydrated)) failures.push(name + ": instance");
+            if (lowered.innerHTML !== hydrated.innerHTML) failures.push(name + ": DOM");
+            if (hydrated.querySelector(":scope > * > template")) failures.push(name + ": carrier left in the DOM");
+            if (change) {
+              for (const box of [lowered, hydrated]) {
+                if (change[0] === "attr") box.firstElementChild.setAttribute(change[1], change[2]);
+                else box.querySelector("button").click();
+              }
+              await tick();
+              if (lowered.innerHTML !== hydrated.innerHTML) failures.push(name + ": DOM after change");
+            }
+            lowered.remove();
+            hydrated.remove();
+          }
+          return failures;
+        })()`);
+        assert.deepEqual(result, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} lets a framework claim a server-rendered root in either order`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const serverRoot = (id: string) =>
+          `<button id="${id}" data-component="claimed-button" data-component-root="claimed-button">Save</button>`;
+        await page.setContent(
+          '<template component="claimed-button" status="early" summary="Framework claim fixture.">' +
+          '<defs><prop name="label" type="string" default="">Accessible label.</prop></defs>' +
+          '<button :aria-label="label"><slot></slot></button></template>' +
+          `<main>${serverRoot("observed-first")}</main>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+          const log = [];
+          const controller = (owner) => ({
+            default(host) {
+              log.push(owner + " start " + host.element.id);
+              return () => log.push(owner + " stop " + host.element.id);
+            },
+          });
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(root) { return controller("observer").default({ element: root }); },
+          });
+          await tick();
+
+          // 1. The observer hydrated the server root first; the framework claims it.
+          const observedFirst = document.getElementById("observed-first");
+          const detachObserved = window.HtmlRuntime.attachRegisteredComponent(observedFirst, "claimed-button", {
+            props: { label: "Save changes" },
+            controller: controller("framework"),
+          });
+          await tick();
+          const claimedLabel = observedFirst.getAttribute("aria-label");
+          const claimedText = observedFirst.textContent;
+
+          // Moving a claimed root must not hand it back to the observer.
+          document.querySelector("main").append(observedFirst);
+          await tick();
+
+          // 2. The framework attaches before the observer sees the root.
+          const container = document.createElement("div");
+          container.innerHTML = '<button id="framework-first" data-component="claimed-button" data-component-root="claimed-button">Save</button>';
+          const frameworkFirst = container.firstElementChild;
+          const detachFramework = window.HtmlRuntime.attachRegisteredComponent(frameworkFirst, "claimed-button", {
+            controller: controller("framework"),
+          });
+          document.querySelector("main").append(frameworkFirst);
+          await tick();
+
+          detachObserved();
+          detachFramework();
+          stop();
+          return { log, claimedLabel, claimedText };
+        })()`);
+        assert.deepEqual(result, {
+          log: [
+            "observer start observed-first",
+            "observer stop observed-first",
+            "framework start observed-first",
+            "framework start framework-first",
+            "framework stop observed-first",
+            "framework stop framework-first",
+          ],
+          claimedLabel: "Save changes",
+          claimedText: "Save",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} leaves framework-owned slot regions and structural anchors intact`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -216,16 +362,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<article><header><slot name="leading"></slot><slot></slot><slot name="actions"></slot></header>' +
           '<section $if="expanded"><slot name="details"></slot></section></article></template>' +
           '<main><article id="root"><header>' +
-          '<span slot="leading" data-html-next-slot="leading"><i>Icon</i></span>' +
-          '<span data-html-next-slot=""><b>Title</b></span>' +
-          '<span slot="actions" data-html-next-slot="actions"><button>More</button></span>' +
+          '<span slot="leading"><i>Icon</i></span>' +
+          '<span slot=""><b>Title</b></span>' +
+          '<span slot="actions"><button>More</button></span>' +
           '</header><!--framework-if--></article></main>',
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(() => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector("#root");
-          const regions = Array.from(root.querySelectorAll("[data-html-next-slot]"));
+          const regions = Array.from(root.querySelectorAll("span[slot]"));
           const anchor = root.lastChild;
           const detach = window.HtmlRuntime.attachRegisteredComponent(
             root,
@@ -234,16 +380,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
           );
           regions[1].querySelector("b").textContent = "Updated";
           const details = document.createElement("section");
-          details.innerHTML = '<span slot="details" data-html-next-slot="details">Details</span>';
+          details.innerHTML = '<span slot="details">Details</span>';
           anchor.replaceWith(details);
           root.expanded = true;
           const result = {
-            regionIdentity: Array.from(root.querySelectorAll("[data-html-next-slot]"))
+            regionIdentity: Array.from(root.querySelectorAll("span[slot]"))
               .slice(0, 3).every((region, index) => region === regions[index]),
-            leading: root.querySelector('[data-html-next-slot="leading"]')?.textContent,
-            title: root.querySelector('[data-html-next-slot=""]')?.textContent,
-            actions: root.querySelector('[data-html-next-slot="actions"]')?.textContent,
-            details: root.querySelector('[data-html-next-slot="details"]')?.textContent,
+            leading: root.querySelector('span[slot="leading"]')?.textContent,
+            title: root.querySelector('span[slot=""]')?.textContent,
+            actions: root.querySelector('span[slot="actions"]')?.textContent,
+            details: root.querySelector('span[slot="details"]')?.textContent,
           };
           detach();
           return result;
@@ -1856,7 +2002,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
               attributes: Array.from(element.attributes)
                 .map((attribute) => [attribute.name, attribute.value])
                 .sort(([left], [right]) => left.localeCompare(right)),
-              children: Array.from(element.childNodes).map((child) =>
+              // Rendered-form markers (PIs, or comments where PIs are not parsed) are not public DOM.
+              children: Array.from(element.childNodes).filter((child) =>
+                child.nodeType !== Node.PROCESSING_INSTRUCTION_NODE && child.nodeType !== Node.COMMENT_NODE,
+              ).map((child) =>
                 child.nodeType === Node.TEXT_NODE
                   ? { text: child.textContent }
                   : snapshot(child),

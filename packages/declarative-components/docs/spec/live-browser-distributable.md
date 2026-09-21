@@ -42,6 +42,18 @@ registered component tags. Lowered roots carry the shared component-root marker 
 transitions. A component disconnect runs its registered cleanup once; a reconnect installs one
 fresh active lifecycle without duplicating effects or handlers.
 
+### Server-rendered roots
+
+A root carrying the component-root marker is server-rendered output. Its slot ranges, unrendered
+projection, and hydration into the same instance are defined by [Rendered form](rendered-form.md).
+
+A root has exactly one runtime instance and at most one running controller. Document observation
+and framework attachment may reach a server-rendered root in either order; no application or
+library marker decides between them. A framework attachment claims the root: when observation
+hydrated it first, that instance and its controller are released without changing the DOM, and the
+root is re-attached as framework-owned. Document observation never connects, re-hydrates, or
+disconnects a framework-owned root; the framework's attachment owns its lifecycle.
+
 ## Output artifacts
 
 The required artifact is an ESM browser entry that starts or exposes the live loader. A release may

@@ -32,6 +32,8 @@ Framework adapters pass their framework's props through this same attribute boun
 
 Definitions support a default slot, named slots, fallback content, and expression-bound slot names used inside structural regions. Projected nodes retain consumer ownership and identity. Fallback renders only while the corresponding projection is empty.
 
+Server-rendered slots, including projected content no slot currently renders, follow [Rendered form](rendered-form.md).
+
 Framework adapters may expose a scoped slot as a function and project each returned node into a data-derived native slot. That adapter operation must remain equivalent to authoring the resulting named slot nodes directly.
 
 ```html conforming

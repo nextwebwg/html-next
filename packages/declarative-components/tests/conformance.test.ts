@@ -38,7 +38,7 @@ function pageProgram(testCase: ConformanceCase): string {
           .map((a) => [a.name, a.value])
           .sort((x, y) => x[0].localeCompare(y[0])),
         children: Array.from(node.childNodes)
-          .filter((n) => !(n.nodeType === Node.TEXT_NODE && n.textContent.trim() === "") && n.nodeType !== Node.COMMENT_NODE)
+          .filter((n) => !(n.nodeType === Node.TEXT_NODE && n.textContent.trim() === "") && n.nodeType !== Node.COMMENT_NODE && n.nodeType !== Node.PROCESSING_INSTRUCTION_NODE)
           .map(snapshot),
       };
     }

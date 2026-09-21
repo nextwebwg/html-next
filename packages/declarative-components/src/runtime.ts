@@ -37,6 +37,7 @@ import type {
   ElementNode,
   Flow,
   HandlerDeclaration,
+  LiteralAttribute,
   SlotNode,
   TemplateNode,
   TextNode,
@@ -77,6 +78,10 @@ interface RuntimeInstance {
   host?: ComponentHost;
   /** Props the author supplied. Only these are reflected; defaults never are. */
   readonly explicit: Set<string>;
+  /** A framework renders this root; document observation never manages it. */
+  readonly frameworkOwned: boolean;
+  /** Every projected node and its slot, rendered or not (for serialization). */
+  projection?: { readonly nodes: readonly Node[]; readonly slotNames: WeakMap<Node, string> };
 }
 
 interface DocumentRegistry {
@@ -99,6 +104,8 @@ interface DocumentState {
   mutationHub?: DocumentMutationHub;
   lifecycle?: LifecycleCoordinator;
   observer?: () => void;
+  /** Hands a root the observer manages over to a framework attachment. */
+  release?: (element: Element) => void;
 }
 
 type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
@@ -353,6 +360,14 @@ function evalValue(expression: string, scope: Scope): Value {
   }
 }
 
+interface HydrationRange {
+  readonly slot: string;
+  readonly fallback: boolean;
+  /** The server's marker nodes: [start, end], or [marker] for an empty slot. */
+  readonly markers: readonly Node[];
+  readonly content: readonly Node[];
+}
+
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   readonly effects: ReactiveOwner[];
@@ -366,6 +381,8 @@ interface RuntimeRenderContext {
   readonly rootName: string;
   readonly frameworkOwned: boolean;
   committed: boolean;
+  /** Server slot ranges, consumed in template order while hydrating. */
+  hydrationRanges?: HydrationRange[] | undefined;
   /** SVG while rendering inside an `<svg>` subtree (outside `<foreignObject>`); otherwise HTML. */
   readonly namespace?: typeof SVG_NAMESPACE;
 }
@@ -1000,6 +1017,30 @@ function renderInstance(
     // nodes into a disconnected synthetic element.
     return [candidate];
   }
+  if (
+    context.hydrationRanges !== undefined &&
+    !context.frameworkOwned &&
+    candidate instanceof Element &&
+    candidate.localName !== elementName &&
+    (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(node.name)
+  ) {
+    // A nested component the server already lowered. Keep its root, and bind this
+    // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
+    // carrier), exactly where lowering put them.
+    const nested = serverRanges(candidate, false);
+    const slotOf = (child: TemplateNode): string => child.kind === "element"
+      ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
+      : "";
+    const rendered = nested?.ranges.filter((range) => !range.fallback) ?? [];
+    const walk = (children: readonly TemplateNode[], existing: readonly Node[]): void => {
+      let cursor = 0;
+      for (const child of children) cursor += renderTemplateNode(child, scope, document, context, existing[cursor]).length;
+    };
+    for (const range of rendered) walk(node.children.filter((child) => slotOf(child) === range.slot), range.content);
+    const renderedSlots = new Set(rendered.map((range) => range.slot));
+    walk(node.children.filter((child) => !renderedSlots.has(slotOf(child))), nested?.carried ?? []);
+    return [candidate];
+  }
   const adopted = candidate instanceof Element && candidate.localName === elementName;
   const element = adopted ? candidate : createTemplateElement(document, elementName, context);
   if (node === context.definition.template) context.root = element;
@@ -1152,14 +1193,177 @@ function renderSlot(
     ? node.name ?? ""
     : toText(evaluateCompiled(node.nameExpression, scope));
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
-  if (assigned.length === 0) return renderChildren(node.fallback ?? [], scope, document, context);
+  // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
+  // delimited, so server output can rebuild the same instance.
+  const hydrating = context.hydrationRanges?.shift();
+  if (hydrating !== undefined) {
+    // Adopt the server's range whole: its markers, and either the consumer's nodes or the fallback.
+    if (hydrating.fallback) {
+      const adopted: Node[] = [];
+      let cursor = 0;
+      for (const child of node.fallback ?? []) {
+        const out = renderTemplateNode(child, scope, document, context, hydrating.content[cursor]);
+        adopted.push(...out);
+        cursor += out.length;
+      }
+      return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
+    }
+    for (const candidate of hydrating.content) markProjectedRoot(candidate);
+    return hydrating.markers.length === 1
+      ? [hydrating.markers[0]!]
+      : [hydrating.markers[0]!, ...hydrating.content, hydrating.markers[1]!];
+  }
+  const quoted = (value: string): string =>
+    `"${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
+  // Where the parser does not produce PIs, write the comment it would produce, so a lowered DOM and a
+  // hydrated DOM hold the same nodes.
+  const instruction = (target: string, data: string): Node => documentParsesInstructions(document)
+    ? document.createProcessingInstruction(target, data)
+    : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
+  const ranged = (nodes: Node[], fallback: boolean): Node[] => {
+    if (nodes.length === 0) return [instruction("marker", `slot=${quoted(name)}`)];
+    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}`;
+    return [instruction("start", data), ...nodes, instruction("end", "")];
+  };
+  if (assigned.length === 0) {
+    return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
+  }
   if (context.committed) {
     for (const candidate of assigned) markProjectedRoot(candidate);
-    return [...assigned];
+    return ranged([...assigned], false);
   }
   const anchor = document.createComment(`html-next:slot:${name}`);
   context.slotInsertions.push({ anchor, nodes: assigned });
-  return [anchor];
+  return ranged([anchor], false);
+}
+
+// ---- Rendered form (spec: live-browser-distributable.md, "Rendered form") ----
+
+interface ServerMark { readonly target: string; readonly attributes: Map<string, string> }
+
+function pseudoAttributes(data: string): Map<string, string> {
+  const attributes = new Map<string, string>();
+  let rest = data.trim();
+  const references: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  while (rest !== "") {
+    const match = /^([A-Za-z_:][-A-Za-z0-9._:]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')(?:\s+|$)/.exec(rest);
+    if (match === null || attributes.has(match[1]!)) return new Map();
+    const value = (match[2] ?? match[3]!).replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (_, body: string) =>
+      body.startsWith("#x") ? String.fromCodePoint(parseInt(body.slice(2), 16))
+        : body.startsWith("#") ? String.fromCodePoint(Number(body.slice(1))) : references[body]!);
+    attributes.set(match[1]!, value);
+    rest = rest.slice(match[0].length);
+  }
+  return attributes;
+}
+
+const piParsingByDocument = new WeakMap<Document, boolean>();
+function documentParsesInstructions(document: Document): boolean {
+  let piParsing = piParsingByDocument.get(document);
+  if (piParsing === undefined) {
+    const probe = document.createElement("div");
+    probe.innerHTML = '<?probe x="1"?>';
+    piParsing = probe.firstChild?.nodeType === 7;
+    piParsingByDocument.set(document, piParsing);
+  }
+  return piParsing;
+}
+function serverMark(node: Node): ServerMark | undefined {
+  if (node.nodeType === 7) {
+    const pi = node as ProcessingInstruction;
+    return { target: pi.target, attributes: pseudoAttributes(pi.data) };
+  }
+  if (node.nodeType !== 8) return undefined;
+  if (documentParsesInstructions(node.ownerDocument!)) return undefined;   // a real comment is never a marker where PIs parse
+  const match = /^\?([A-Za-z][-A-Za-z0-9]*)(?:\s+([\s\S]*?))?\s*\??$/.exec((node as Comment).data);
+  return match === null ? undefined : { target: match[1]!, attributes: pseudoAttributes(match[2] ?? "") };
+}
+
+/** The slot ranges a server-rendered root owns, in document order, and its carried projection. */
+function serverRanges(root: Element, consume = true): { ranges: HydrationRange[]; carried: Node[] } | undefined {
+  const ranges: HydrationRange[] = [];
+  const inRanges = new Set<Node>();
+  const collect = (nodes: readonly Node[], into: HydrationRange[]): void => {
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index]!;
+      const mark = serverMark(node);
+      if (mark?.target === "marker" && mark.attributes.has("slot")) {
+        into.push({ slot: mark.attributes.get("slot")!, fallback: false, markers: [node], content: [] });
+        continue;
+      }
+      if (mark?.target === "start") {
+        let depth = 1;
+        const content: Node[] = [];
+        let end: Node | undefined;
+        for (index += 1; index < nodes.length; index += 1) {
+          const inner = serverMark(nodes[index]!);
+          if (inner?.target === "start") depth += 1;
+          else if (inner?.target === "end" && --depth === 0) { end = nodes[index]; break; }
+          content.push(nodes[index]!);
+        }
+        if (mark.attributes.has("slot")) {
+          into.push({ slot: mark.attributes.get("slot")!, fallback: mark.attributes.has("fallback"), markers: end ? [node, end] : [node], content });
+          for (const child of content) inRanges.add(child);
+        } else collect(content, into);   // a page's own range is transparent
+        continue;
+      }
+      if (!(node instanceof Element)) continue;
+      if (node !== root && node.hasAttribute("data-component-root")) {
+        const nested = serverRanges(node, false);
+        for (const range of nested?.ranges ?? []) collect(range.content, into);
+      } else collect(Array.from(node.childNodes), into);
+    }
+  };
+  collect(Array.from(root.childNodes), ranges);
+  const carrier = Array.from(root.children).find((child): child is HTMLTemplateElement =>
+    child instanceof HTMLTemplateElement && !child.hasAttribute("data-component") && !inRanges.has(child));
+  if (ranges.length === 0 && carrier === undefined) return undefined;
+  const carried: Node[] = [];
+  if (carrier !== undefined && consume) {
+    for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
+    carrier.remove();
+  } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
+  return { ranges, carried };
+}
+
+/**
+ * Serializes the rendered form. Like getHTML({ serializableShadowRoots }), it writes what
+ * the live DOM does not hold: each component root's projected nodes that no slot currently renders,
+ * in an inert trailing <template>.
+ */
+export function serializeRenderedForm(container: Element): string {
+  const clone = container.cloneNode(true) as Element;
+  const originals = [container, ...Array.from(container.querySelectorAll("*"))];
+  const copies = [clone, ...Array.from(clone.querySelectorAll("*"))];
+  originals.forEach((original, index) => {
+    const projection = runtimeInstance(original)?.projection;
+    if (projection === undefined) return;
+    const unrendered = projection.nodes.filter((node) => !original.contains(node));
+    if (unrendered.length === 0) return;
+    const carrier = clone.ownerDocument.createElement("template");
+    for (const node of unrendered) carrier.content.append(node.cloneNode(true));
+    copies[index]!.append(carrier);
+  });
+  return clone.innerHTML;
+}
+
+/**
+ * Diagnostic: an instance's internal shape (definition, explicit props, prop values, projected nodes per
+ * slot). Two instances with equal shapes behave identically; conformance tests compare them.
+ */
+export function inspectInstance(element: Element): unknown {
+  const instance = runtimeInstance(element);
+  if (instance === undefined) return undefined;
+  const props: Record<string, unknown> = {};
+  for (const name of Object.keys(instance.definition.contract.props)) props[name] = instance.scope.get(name);
+  const slots: Record<string, string[]> = {};
+  for (const node of instance.projection?.nodes ?? []) {
+    const slot = instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
+    (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
+  }
+  // Order across slots is not observable; order within a slot is.
+  const sorted = Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
+  return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props, slots: sorted };
 }
 
 function renderTemplateNode(
@@ -1283,9 +1487,29 @@ function prepareRuntimeInvocation(
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
   const { scope, passThrough, effects, rootName, explicit } = readInvocation(invocation, definition, hydration);
-  const children = hydration
-    ? projectedNodes ?? Array.from(invocation.querySelectorAll("[data-slotted]"))
-    : Array.from(invocation.childNodes);
+  let hydratedNodes = projectedNodes;
+  let hydrationRanges: HydrationRange[] | undefined;
+  if (hydration && hydratedNodes === undefined) {
+    const server = serverRanges(invocation);
+    if (server !== undefined) {
+      // The rendered form names every slot range, and the serializer carried the
+      // projected nodes no slot currently renders. Together they are the authored projection.
+      hydrationRanges = server.ranges;
+      const nodes: Node[] = [];
+      for (const range of server.ranges) {
+        if (range.fallback) continue;
+        for (const node of range.content) {
+          projectedSlotNames.set(node, range.slot);
+          nodes.push(node);
+        }
+      }
+      nodes.push(...server.carried);
+      hydratedNodes = nodes;
+    } else {
+      ({ projected: hydratedNodes, projectedSlotNames } = serverProjection(invocation, definition));
+    }
+  }
+  const children = hydration ? hydratedNodes! : Array.from(invocation.childNodes);
   const instance: RuntimeInstance = {
     definition,
     scope,
@@ -1295,6 +1519,8 @@ function prepareRuntimeInvocation(
     disconnectCallbacks: new Set(),
     connected: false,
     explicit,
+    frameworkOwned,
+    projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
   };
   const context: RuntimeRenderContext = {
     definition,
@@ -1308,6 +1534,7 @@ function prepareRuntimeInvocation(
     rootName,
     frameworkOwned,
     committed: hydration,
+    hydrationRanges,
   };
   const rendered = renderNode(
     definition.template,
@@ -1317,6 +1544,7 @@ function prepareRuntimeInvocation(
     context,
     hydration ? invocation : undefined,
   );
+  context.hydrationRanges = undefined;
   const nativeRoot = rendered[0] as Element;
   if (hydration && nativeRoot !== invocation) {
     fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
@@ -1427,8 +1655,9 @@ function lowerScopes(
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
       if (!element.hasAttribute("data-component-root")) continue;
-      if (runtimeInstance(element) !== undefined) {
-        roots.add(element);
+      const existing = runtimeInstance(element);
+      if (existing !== undefined) {
+        if (!existing.frameworkOwned) roots.add(element);
         continue;
       }
       let accepted = false;
@@ -1644,6 +1873,77 @@ export function registerComponentDefinitions(
 }
 
 /**
+ * Finds the slot content inside a server-rendered root. Nodes stamped with the component's
+ * `data-component` lineage are template output; everything else was projected into a slot, whoever
+ * rendered it (HTML Next's server renderer or a framework).
+ */
+function serverProjection(element: Element, definition: ComponentDefinition): {
+  readonly projected: Node[];
+  readonly projectedSlotNames: WeakMap<Node, string>;
+} {
+  const projected: Node[] = [];
+  const projectedSlotNames = new WeakMap<Node, string>();
+  const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
+    const slots = authored.children.filter((child): child is SlotNode => child.kind === "slot");
+    const slot = slots[0];
+    const slotName = slot?.name ?? "";
+    // Text cannot carry a slot attribute; like HTML slotting, it belongs to the default slot.
+    const textSlotName = slots.some((candidate) => (candidate.name ?? "") === "") ? "" : slotName;
+    const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
+      .map((child) => child.value);
+    let literalCursor = 0;
+    const authoredElements = authored.children.filter((child): child is ElementNode => child.kind === "element");
+    let elementCursor = 0;
+    for (const child of Array.from(parent.childNodes)) {
+      if (child instanceof Element) {
+        const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
+        const componentRoots = (child.getAttribute("data-component-root") ?? "").split(/\s+/);
+        while (
+          elementCursor < authoredElements.length &&
+          authoredElements[elementCursor]!.name !== child.localName &&
+          !componentRoots.includes(authoredElements[elementCursor]!.name)
+        ) elementCursor += 1;
+        const authoredChild = authoredElements[elementCursor];
+        const nestedFrameworkRoot = authoredChild !== undefined &&
+          child.localName !== authoredChild.name &&
+          componentRoots.includes(authoredChild.name);
+        if (!lineage.includes(definition.contract.tag) && !nestedFrameworkRoot) {
+          projectedSlotNames.set(
+            child,
+            child.getAttribute("slot") ?? slotName,
+          );
+          markProjectedRoot(child);
+          projected.push(child);
+        } else {
+          elementCursor += 1;
+          // Nested framework roots are opaque. Their own attachment maps
+          // slots and controllers against the nested component definition.
+          if (authoredChild !== undefined && !nestedFrameworkRoot) {
+            markFrameworkProjection(child, authoredChild);
+          }
+        }
+        continue;
+      }
+      if (child instanceof Comment && slot !== undefined) {
+        projectedSlotNames.set(child, slotName);
+        projected.push(child);
+        continue;
+      }
+      if (child instanceof Text && child.data.trim() !== "") {
+        while (literalCursor < literalText.length && literalText[literalCursor] !== child.data) literalCursor += 1;
+        if (literalCursor < literalText.length) literalCursor += 1;
+        else {
+          projectedSlotNames.set(child, textSlotName);
+          projected.push(child);
+        }
+      }
+    }
+  };
+  markFrameworkProjection(element, definition.template);
+  return { projected, projectedSlotNames };
+}
+
+/**
  * Framework-host adapter. The framework emits the declared native root and owns its outer
  * lifetime; this function adopts that root into the same runtime used by live HTML.
  */
@@ -1664,61 +1964,19 @@ export function attachComponent(
     fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
   }
 
+  // Server-rendered roots are claimed by whichever arrives first. When document observation hydrated
+  // this root before its framework attached, the framework takes it over: hydration leaves the DOM
+  // as rendered, so the observer's instance (and its controller) is released and the root is
+  // re-attached as framework-owned.
+  const observed = runtimeInstance(element);
+  if (observed !== undefined && !observed.frameworkOwned) {
+    documentState(root).release?.(element);
+    disconnectRuntimeInstance(observed);
+    runtimeInstances.delete(element);
+  }
   const instance = runtimeInstance(element);
   if (instance === undefined) {
-    const projected: Node[] = [];
-    const projectedSlotNames = new WeakMap<Node, string>();
-    const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
-      const slot = authored.children.find((child): child is SlotNode => child.kind === "slot");
-      const slotName = slot?.name ?? "";
-      const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
-        .map((child) => child.value);
-      let literalCursor = 0;
-      const authoredElements = authored.children.filter((child): child is ElementNode => child.kind === "element");
-      let elementCursor = 0;
-      for (const child of Array.from(parent.childNodes)) {
-        if (child instanceof Element) {
-          const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
-          const componentRoots = (child.getAttribute("data-component-root") ?? "").split(/\s+/);
-          while (
-            elementCursor < authoredElements.length &&
-            authoredElements[elementCursor]!.name !== child.localName &&
-            !componentRoots.includes(authoredElements[elementCursor]!.name)
-          ) elementCursor += 1;
-          const authoredChild = authoredElements[elementCursor];
-          const nestedFrameworkRoot = authoredChild !== undefined &&
-            child.localName !== authoredChild.name &&
-            componentRoots.includes(authoredChild.name);
-          if (!lineage.includes(definition.contract.tag) && !nestedFrameworkRoot) {
-            projectedSlotNames.set(
-              child,
-              child.getAttribute("data-html-next-slot") ?? child.getAttribute("slot") ?? slotName,
-            );
-            markProjectedRoot(child);
-            projected.push(child);
-          } else {
-            elementCursor += 1;
-            // Nested framework roots are opaque. Their own attachment maps
-            // slots and controllers against the nested component definition.
-            if (authoredChild !== undefined && !nestedFrameworkRoot) {
-              markFrameworkProjection(child, authoredChild);
-            }
-          }
-          continue;
-        }
-        if (child instanceof Comment && slot !== undefined) {
-          projectedSlotNames.set(child, slotName);
-          projected.push(child);
-          continue;
-        }
-        if (child instanceof Text && child.data.trim() !== "") {
-          while (literalCursor < literalText.length && literalText[literalCursor] !== child.data) literalCursor += 1;
-          if (literalCursor < literalText.length) literalCursor += 1;
-          else projected.push(child);
-        }
-      }
-    };
-    markFrameworkProjection(element, definition.template);
+    const { projected, projectedSlotNames } = serverProjection(element, definition);
     stampAuthoredElement(element, definition.contract.tag);
     stampComponentRoot(element, definition.contract.tag);
     // The framework's explicit props become the same data-* attributes hydration reads; defaults
@@ -1957,7 +2215,10 @@ export function setControllerModule(
 }
 
 export interface DocumentObservationOptions {
-  /** Return false to leave a discovered invocation or hydration root under application ownership. */
+  /**
+   * Return false to leave a discovered invocation or hydration root unlowered. Framework ownership
+   * needs no filter: a framework attachment claims its root in either order.
+   */
   readonly shouldLower?: (
     element: Element,
     definition: ComponentDefinition,
@@ -1992,7 +2253,7 @@ export function observeDocument(
   };
   const connect = (element: Element): void => {
     const instance = runtimeInstance(element);
-    if (instance === undefined || connected.has(element) || !root.contains(element)) return;
+    if (instance === undefined || instance.frameworkOwned || connected.has(element) || !root.contains(element)) return;
     // Record first so callback mutations cannot connect an instance twice.
     connected.set(element, undefined);
     try {
@@ -2032,12 +2293,16 @@ export function observeDocument(
       } catch (error) { report(error); }
     }
   };
+  state.release = (element) => {
+    if (connected.has(element)) disconnect(element);
+  };
   const stopObservation = subscribeDocumentMutations(root, synchronize);
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
     stopObservation();
     delete state.observer;
+    delete state.release;
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
     }
