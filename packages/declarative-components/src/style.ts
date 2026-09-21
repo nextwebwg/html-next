@@ -163,12 +163,7 @@ function rewriteSelectorSyntax(
   for (let index = 0; index < selector.length;) {
     const character = selector[index]!;
     if (character === "\"" || character === "'") {
-      const quote = character;
-      let end = index + 1;
-      while (end < selector.length) {
-        if (selector[end] === "\\") end += 2;
-        else if (selector[end++] === quote) break;
-      }
+      const end = skipString(selector, index) + 1;
       output += selector.slice(index, end);
       index = end;
       continue;
@@ -182,22 +177,14 @@ function rewriteSelectorSyntax(
     }
     if (character === "[") {
       let end = index + 1;
-      let quote: "\"" | "'" | undefined;
       while (end < selector.length) {
         const current = selector[end]!;
-        if (quote !== undefined) {
-          if (current === "\\") end += 2;
-          else {
-            if (current === quote) quote = undefined;
-            end += 1;
-          }
-        } else if (current === "\"" || current === "'") {
-          quote = current;
-          end += 1;
-        } else if (current === "]") {
-          end += 1;
-          break;
-        } else end += 1;
+        if (current === "\"" || current === "'") {
+          end = skipString(selector, end) + 1;
+          continue;
+        }
+        end += 1;
+        if (current === "]") break;
       }
       output += selector.slice(index, end);
       index = end;
