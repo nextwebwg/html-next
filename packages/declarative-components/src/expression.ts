@@ -51,14 +51,6 @@ type TokenKind = 0 | 1 | 2 | 3 | 4;
 const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.:{}[\]-])|$)/y;
 const ESCAPE = /\\([\s\S])/g;
 const FORMAT_TOKEN = /%s/g;
-const atoms = new Map<string, string>();
-
-function atom(value: string): string {
-  const stored = atoms.get(value);
-  if (stored !== undefined) return stored;
-  atoms.set(value, value);
-  return value;
-}
 
 function precedence(token: string | number): number {
   switch (token) {
@@ -119,7 +111,7 @@ function parse(source: string): ExpressionNode {
       token = match[3].slice(1, -1).replace(ESCAPE, "$1");
     } else if (match[4] !== undefined) {
       kind = 3;
-      token = atom(match[4]);
+      token = match[4]!;
     } else {
       kind = 0;
       token = "";
