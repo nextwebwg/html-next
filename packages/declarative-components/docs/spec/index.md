@@ -12,6 +12,7 @@ The key words **must**, **must not**, **should**, and **may** are normative. A f
   - [Framework conversion](framework-conversion.md)
 - [Syntax and diagnostics](syntax.md)
 - [Components](components.md)
+  - [Rendered form](rendered-form.md)
 - [Expressions](expressions.md)
 - [Reactivity, handlers, data, and forms](reactivity.md)
 - [Loading and security](loading-and-security.md)

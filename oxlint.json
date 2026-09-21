@@ -10,5 +10,5 @@
     "unicorn/consistent-function-scoping": "off",
     "unicorn/no-array-sort": "off"
   },
-  "ignorePatterns": ["packages/*/dist/**", "packages/*/examples/generated/**"]
+  "ignorePatterns": ["packages/*/dist/**", "packages/*/examples/generated/**", "packages/*/lab/**"]
 }
