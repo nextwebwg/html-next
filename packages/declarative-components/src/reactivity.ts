@@ -493,10 +493,6 @@ export class ReactiveScope implements Scope {
     for (const [name, value] of values) this.set(name, value);
   }
 
-  get size(): number {
-    return this.#keySnapshot().size;
-  }
-
   has(name: string): boolean {
     return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
@@ -544,46 +540,6 @@ export class ReactiveScope implements Scope {
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
     return new ReactiveScope(values, this.scheduler, this);
-  }
-
-  entries(): MapIterator<[string, Value]> {
-    return this.#snapshot().entries();
-  }
-
-  keys(): MapIterator<string> {
-    return this.#keySnapshot().keys();
-  }
-
-  values(): MapIterator<Value> {
-    return this.#snapshot().values();
-  }
-
-  [Symbol.iterator](): MapIterator<[string, Value]> {
-    return this.entries();
-  }
-
-  forEach(
-    callbackfn: (value: Value, key: string, map: ReadonlyMap<string, Value>) => void,
-    thisArg?: unknown,
-  ): void {
-    for (const [key, value] of this.entries()) callbackfn.call(thisArg, value, key, this);
-  }
-
-  #snapshot(): Map<string, Value> {
-    return new Map([
-      ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#cells, ([name, cell]) => [
-        name,
-        cell.computed === undefined ? cell.value : cell.computed.get(),
-      ] as const),
-    ]);
-  }
-
-  #keySnapshot(): Map<string, undefined> {
-    const keys = new Map<string, undefined>();
-    for (const name of this.parent?.keys() ?? []) keys.set(name, undefined);
-    for (const name of this.#cells.keys()) keys.set(name, undefined);
-    return keys;
   }
 
   #local(name: string): ReactiveCell | undefined {

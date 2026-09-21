@@ -11,7 +11,10 @@ export type Value =
   | readonly Value[]
   | { readonly [key: string]: Value };
 
-export type Scope = ReadonlyMap<string, Value>;
+/** Expressions only look names up, so any `Map` or reactive scope layer can supply them. */
+export interface Scope {
+  get(name: string): Value | undefined;
+}
 
 export class UndeclaredName extends Error {
   constructor(readonly identifier: string) {
