@@ -122,7 +122,7 @@ function parse(source: string): ExpressionNode {
     let left = unary();
     let power = precedence(token);
     while (power >= minimum) {
-      const op = String(token);
+      const op = token as string;
       next();
       left = { kind: "binary", op, left, right: binary(power + 1) };
       power = precedence(token);
@@ -143,7 +143,7 @@ function parse(source: string): ExpressionNode {
         if ((kind as TokenKind) !== 3) {
           throw new SyntaxError("Expected a property name after `.`.");
         }
-        const key = String(token);
+        const key = token as string;
         next();
         object = { kind: "member", object, key };
       } else if (eat("[")) {
@@ -179,7 +179,7 @@ function parse(source: string): ExpressionNode {
           if (kind !== 3 && kind !== 2) {
             throw new SyntaxError("Object keys must be identifiers or strings.");
           }
-          const key = String(token);
+          const key = token as string;
           next();
           expect(":");
           pairs.push({ key, value: binary(1) });
@@ -201,7 +201,7 @@ function parse(source: string): ExpressionNode {
       return { kind: "array", items };
     }
     if (currentKind === 3) {
-      const name = String(currentToken);
+      const name = currentToken as string;
       next();
       if (name === "true") return { kind: "literal", value: true };
       if (name === "false") return { kind: "literal", value: false };
