@@ -82,8 +82,12 @@ export class DataResource<T = unknown> {
     this.#timer = undefined;
   }
 
+  #stale(generation: number): boolean {
+    return !this.#connected || generation !== this.#generation;
+  }
+
   async #request(generation: number): Promise<void> {
-    if (!this.#connected || generation !== this.#generation) return;
+    if (this.#stale(generation)) return;
     const abort = new AbortController();
     this.#abort = abort;
     const previous = this.options;
@@ -96,14 +100,14 @@ export class DataResource<T = unknown> {
       if (!response.ok) throw new TypeError(`Request failed with ${response.status}.`);
       const raw = previous.type === "text" ? await response.text() : await response.json();
       const value = previous.adapt === undefined ? raw as T : previous.adapt(raw);
-      if (!this.#connected || generation !== this.#generation) return;
+      if (this.#stale(generation)) return;
       previous.onState({ pending: false, value, error: null, ok: true });
     } catch (error) {
-      if (abort.signal.aborted || !this.#connected || generation !== this.#generation) return;
+      if (abort.signal.aborted || this.#stale(generation)) return;
       previous.onState({ pending: false, value: null, error, ok: false });
     } finally {
       if (this.#abort === abort) this.#abort = undefined;
-      if (this.#connected && generation === this.#generation && (previous.poll ?? 0) > 0) {
+      if (!this.#stale(generation) && (previous.poll ?? 0) > 0) {
         this.#timer = this.#setTimer(() => { void this.#request(generation); }, previous.poll!);
       }
     }
