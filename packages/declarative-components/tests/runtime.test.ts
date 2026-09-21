@@ -968,7 +968,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-controller-reactivity" status="early" summary="Controller reactivity.">` +
-            `<p>Ready</p></template><x-controller-reactivity id="controller-reactivity"></x-controller-reactivity>`,
+            `<defs><event name="local-change" type="number" bubbles="false"></event></defs>` +
+            `<p>Ready</p></template><div id="controller-parent"><x-controller-reactivity id="controller-reactivity"></x-controller-reactivity></div>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -986,6 +987,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const dispatched = dispatch('controller-value', { value: 2 });
           stopListening();
           dispatch('controller-value', { value: 10 });
+          let parentSawLocal = false;
+          document.querySelector('#controller-parent').addEventListener('local-change', () => { parentSawLocal = true; });
+          dispatch('local-change', 1);
           const bucket = computed(() => {
             computedRuns += 1;
             return source.get() === 0 ? 'empty' : 'ready';
@@ -1002,7 +1006,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           });
           source.set(3);
           await Promise.resolve();
-          return { beforeRead, first, second, computedRuns, effectRuns, observed, dispatched, eventTotal };
+          return { beforeRead, first, second, computedRuns, effectRuns, observed, dispatched, eventTotal, parentSawLocal };
         })()`);
         assert.deepEqual(result, {
           beforeRead: 0,
@@ -1013,6 +1017,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           observed: "ready",
           dispatched: true,
           eventTotal: 2,
+          parentSawLocal: false,
         });
       } finally {
         await browser.close();

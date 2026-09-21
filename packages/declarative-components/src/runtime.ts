@@ -1930,7 +1930,16 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       return () => element.removeEventListener(event, listener);
     },
     dispatch(event, detail) {
-      return element.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }));
+      const declaration = (instance.definition.declarations ?? []).find(
+        (candidate) => candidate.kind === "event" && candidate.name === event,
+      );
+      const declared = declaration?.kind === "event" ? declaration : undefined;
+      return element.dispatchEvent(new CustomEvent(event, {
+        detail,
+        bubbles: declared?.bubbles ?? true,
+        composed: declared?.composed ?? true,
+        cancelable: declared?.cancelable ?? false,
+      }));
     },
   };
   instance.host = Object.freeze(host);
