@@ -25,8 +25,8 @@ export function createXButton(options = {}) {
   } else {
   }
   manageGeneratedProps(element, [
-    { name: "size", attribute: "data-size", value: prop0, type: ["sm","md","lg"], required: false },
-    { name: "variant", attribute: "data-variant", value: prop1, type: ["outline","solid","destructive","ghost"], required: false },
+    { name: "size", attribute: "data-size", value: componentProps["size"], default: "md", bound: true, type: ["sm","md","lg"], required: false },
+    { name: "variant", attribute: "data-variant", value: componentProps["variant"], default: "outline", bound: true, type: ["outline","solid","destructive","ghost"], required: false },
   ]);
   return element;
 }

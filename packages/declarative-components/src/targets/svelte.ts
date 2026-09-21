@@ -83,8 +83,8 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
   const props = target.props.map(({ name, contract }) => [name, contract] as const);
   const aliases = new Map(target.props.map(({ name, local }) => [name, local]));
   const polymorphic = target.polymorphic;
-  const generatedProps = props.map(([name, prop], index) =>
-    generatedPropDescriptor(name, prop, `prop${index}`)
+  const generatedProps = props.map(([name, prop]) =>
+    generatedPropDescriptor(name, prop, `props[${quote(name)}]`, template)
   );
   const supportsGeneratedProps = !hasUnsupportedPropertyBindings(template) &&
     generatedProps.every((prop) => prop !== undefined);
@@ -98,8 +98,11 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     for (const [name, variable] of reactive.values) aliases.set(name, variable);
   }
   const nativeElement = quote(contract.nativeElement);
-  const destructured = props.map(([name, prop], index) =>
-    `${quote(name)}: prop${index}${"default" in prop ? ` = ${JSON.stringify(prop.default)}` : ""}`,
+  // Props are destructured raw so an omitted prop stays undefined (it is not the author's explicit
+  // value); the rendered value adds the declared default.
+  const destructured = props.map(([name], index) => `${quote(name)}: raw${index}`);
+  const defaulted = props.map(([, prop], index) =>
+    `  let prop${index} = $derived(${"default" in prop ? `raw${index} ?? ${JSON.stringify(prop.default)}` : `raw${index}`});`
   );
   const rootAttributes = [
     "{...nativeProps}",
@@ -122,7 +125,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
       const handler = reactive.handlers.find(({ name }) => name === event.handler)!;
       return `on${event.name}={${handler.variable}}`;
     })),
-    `use:htmlNext={{ ${props.map(([name], index) => `${quote(name)}: prop${index}`).join(", ")} }}`,
+    `use:htmlNext={{ ${props.map(([name], index) => `${quote(name)}: raw${index}`).join(", ")} }}`,
     "bind:this={root}",
   ].filter(Boolean);
   const rootValue = template.attributes.find(
@@ -145,11 +148,11 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     ...(dispatchesEvents || usesGeneratedProps
       ? [`  import { ${[
         ...(dispatchesEvents ? ["dispatchGeneratedEvent"] : []),
-        ...(usesGeneratedProps ? ["manageGeneratedProps"] : []),
+        ...(usesGeneratedProps ? ["manageGeneratedProps", "updateGeneratedProps"] : []),
       ].join(", ")} } from "@nextwebwg/declarative-components/generated-runtime";`]
       : []),
     ...(needsBridge ? [
-      '  import { attachComponent } from "@nextwebwg/declarative-components/runtime";',
+      '  import { attachComponent, updateComponentProps } from "@nextwebwg/declarative-components/runtime";',
       '  import type { ComponentDefinition } from "@nextwebwg/declarative-components";',
     ] : []),
     ...(definition.controller === undefined ? [] : [`  import * as controller from ${quote(definition.controller)};`]),
@@ -166,6 +169,7 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
     `  type Props = Omit<SvelteHTMLElements[${nativeElement}], keyof OwnProps | "children"> & OwnProps & { children?: Snippet };`,
     "",
     `  let { ${[...destructured, ...target.events.map((event) => event.callbackName), ...(polymorphic ? ["as"] : []), "slots", "children", "...nativeProps"].join(", ")} }: Props = $props();`,
+    ...defaulted,
     ...(reactive === undefined ? [] : [
       ...reactive.states.map((state) => `  let ${state.variable} = $state(${state.initial});`),
       ...reactive.computed.map((value) => `  let ${value.variable} = $derived(${value.expression});`),
@@ -197,13 +201,17 @@ export function generateSvelte(definition: ComponentDefinition, version: string)
       "    const detach = manageGeneratedProps(node, [",
       ...generatedProps.map((prop) => `      ${prop},`),
       "    ]);",
-    ] : ["    Object.assign(node, props);"]),
+    ] : []),
     ...target.events.flatMap((event, index) => [
       `    const listener${index} = (event: Event) => ${event.callbackName}?.((event as CustomEvent<${event.detailType}>).detail, event as CustomEvent<${event.detailType}>);`,
       `    node.addEventListener(${quote(event.name)}, listener${index});`,
     ]),
     "    return {",
-    "      update(next: Record<string, unknown>) { Object.assign(node, next); },",
+    ...(needsBridge
+      ? ["      update(next: Record<string, unknown>) { updateComponentProps(node, next); },"]
+      : usesGeneratedProps
+        ? ["      update(next: Record<string, unknown>) { updateGeneratedProps(node, next); },"]
+        : []),
     "      destroy() {",
     ...target.events.map((event, index) =>
       `        node.removeEventListener(${quote(event.name)}, listener${index});`

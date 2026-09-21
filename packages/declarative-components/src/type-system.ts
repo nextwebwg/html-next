@@ -451,16 +451,18 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   return String(parsed.value);
 }
 
-/** Whether a boundary can contain values that are intentionally never represented by attributes. */
-export function isPropertyOnlyType(type: TypeInput): boolean {
+/**
+ * Whether a prop type can be written as an HTML attribute. Props are attributes on the component
+ * invocation, so only scalar terminals and keyword unions qualify; structured, callable, and
+ * trusted-content types belong to state, computed values, and events, never to props.
+ */
+export function isAttributeType(type: TypeInput): boolean {
   const node = normalizeType(type);
   if (node.kind === "terminal") {
-    return node.name === "function" || node.name === "unknown" || node.name === "trusted-html" || node.name === "trusted-script";
+    return ["string", "number", "integer", "boolean", "null", "absent"].includes(node.name);
   }
-  if (node.kind === "union") return node.members.some(isPropertyOnlyType);
-  if (node.kind === "list") return isPropertyOnlyType(node.item);
-  if (node.kind === "record") return isPropertyOnlyType(node.value);
-  if (node.kind === "object") return node.fields.some((field) => isPropertyOnlyType(field.type));
+  if (node.kind === "keyword") return true;
+  if (node.kind === "union") return node.members.every(isAttributeType);
   return false;
 }
 

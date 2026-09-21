@@ -18,11 +18,15 @@ This observation is a browser-runtime responsibility. Ahead-of-time compilation 
 
 ## Properties
 
-A property declaration gives a public name, type, optional default, requiredness, reflection behavior, and binding target. Scalar values may be sourced from invocation attributes; their HTML strings are parsed through the declared type as specified by [Invocation attribute parsing](types-and-validation.md#invocation-attribute-parsing). Structured values and functions are property-only inputs. Changes made through the lowered root's public property participate in the same update batch as local state writes.
+A property declaration gives a public name, type, optional default, requiredness, and binding target. Properties are HTML attributes: the author writes them on the component invocation, and their strings are parsed through the declared type as specified by [Invocation attribute parsing](types-and-validation.md#invocation-attribute-parsing). A property type must therefore be writable as an attribute: `string`, `number`, `integer`, `boolean`, or a keyword union, optionally with `null`. Structured, callable, and trusted-content types are not properties; they belong to state, computed values, data, and event details. Collections an author supplies are expressed as child markup, not as a property value.
+
+A component adds no JavaScript properties to its lowered root. The root is a native element and keeps every native property's platform meaning, including when a component property has the same name (a `disabled` property on a `<button>` root is the button's own `disabled` attribute and state). A template's `.name` binding may target only a native DOM property of its element.
 
 A controlled property is authoritative while present. Its paired `default-*` value initializes local state only when the controlled property is absent. User interaction updates local state and dispatches the declared change event; it does not mutate an externally controlled property.
 
-Every effective public value is reflected on the lowered root as `data-<lowercase-name>` so server output can reconstruct the instance scope. Values, including structured values, use the type's canonical serializer at this reflection boundary; this does not turn structured invocation attributes into an authoring syntax. External writes to a reflected attribute are parsed through the declared type and enter the same scheduler. Absence removes the reflected attribute. Property-to-attribute reflection must not create a feedback loop.
+Each property the author supplied explicitly is recorded on the lowered root as `data-<kebab-case-name>`, so the element shows which options produced it and server output can reconstruct the instance scope. Defaults are never written. When the template itself binds that same attribute on the root, the attribute is template output and always shows the effective value, defaults included. Values use the type's canonical serializer. A write to a reflected attribute after lowering is parsed through the declared type and enters the same scheduler as local state writes; removing it returns the property to its default. Reflection must not create a feedback loop.
+
+Framework adapters pass their framework's props through this same attribute boundary. A prop the framework caller did not pass is not explicit, so it is not reflected. Adapters must not assign component values as element properties.
 
 ## Slots
 

@@ -22,7 +22,7 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import { isPropertyOnlyType, parseTypedValue } from "./type-system.js";
+import { isAttributeType, parseTypedValue } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
 
 type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
@@ -252,8 +252,12 @@ function readProps(
     if (description === "") {
       fail("HC003", `\`props.${name}.description\` must be a non-empty string.`, source);
     }
-    if ("attribute" in target && isPropertyOnlyType(type)) {
-      fail("HC017", `Prop \`${name}\` uses a property-only type and must target a DOM property.`, source);
+    if (!isAttributeType(type)) {
+      fail(
+        "HC017",
+        `Prop \`${name}\` cannot be written as an HTML attribute; a prop type must be a string, number, integer, boolean, or keyword union.`,
+        source,
+      );
     }
     const defaultValue = attr(element, "default");
     if (required && defaultValue !== undefined) {
@@ -658,10 +662,10 @@ function parseAttributes(
       if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
         fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
       }
-      const name = platform.resolveDomProperty(tagName, key) ??
-        (prop !== undefined && "property" in prop.target ? prop.target.property : undefined);
+      // Property bindings reach native DOM properties only; component inputs are attributes.
+      const name = platform.resolveDomProperty(tagName, key);
       if (name === undefined) {
-        fail("HP001", `\`${key}\` is not a known property of <${tagName}>.`, source);
+        fail("HP001", `\`${key}\` is not a native property of <${tagName}>.`, source);
       }
       validateMvpDomProperty(name, source);
       parsed.push({ kind: "property", key, name, expression: attribute.value, expressionPlan });

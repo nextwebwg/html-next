@@ -16,7 +16,7 @@ output inventory.
 ## Capability contract
 
 Generated target components must preserve the shared semantic model: the same native root,
-projected-content identity, public properties, events, methods, declared type behavior, state results,
+projected-content identity, properties (as attributes), events, methods, declared type behavior, state results,
 requests, styles, lifecycle, controller behavior, and hydration outcome.
 
 Target-native conventions may shape private implementation and generated source. They must not add

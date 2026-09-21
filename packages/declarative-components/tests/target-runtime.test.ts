@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
@@ -23,7 +23,6 @@ const source = `<template component="demo-counter" controller="./demo-controller
   <defs>
     <prop name="email" type="string" default="invalid">Email.</prop>
     <prop name="optionalCount" type="number">Optional count.</prop>
-    <prop name="items" type="list(string)">Optional items.</prop>
     <prop name="title" type="string">Optional title colliding with HTMLElement.title.</prop>
     <state name="count" :value="0"></state>
     <event name="count-change" type="number"></event>
@@ -36,7 +35,7 @@ const source = `<template component="demo-counter" controller="./demo-controller
       <dispatch event="invalid-change" :value="'not-a-number'"></dispatch>
     </handler>
   </defs>
-  <section .items="items">
+  <section>
     <header><slot name="title"><h2>Untitled</h2></slot></header>
     <button type="button" on:click="increment"><output $value="count"></output></button>
     <button type="button" data-invalid on:click="invalid">Invalid event</button>
@@ -106,7 +105,7 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
 import { createDemoPanel } from "./vanilla/DemoPanel.js";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
-const component = createDemoCounter({ items: ["first"], children: ["Projected"], slots: { title: [title] } });
+const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
 document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready" }));`,
@@ -115,19 +114,19 @@ import { createRoot } from "react-dom/client";
 import { DemoCounter } from "./react/DemoCounter";
 import { DemoPanel } from "./react/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createRoot(document.querySelector("main")).render(<><DemoCounter items={["first"]} onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter><DemoPanel align="end" label="Ready" /></>);`,
+createRoot(document.querySelector("main")).render(<><DemoCounter onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter><DemoPanel align="end" label="Ready" /></>);`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 import DemoPanel from "./vue/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { items: ["first"], onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready" })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready" })]) }).mount(document.querySelector("main"));`,
       svelte: `import { createRawSnippet, mount } from "svelte";
 import DemoCounter from "./svelte/DemoCounter";
 import DemoPanel from "./svelte/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = createRawSnippet(() => ({ render: () => '<h1 slot="title">Title</h1>' }));
 const children = createRawSnippet(() => ({ render: () => 'Projected' }));
-mount(DemoCounter, { target: document.querySelector("main"), props: { items: ["first"], onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });
+mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });
 mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end", label: "Ready" } });`,
     };
 
@@ -176,10 +175,9 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
           const root = document.querySelector('[data-component-root~="demo-counter"]') as HTMLElement;
           const output = root.querySelector("output")!;
           const input = root.querySelector("input") as HTMLInputElement;
-          const panel = document.querySelector('[data-component-root~="demo-panel"]') as HTMLElement & { align?: string };
+          const panel = document.querySelector('[data-component-root~="demo-panel"]') as HTMLElement;
           const before = output;
-          (root as unknown as { items: string[] }).items = ["second"];
-          panel.align = "center";
+          panel.setAttribute("data-align", "center");
           (root.querySelector("button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
@@ -192,10 +190,11 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
             identity: output === before,
             events: (window as unknown as { targetEvents: unknown[] }).targetEvents,
             invalid: input.validity.typeMismatch && input.matches(":invalid"),
+            // The native HTMLElement.title property is untouched by the same-named prop.
             optionalTitle: root.title,
-            items: (root as unknown as { items?: string[] }).items,
+            ownTitle: Object.hasOwn(root, "title"),
             panel: {
-              align: panel.align,
+              ownAlign: Object.hasOwn(panel, "align"),
               dataAlign: panel.getAttribute("data-align"),
               dataLabel: panel.getAttribute("data-label"),
             },
@@ -211,9 +210,9 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
           identity: true,
           events: [1],
           invalid: true,
-          optionalTitle: undefined,
-          items: ["second"],
-          panel: { align: "center", dataAlign: "center", dataLabel: "Ready" },
+          optionalTitle: "",
+          ownTitle: false,
+          panel: { ownAlign: false, dataAlign: "center", dataLabel: "Ready" },
           provenance: "demo-counter",
         });
         const invalidError = page.waitForEvent("pageerror");
@@ -528,6 +527,8 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.setContent("<main></main>");
         await page.evaluate(() => {
           const NativeObserver = MutationObserver;
@@ -547,31 +548,31 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           const create = (window as unknown as {
             DemoProps: { createDemoProps(options?: Record<string, unknown>): Element };
           }).DemoProps.createDemoProps;
-          const root = create({ children: ["Projected"] }) as Element & {
-            count: number;
-            label: string;
-            tone: string;
-          };
+          const root = create({ children: ["Projected"] });
           const second = create();
           document.querySelector("main")!.append(root, second);
           await new Promise((resolve) => setTimeout(resolve, 0));
           const output = root.querySelector("output")!;
           const label = root.querySelector("span")!;
+          const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
           const initial = {
-            count: root.count,
+            // Template-bound attributes show defaults; the unbound label default is not reflected.
+            count: root.getAttribute("data-count"),
             text: output.textContent,
             label: label.getAttribute("aria-label"),
             tone: root.getAttribute("data-tone"),
+            reflectedLabel: root.hasAttribute("data-label"),
+            ownProperties: ["count", "label", "tone"].filter((key) => Object.hasOwn(root, key)),
           };
 
-          root.count = 2;
-          root.label = "First";
-          root.label = "Second";
+          root.setAttribute("data-count", "2");
+          root.setAttribute("data-label", "First");
+          root.setAttribute("data-label", "Second");
           const synchronous = {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
           };
-          await Promise.resolve();
+          await tick();
           const batched = {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
@@ -579,16 +580,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           };
 
           root.setAttribute("data-label", "External");
-          await Promise.resolve();
-          await Promise.resolve();
-          const external = { property: root.label, label: label.getAttribute("aria-label") };
+          await tick();
+          const external = { label: label.getAttribute("aria-label") };
 
           root.remove();
           await new Promise((resolve) => setTimeout(resolve, 0));
-          root.count = 3;
-          await Promise.resolve();
+          root.setAttribute("data-count", "3");
+          await tick();
           const detached = {
-            property: root.count,
             text: output.textContent,
             reflected: root.getAttribute("data-count"),
           };
@@ -599,9 +598,9 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-count"),
           };
 
-          let invalid = "";
-          try { root.tone = "unknown"; }
-          catch (error) { invalid = String(error); }
+          // An invalid attribute value is rejected at the type boundary (reported as a page error).
+          root.setAttribute("data-tone", "unknown");
+          await new Promise((resolve) => setTimeout(resolve, 50));
           return {
             initial,
             synchronous,
@@ -609,17 +608,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             external,
             detached,
             reconnected,
-            invalid,
             observedTargets: (window as unknown as { observedTargets: string[] }).observedTargets,
           };
         });
-        assert.deepEqual(result.initial, { count: 1, text: "1", label: "Ready", tone: "quiet" });
+        assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [] });
         assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
         assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
-        assert.deepEqual(result.external, { property: "External", label: "External" });
-        assert.deepEqual(result.detached, { property: 3, text: "2", reflected: "2" });
+        assert.deepEqual(result.external, { label: "External" });
+        assert.deepEqual(result.detached, { text: "2", reflected: "3" });
         assert.deepEqual(result.reconnected, { text: "3", reflected: "3" });
-        assert.match(result.invalid, /HR002/);
+        await expect.poll(() => pageErrors.join("\n")).toMatch(/HR002/);
         assert.deepEqual(result.observedTargets, ["#document", "SECTION", "SECTION", "SECTION"]);
       } finally {
         await browser.close();
