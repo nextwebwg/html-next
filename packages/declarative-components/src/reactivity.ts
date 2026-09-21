@@ -420,6 +420,10 @@ function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): voi
   const first = dependency?.first;
   if (first === undefined) return;
   const multiple = first !== dependency!.last;
+  if (!multiple && first.effect.computed !== undefined) {
+    if (first.effect !== skip) first.effect.computed.invalidate();
+    return;
+  }
   if (first.effect.computed === undefined) {
     if (skip === undefined && multiple && first.effect.scheduler.enqueueDependency(dependency!)) return;
     for (let subscription: Subscription | undefined = first;
