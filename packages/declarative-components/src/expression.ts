@@ -466,15 +466,7 @@ export function evaluateCompiled(expression: CompiledExpression | ExpressionNode
 /** Escaped-text form: absence and null render as empty text. */
 export function toText(value: Value): string {
   if (isAbsent(value)) return "";
-  if (Array.isArray(value)) {
-    let text = "";
-    let separator = "";
-    for (const item of value) {
-      text += separator + toText(item);
-      separator = " ";
-    }
-    return text;
-  }
+  if (Array.isArray(value)) return value.map(toText).join(" ");
   if (typeof value === "object") return "";
   return String(value);
 }
