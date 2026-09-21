@@ -1200,7 +1200,9 @@ function installPropReflection(root: Element, instance: RuntimeInstance): void {
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
       if (!bound && !instance.explicit.has(name)) return;
-      const serialized = value === undefined || value === ABSENT
+      // Null is "no value" at the attribute boundary: it removes the attribute rather than
+      // writing text that would not parse back.
+      const serialized = value === undefined || value === ABSENT || value === null
         ? null
         : serializeTypedValue(value, prop.type);
       reflected[attributeName] = serialized;
@@ -1723,7 +1725,7 @@ export function attachComponent(
     // stay implicit, exactly as for HTML authors.
     for (const [name, prop] of Object.entries(definition.contract.props)) {
       const value = options.props?.[name];
-      if (value !== undefined) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
+      if (value !== undefined && value !== null) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
     }
     commitRuntimeInvocations(registry, [
       prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true),
@@ -1770,7 +1772,8 @@ export function updateComponentProps(
     if (prop === undefined) continue;
     const attributeName = `data-${kebabCase(name)}`;
     const value = assignedPropValue(name, prop, input);
-    if (input === undefined) {
+    // Null has no attribute form: like undefined, it leaves no explicit data-* attribute.
+    if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
       const bound = instance.definition.template.attributes.some((binding) =>

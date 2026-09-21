@@ -237,7 +237,7 @@ export function manageGeneratedProps(
     for (const index of dirty) {
       const prop = props[index]!;
       const value = prop.bound ? effective(index) : explicit[index];
-      const serialized = value === undefined ? null : String(value);
+      const serialized = value === undefined || value === null ? null : String(value);
       reflected.set(prop.attribute, serialized);
       if (serialized === null) element.removeAttribute(prop.attribute);
       else element.setAttribute(prop.attribute, serialized);
