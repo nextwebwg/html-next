@@ -38,8 +38,21 @@ function unsubscribe(subscription: Subscription): void {
   else nextSubscriber.previousSubscriber = previousSubscriber;
 }
 
+/**
+ * Returns a finished batch emptied for reuse. Most flushes carry a few effects, and popping them is
+ * much cheaper than allocating a new queue (and far cheaper than `length = 0`, which V8 handles in
+ * the runtime). Wide batches pop more than a fresh array costs, so they are dropped instead.
+ */
+function emptied(batch: ReactiveEffect[]): ReactiveEffect[] {
+  if (batch.length > 8) return [];
+  while (batch.length > 0) batch.pop();
+  return batch;
+}
+
 export class ReactiveScheduler {
   #pending: ReactiveEffect[] = [];
+  // A drained batch, emptied in place, becomes the next pending queue so flushing allocates nothing.
+  #spare: ReactiveEffect[] = [];
   #scheduled = false;
   #flushing = false;
 
@@ -117,7 +130,7 @@ export class ReactiveScheduler {
             effects.sort((left, right) => left.priority - right.priority || left.id - right.id);
           }
         }
-        this.#pending = [];
+        this.#pending = this.#spare;
         index = 0;
         do {
           const effect = effects[index]!;
@@ -136,21 +149,26 @@ export class ReactiveScheduler {
               this.#pending = [];
               fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
             }
-            effects = this.#pending;
-            this.#pending = [];
+            const next: ReactiveEffect[] = this.#pending;
+            this.#pending = emptied(effects);
+            effects = next;
             index = 0;
           } else if (this.#pending.length > 0) {
             this.#deferConsumersBehindComputeds(effects, index);
           }
         } while (index < effects.length);
+        this.#spare = emptied(effects);
         effects = undefined;
       }
     } finally {
       if (effects !== undefined) {
         while (index < effects.length) effects[index++]!.queued = false;
+        this.#spare = [];
       }
-      for (const pending of this.#pending) pending.queued = false;
-      this.#pending = [];
+      if (this.#pending.length > 0) {
+        for (const pending of this.#pending) pending.queued = false;
+        this.#pending = [];
+      }
       this.#flushing = false;
     }
   }
@@ -493,10 +511,6 @@ export class ReactiveScope implements Scope {
     for (const [name, value] of values) this.set(name, value);
   }
 
-  get size(): number {
-    return this.#keySnapshot().size;
-  }
-
   has(name: string): boolean {
     return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
@@ -544,46 +558,6 @@ export class ReactiveScope implements Scope {
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
     return new ReactiveScope(values, this.scheduler, this);
-  }
-
-  entries(): MapIterator<[string, Value]> {
-    return this.#snapshot().entries();
-  }
-
-  keys(): MapIterator<string> {
-    return this.#keySnapshot().keys();
-  }
-
-  values(): MapIterator<Value> {
-    return this.#snapshot().values();
-  }
-
-  [Symbol.iterator](): MapIterator<[string, Value]> {
-    return this.entries();
-  }
-
-  forEach(
-    callbackfn: (value: Value, key: string, map: ReadonlyMap<string, Value>) => void,
-    thisArg?: unknown,
-  ): void {
-    for (const [key, value] of this.entries()) callbackfn.call(thisArg, value, key, this);
-  }
-
-  #snapshot(): Map<string, Value> {
-    return new Map([
-      ...Array.from(this.parent?.entries() ?? []),
-      ...Array.from(this.#cells, ([name, cell]) => [
-        name,
-        cell.computed === undefined ? cell.value : cell.computed.get(),
-      ] as const),
-    ]);
-  }
-
-  #keySnapshot(): Map<string, undefined> {
-    const keys = new Map<string, undefined>();
-    for (const name of this.parent?.keys() ?? []) keys.set(name, undefined);
-    for (const name of this.#cells.keys()) keys.set(name, undefined);
-    return keys;
   }
 
   #local(name: string): ReactiveCell | undefined {

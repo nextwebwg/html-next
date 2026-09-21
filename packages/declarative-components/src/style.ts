@@ -31,19 +31,26 @@ function isIdentifierCharacter(value: string | undefined): boolean {
   return value !== undefined && /[A-Za-z0-9_-]/.test(value);
 }
 
+/** Jump from an opening quote to its matching close, honoring backslash escapes. Returns the
+ *  index of the closing quote, or the string's last index when the quote is unterminated. */
+function skipString(value: string, index: number): number {
+  const quote = value[index];
+  let position = index + 1;
+  while (position < value.length) {
+    if (value[position] === "\\") position += 2;
+    else if (value[position] === quote) return position;
+    else position += 1;
+  }
+  return value.length - 1;
+}
+
 function matchingParenthesis(value: string, opening: number): number {
   let depth = 1;
-  let quote: "\"" | "'" | undefined;
   let brackets = 0;
   for (let index = opening + 1; index < value.length; index += 1) {
     const character = value[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
     if (character === "\"" || character === "'") {
-      quote = character;
+      index = skipString(value, index);
       continue;
     }
     if (character === "/" && value[index + 1] === "*") {
@@ -65,15 +72,9 @@ function splitSelectorList(value: string): string[] {
   let start = 0;
   let parentheses = 0;
   let brackets = 0;
-  let quote: "\"" | "'" | undefined;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(value, index);
     else if (character === "/" && value[index + 1] === "*") {
       const end = value.indexOf("*/", index + 2);
       if (end === -1) break;
@@ -95,15 +96,9 @@ function lastCompoundStart(selector: string): number {
   let start = 0;
   let parentheses = 0;
   let brackets = 0;
-  let quote: "\"" | "'" | undefined;
   for (let index = 0; index < selector.length; index += 1) {
     const character = selector[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(selector, index);
     else if (character === "/" && selector[index + 1] === "*") {
       const end = selector.indexOf("*/", index + 2);
       if (end === -1) return start;
@@ -130,15 +125,9 @@ function lastCompoundStart(selector: string): number {
 function pseudoElementIndex(compound: string): number {
   let parentheses = 0;
   let brackets = 0;
-  let quote: "\"" | "'" | undefined;
   for (let index = 0; index < compound.length - 1; index += 1) {
     const character = compound[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(compound, index);
     else if (character === "[") brackets += 1;
     else if (character === "]") brackets = Math.max(0, brackets - 1);
     else if (brackets === 0 && character === "(") parentheses += 1;
@@ -174,12 +163,7 @@ function rewriteSelectorSyntax(
   for (let index = 0; index < selector.length;) {
     const character = selector[index]!;
     if (character === "\"" || character === "'") {
-      const quote = character;
-      let end = index + 1;
-      while (end < selector.length) {
-        if (selector[end] === "\\") end += 2;
-        else if (selector[end++] === quote) break;
-      }
+      const end = skipString(selector, index) + 1;
       output += selector.slice(index, end);
       index = end;
       continue;
@@ -193,22 +177,14 @@ function rewriteSelectorSyntax(
     }
     if (character === "[") {
       let end = index + 1;
-      let quote: "\"" | "'" | undefined;
       while (end < selector.length) {
         const current = selector[end]!;
-        if (quote !== undefined) {
-          if (current === "\\") end += 2;
-          else {
-            if (current === quote) quote = undefined;
-            end += 1;
-          }
-        } else if (current === "\"" || current === "'") {
-          quote = current;
-          end += 1;
-        } else if (current === "]") {
-          end += 1;
-          break;
-        } else end += 1;
+        if (current === "\"" || current === "'") {
+          end = skipString(selector, end) + 1;
+          continue;
+        }
+        end += 1;
+        if (current === "]") break;
       }
       output += selector.slice(index, end);
       index = end;
@@ -312,15 +288,9 @@ function rewriteSelectorList(
 
 function findBlockEnd(css: string, openingBrace: number): number {
   let depth = 1;
-  let quote: "\"" | "'" | undefined;
   for (let index = openingBrace + 1; index < css.length; index += 1) {
     const character = css[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(css, index);
     else if (character === "/" && css[index + 1] === "*") {
       const end = css.indexOf("*/", index + 2);
       if (end === -1) return css.length - 1;
@@ -340,17 +310,11 @@ function rewriteRuleList(
 ): string {
   let output = "";
   let ruleStart = 0;
-  let quote: "\"" | "'" | undefined;
   let parentheses = 0;
   let brackets = 0;
   for (let index = 0; index < css.length; index += 1) {
     const character = css[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(css, index);
     else if (character === "/" && css[index + 1] === "*") {
       const end = css.indexOf("*/", index + 2);
       if (end === -1) break;
@@ -398,17 +362,11 @@ function partitionSlotted(css: string): { normal: string; slotted: string } {
   let normal = "";
   let slotted = "";
   let ruleStart = 0;
-  let quote: "\"" | "'" | undefined;
   let parentheses = 0;
   let brackets = 0;
   for (let index = 0; index < css.length; index += 1) {
     const character = css[index]!;
-    if (quote !== undefined) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
-    }
-    if (character === "\"" || character === "'") quote = character;
+    if (character === "\"" || character === "'") index = skipString(css, index);
     else if (character === "/" && css[index + 1] === "*") {
       const end = css.indexOf("*/", index + 2);
       if (end === -1) break;

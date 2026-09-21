@@ -109,7 +109,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="icon-close" status="early" summary="SVG namespace fixture.">' +
           '<button type="button"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">' +
-          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g"></linearGradient>' +
+          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" :gradientUnits="\'userSpaceOnUse\'"></linearGradient>' +
           '<foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button></template>' +
           '<main><icon-close></icon-close></main>',
         );
@@ -124,6 +124,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             path: path.namespaceURI,
             pathWidth: Math.round(path.getBBox().width),
             gradient: svg.querySelector("linearGradient")?.namespaceURI ?? null,
+            boundUnits: svg.querySelector("linearGradient")?.getAttribute("gradientUnits") ?? null,
             foreignChild: svg.querySelector("foreignObject > span")?.namespaceURI ?? null,
           };
         })()`);
@@ -133,6 +134,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           path: "http://www.w3.org/2000/svg",
           pathWidth: 12,
           gradient: "http://www.w3.org/2000/svg",
+          boundUnits: "userSpaceOnUse",
           foreignChild: "http://www.w3.org/1999/xhtml",
         });
       } finally {
