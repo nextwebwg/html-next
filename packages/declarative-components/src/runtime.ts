@@ -372,38 +372,26 @@ interface RuntimeRenderContext {
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
-// The template source parser lowercases names. Inside SVG, restore the camelCase names that HTML's
-// parser would produce (the spec's "adjust SVG tag names" and "adjust SVG attributes" tables).
-const SVG_TAG_NAMES = new Map([
-  "altGlyph", "altGlyphDef", "altGlyphItem", "animateColor", "animateMotion", "animateTransform",
-  "clipPath", "feBlend", "feColorMatrix", "feComponentTransfer", "feComposite", "feConvolveMatrix",
-  "feDiffuseLighting", "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
-  "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge", "feMergeNode",
-  "feMorphology", "feOffset", "fePointLight", "feSpecularLighting", "feSpotLight", "feTile",
-  "feTurbulence", "foreignObject", "glyphRef", "linearGradient", "radialGradient", "textPath",
-].map((name) => [name.toLowerCase(), name]));
-
-const SVG_ATTRIBUTE_NAMES = new Map([
-  "attributeName", "attributeType", "baseFrequency", "baseProfile", "calcMode", "clipPathUnits",
-  "diffuseConstant", "edgeMode", "filterUnits", "glyphRef", "gradientTransform", "gradientUnits",
-  "kernelMatrix", "kernelUnitLength", "keyPoints", "keySplines", "keyTimes", "lengthAdjust",
-  "limitingConeAngle", "markerHeight", "markerUnits", "markerWidth", "maskContentUnits", "maskUnits",
-  "numOctaves", "pathLength", "patternContentUnits", "patternTransform", "patternUnits", "pointsAtX",
-  "pointsAtY", "pointsAtZ", "preserveAlpha", "preserveAspectRatio", "primitiveUnits", "refX", "refY",
-  "repeatCount", "repeatDur", "requiredExtensions", "requiredFeatures", "specularConstant",
-  "specularExponent", "spreadMethod", "startOffset", "stdDeviation", "stitchTiles", "surfaceScale",
-  "systemLanguage", "tableValues", "targetX", "targetY", "textLength", "viewBox", "viewTarget",
-  "xChannelSelector", "yChannelSelector", "zoomAndPan",
-].map((name) => [name.toLowerCase(), name]));
+// Bound attribute names reach the runtime lowercased (`:viewBox` is tokenized as `:viewbox`), so
+// let the HTML parser apply its own SVG attribute adjustment table rather than shipping a copy.
+const svgAttributeNames = new Map<string, string>();
 
 function attributeNameFor(element: Element, name: string): string {
-  return element.namespaceURI === SVG_NAMESPACE ? SVG_ATTRIBUTE_NAMES.get(name) ?? name : name;
+  if (element.namespaceURI !== SVG_NAMESPACE) return name;
+  let adjusted = svgAttributeNames.get(name);
+  if (adjusted === undefined) {
+    const parser = element.ownerDocument.createElement("template");
+    parser.innerHTML = `<svg ${name}>`;
+    adjusted = (parser.content.firstChild as Element).attributes[0]?.name ?? name;
+    svgAttributeNames.set(name, adjusted);
+  }
+  return adjusted;
 }
 
 /** Create an element in the namespace its template position implies. */
 function createTemplateElement(document: Document, name: string, context: RuntimeRenderContext): Element {
   if (name === "svg" || context.namespace === SVG_NAMESPACE) {
-    return document.createElementNS(SVG_NAMESPACE, SVG_TAG_NAMES.get(name) ?? name);
+    return document.createElementNS(SVG_NAMESPACE, name);
   }
   return document.createElement(name);
 }
@@ -952,7 +940,7 @@ function renderMatch(
   // $match on a real element wraps the winning arm in that element.
   const wrapper = createTemplateElement(document, node.name, context);
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") wrapper.setAttribute(attributeNameFor(wrapper, attribute.name), attribute.value);
+    if (attribute.kind === "literal") wrapper.setAttribute(attribute.name, attribute.value);
   }
   wrapper.append(...rendered);
   stampAuthoredElement(wrapper, context.definition.contract.tag);
@@ -1019,7 +1007,7 @@ function renderInstance(
   if (node.ref !== undefined) context.refs[node.ref] = element;
   for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") element.setAttribute(attributeNameFor(element, attribute.name), attribute.value);
+    if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
     else if (attribute.kind === "attribute") {
       ownEffect(context, scope, () => {
         const value = evalValue(attribute.expression, scope);
