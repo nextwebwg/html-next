@@ -52,26 +52,16 @@ const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|
 const ESCAPE = /\\([\s\S])/g;
 const FORMAT_TOKEN = /%s/g;
 
+const PRECEDENCE: Readonly<Record<string, number>> = {
+  or: 1, and: 2,
+  "=": 3, "!=": 3, "^=": 3, "$=": 3, "*=": 3,
+  "<": 4, "<=": 4, ">": 4, ">=": 4,
+  "+": 5, "-": 5,
+  "*": 6, "/": 6, "%": 6,
+};
+
 function precedence(token: string | number): number {
-  switch (token) {
-    case "or": return 1;
-    case "and": return 2;
-    case "=":
-    case "!=":
-    case "^=":
-    case "$=":
-    case "*=": return 3;
-    case "<":
-    case "<=":
-    case ">":
-    case ">=": return 4;
-    case "+":
-    case "-": return 5;
-    case "*":
-    case "/":
-    case "%": return 6;
-    default: return 0;
-  }
+  return PRECEDENCE[token as string] ?? 0;
 }
 
 function isFunction(name: string): boolean {
