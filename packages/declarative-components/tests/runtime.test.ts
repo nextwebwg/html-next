@@ -147,6 +147,60 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} leaves framework-owned slot regions and structural anchors intact`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="framework-card" status="early" summary="Framework adoption fixture.">' +
+          '<defs><prop name="expanded" type="boolean" default="false">Shows details.</prop></defs>' +
+          '<article><header><slot name="leading"></slot><slot></slot><slot name="actions"></slot></header>' +
+          '<section $if="expanded"><slot name="details"></slot></section></article></template>' +
+          '<main><article id="root"><header>' +
+          '<span slot="leading" data-html-next-slot="leading"><i>Icon</i></span>' +
+          '<span data-html-next-slot=""><b>Title</b></span>' +
+          '<span slot="actions" data-html-next-slot="actions"><button>More</button></span>' +
+          '</header><!--framework-if--></article></main>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(() => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#root");
+          const regions = Array.from(root.querySelectorAll("[data-html-next-slot]"));
+          const anchor = root.lastChild;
+          const detach = window.HtmlRuntime.attachRegisteredComponent(
+            root,
+            "framework-card",
+            { props: { expanded: false } },
+          );
+          regions[1].querySelector("b").textContent = "Updated";
+          const details = document.createElement("section");
+          details.innerHTML = '<span slot="details" data-html-next-slot="details">Details</span>';
+          anchor.replaceWith(details);
+          root.expanded = true;
+          const result = {
+            regionIdentity: Array.from(root.querySelectorAll("[data-html-next-slot]"))
+              .slice(0, 3).every((region, index) => region === regions[index]),
+            leading: root.querySelector('[data-html-next-slot="leading"]')?.textContent,
+            title: root.querySelector('[data-html-next-slot=""]')?.textContent,
+            actions: root.querySelector('[data-html-next-slot="actions"]')?.textContent,
+            details: root.querySelector('[data-html-next-slot="details"]')?.textContent,
+          };
+          detach();
+          return result;
+        })()`);
+        assert.deepEqual(result, {
+          regionIdentity: true,
+          leading: "Icon",
+          title: "Updated",
+          actions: "More",
+          details: "Details",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} parses and lowers components owned by another browser realm`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
