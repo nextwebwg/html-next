@@ -125,7 +125,20 @@ export class ReactiveScheduler {
           index += 1;
           if (effect.computed === undefined) effect.execute();
           else effect.computed.refresh();
-          if (this.#pending.length > 0) this.#deferConsumersBehindComputeds(effects, index);
+          if (this.#pending.length === 1 && index === effects.length &&
+            this.#pending[0]!.computed === undefined) {
+            rounds += 1;
+            if (rounds > maximumExecutionsPerFlush) {
+              this.#pending[0]!.queued = false;
+              this.#pending = [];
+              fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
+            }
+            effects = this.#pending;
+            this.#pending = [];
+            index = 0;
+          } else if (this.#pending.length > 0) {
+            this.#deferConsumersBehindComputeds(effects, index);
+          }
         } while (index < effects.length);
         effects = undefined;
       }
