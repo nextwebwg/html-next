@@ -125,6 +125,9 @@ export class ReactiveScheduler {
           index += 1;
           if (effect.computed === undefined) effect.execute();
           else effect.computed.refresh();
+          // With no remaining owner and one ordinary pending effect, the next sortable round is
+          // already known. Adopt it in place, but still advance the round count so HR006 retains
+          // exactly the same propagation-depth bound as the generic outer loop.
           if (this.#pending.length === 1 && index === effects.length &&
             this.#pending[0]!.computed === undefined) {
             rounds += 1;
@@ -433,6 +436,7 @@ function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): voi
   const first = dependency?.first;
   if (first === undefined) return;
   const multiple = first !== dependency!.last;
+  // A singleton computed's generic schedule path can only invalidate this same owner.
   if (!multiple && first.effect.computed !== undefined) {
     if (first.effect !== skip) first.effect.computed.invalidate();
     return;
