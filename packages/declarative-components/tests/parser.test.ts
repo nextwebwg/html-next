@@ -150,21 +150,16 @@ describe("parseComponent", () => {
     });
   });
 
-  it("preserves property casing when a component prop names a non-native target", () => {
-    const definition = parseComponent(
-      componentSource(
-        `<div .anchorRect="anchorRect"></div>`,
-        `<prop name="anchorRect" type="unknown">Anchor geometry.</prop>`,
-      ),
-      "structured-property.html",
+  it("rejects property bindings to non-native properties and non-attribute prop types", () => {
+    // A property binding may only reach a native DOM property; component inputs are attributes.
+    expectDiagnostic(
+      "HP001",
+      componentSource(`<div .anchorRect="anchor"></div>`, `<prop name="anchor" type="string">Anchor id.</prop>`),
     );
-    const property = definition.template.attributes[0];
-    assert.ok(property?.kind === "property");
-    assert.equal(property.key, "anchorrect");
-    assert.equal(property.name, "anchorRect");
-    assert.deepEqual(definition.contract.props.anchorRect?.target, {
-      property: "anchorRect",
-    });
+    expectDiagnostic(
+      "HC017",
+      componentSource(`<div :data-anchor="anchor"></div>`, `<prop name="anchor" type="unknown">Anchor geometry.</prop>`),
+    );
   });
 
   it("rejects missing, duplicate, and malformed carriers", () => {

@@ -113,18 +113,23 @@ describe("defineContract", () => {
     });
   });
 
-  it("requires callbacks and opaque values to target properties", () => {
-    const input = validContract();
-    input.props = {
-      provider: {
-        type: "function",
-        target: { property: "provider" },
-        description: "Loads values.",
-      },
-    };
-    assert.equal(defineFromButtonFile(input).props.provider?.target.property, "provider");
-    input.props.provider.target = { attribute: "provider" };
-    expectDiagnostic("HC017", () => defineFromButtonFile(input));
+  it("rejects prop types that cannot be written as HTML attributes", () => {
+    // Props are attributes on the invocation: callbacks and opaque values have no text form, so
+    // they are not props whatever their binding target. Structured types are written as JSON.
+    const structured = validContract();
+    structured.props = {
+      provider: { type: { kind: "list", item: "string" }, target: { attribute: "data-provider" }, description: "Values." },
+    } as unknown as typeof structured.props;
+    assert.ok(defineFromButtonFile(structured).props.provider);
+    for (const type of ["function", "unknown"] as const) {
+      for (const target of [{ property: "provider" }, { attribute: "provider" }]) {
+        const input = validContract();
+        input.props = {
+          provider: { type, target, description: "Loads values." },
+        } as unknown as typeof input.props;
+        expectDiagnostic("HC017", () => defineFromButtonFile(input));
+      }
+    }
   });
 
   it("rejects unknown fields at every schema object boundary", () => {

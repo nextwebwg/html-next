@@ -1,4 +1,4 @@
-import type { ComponentDefinition, TemplateAttribute, TemplateNode } from "../template.js";
+import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
@@ -69,12 +69,18 @@ export function generatedPropDescriptor(
   name: string,
   prop: PropContract,
   value: string,
+  root?: ElementNode,
 ): string | undefined {
   const type = prop.type === "string" || prop.type === "boolean" || prop.type === "number"
     ? quote(prop.type)
     : "enum" in prop.type ? JSON.stringify(prop.type.enum) : undefined;
   if (type === undefined) return undefined;
-  return `{ name: ${quote(name)}, attribute: ${quote(`data-${kebabCase(name)}`)}, value: ${value}, type: ${type}, required: ${String(prop.required)} }`;
+  const attribute = `data-${kebabCase(name)}`;
+  const defaultValue = "default" in prop ? `, default: ${JSON.stringify(prop.default)}` : "";
+  const bound = root?.attributes.some((binding) => binding.kind === "attribute" && binding.name === attribute)
+    ? ", bound: true"
+    : "";
+  return `{ name: ${quote(name)}, attribute: ${quote(attribute)}, value: ${value}${defaultValue}${bound}, type: ${type}, required: ${String(prop.required)} }`;
 }
 
 export function hasUnsupportedPropertyBindings(node: TemplateNode): boolean {

@@ -167,11 +167,22 @@ export type GeneratedPropType = "string" | "boolean" | "number" | readonly strin
 
 export interface GeneratedProp {
   readonly name: string;
+  /** The `data-<name>` attribute that records an explicit value on the root. */
   readonly attribute: string;
+  /** The value the author or framework supplied; `undefined` when the prop was not set. */
   readonly value: unknown;
+  /** The declared default, used for rendering but never reflected. */
+  readonly default?: unknown;
+  /**
+   * The template itself binds this attribute on the root, so it is template output and always shows
+   * the effective value (defaults included). Otherwise it only records explicit values.
+   */
+  readonly bound?: boolean;
   readonly type: GeneratedPropType;
   readonly required: boolean;
 }
+
+const generatedPropUpdaters = new WeakMap<Element, (props: Readonly<Record<string, unknown>>) => void>();
 
 function propValue(input: unknown, type: GeneratedPropType, attributePresent = false): unknown {
   if (type === "string" && typeof input === "string") return input;
@@ -200,14 +211,21 @@ function assignedGeneratedProp(
   return undefined;
 }
 
-/** Installs the scalar prop boundary used by a directly compiled component. */
+/**
+ * Installs the scalar prop boundary used by a directly compiled component. Explicit values are
+ * reflected as `data-<name>` (defaults never are) and later attribute writes are parsed back in.
+ * No JavaScript properties are added to the element.
+ */
 export function manageGeneratedProps(
   element: Element,
   props: readonly GeneratedProp[],
   apply?: (name: string, value: unknown) => void,
 ): () => void {
-  const values = props.map((prop) => assignedGeneratedProp(prop, prop.value));
+  // `explicit` holds the supplied value (or undefined); `effective` adds the declared default.
+  const explicit = props.map((prop) => assignedGeneratedProp(prop, prop.value));
+  const effective = (index: number): unknown => explicit[index] ?? props[index]!.default;
   const byAttribute = new Map(props.map((prop, index) => [prop.attribute, index]));
+  const byName = new Map(props.map((prop, index) => [prop.name, index]));
   const reflected = new Map<string, string | null>();
   const dirty = new Set(props.map((_, index) => index));
   let connected = false;
@@ -218,12 +236,12 @@ export function manageGeneratedProps(
     if (!connected) return;
     for (const index of dirty) {
       const prop = props[index]!;
-      const value = values[index];
-      const serialized = value === undefined ? null : String(value);
+      const value = prop.bound ? effective(index) : explicit[index];
+      const serialized = value === undefined || value === null ? null : String(value);
       reflected.set(prop.attribute, serialized);
       if (serialized === null) element.removeAttribute(prop.attribute);
       else element.setAttribute(prop.attribute, serialized);
-      apply?.(prop.name, value);
+      apply?.(prop.name, effective(index));
     }
     dirty.clear();
   };
@@ -234,19 +252,16 @@ export function manageGeneratedProps(
       queueMicrotask(flush);
     }
   };
-  for (const [index, prop] of props.entries()) {
-    Object.defineProperty(element, prop.name, {
-      configurable: true,
-      enumerable: true,
-      get: () => values[index],
-      set: (input: unknown) => {
-        const value = assignedGeneratedProp(prop, input);
-        if (Object.is(values[index], value)) return;
-        values[index] = value;
-        schedule(index);
-      },
-    });
-  }
+  generatedPropUpdaters.set(element, (next) => {
+    for (const [name, input] of Object.entries(next)) {
+      const index = byName.get(name);
+      if (index === undefined) continue;
+      const value = assignedGeneratedProp(props[index]!, input);
+      if (Object.is(explicit[index], value)) continue;
+      explicit[index] = value;
+      schedule(index);
+    }
+  });
 
   const Observer = element.ownerDocument.defaultView?.MutationObserver ?? MutationObserver;
   const observer = new Observer((mutations) => {
@@ -261,8 +276,8 @@ export function manageGeneratedProps(
       const prop = props[index]!;
       const present = current !== null;
       const value = assignedGeneratedProp(prop, present ? current : undefined, present);
-      if (Object.is(values[index], value)) continue;
-      values[index] = value;
+      if (Object.is(explicit[index], value)) continue;
+      explicit[index] = value;
       schedule(index);
     }
   });
@@ -270,6 +285,13 @@ export function manageGeneratedProps(
     element,
     () => {
       connected = true;
+      // Attributes the author wrote while the element was detached (unobserved) are still props.
+      for (const [index, prop] of props.entries()) {
+        const current = element.getAttribute(prop.attribute);
+        const ours = reflected.has(prop.attribute) ? reflected.get(prop.attribute) : null;
+        if (current !== null && current !== ours) explicit[index] = assignedGeneratedProp(prop, current, true);
+        reflected.delete(prop.attribute);
+      }
       for (let index = 0; index < props.length; index += 1) dirty.add(index);
       flush();
       observer.observe(element, {
@@ -282,4 +304,9 @@ export function manageGeneratedProps(
       observer.disconnect();
     },
   );
+}
+
+/** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
+export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
+  generatedPropUpdaters.get(element)?.(props);
 }

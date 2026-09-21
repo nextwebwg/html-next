@@ -147,11 +147,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="registered-button" status="early" summary="Registered adapter fixture.">' +
           '<defs><prop name="label" type="string" default="">Accessible label.</prop>' +
-          '<prop name="payload" type="object({ value: string }) | null">Structured payload.</prop></defs>' +
-          '<button :aria-label="label" .payload="payload"><slot></slot></button></template><main></main>',
+          '<prop name="pressed" type="boolean" default="false">Pressed state.</prop></defs>' +
+          '<button :aria-label="label" :aria-pressed="pressed"><slot></slot></button></template><main></main>',
         );
         await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(() => {
+        const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.createElement("button");
           root.textContent = "Save";
@@ -159,26 +159,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const detach = window.HtmlRuntime.attachRegisteredComponent(
             root,
             "registered-button",
-            { props: { label: "Save changes", payload: null } },
+            { props: { label: "Save changes" } },
           );
-          const result = {
+          const initial = {
             root: root.localName,
             label: root.getAttribute("aria-label"),
-            payload: root.payload,
-            reflectedPayload: root.hasAttribute("data-payload"),
+            pressed: root.getAttribute("aria-pressed"),
+            reflectedLabel: root.getAttribute("data-label"),
+            reflectedPressed: root.hasAttribute("data-pressed"),
+            ownProperties: ["label", "pressed"].filter((key) => Object.hasOwn(root, key)),
             text: root.textContent,
             customElement: customElements.get("registered-button") !== undefined,
           };
+          window.HtmlRuntime.updateComponentProps(root, { pressed: true, label: undefined });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const updated = {
+            pressed: root.getAttribute("aria-pressed"),
+            reflectedPressed: root.getAttribute("data-pressed"),
+            label: root.getAttribute("aria-label"),
+            reflectedLabel: root.hasAttribute("data-label"),
+          };
           detach();
-          return result;
+          return { initial, updated };
         })()`);
         assert.deepEqual(result, {
-          root: "button",
-          label: "Save changes",
-          payload: null,
-          reflectedPayload: false,
-          text: "Save",
-          customElement: false,
+          initial: {
+            root: "button",
+            label: "Save changes",
+            // A false boolean binding removes the attribute; true renders it present.
+            pressed: null,
+            reflectedLabel: "Save changes",
+            reflectedPressed: false,
+            ownProperties: [],
+            text: "Save",
+            customElement: false,
+          },
+          updated: {
+            pressed: "",
+            reflectedPressed: "true",
+            label: "",
+            reflectedLabel: false,
+          },
         });
       } finally {
         await browser.close();
@@ -864,14 +885,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
             document.getElementById(id).getAttribute("data-enabled")
           );
           const generated = document.getElementById("generated");
+          let applied;
           window.HtmlGeneratedRuntime.manageGeneratedProps(generated, [{
             name: "enabled", attribute: "data-enabled", value: false, type: "boolean", required: false
-          }]);
+          }], (_name, value) => { applied = value; });
           const values = [];
           for (const value of ["", "true", "false"]) {
             generated.setAttribute("data-enabled", value);
             await new Promise(resolve => setTimeout(resolve, 0));
-            values.push(generated.enabled);
+            values.push(applied);
           }
           return { interpreted, generated: values };
         })()`);
@@ -946,7 +968,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-controller-reactivity" status="early" summary="Controller reactivity.">` +
-            `<p>Ready</p></template><x-controller-reactivity id="controller-reactivity"></x-controller-reactivity>`,
+            `<defs><event name="local-change" type="number" bubbles="false"></event></defs>` +
+            `<p>Ready</p></template><div id="controller-parent"><x-controller-reactivity id="controller-reactivity"></x-controller-reactivity></div>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -964,6 +987,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const dispatched = dispatch('controller-value', { value: 2 });
           stopListening();
           dispatch('controller-value', { value: 10 });
+          let parentSawLocal = false;
+          document.querySelector('#controller-parent').addEventListener('local-change', () => { parentSawLocal = true; });
+          dispatch('local-change', 1);
           const bucket = computed(() => {
             computedRuns += 1;
             return source.get() === 0 ? 'empty' : 'ready';
@@ -980,7 +1006,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           });
           source.set(3);
           await Promise.resolve();
-          return { beforeRead, first, second, computedRuns, effectRuns, observed, dispatched, eventTotal };
+          return { beforeRead, first, second, computedRuns, effectRuns, observed, dispatched, eventTotal, parentSawLocal };
         })()`);
         assert.deepEqual(result, {
           beforeRead: 0,
@@ -991,6 +1017,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           observed: "ready",
           dispatched: true,
           eventTotal: 2,
+          parentSawLocal: false,
         });
       } finally {
         await browser.close();
@@ -1472,7 +1499,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
-            `<defs><prop name="rows" type="list(object({ id: string }))">Rows.</prop><prop name="label" type="string" default="Panel">Label.</prop></defs>` +
+            `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop></defs>` +
             `<section as="section | article"><header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
             `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
             `<ul><li $each="row of rows" $key="row.id"><slot :name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul></section>` +
@@ -1480,12 +1507,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
           `<x-panel id="empty"></x-panel>`,
         );
-        await page.evaluate(() => {
-          const filled = document.querySelector("#filled") as Element & { rows?: unknown };
-          const empty = document.querySelector("#empty") as Element & { rows?: unknown };
-          filled.rows = [{ id: "a" }, { id: "b" }];
-          empty.rows = [];
-        });
         await page.addScriptTag({ path: bundlePath });
 
         const result = await page.evaluate(`(async () => {
@@ -1508,9 +1529,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
               empty.querySelector('.body-fallback')?.textContent,
             ],
           };
-          filled.label = 'Updated';
-          filled.rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
-          await Promise.resolve();
+          const reflectedInitially = filled.getAttribute('data-label');
+          const reflectedDefault = empty.hasAttribute('data-label');
           filled.setAttribute('data-label', 'External');
           await Promise.resolve();
           await Promise.resolve();
@@ -1520,7 +1540,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
               label: filled.querySelector('.label').textContent,
               rows: Array.from(filled.querySelectorAll('li'), item => item.textContent),
               reflectedLabel: filled.getAttribute('data-label'),
-              reflectedRows: filled.getAttribute('data-rows'),
+              reflectedInitially,
+              reflectedDefault,
+              ownLabelProperty: Object.hasOwn(filled, 'label'),
             },
           };
         })()`);
@@ -1537,12 +1559,60 @@ describe.skipIf(!enabled)("browser runtime", () => {
             fallbacks: ["Untitled", "Empty"],
           },
           updated: {
-              label: "External",
-            rows: ["A", "b", "c"],
-              reflectedLabel: "External",
-            reflectedRows: '[{"id":"a"},{"id":"b"},{"id":"c"}]',
+            label: "External",
+            rows: ["A", "b"],
+            reflectedLabel: "External",
+            reflectedInitially: "Initial",
+            reflectedDefault: false,
+            ownLabelProperty: false,
           },
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} parses structured props from JSON attributes and reflects only explicit ones`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-tags" status="early" summary="Structured props.">` +
+            `<defs><prop name="tags" type="list(string)" default='["none"]'>Tags.</prop></defs>` +
+            `<ul><li $each="tag of tags" $key="tag" $value="tag"></li></ul></template>` +
+          `<x-tags id="authored" tags='["design","docs"]'></x-tags><x-tags id="default"></x-tags>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const authored = document.getElementById("authored");
+          const fallback = document.getElementById("default");
+          const read = (root) => Array.from(root.querySelectorAll("li"), (item) => item.textContent);
+          const initial = {
+            authored: read(authored),
+            reflected: authored.getAttribute("data-tags"),
+            fallback: read(fallback),
+            fallbackReflected: fallback.hasAttribute("data-tags"),
+          };
+          authored.setAttribute("data-tags", '["api"]');
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initial, updated: read(authored) };
+        })()`);
+        assert.deepEqual(result, {
+          initial: {
+            authored: ["design", "docs"],
+            reflected: '["design","docs"]',
+            fallback: ["none"],
+            fallbackReflected: false,
+          },
+          updated: ["api"],
+        });
+
+        await page.evaluate(`document.getElementById("authored").setAttribute("data-tags", '[1]')`);
+        await page.waitForTimeout(50);
+        assert.match(pageErrors.join("\n"), /HR002/);
       } finally {
         await browser.close();
       }
@@ -1561,16 +1631,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
-          const root = document.getElementById("camel") as Element & { defaultValue?: string };
+          const root = document.getElementById("camel") as Element;
           return {
-            value: root.defaultValue,
+            ownProperty: Object.hasOwn(root, "defaultValue"),
             rendered: root.getAttribute("data-default"),
             reflected: root.getAttribute("data-default-value"),
             legacyReflection: root.hasAttribute("data-defaultvalue"),
           };
         });
         assert.deepEqual(result, {
-          value: "authored",
+          ownProperty: false,
           rendered: "authored",
           reflected: "authored",
           legacyReflection: false,
@@ -1618,10 +1688,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
-          const root = document.getElementById("openable") as Element & { open?: boolean };
-          return { value: root.open, attribute: root.getAttribute("data-open") };
+          const root = document.getElementById("openable") as Element;
+          return { ownProperty: Object.hasOwn(root, "open"), attribute: root.getAttribute("data-open") };
         });
-        assert.deepEqual(result, { value: true, attribute: "true" });
+        assert.deepEqual(result, { ownProperty: false, attribute: "true" });
       } finally {
         await browser.close();
       }
@@ -1660,8 +1730,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
             focused: document.activeElement === input,
             selection: [input.selectionStart, input.selectionEnd],
           };
-          root.label = 'Next';
-          await Promise.resolve();
+          root.setAttribute('data-label', 'Next');
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, updated: { heading: root.querySelector('h2').textContent, value: input.value } };
         })()`);
         assert.deepEqual(result, {
@@ -1826,7 +1896,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["class", "cta"],
               ["data-component", "x-button"],
               ["data-component-root", "x-button"],
-              ["data-disabled", "false"],
+              // `disabled` was not set by the author and the template does not bind data-disabled.
               ["data-size", "lg"],
               ["data-trace", "runtime"],
               ["data-variant", "outline"],

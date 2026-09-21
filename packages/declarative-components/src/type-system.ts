@@ -451,17 +451,22 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   return String(parsed.value);
 }
 
-/** Whether a boundary can contain values that are intentionally never represented by attributes. */
-export function isPropertyOnlyType(type: TypeInput): boolean {
+/**
+ * Whether a prop type can be written as an HTML attribute. Props are attributes on the component
+ * invocation, so every declared type with a text form qualifies: terminals and keyword unions as
+ * their text, and collection and structured shapes as JSON text parsed against the declared shape.
+ * `function`, `unknown`, and trusted content have no text form and cannot be props.
+ */
+export function isAttributeType(type: TypeInput): boolean {
   const node = normalizeType(type);
   if (node.kind === "terminal") {
-    return node.name === "function" || node.name === "unknown" || node.name === "trusted-html" || node.name === "trusted-script";
+    return !["function", "unknown", "trusted-html", "trusted-script"].includes(node.name);
   }
-  if (node.kind === "union") return node.members.some(isPropertyOnlyType);
-  if (node.kind === "list") return isPropertyOnlyType(node.item);
-  if (node.kind === "record") return isPropertyOnlyType(node.value);
-  if (node.kind === "object") return node.fields.some((field) => isPropertyOnlyType(field.type));
-  return false;
+  if (node.kind === "keyword") return true;
+  if (node.kind === "union") return node.members.every(isAttributeType);
+  if (node.kind === "list") return isAttributeType(node.item);
+  if (node.kind === "record") return isAttributeType(node.value);
+  return node.fields.every((field) => isAttributeType(field.type));
 }
 
 /** Explicitly brand an already-approved Trusted Types-compatible value for non-browser hosts. */

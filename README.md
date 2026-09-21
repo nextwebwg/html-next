@@ -215,7 +215,7 @@ The package assembler emits:
 
 - side-effect registration and concrete component HTML;
 - Vanilla, React, Vue, and Svelte components with native roots;
-- typed props, events, slots, property-only values, and exposed methods;
+- typed props (as HTML attributes), events, slots, and exposed methods;
 - scoped component CSS and provenance markers;
 - controller and dependency graphs preserved as static modules; and
 - explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.

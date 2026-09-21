@@ -68,8 +68,9 @@ apply. A non-empty value other than `true` or `false` is a type error; it does n
 presence alone.
 
 Number and integer attributes are likewise parsed from their complete strings. Keyword unions
-select their matching declared string value. Structured and callable types remain property-only
-unless another section explicitly defines a text encoding. Ahead-of-time targets and the live
+select their matching declared string value. Collection and structured attributes are JSON text parsed
+against the declared shape (see [Collection and structured types](#collection-and-structured-types)). `function`, `unknown`, and trusted-content types have no
+text form and cannot be component properties (see [Properties](components.md#properties)). Ahead-of-time targets and the live
 browser runtime must produce the same canonical value for the same invocation.
 
 ## Terminal types
@@ -84,8 +85,8 @@ browser runtime must produce the same canonical value for the same invocation.
 | `absent` | no supplied value | absence | no attribute/value |
 | `trusted-html` | a platform `TrustedHTML` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
 | `trusted-script` | a platform `TrustedScript` or explicitly branded host equivalent | the trusted value | never implicitly stringified into an attribute |
-| `function` | a JavaScript callable supplied through a property | the same callable | property-only; serialization is an error |
-| `unknown` | any JavaScript value supplied through a property | the same value | property-only; serialization is an error |
+| `function` | a JavaScript callable produced inside the component | the same callable | never serialized; not a property type |
+| `unknown` | any JavaScript value produced inside the component | the same value | never serialized; not a property type |
 
 Formats such as email addresses, URLs, dates, colors, identifiers, and token lists are not
 component-contract terminals. A component declares their representation as `string` or a
@@ -93,11 +94,11 @@ structured type and puts format constraints on the native control that owns the 
 validation and coercion can instead be supplied by an application adapter. This avoids embedding
 a second implementation of browser and application value spaces in every live component loader.
 
-`function` is the explicit callback or provider boundary. `unknown` is an escape hatch for a
-package type whose shape is owned by a separately published TypeScript contract. Both are
-property-only: a definition must bind them with `.property`, and tools must never encode them
-into markup. Authors should prefer a structural HTML Next type when the complete shape belongs
-to the component contract; `unknown` deliberately makes no validation claim.
+`function` describes a callable a component produces internally, for example in data or event
+details. `unknown` is an escape hatch for a value whose shape is owned by a separately published
+TypeScript contract. Neither can be a property type, and tools must never encode them into markup.
+Authors should prefer a structural HTML Next type when the complete shape belongs to the component
+contract; `unknown` deliberately makes no validation claim.
 
 The CSS Working Group's [value-definition syntax](https://www.w3.org/TR/css-values-4/#value-defs),
 [component value types](https://www.w3.org/TR/css-values-4/#component-types), and
@@ -154,7 +155,7 @@ Parsing returns either `{ ok: true, value }` or `{ ok: false, issues }`. Each is
 
 Serialization first validates and canonicalizes. Scalars use the terminal rule above; list,
 record, and object values use JSON. Trusted
-content is property-only. A serializer must reject an invalid value rather than silently coerce
+content is never serialized. A serializer must reject an invalid value rather than silently coerce
 it.
 
 TypeScript projections are mechanical: strings project to `string`;

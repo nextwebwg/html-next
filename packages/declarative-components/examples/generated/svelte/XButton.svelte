@@ -2,7 +2,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { SvelteHTMLElements } from "svelte/elements";
-  import { manageGeneratedProps } from "@nextwebwg/declarative-components/generated-runtime";
+  import { manageGeneratedProps, updateGeneratedProps } from "@nextwebwg/declarative-components/generated-runtime";
   import "../styles/x-button.css";
 
   interface OwnProps {
@@ -12,15 +12,17 @@
   }
   type Props = Omit<SvelteHTMLElements["button"], keyof OwnProps | "children"> & OwnProps & { children?: Snippet };
 
-  let { "size": prop0 = "md", "variant": prop1 = "outline", slots, children, ...nativeProps }: Props = $props();
+  let { "size": raw0, "variant": raw1, slots, children, ...nativeProps }: Props = $props();
+  let prop0 = $derived(raw0 ?? "md");
+  let prop1 = $derived(raw1 ?? "outline");
   let root: Element;
   function htmlNext(node: Element, props: Record<string, unknown>) {
     const detach = manageGeneratedProps(node, [
-      { name: "size", attribute: "data-size", value: prop0, type: ["sm","md","lg"], required: false },
-      { name: "variant", attribute: "data-variant", value: prop1, type: ["outline","solid","destructive","ghost"], required: false },
+      { name: "size", attribute: "data-size", value: props["size"], default: "md", bound: true, type: ["sm","md","lg"], required: false },
+      { name: "variant", attribute: "data-variant", value: props["variant"], default: "outline", bound: true, type: ["outline","solid","destructive","ghost"], required: false },
     ]);
     return {
-      update(next: Record<string, unknown>) { Object.assign(node, next); },
+      update(next: Record<string, unknown>) { updateGeneratedProps(node, next); },
       destroy() {
         detach();
       },
@@ -28,6 +30,6 @@
   }
 </script>
 
-<button {...nativeProps} data-component="x-button" data-component-root="x-button" data-x-button="" data-variant={prop1} data-size={prop0} use:htmlNext={{ "size": prop0, "variant": prop1 }} bind:this={root}>
+<button {...nativeProps} data-component="x-button" data-component-root="x-button" data-x-button="" data-variant={prop1} data-size={prop0} use:htmlNext={{ "size": raw0, "variant": raw1 }} bind:this={root}>
   {@render children?.()}
 </button>

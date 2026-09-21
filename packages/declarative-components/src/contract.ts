@@ -3,7 +3,7 @@ import { deepFreeze } from "./freeze.js";
 import { componentName } from "./names.js";
 import {
   formatType,
-  isPropertyOnlyType,
+  isAttributeType,
   isTypeNode,
   parseTypedValue,
   parseTypeExpression,
@@ -187,8 +187,12 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   }
 
   const target = parseTarget(object.target, source);
-  if ("attribute" in target && isPropertyOnlyType(type)) {
-    fail("HC017", `Prop \`${name}\` uses a property-only type and must target a DOM property.`, source);
+  if (!isAttributeType(type)) {
+    fail(
+      "HC017",
+      `Prop \`${name}\` cannot be written as an HTML attribute; function, unknown, and trusted content types have no text form.`,
+      source,
+    );
   }
   const description = requiredString(object.description, `props.${name}.description`, source);
   const normalized: {

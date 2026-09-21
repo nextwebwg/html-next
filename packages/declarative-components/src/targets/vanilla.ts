@@ -494,7 +494,8 @@ export function generateVanilla(
     for (const [name, prop] of directPropRender.plan.props) {
       const type = directPropType(prop.contract)!;
       lines.push(
-        `    { name: ${js(name)}, attribute: ${js(`data-${kebabCase(name)}`)}, value: ${prop.variable}, type: ${typeof type === "string" ? js(type) : JSON.stringify(type)}, required: ${String(prop.contract.required)} },`,
+        // The raw option (undefined when omitted) so only explicit values are reflected.
+        `    { name: ${js(name)}, attribute: ${js(`data-${kebabCase(name)}`)}, value: componentProps[${js(name)}]${"default" in prop.contract ? `, default: ${JSON.stringify(prop.contract.default)}` : ""}${template.attributes.some((binding) => binding.kind === "attribute" && binding.name === `data-${kebabCase(name)}`) ? ", bound: true" : ""}, type: ${typeof type === "string" ? js(type) : JSON.stringify(type)}, required: ${String(prop.contract.required)} },`,
       );
     }
     if (directPropRender.bindings.length === 0) {

@@ -89,27 +89,27 @@ describe("official target compilers", () => {
     }
   });
 
-  it("keeps property-only structured framework props on the complete runtime path", () => {
+  it("passes only explicit props and never assigns element properties in framework adapters", () => {
     const output = generated(componentSource(
-      "demo-list",
-      `<prop name="items" type="list(unknown)">Items.</prop>`,
-      `<div><span .items="items"></span><slot></slot></div>`,
+      "demo-toggle",
+      `<prop name="pressed" type="boolean" default="false">Pressed.</prop>`,
+      `<button :aria-pressed="pressed"><slot></slot></button>`,
     ));
 
-    for (const path of ["react/DemoList.tsx", "vue/DemoList.vue", "svelte/DemoList.svelte"]) {
+    for (const path of ["react/DemoToggle.tsx", "vue/DemoToggle.vue", "svelte/DemoToggle.svelte"]) {
       const module = output.get(path)!;
-      assert.match(module, /declarative-components\/runtime|attachComponent/);
-      assert.match(module, /"target":\{"property":"items"\}/);
-      assert.doesNotMatch(module, /manageGeneratedProps/);
-      assert.doesNotMatch(module, /(?:^|\s)(?::)?items=/m);
+      assert.doesNotMatch(module, /Object\.assign\(/);
+      assert.doesNotMatch(module, /\)\[name\] = /);
+      assert.match(module, /update(?:Generated|Component)Props/);
+      assert.match(module, /default: false/);
     }
   });
 
   it("does not duplicate null in optional nullable target types", () => {
     const output = generated(componentSource(
       "demo-anchor",
-      `<prop name="anchor" type="object({ left: number }) | null">Anchor.</prop>`,
-      `<div .anchor="anchor"></div>`,
+      `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
+      `<div :data-edge="anchor"></div>`,
     ));
 
     for (const path of [
@@ -118,7 +118,7 @@ describe("official target compilers", () => {
       "vue/DemoAnchor.vue",
       "svelte/DemoAnchor.svelte",
     ]) {
-      assert.match(output.get(path)!, /anchor\?: \{ readonly left: number \} \| null;/);
+      assert.match(output.get(path)!, /anchor\?: "start" \| "end" \| null;/);
       assert.doesNotMatch(output.get(path)!, /null \| null/);
     }
   });

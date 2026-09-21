@@ -105,8 +105,8 @@ export function generateReact(definition: ComponentDefinition, version: string):
     return `${quote(name)}: prop${index}${defaultValue}`;
   });
   const polymorphic = target.polymorphic;
-  const generatedProps = props.map(([name, prop], index) =>
-    generatedPropDescriptor(name, prop, `prop${index}`)
+  const generatedProps = props.map(([name, prop]) =>
+    generatedPropDescriptor(name, prop, `props[${quote(name)}]`, template)
   );
   const supportsGeneratedProps = !hasUnsupportedPropertyBindings(template) &&
     generatedProps.every((prop) => prop !== undefined);
@@ -174,11 +174,11 @@ export function generateReact(definition: ComponentDefinition, version: string):
     ...(dispatchesEvents || usesGeneratedProps
       ? [`import { ${[
         ...(dispatchesEvents ? ["dispatchGeneratedEvent"] : []),
-        ...(usesGeneratedProps ? ["manageGeneratedProps"] : []),
+        ...(usesGeneratedProps ? ["manageGeneratedProps", "updateGeneratedProps"] : []),
       ].join(", ")} } from "@nextwebwg/declarative-components/generated-runtime";`]
       : []),
     ...(needsBridge ? [
-      'import { attachComponent } from "@nextwebwg/declarative-components/runtime";',
+      'import { attachComponent, updateComponentProps } from "@nextwebwg/declarative-components/runtime";',
       'import type { ComponentDefinition } from "@nextwebwg/declarative-components";',
     ] : []),
     ...controllerImport,
@@ -213,7 +213,8 @@ export function generateReact(definition: ComponentDefinition, version: string):
     "    if (typeof ref === \"function\") ref(node);",
     "    else if (ref != null) ref.current = node;",
     "  };",
-    `  const componentProps: Record<string, unknown> = { ${props.map(([name], index) => `${quote(name)}: prop${index}`).join(", ")} };`,
+    // Explicit props only: an omitted prop stays undefined so its default is never reflected.
+    `  const componentProps: Record<string, unknown> = { ${props.map(([name]) => `${quote(name)}: props[${quote(name)}]`).join(", ")} };`,
     ...(reactive === undefined ? [] : [
       ...reactive.states.map((state) =>
         `  const [${state.variable}, ${state.setter}] = useState(${state.initial});\n  const current${state.variable} = useRef(${state.variable});`
@@ -262,7 +263,11 @@ export function generateReact(definition: ComponentDefinition, version: string):
       ...generatedProps.map((prop) => `    ${prop},`),
       "  ]), []);",
     ] : []),
-    "  useLayoutEffect(() => { if (root.current != null) Object.assign(root.current, componentProps); });",
+    ...(needsBridge
+      ? ["  useLayoutEffect(() => { if (root.current != null) updateComponentProps(root.current, componentProps); });"]
+      : usesGeneratedProps
+        ? ["  useLayoutEffect(() => { if (root.current != null) updateGeneratedProps(root.current, componentProps); });"]
+        : []),
     ...eventEffects,
     ...(polymorphic ? [`  const Root = (as ?? ${quote(template.name)}) as ElementType;`] : []),
     "  return (",

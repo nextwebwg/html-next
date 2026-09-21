@@ -75,6 +75,8 @@ interface RuntimeInstance {
   connected: boolean;
   controllerModule?: Promise<ControllerModule>;
   host?: ComponentHost;
+  /** Props the author supplied. Only these are reflected; defaults never are. */
+  readonly explicit: Set<string>;
 }
 
 interface DocumentRegistry {
@@ -229,6 +231,7 @@ function readInvocation(
   readonly passThrough: readonly Attr[];
   readonly effects: ReactiveOwner[];
   readonly rootName: string;
+  readonly explicit: Set<string>;
 } {
   const contract = definition.contract;
   const names = propAttributeNames(definition, hydration);
@@ -261,16 +264,9 @@ function readInvocation(
     );
   }
 
-  for (const [name, prop] of Object.entries(contract.props)) {
-    if (values[name] !== undefined) continue;
-    // A framework-owned native root can expose unrelated built-in properties
-    // with the same name (for example HTMLDivElement.align === ""). Only own
-    // properties were explicitly supplied as property-only inputs before
-    // hydration; scalar inputs arrive through their data-* attributes.
-    if (hydration && !Object.hasOwn(invocation, name)) continue;
-    const propertyValue = (invocation as unknown as Record<string, unknown>)[name];
-    if (propertyValue !== undefined) values[name] = invocationValue(prop, propertyValue);
-  }
+  // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
+  // author's explicit attributes). They are never read from JavaScript properties.
+  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined));
 
   const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(contract.props)) {
@@ -338,7 +334,7 @@ function readInvocation(
       return () => resource.disconnect();
     }, 0));
   }
-  return { scope, passThrough, effects, rootName };
+  return { scope, passThrough, effects, rootName, explicit };
 }
 
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
@@ -1182,31 +1178,31 @@ function renderTemplateNode(
   return renderNode(node, scope, document, [], context, candidate);
 }
 
-function installPublicProps(root: Element, instance: RuntimeInstance): void {
+/**
+ * Reflects the author's explicit props onto the lowered root as `data-<name>` so the element records
+ * which options produced it (and server output can be hydrated). Defaults are never written, and no
+ * JavaScript properties are added: the root keeps its native properties untouched. Later attribute
+ * writes by the author are parsed back into the scope.
+ */
+function installPropReflection(root: Element, instance: RuntimeInstance): void {
   const props = instance.definition.contract.props;
   const attributeNames: Record<string, string> = {};
   const reflected: Record<string, string | null> = {};
 
   for (const [name, prop] of Object.entries(props)) {
-    Object.defineProperty(root, name, {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        const value = instance.scope.get(name);
-        return value === ABSENT ? undefined : value;
-      },
-      set: (input: unknown) => {
-        const current = instance.scope.get(name);
-        if (Object.is(current === ABSENT ? undefined : current, input)) return;
-        instance.scope.set(name, assignedPropValue(name, prop, input));
-      },
-    });
-    if ("property" in prop.target) continue;
     const attributeName = `data-${kebabCase(name)}`;
     attributeNames[attributeName] = name;
+    // When the template binds this attribute itself it is template output and always shows the
+    // effective value (defaults included), matching the compiled runtime's `bound` props.
+    const bound = instance.definition.template.attributes.some((binding) =>
+      binding.kind === "attribute" && binding.name === attributeName
+    );
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const value = instance.scope.get(name);
-      const serialized = value === undefined || value === ABSENT
+      if (!bound && !instance.explicit.has(name)) return;
+      // Null is "no value" at the attribute boundary: it removes the attribute rather than
+      // writing text that would not parse back.
+      const serialized = value === undefined || value === ABSENT || value === null
         ? null
         : serializeTypedValue(value, prop.type);
       reflected[attributeName] = serialized;
@@ -1231,6 +1227,8 @@ function installPublicProps(root: Element, instance: RuntimeInstance): void {
       }
       delete reflected[attributeName];
       const prop = props[name]!;
+      if (value === null) instance.explicit.delete(name);
+      else instance.explicit.add(name);
       instance.scope.set(
         name,
         value === null ? assignedPropValue(name, prop, undefined) : invocationValue(prop, value, true) as Value,
@@ -1284,7 +1282,7 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, rootName } = readInvocation(invocation, definition, hydration);
+  const { scope, passThrough, effects, rootName, explicit } = readInvocation(invocation, definition, hydration);
   const children = hydration
     ? projectedNodes ?? Array.from(invocation.querySelectorAll("[data-slotted]"))
     : Array.from(invocation.childNodes);
@@ -1296,6 +1294,7 @@ function prepareRuntimeInvocation(
     connectCallbacks: new Set(),
     disconnectCallbacks: new Set(),
     connected: false,
+    explicit,
   };
   const context: RuntimeRenderContext = {
     definition,
@@ -1362,7 +1361,7 @@ function commitRuntimeInvocations(
     if (invocation.replace) invocation.invocation.replaceWith(invocation.nativeRoot);
     invocation.context.committed = true;
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
-    installPublicProps(invocation.nativeRoot, invocation.instance);
+    installPropReflection(invocation.nativeRoot, invocation.instance);
     installPublicMethods(invocation.nativeRoot, invocation.instance);
     connectRuntimeInstance(invocation.instance);
   }
@@ -1722,14 +1721,11 @@ export function attachComponent(
     markFrameworkProjection(element, definition.template);
     stampAuthoredElement(element, definition.contract.tag);
     stampComponentRoot(element, definition.contract.tag);
+    // The framework's explicit props become the same data-* attributes hydration reads; defaults
+    // stay implicit, exactly as for HTML authors.
     for (const [name, prop] of Object.entries(definition.contract.props)) {
-      const value = Object.hasOwn(options.props ?? {}, name) ? options.props?.[name] : prop.default;
-      if (value !== undefined) {
-        (element as unknown as Record<string, unknown>)[name] = value;
-        if ("attribute" in prop.target) {
-          element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
-        }
-      }
+      const value = options.props?.[name];
+      if (value !== undefined && value !== null) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
     }
     commitRuntimeInvocations(registry, [
       prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true),
@@ -1738,9 +1734,7 @@ export function attachComponent(
 
   const attached = runtimeInstance(element);
   if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
-  for (const [name, value] of Object.entries(options.props ?? {})) {
-    if (name in definition.contract.props) (element as unknown as Record<string, unknown>)[name] = value;
-  }
+  updateComponentProps(element, options.props ?? {});
   connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
@@ -1760,6 +1754,38 @@ export function attachComponent(
     controllerCleanup?.();
     disconnectRuntimeInstance(attached);
   };
+}
+
+/**
+ * The framework-adapter prop channel. A framework's props are the equivalent of authored
+ * attributes: each defined value becomes explicit (and is reflected as `data-<name>`), and
+ * `undefined` returns the prop to its implicit default. This is not a page-authoring API.
+ */
+export function updateComponentProps(
+  element: Element,
+  props: Readonly<Record<string, unknown>>,
+): void {
+  const instance = runtimeInstance(element);
+  if (instance === undefined) return;
+  for (const [name, input] of Object.entries(props)) {
+    const prop = instance.definition.contract.props[name];
+    if (prop === undefined) continue;
+    const attributeName = `data-${kebabCase(name)}`;
+    const value = assignedPropValue(name, prop, input);
+    // Null has no attribute form: like undefined, it leaves no explicit data-* attribute.
+    if (input === undefined || input === null) {
+      instance.explicit.delete(name);
+      // An attribute the template binds is its own output (it shows the default); leave it be.
+      const bound = instance.definition.template.attributes.some((binding) =>
+        binding.kind === "attribute" && binding.name === attributeName
+      );
+      if (!bound) element.removeAttribute(attributeName);
+    } else {
+      instance.explicit.add(name);
+      element.setAttribute(attributeName, serializeTypedValue(input, prop.type));
+    }
+    if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
+  }
 }
 
 /** Adopts a framework-owned native root using a definition already installed in its document. */
@@ -1904,7 +1930,16 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       return () => element.removeEventListener(event, listener);
     },
     dispatch(event, detail) {
-      return element.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }));
+      const declaration = (instance.definition.declarations ?? []).find(
+        (candidate) => candidate.kind === "event" && candidate.name === event,
+      );
+      const declared = declaration?.kind === "event" ? declaration : undefined;
+      return element.dispatchEvent(new CustomEvent(event, {
+        detail,
+        bubbles: declared?.bubbles ?? true,
+        composed: declared?.composed ?? true,
+        cancelable: declared?.cancelable ?? false,
+      }));
     },
   };
   instance.host = Object.freeze(host);
