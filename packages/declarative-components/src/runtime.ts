@@ -941,6 +941,18 @@ function renderInstance(
   }
 
   const elementName = node === context.definition.template ? context.rootName : node.name;
+  if (
+    context.frameworkOwned &&
+    candidate instanceof Element &&
+    candidate.localName !== elementName &&
+    (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(node.name)
+  ) {
+    // A framework renders nested declarative components as their native roots,
+    // not as the authored invocation tag. That child owns its already-adopted
+    // subtree; walking the parent's invocation shape would move its projected
+    // nodes into a disconnected synthetic element.
+    return [candidate];
+  }
   const adopted = candidate instanceof Element && candidate.localName === elementName;
   const element = adopted ? candidate : document.createElement(elementName);
   if (node === context.definition.template) context.root = element;
@@ -1596,7 +1608,17 @@ export function attachComponent(
       for (const child of Array.from(parent.childNodes)) {
         if (child instanceof Element) {
           const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
-          if (!lineage.includes(definition.contract.tag)) {
+          const componentRoots = (child.getAttribute("data-component-root") ?? "").split(/\s+/);
+          while (
+            elementCursor < authoredElements.length &&
+            authoredElements[elementCursor]!.name !== child.localName &&
+            !componentRoots.includes(authoredElements[elementCursor]!.name)
+          ) elementCursor += 1;
+          const authoredChild = authoredElements[elementCursor];
+          const nestedFrameworkRoot = authoredChild !== undefined &&
+            child.localName !== authoredChild.name &&
+            componentRoots.includes(authoredChild.name);
+          if (!lineage.includes(definition.contract.tag) && !nestedFrameworkRoot) {
             projectedSlotNames.set(
               child,
               child.getAttribute("data-html-next-slot") ?? child.getAttribute("slot") ?? slotName,
@@ -1604,12 +1626,12 @@ export function attachComponent(
             markProjectedRoot(child);
             projected.push(child);
           } else {
-            while (
-              elementCursor < authoredElements.length &&
-              authoredElements[elementCursor]!.name !== child.localName
-            ) elementCursor += 1;
-            const authoredChild = authoredElements[elementCursor++];
-            if (authoredChild !== undefined) markFrameworkProjection(child, authoredChild);
+            elementCursor += 1;
+            // Nested framework roots are opaque. Their own attachment maps
+            // slots and controllers against the nested component definition.
+            if (authoredChild !== undefined && !nestedFrameworkRoot) {
+              markFrameworkProjection(child, authoredChild);
+            }
           }
           continue;
         }
