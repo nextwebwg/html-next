@@ -255,7 +255,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     }
     case "member": {
       const object = evalNode(node.object, scope);
-      if (object === null || object === ABSENT || typeof object !== "object" || Array.isArray(object)) {
+      if (isAbsent(object) || typeof object !== "object" || Array.isArray(object)) {
         return ABSENT;
       }
       const value = (object as { readonly [key: string]: Value })[node.key];
@@ -264,7 +264,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     case "index": {
       const object = evalNode(node.object, scope);
       const index = evalNode(node.index, scope);
-      if (object === null || object === ABSENT || isAbsent(index)) return ABSENT;
+      if (isAbsent(object) || isAbsent(index)) return ABSENT;
       if (Array.isArray(object) && typeof index === "number") {
         const value = object[index];
         return value === undefined ? ABSENT : value;
