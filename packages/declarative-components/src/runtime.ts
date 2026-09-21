@@ -1018,9 +1018,29 @@ function renderInstance(
   let renderedChildren: Node[] = [];
   let cursor = 0;
   for (const child of node.children) {
-    const rendered = renderTemplateNode(child, scope, document, context, existingChildren[cursor]);
+    let candidateIndex = cursor;
+    if (context.frameworkOwned && child.kind === "element") {
+      // Frameworks may retain whitespace, hydration anchors, and branch sentinels between
+      // authored elements. Match the framework's owned element by shape instead of treating
+      // its raw childNodes offset as the declarative-template offset; otherwise effects and
+      // listeners are installed on a disconnected replacement that the framework never uses.
+      let matchingIndex = existingChildren.findIndex((candidate, index) => {
+        if (index < cursor) return false;
+        return candidate instanceof Element && (
+          candidate.localName === child.name ||
+          (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(child.name)
+        );
+      });
+      if (matchingIndex < 0 && child.flow !== undefined) {
+        matchingIndex = existingChildren.findIndex((candidate, index) =>
+          index >= cursor && candidate instanceof Comment
+        );
+      }
+      if (matchingIndex >= 0) candidateIndex = matchingIndex;
+    }
+    const rendered = renderTemplateNode(child, scope, document, context, existingChildren[candidateIndex]);
     renderedChildren.push(...rendered);
-    cursor += rendered.length;
+    cursor = candidateIndex + rendered.length;
   }
   if (adopted && !context.frameworkOwned) {
     // Structural renderers use DocumentFragments. Reconcile their children,
