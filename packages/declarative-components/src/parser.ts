@@ -255,7 +255,7 @@ function readProps(
     if (!isAttributeType(type)) {
       fail(
         "HC017",
-        `Prop \`${name}\` cannot be written as an HTML attribute; a prop type must be a string, number, integer, boolean, or keyword union.`,
+        `Prop \`${name}\` cannot be written as an HTML attribute; function, unknown, and trusted content types have no text form.`,
         source,
       );
     }

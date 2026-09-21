@@ -1567,6 +1567,52 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} parses structured props from JSON attributes and reflects only explicit ones`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-tags" status="early" summary="Structured props.">` +
+            `<defs><prop name="tags" type="list(string)" default='["none"]'>Tags.</prop></defs>` +
+            `<ul><li $each="tag of tags" $key="tag" $value="tag"></li></ul></template>` +
+          `<x-tags id="authored" tags='["design","docs"]'></x-tags><x-tags id="default"></x-tags>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const authored = document.getElementById("authored");
+          const fallback = document.getElementById("default");
+          const read = (root) => Array.from(root.querySelectorAll("li"), (item) => item.textContent);
+          const initial = {
+            authored: read(authored),
+            reflected: authored.getAttribute("data-tags"),
+            fallback: read(fallback),
+            fallbackReflected: fallback.hasAttribute("data-tags"),
+          };
+          authored.setAttribute("data-tags", '["api"]');
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initial, updated: read(authored) };
+        })()`);
+        assert.deepEqual(result, {
+          initial: {
+            authored: ["design", "docs"],
+            reflected: '["design","docs"]',
+            fallback: ["none"],
+            fallbackReflected: false,
+          },
+          updated: ["api"],
+        });
+
+        await page.evaluate(`document.getElementById("authored").setAttribute("data-tags", '[1]')`);
+        await page.waitForTimeout(50);
+        assert.match(pageErrors.join("\n"), /HR002/);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} maps camel-case public props to kebab-case HTML attributes`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

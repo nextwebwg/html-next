@@ -68,8 +68,9 @@ apply. A non-empty value other than `true` or `false` is a type error; it does n
 presence alone.
 
 Number and integer attributes are likewise parsed from their complete strings. Keyword unions
-select their matching declared string value. Structured, callable, and trusted-content types cannot
-be component properties (see [Properties](components.md#properties)). Ahead-of-time targets and the live
+select their matching declared string value. Collection and structured attributes are JSON text parsed
+against the declared shape (see [Collection and structured types](#collection-and-structured-types)). `function`, `unknown`, and trusted-content types have no
+text form and cannot be component properties (see [Properties](components.md#properties)). Ahead-of-time targets and the live
 browser runtime must produce the same canonical value for the same invocation.
 
 ## Terminal types

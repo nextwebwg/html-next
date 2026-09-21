@@ -453,17 +453,20 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
 
 /**
  * Whether a prop type can be written as an HTML attribute. Props are attributes on the component
- * invocation, so only scalar terminals and keyword unions qualify; structured, callable, and
- * trusted-content types belong to state, computed values, and events, never to props.
+ * invocation, so every declared type with a text form qualifies: terminals and keyword unions as
+ * their text, and collection and structured shapes as JSON text parsed against the declared shape.
+ * `function`, `unknown`, and trusted content have no text form and cannot be props.
  */
 export function isAttributeType(type: TypeInput): boolean {
   const node = normalizeType(type);
   if (node.kind === "terminal") {
-    return ["string", "number", "integer", "boolean", "null", "absent"].includes(node.name);
+    return !["function", "unknown", "trusted-html", "trusted-script"].includes(node.name);
   }
   if (node.kind === "keyword") return true;
   if (node.kind === "union") return node.members.every(isAttributeType);
-  return false;
+  if (node.kind === "list") return isAttributeType(node.item);
+  if (node.kind === "record") return isAttributeType(node.value);
+  return node.fields.every((field) => isAttributeType(field.type));
 }
 
 /** Explicitly brand an already-approved Trusted Types-compatible value for non-browser hosts. */
