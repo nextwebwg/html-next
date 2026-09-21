@@ -365,8 +365,10 @@ interface RuntimeRenderContext {
   readonly disconnectCallbacks: Set<() => void>;
   root?: Element;
   readonly projectedNodes: readonly Node[];
+  readonly projectedSlotNames: WeakMap<Node, string>;
   readonly slotInsertions: SlotInsertion[];
   readonly rootName: string;
+  readonly frameworkOwned: boolean;
   committed: boolean;
 }
 
@@ -857,6 +859,11 @@ function renderNode(
     node.flow?.kind === "with" ||
     node.flow?.kind === "match"
   ) {
+    // Framework renderers retain ownership of structural branches and their
+    // reconciliation anchors. During adoption, keep the framework's current
+    // node; installing a second reactive branch would invalidate its next
+    // update target and can move projected content into the wrong region.
+    if (context.committed && context.frameworkOwned && candidate !== undefined) return [candidate];
     return renderDynamicNode(node, scope, document, passThrough, context);
   }
   const out: Node[] = [];
@@ -996,14 +1003,20 @@ function renderInstance(
     return [element];
   }
 
-  const renderedChildren: Node[] = [];
+  let renderedChildren: Node[] = [];
   let cursor = 0;
   for (const child of node.children) {
     const rendered = renderTemplateNode(child, scope, document, context, existingChildren[cursor]);
     renderedChildren.push(...rendered);
     cursor += rendered.length;
   }
-  if (adopted) {
+  if (adopted && !context.frameworkOwned) {
+    // Structural renderers use DocumentFragments. Reconcile their children,
+    // not the fragment carrier, because inserting a fragment consumes it and
+    // would otherwise make the following-child count stale.
+    renderedChildren = renderedChildren.flatMap((child) =>
+      child.nodeType === 11 ? Array.from(child.childNodes) : [child]
+    );
     for (let index = 0; index < renderedChildren.length; index += 1) {
       const expected = renderedChildren[index]!;
       if (element.childNodes[index] !== expected) {
@@ -1011,7 +1024,7 @@ function renderInstance(
       }
     }
     while (element.childNodes.length > renderedChildren.length) element.lastChild!.remove();
-  } else {
+  } else if (!adopted) {
     element.append(...renderedChildren);
   }
   if (controlState !== undefined) {
@@ -1044,8 +1057,9 @@ function renderChildren(
   return out;
 }
 
-function projectedSlotName(node: Node): string {
-  return node instanceof Element ? node.getAttribute("slot") ?? "" : "";
+function projectedSlotName(node: Node, context: RuntimeRenderContext): string {
+  return context.projectedSlotNames.get(node) ??
+    (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
 }
 
 function renderSlot(
@@ -1057,7 +1071,7 @@ function renderSlot(
   const name = node.nameExpression === undefined
     ? node.name ?? ""
     : toText(evaluateCompiled(node.nameExpression, scope));
-  const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate) === name);
+  const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
   if (assigned.length === 0) return renderChildren(node.fallback ?? [], scope, document, context);
   if (context.committed) {
     for (const candidate of assigned) markProjectedRoot(candidate);
@@ -1177,6 +1191,8 @@ function prepareRuntimeInvocation(
   definition: ComponentDefinition,
   hydration: boolean,
   projectedNodes?: readonly Node[],
+  projectedSlotNames = new WeakMap<Node, string>(),
+  frameworkOwned = false,
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -1204,8 +1220,10 @@ function prepareRuntimeInvocation(
     connectCallbacks: instance.connectCallbacks,
     disconnectCallbacks: instance.disconnectCallbacks,
     projectedNodes: children,
+    projectedSlotNames,
     slotInsertions: [],
     rootName,
+    frameworkOwned,
     committed: hydration,
   };
   const rendered = renderNode(
@@ -1566,7 +1584,10 @@ export function attachComponent(
   const instance = runtimeInstance(element);
   if (instance === undefined) {
     const projected: Node[] = [];
+    const projectedSlotNames = new WeakMap<Node, string>();
     const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
+      const slot = authored.children.find((child): child is SlotNode => child.kind === "slot");
+      const slotName = slot?.name ?? "";
       const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
         .map((child) => child.value);
       let literalCursor = 0;
@@ -1576,6 +1597,10 @@ export function attachComponent(
         if (child instanceof Element) {
           const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
           if (!lineage.includes(definition.contract.tag)) {
+            projectedSlotNames.set(
+              child,
+              child.getAttribute("data-html-next-slot") ?? child.getAttribute("slot") ?? slotName,
+            );
             markProjectedRoot(child);
             projected.push(child);
           } else {
@@ -1586,6 +1611,11 @@ export function attachComponent(
             const authoredChild = authoredElements[elementCursor++];
             if (authoredChild !== undefined) markFrameworkProjection(child, authoredChild);
           }
+          continue;
+        }
+        if (child instanceof Comment && slot !== undefined) {
+          projectedSlotNames.set(child, slotName);
+          projected.push(child);
           continue;
         }
         if (child instanceof Text && child.data.trim() !== "") {
@@ -1607,7 +1637,9 @@ export function attachComponent(
         }
       }
     }
-    commitRuntimeInvocations(registry, [prepareRuntimeInvocation(element, definition, true, projected)]);
+    commitRuntimeInvocations(registry, [
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true),
+    ]);
   }
 
   const attached = runtimeInstance(element);
