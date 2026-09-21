@@ -444,7 +444,7 @@ export function getWritablePath(
 ): WritablePath | undefined {
   const result: WritablePathSegment[] = [];
   if (!appendWritable(compileExpression(source).ast, result)
-    || !writableRoots.has(String(result[0]))) return undefined;
+    || !writableRoots.has(result[0] as string)) return undefined;
   return result;
 }
 
