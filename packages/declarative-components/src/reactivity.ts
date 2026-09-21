@@ -125,7 +125,23 @@ export class ReactiveScheduler {
           index += 1;
           if (effect.computed === undefined) effect.execute();
           else effect.computed.refresh();
-          if (this.#pending.length > 0) this.#deferConsumersBehindComputeds(effects, index);
+          // With no remaining owner and one ordinary pending effect, the next sortable round is
+          // already known. Adopt it in place, but still advance the round count so HR006 retains
+          // exactly the same propagation-depth bound as the generic outer loop.
+          if (this.#pending.length === 1 && index === effects.length &&
+            this.#pending[0]!.computed === undefined) {
+            rounds += 1;
+            if (rounds > maximumExecutionsPerFlush) {
+              this.#pending[0]!.queued = false;
+              this.#pending = [];
+              fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
+            }
+            effects = this.#pending;
+            this.#pending = [];
+            index = 0;
+          } else if (this.#pending.length > 0) {
+            this.#deferConsumersBehindComputeds(effects, index);
+          }
         } while (index < effects.length);
         effects = undefined;
       }
@@ -420,6 +436,11 @@ function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): voi
   const first = dependency?.first;
   if (first === undefined) return;
   const multiple = first !== dependency!.last;
+  // A singleton computed's generic schedule path can only invalidate this same owner.
+  if (!multiple && first.effect.computed !== undefined) {
+    if (first.effect !== skip) first.effect.computed.invalidate();
+    return;
+  }
   if (first.effect.computed === undefined) {
     if (skip === undefined && multiple && first.effect.scheduler.enqueueDependency(dependency!)) return;
     for (let subscription: Subscription | undefined = first;
