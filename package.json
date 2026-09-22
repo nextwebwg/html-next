@@ -14,7 +14,6 @@
     "build": "pnpm --recursive --if-present build",
     "build:example": "pnpm --filter @nextwebwg/declarative-components build:example",
     "check:generated": "pnpm --filter @nextwebwg/declarative-components check:generated",
-    "check:spec": "vitest run --config vitest.config.ts packages/declarative-components/tests/spec.test.ts",
     "clean": "pnpm --recursive --if-present run clean",
     "generate:dom": "pnpm --filter @nextwebwg/declarative-components generate:dom",
     "generate:snapshots": "pnpm --filter @nextwebwg/declarative-components generate:snapshots",

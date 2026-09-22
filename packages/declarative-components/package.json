@@ -69,7 +69,6 @@
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
     "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/check-example-generated.ts",
     "check:release": "tsx scripts/check-release.ts",
-    "check:spec": "vitest run --config vitest.config.ts tests/spec.test.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",

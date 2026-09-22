@@ -1,6 +1,6 @@
 # The rendered form (design study)
 
-Status: design study behind the normative [Rendered form](spec/rendered-form.md) module. Every claim
+Status: design study behind the [Rendered form](https://nextwebwg.org/html-next/rendered-form) section of the proposal. Every claim
 links to a lab script in `lab/ssr-slots/`; results are from Chromium, Firefox, and WebKit as bundled with
 Playwright (September 2026). Earlier drafts below used a lab-only flag and comment markers; the runtime
 now always writes the markers, and `serializeRenderedForm` and `inspectInstance` are runtime exports.

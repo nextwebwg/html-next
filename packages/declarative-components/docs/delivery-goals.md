@@ -8,7 +8,7 @@ completion criteria, measurements, and next evidence separate.
 **Current work.** Minimize the full-capability browser entry by composing Web Platform facilities
 and removing universally redundant runtime machinery.
 
-- Contract: [live browser distributable](spec/live-browser-distributable.md)
+- Contract: [live browser distributable](https://nextwebwg.org/html-next/)
 - Input boundary: any conforming component graph introduced during the document lifetime
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
 - Current result: 76,223 minified raw bytes and 25,854 gzip bytes
@@ -31,7 +31,7 @@ compatibility, and policy reductions against this complete entry.
 **Tracked goal.** Compile a complete application or library graph to native DOM with one
 graph-scoped support plan.
 
-- Contract: [native application or library build](spec/native-application-build.md)
+- Contract: [native application or library build](https://nextwebwg.org/html-next/)
 - Input boundary: application entries or a concrete public library entry set
 - Primary metrics: whole application output; full library output; representative consumer subsets
 - Attribution metrics: isolated capability fixtures, reported separately from product output
@@ -53,7 +53,7 @@ metadata.
 **Tracked goal.** Convert application and library graphs into React, Vue, and Svelte components that
 use target-native rendering, reactivity, lifecycle, lists, and hydration.
 
-- Contract: [framework conversion](spec/framework-conversion.md)
+- Contract: [converter requirements](../../declarative-components-converter/docs/requirements.md)
 - Input boundary: application or library entries plus a target framework and supported version
 - Primary metrics: generated output, HTML Next bridge cost, target framework/runtime cost, and total
   production output

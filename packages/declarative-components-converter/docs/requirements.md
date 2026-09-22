@@ -1,4 +1,7 @@
-# Framework conversion
+# Conversion requirements
+
+What the HTML Next framework converter must produce. The converter is tooling built on the
+Declarative Components specification, not part of it.
 
 Framework conversion translates a Declarative Components application or library graph into React,
 Vue, or Svelte components while that target owns rendering, reactivity, lifecycle, and hydration.
@@ -29,10 +32,10 @@ React, Vue, or Svelte owns its normal render scheduling, reactive dependency tra
 reconciliation, component lifecycle, SSR attachment, and hydration. The converter expresses the
 normalized component plan through those facilities.
 
-HTML Next bridge code owns only semantic differences the target cannot express directly, including
-stable diagnostics, resource-policy rules, or a controller-host
-adapter when needed. Controllers keep one public host contract; each target adapter maps that
-contract to target-native state and lifecycle.
+Converted output has **no runtime dependency on HTML Next**: it imports only the target framework
+and the component's own modules (its controller and preserved ordinary modules), never an HTML Next
+package, runtime, or bridge. HTML Next either runs a component itself or converts it; once converted,
+it is gone. Whatever the target cannot express directly is part of the generated output.
 
 ## Output artifacts
 
