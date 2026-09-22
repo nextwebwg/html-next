@@ -1,0 +1,46 @@
+name: Release
+
+# Publishes each listed package whose version is not yet on npm, through npm trusted publishing
+# (OIDC): no npm token, and provenance is generated automatically. Each package needs this
+# repository and workflow configured as its trusted publisher on npmjs.com.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global --ignore-scripts npm@11.6.2 corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:release
+      - name: Publish unpublished versions
+        run: |
+          mkdir -p .release
+          for directory in html-next declarative-components-converter; do
+            name=$(node -p "require('./packages/$directory/package.json').name")
+            version=$(node -p "require('./packages/$directory/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published"
+              continue
+            fi
+            pnpm --filter "$name" pack --pack-destination .release
+            npm publish ".release/$(echo "${name#@}" | tr / -)-$version.tgz" --tag next --access public
+          done

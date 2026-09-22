@@ -40,21 +40,12 @@ corepack pnpm --filter @nextwebwg/html-next pack --pack-destination .release
 npm publish .release/nextwebwg-html-next-1.0.0-alpha.1.tgz
 ```
 
-## Later: trusted publishing with OIDC
+## Trusted publishing
 
-The first alpha remains a manual publication. After it succeeds, replace long-lived npm tokens
-with npm trusted publishing from GitHub Actions:
+Merging to `main` publishes: `.github/workflows/release.yml` publishes each listed package whose
+version is not yet on npm, on the `next` dist-tag, through npm trusted publishing (OIDC, with
+automatic provenance). Release by bumping a package's version in a pull request.
 
-1. Configure the package's trusted publisher on npm with this repository, its owner, and the exact
-   release workflow filename. Use a GitHub-hosted runner.
-2. Pin the workflow to supported Node 24 and npm 11.5.1 or newer.
-3. Grant only `contents: read` and `id-token: write`; do not configure `NODE_AUTH_TOKEN` for the
-   publish job.
-4. Put publishing behind a protected GitHub environment with required approval. Before
-   `npm publish`, require a matching version tag, a clean checkout, the release verification, and
-   review of the packed archive.
-
-For a public npm package published from a public repository, npm trusted publishing automatically
-generates package provenance. See npm's
-[trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/) and GitHub's
-[OIDC reference](https://docs.github.com/en/actions/reference/security/oidc).
+A new package's first version is published manually, because npm configures a trusted publisher
+only for an existing package. Then, on npmjs.com, add this repository and `release.yml` as the
+package's trusted publisher, and add the package to the workflow's list.
