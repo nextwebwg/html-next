@@ -70,10 +70,10 @@ function closingParenthesis(value: string, open: number): number {
 const STATE_TEST = /\[\s*([\w-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\]\s]+))\s*)?\]/g;
 
 /** `[name]` and `[name="value"]` tests as tokens of the state attribute. */
-function stateTokens(tests: string, tag: string, names: Set<string>): string {
+function stateTokens(tests: string, tag: string, names: Set<string>, canonical: (name: string) => string): string {
   let output = "";
   for (const match of tests.matchAll(STATE_TEST)) {
-    const name = match[1]!;
+    const name = canonical(match[1]!);
     const value = match[2] ?? match[3] ?? match[4];
     names.add(name);
     output += `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
@@ -110,7 +110,13 @@ function rewriteComponentTags(selector: string): string {
  * Rewrites one renamed selector for its scope. In the component's own scope `:host` is the scoping
  * root; in the projected-content scope it is the root's selector, since the subject is projected.
  */
-export function rewriteComponentSelector(selector: string, tag: string, kind: StyleRuleKind, names: Set<string>): string {
+export function rewriteComponentSelector(
+  selector: string,
+  tag: string,
+  kind: StyleRuleKind,
+  names: Set<string>,
+  canonical: (name: string) => string = (name) => name,
+): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
   }
@@ -122,7 +128,7 @@ export function rewriteComponentSelector(selector: string, tag: string, kind: St
   for (let match = state.exec(selector); match !== null; match = state.exec(selector)) {
     const open = match.index + match[0].length - 1;
     const close = closingParenthesis(selector, open);
-    output += `${selector.slice(index, match.index)}${host}${stateTokens(selector.slice(open + 1, close), tag, names)}`;
+    output += `${selector.slice(index, match.index)}${host}${stateTokens(selector.slice(open + 1, close), tag, names, canonical)}`;
     index = close + 1;
     state.lastIndex = index;
   }
@@ -194,26 +200,37 @@ export function compileComponentStyles(
   const view = document.defaultView ?? globalThis;
   const StyleRule = view.CSSStyleRule;
   const GroupingRule = view.CSSGroupingRule;
+  // The Object Model serializes attribute names in lowercase, so `[validationStatus]` comes back as
+  // `[validationstatus]`; state tests resolve against the declared names without regard to case.
+  const declared = new Map([
+    ...Object.keys(definition.contract.props),
+    ...(definition.declarations ?? []).filter((declaration) => declaration.kind === "state").map((declaration) => declaration.name),
+  ].map((name) => [name.toLowerCase(), name]));
+  const canonical = (name: string): string => declared.get(name.toLowerCase()) ?? name;
   const rewriteNested = (rule: CSSStyleRule, kind: StyleRuleKind): void => {
-    rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, kind, names);
+    rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, kind, names, canonical);
     for (const child of Array.from(rule.cssRules ?? [])) {
       if (child instanceof StyleRule) rewriteNested(child, kind);
     }
   };
   // Keeps the rules of one kind, rewriting their selectors; grouping rules keep their structure.
   const prune = (container: RuleContainer, want: StyleRuleKind, topLevel: boolean): void => {
+    // In source order, so state names are collected in first-use order, as build tools collect them.
     const rules = container.cssRules;
-    for (let index = rules.length - 1; index >= 0; index -= 1) {
+    for (let index = 0; index < rules.length;) {
       const rule = rules[index]!;
       if (rule instanceof StyleRule) {
         const kind = styleRuleKind(rule.selectorText);
-        if (kind === want) rewriteNested(rule, kind);
-        else container.deleteRule(index);
+        if (kind === want) {
+          rewriteNested(rule, kind);
+          index += 1;
+        } else container.deleteRule(index);
       } else if (rule instanceof GroupingRule) {
         prune(rule, want, false);
+        index += 1;
       } else {
         // Document-wide rules (@keyframes, @font-face, @property, …) are hoisted once, unscoped.
-        if (topLevel && want === "own") hoisted.unshift(rule.cssText);
+        if (topLevel && want === "own") hoisted.push(rule.cssText);
         container.deleteRule(index);
       }
     }

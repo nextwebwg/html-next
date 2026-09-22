@@ -109,6 +109,20 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "styles by camel-case props and state with :host-state()",
+    source: scene({
+      tag: "x-camel-state",
+      defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state name="toneName" :value="'warm'"></state>`,
+      root: `<div></div>`,
+      style: `:host-state([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
+      use: `<x-camel-state id="c"></x-camel-state>`,
+    }),
+    expect: {
+      probe: `const c = q('#c'); const style = getComputedStyle(c); return [c.getAttribute("data-x-camel-state-state"), style.width, style.height];`,
+      result: ["isWide toneName toneName=warm", "123px", "45px"],
+    },
+  },
+  {
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,
