@@ -180,6 +180,19 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /function (truthy|text|attribute)\(/);
   });
 
+  it("types optional fields, open objects, and nullable records in state", () => {
+    const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
+      `<defs><state name="hovered" type="object({ row: integer, label?: string, ... }) | null" :value="null"></state>` +
+      `<state name="issues" type="list(object({ message: string }))" :value="[]"></state></defs>` +
+      `<div><span $if="hovered" :title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
+    ).get("vue/XHover.vue")!;
+    compileVue(vue, "XHover.vue");
+    assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\);/);
+    assert.match(vue, /<span v-if="hovered" :title="hovered\?\.label"/);
+    assert.match(vue, /<p v-if="!issues\.length">Valid<\/p>/);
+    assert.doesNotMatch(vue, /function truthy\(/);
+  });
+
   it("rejects a state type that does not parse", () => {
     assert.throws(() => generated(`<template component="x-bad" status="experimental" summary="Bad state type.">` +
       `<defs><state name="rows" type="list(" :value="[]"></state></defs><div></div></template>`), /HC013/);

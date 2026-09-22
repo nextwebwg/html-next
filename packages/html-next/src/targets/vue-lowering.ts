@@ -81,7 +81,9 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       const object = typeOf(node.object, scope);
       const type = object.type;
       let result: Static = UNKNOWN;
-      if (node.kind === "member" && type.kind === "object") {
+      if (node.kind === "member" && node.key === "length" && (type.kind === "list" || category(type) === "string")) {
+        result = terminal("number");
+      } else if (node.kind === "member" && type.kind === "object") {
         const field = type.fields.find((candidate) => candidate.name === node.key);
         if (field !== undefined) {
           const value = present(field.type);
@@ -129,12 +131,19 @@ export function typeScript(value: Static): string {
         return type.name === "string" ? "string"
           : type.name === "boolean" ? "boolean"
           : type.name === "number" || type.name === "integer" ? "number"
+          : type.name === "null" ? "null"
+          : type.name === "absent" ? "undefined"
           : "any";
       case "keyword": return JSON.stringify(type.value);
       case "union": return type.members.map(source).join(" | ");
       case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;
-      case "object": return `{ ${type.fields.map((field) => `${/^[A-Za-z_$][\w$]*$/.test(field.name) ? field.name : quote(field.name)}: ${source(field.type)}`).join("; ")} }`;
+      case "object": {
+        const fields = type.fields.map((field) =>
+          `${/^[A-Za-z_$][\w$]*$/.test(field.name) ? field.name : quote(field.name)}${field.optional ? "?" : ""}: ${source(field.type)}`);
+        if (type.open) fields.push("[name: string]: any");
+        return `{ ${fields.join("; ")} }`;
+      }
     }
   };
   const type = source(value.type);
@@ -252,6 +261,9 @@ export class Lowering {
     if (node.kind === "unary" && node.op === "not") return this.#not(node.operand, scope);
     const code = this.value(node, scope);
     const type = typeOf(node, scope);
+    // A closed object with a required field always has keys, so only its absence makes it false.
+    const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
+    if (filled) return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
       case "list": return type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
