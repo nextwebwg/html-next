@@ -37,7 +37,7 @@ that policy change, then create and publish the reviewed archive explicitly:
 ```sh
 mkdir -p .release
 corepack pnpm --filter @nextwebwg/html-next pack --pack-destination .release
-npm publish .release/nextwebwg-html-next-1.0.0-alpha.0.tgz
+npm publish .release/nextwebwg-html-next-1.0.0-alpha.1.tgz
 ```
 
 ## Later: trusted publishing with OIDC
