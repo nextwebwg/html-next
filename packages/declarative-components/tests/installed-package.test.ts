@@ -75,7 +75,7 @@ describe.skipIf(!enabled)("installed package consumer", () => {
   });
 
   it("ships JavaScript and declarations for every public export", async () => {
-    assert.equal(manifest.version, "1.0.0-alpha.0");
+    assert.equal(manifest.version, "1.0.0-alpha.1");
     assert.deepEqual(Object.keys(manifest.exports), publicExports);
     for (const path of publicExports) {
       const entry = manifest.exports[path]!;
