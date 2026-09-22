@@ -1,7 +1,6 @@
 {
   "name": "@nextwebwg/declarative-components",
   "version": "1.0.0-alpha.0",
-  "private": true,
   "description": "Reference runtime and component bridge for Declarative HTML Components.",
   "license": "MIT",
   "keywords": [
@@ -53,7 +52,9 @@
       "import": "./dist/node-loader.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public",
     "tag": "next",

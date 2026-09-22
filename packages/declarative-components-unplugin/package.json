@@ -1,7 +1,6 @@
 {
   "name": "@nextwebwg/declarative-components-unplugin",
   "version": "1.0.0-alpha.0",
-  "private": true,
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -16,7 +15,9 @@
       "import": "./dist/vite.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.13 <23 || >=24 <25"
   },
@@ -24,7 +25,8 @@
     "build": "pnpm clean && tsc -p tsconfig.build.json",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "test": "vitest run --config vitest.config.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@nextwebwg/declarative-components": "workspace:*",
@@ -35,5 +37,15 @@
     "vite": "catalog:",
     "vitest": "catalog:",
     "typescript": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nextwebwg/html-next.git",
+    "directory": "packages/declarative-components-unplugin"
   }
 }
