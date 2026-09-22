@@ -89,6 +89,22 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("gives a native form-control root Vue's v-model", () => {
+    const outputs = generated(componentSource(
+      "x-field",
+      '<prop name="value" type="string">Value.</prop>',
+      '<input :value="value">',
+    ));
+    const vue = outputs.get("vue/XField.vue")!;
+    compileVue(vue, "XField.vue");
+    assert.match(vue, /modelValue\?: string \| null;/);
+    assert.match(vue, /"update:modelValue": \[value: string\];/);
+    assert.match(vue, /@input="updateModel"/);
+    assert.match(vue, /:value="hn\.attr\(\(props\.modelValue \?\? props\.value\)\)"/);
+    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select :value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
+    assert.match(select, /@change="updateModel"/);
+  });
+
   it("keeps logical operators readable in Vue attribute values", () => {
     const vue = generated(componentSource(
       "x-both",
