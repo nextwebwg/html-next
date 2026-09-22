@@ -65,6 +65,21 @@ describe("official target compilers", () => {
     assert.ok(result.js.code.length > 0);
   });
 
+  it("renders $value text, including a wrapper-less <template $value> slot fallback, in every target", () => {
+    for (const controller of ["", ' controller="./x-row.js"']) {
+      const output = generated(
+        `<template component="x-row" status="experimental" summary="A target compiler fixture."${controller}>` +
+        `<defs><prop name="label" type="string" default="">Row label.</prop></defs>` +
+        `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
+      );
+      for (const path of ["vue/XRow.vue", "react/XRow.tsx", "svelte/XRow.svelte"]) {
+        const source = output.get(path)!;
+        assert.doesNotMatch(source, /\{\{ undefined \}\}|\{undefined\}/, `${path}${controller}: text resolves the prop`);
+        assert.doesNotMatch(source, /<template data-component/, `${path}${controller}: no literal <template> wrapper`);
+      }
+    }
+  });
+
   it("uses framework rendering directly for prop-and-slot components", async () => {
     const output = await targets();
     for (const path of ["react/XButton.tsx", "vue/XButton.vue", "svelte/XButton.svelte"]) {
