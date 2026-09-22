@@ -231,8 +231,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       attributes.push(`v-model=${bound(writableTarget(attribute.writablePath, names.template, lowering))}`);
     } else if (isRoot && context.model && attribute.name === "value") {
-      // Vue's own v-model keeps a native control's value, including a select's, in step with the model.
-      attributes.push('v-model="model"');
+      // The model supplies the root's value (below).
     } else {
       const value = ast(attribute.expressionPlan, attribute.expression);
       attributes.push(`:${attribute.name}=${bound(component ? lowering.value(value, names.template) : lowering.attribute(value, names.template, attribute.name))}`);
@@ -255,6 +254,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     const tag = context.definition.contract.tag;
     literals.unshift(`data-component=${attributeValue(tag)}`);
     literals.push("v-bind=\"$attrs\"");
+    // Vue's own v-model keeps a native control's value, a select's included, in step with the model.
+    if (context.model) attributes.push('v-model="model"');
     if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
     if (context.root) attributes.push("ref=\"root\"");
   }
