@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.2",
   "description": "Reference runtime for HTML Next: Declarative HTML Components and validity on any element.",
   "license": "MIT",
   "keywords": [

@@ -85,7 +85,7 @@ describe("workspace package contracts", () => {
       repository?: { type: string; url: string; directory: string };
       publishConfig?: { access: string; tag: string; registry: string };
     };
-    expect(manifest.version).toBe("1.0.0-alpha.1");
+    expect(manifest.version).toBe("1.0.0-alpha.2");
     expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
