@@ -89,6 +89,16 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("keeps logical operators readable in Vue attribute values", () => {
+    const vue = generated(componentSource(
+      "x-both",
+      '<prop name="a" type="boolean" default="false">A.</prop><prop name="b" type="boolean" default="false">B.</prop>',
+      '<button :hidden="a and b" :title="a" :data-b="b"></button>',
+    )).get("vue/XBoth.vue")!;
+    compileVue(vue, "XBoth.vue");
+    assert.match(vue, /:hidden="hn\.attr\(\(hn\.t\(props\.a\) && hn\.t\(props\.b\)\)\)"/);
+  });
+
   it("serializes booleans on enumerated attributes as true and false", () => {
     const outputs = generated(componentSource(
       "x-aria",
@@ -123,7 +133,7 @@ describe("official target compilers", () => {
     assert.match(vue, /<template v-if="hn\.t\(state_open\)">/);
     assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\.items, \(item\) => \(item\)\?\.done, \['name'\], undefined\)"/);
     assert.match(vue, /v-model="state_query"/);
-    assert.match(vue, /:ref="\(element\) => \{ refs\['search'\] = element \}"/);
+    assert.match(vue, /:ref="\(element\) => \{ refs\['search'\] = element as Element \}"/);
     assert.match(vue, /@click="handler_flip"/);
     assert.match(vue, /:class="\{ 'compact': hn\.t\(/);
     assert.match(vue, /:style="\{ '--gap': hn\.text\(/);
