@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it } from "vitest";
 
 import { loadNodeComponents } from "../src/node-loader.js";
@@ -50,5 +54,25 @@ describe("package loader and registry", () => {
     registry.addGraph(graph);
     await waiting;
     assert.equal(registry.get("x-a")?.node.definition.contract.tag, "x-a");
+  });
+
+  it("bounds a build by the containing package, so component folders can link their siblings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-package-"));
+    const write = async (path: string, source: string) => {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), source);
+    };
+    await write("outside/x-out.html", `<template component="x-out" status="early" summary="Out."><div></div></template>`);
+    await write("pkg/package.json", "{}");
+    await write("pkg/components/x-b/x-b.html", `<template component="x-b" status="early" summary="B."><div></div></template>`);
+    await write("pkg/components/x-a/x-a.html", `<link rel="component" href="../x-b/x-b.html"><template component="x-a" status="early" summary="A."><x-b></x-b></template>`);
+    await write("pkg/components/x-c/x-c.html", `<link rel="component" href="../../../outside/x-out.html"><template component="x-c" status="early" summary="C."><x-out></x-out></template>`);
+
+    const graph = await loadNodeComponents([pathToFileURL(join(root, "pkg/components/x-a/x-a.html")).href]);
+    assert.deepEqual([...graph.nodes.values()].map((node) => node.definition.contract.tag).sort(), ["x-a", "x-b"]);
+    await assert.rejects(
+      loadNodeComponents([pathToFileURL(join(root, "pkg/components/x-c/x-c.html")).href]),
+      /HL003/,
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +32,30 @@ function directory(url: string): string {
   return new URL("./", url).href;
 }
 
+/**
+ * The build's filesystem boundary for a root: the package that contains it (the nearest directory
+ * with a package.json), or the root's own directory outside any package. The live loader has no
+ * directory trust root (`../` is location, not authority); this is a build-tool output constraint,
+ * so sibling components and shared controller modules in one package resolve, and nothing outside
+ * the package is read or copied.
+ */
+function hasPackageJson(directoryURL: URL): boolean {
+  try {
+    return existsSync(fileURLToPath(new URL("package.json", directoryURL)));
+  } catch {
+    // Not a local path on this platform (a synthetic file: URL); treat it as outside any package.
+    return false;
+  }
+}
+
+function packageRoot(url: string): string {
+  if (!url.startsWith("file:")) return directory(url);
+  for (let candidate = new URL("./", url); ; candidate = new URL("../", candidate)) {
+    if (hasPackageJson(candidate)) return candidate.href;
+    if (new URL("../", candidate).href === candidate.href) return directory(url);
+  }
+}
+
 class NodeResourceResolver implements ComponentResourceResolver {
   constructor(
     private readonly baseURL: string,
@@ -40,7 +65,7 @@ class NodeResourceResolver implements ComponentResourceResolver {
   resolveRoot(specifier: string): ResolvedResource {
     if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier)) {
       const url = new URL(specifier, this.baseURL).href;
-      return { url, trustRoot: directory(url) };
+      return { url, trustRoot: packageRoot(url) };
     }
     return this.resolvePackage(specifier, this.baseURL);
   }
@@ -73,7 +98,7 @@ export async function loadNodeComponents(
   const baseURL = options.baseURL ?? new URL("../", import.meta.url).href;
   const resolvePackage = options.resolvePackage ?? ((specifier: string, parentURL: string) => {
     const url = (import.meta.resolve as (value: string, parent?: string) => string)(specifier, parentURL);
-    return { url, trustRoot: directory(url) };
+    return { url, trustRoot: packageRoot(url) };
   });
   const readComponent = options.readComponent ?? (async (url: string) => ({
     url,
