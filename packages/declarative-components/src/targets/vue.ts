@@ -40,7 +40,8 @@ const HELPERS: readonly (readonly [name: string, source: string])[] = [
     ? op === "^=" ? a.startsWith(b) : op === "$=" ? a.endsWith(b) : a.includes(b)
     : undefined,`],
   ["text", `  text: (v: unknown): string => v === undefined || v === null ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? "" : String(v),`],
-  ["attr", `  attr: (v: unknown): string | undefined => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),`],
+  // Vue types intrinsic attributes more narrowly than the strings the platform accepts.
+  ["attr", `  attr: (v: unknown): any => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),`],
   ["call", `  call: (fn: string, ...args: unknown[]): unknown => {
     if (fn === "format") {
       let index = 1;
@@ -58,7 +59,7 @@ const HELPERS: readonly (readonly [name: string, source: string])[] = [
     }
     return undefined;
   },`],
-  ["shape", `  shape: (items: unknown, where: ((item: unknown) => unknown) | undefined, sort: readonly string[], limit: unknown): unknown[] => {
+  ["shape", `  shape: (items: unknown, where: ((item: any) => unknown) | undefined, sort: readonly string[], limit: unknown): any[] => {
     let list = Array.isArray(items) ? items.slice() : [];
     if (where !== undefined) list = list.filter((item) => hn.t(where(item)));
     if (sort.length > 0) {
@@ -110,7 +111,9 @@ function expression(node: ExpressionNode, names: ReadonlyMap<string, string>): s
     case "id":
       return names.get(node.name) ?? "undefined";
     case "member":
-      return `(${expression(node.object, names)})?.[${quote(node.key)}]`;
+      return /^[A-Za-z_$][\w$]*$/.test(node.key)
+        ? `(${expression(node.object, names)})?.${node.key}`
+        : `(${expression(node.object, names)})?.[${quote(node.key)}]`;
     case "index":
       return `(${expression(node.object, names)})?.[${expression(node.index, names) as string}]`;
     case "unary":
@@ -144,9 +147,13 @@ function attributeValue(value: string): string {
   return `"${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`;
 }
 
-/** A template binding: the JavaScript expression as an attribute value. */
+/**
+ * A template binding: the JavaScript expression as an attribute value. String literals use single
+ * quotes so the attribute needs no `&quot;`, which Vue's type checker does not decode.
+ */
 function bound(code: string): string {
-  return attributeValue(code);
+  return attributeValue(code.replace(/"(?:\\.|[^"\\])*"/g, (literal) =>
+    `'${literal.slice(1, -1).replace(/\\"/g, "\"").replace(/'/g, "\\'")}'`));
 }
 
 function writableTarget(path: readonly WritablePathSegment[], names: ReadonlyMap<string, string>): string {
@@ -310,16 +317,16 @@ function typeCheck(type: TypeNode, value: string): string {
     case "union":
       return `(${type.members.map((member) => typeCheck(member, value)).join(" || ")})`;
     case "list":
-      return `(Array.isArray(${value}) && ${value}.every((item: unknown) => ${typeCheck(type.item, "item")}))`;
+      return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => ${typeCheck(type.item, "item")}))`;
     case "record":
-      return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}) && Object.values(${value}).every((item: unknown) => ${typeCheck(type.value, "item")}))`;
+      return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}) && Object.values(${value} as object).every((item: unknown) => ${typeCheck(type.value, "item")}))`;
     case "object": {
       const fields = type.fields.map((field) => {
         const read = `(${value} as Record<string, unknown>)[${quote(field.name)}]`;
         const check = typeCheck(field.type, read);
         return field.optional ? `(${read} === undefined || ${check})` : check;
       });
-      const closed = type.open ? [] : [`Object.keys(${value}).every((key) => ${JSON.stringify(type.fields.map((field) => field.name))}.includes(key))`];
+      const closed = type.open ? [] : [`Object.keys(${value} as object).every((key) => ${JSON.stringify(type.fields.map((field) => field.name))}.includes(key))`];
       return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})${[...fields, ...closed].map((check) => ` && ${check}`).join("")})`;
     }
   }
@@ -406,7 +413,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     ]),
     ...(dispatches ? ["const root = ref<HTMLElement | null>(null);"] : []),
     ...(context.usesRefs.value || controlled ? ["const refs: Record<string, Element | undefined> = {};"] : []),
-    ...states.map((state) => `const state_${safe(state.name)} = ref<unknown>(${state.expression === undefined ? "undefined" : expression(state.expression.ast, names.script)});`),
+    ...states.map((state) => `const state_${safe(state.name)} = ref<any>(${state.expression === undefined ? "undefined" : expression(state.expression.ast, names.script)});`),
     ...computedValues.map((value) => `const computed_${safe(value.name)} = computed(() => ${value.expression === undefined ? "undefined" : expression(value.expression.ast, names.script)});`),
     ...(!dispatches ? [] : [
       "",

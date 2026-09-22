@@ -250,9 +250,6 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
-      svelte:
-        specifier: 'catalog:'
-        version: 5.57.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

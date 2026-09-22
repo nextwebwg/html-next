@@ -5,11 +5,11 @@ It provides three paths over one component language:
 
 - a complete browser distributable for dynamic component graphs;
 - an application/library compiler that emits native DOM and graph-scoped runtime support; and
-- converters that emit React, Vue, and Svelte components using their target runtime.
+- a converter that emits Vue components with no HTML Next left in them (React is in development).
 
 The live runtime supports every declarative capability. Builds analyze an application or library
-graph and share the support that graph requires; framework conversions preserve the same observable
-contract through target-native reactivity and small compatibility bridges.
+graph and share the support that graph requires; Vue conversion preserves the same observable
+contract through Vue's own reactivity.
 
 See the [proposal](https://nextwebwg.org/html-next/) and
 [independent goal ledger](docs/delivery-goals.md).

@@ -115,7 +115,7 @@ export class FrameworkConversionError extends Error {
     readonly reason?: string,
   ) {
     super(
-      `${source}: HTC001: ${target} conversion for ${tag} requires semantics that are not yet expressed through target-native facilities${reason === undefined ? "" : ` (${reason})`}.`,
+      `${source}: HTC001: ${target} conversion of <${tag}> failed${reason === undefined ? "" : `: ${reason}`}`,
     );
     this.name = "FrameworkConversionError";
   }

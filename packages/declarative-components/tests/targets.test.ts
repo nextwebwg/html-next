@@ -103,17 +103,17 @@ describe("official target compilers", () => {
 
   it("maps each construct to Vue's own facility", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
-    assert.match(vue, /const state_open = ref<unknown>\(false\)/);
+    assert.match(vue, /const state_open = ref<any>\(false\)/);
     assert.match(vue, /const computed_count = computed\(/);
     assert.match(vue, /<template v-if="hn\.t\(state_open\)">/);
-    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\.items, \(item\) => \(item\)\?\.\[&quot;done&quot;\], \[&quot;name&quot;\], undefined\)"/);
+    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\.items, \(item\) => \(item\)\?\.done, \['name'\], undefined\)"/);
     assert.match(vue, /v-model="state_query"/);
-    assert.match(vue, /:ref="\(element\) => \{ refs\[&quot;search&quot;\] = element \}"/);
+    assert.match(vue, /:ref="\(element\) => \{ refs\['search'\] = element \}"/);
     assert.match(vue, /@click="handler_flip"/);
-    assert.match(vue, /:class="\{ &quot;compact&quot;: hn\.t\(/);
-    assert.match(vue, /:style="\{ &quot;--gap&quot;: hn\.text\(/);
+    assert.match(vue, /:class="\{ 'compact': hn\.t\(/);
+    assert.match(vue, /:style="\{ '--gap': hn\.text\(/);
     assert.match(vue, /<XBadge :tone="props\.size"><slot name="badge">none<\/slot><\/XBadge>/);
-    assert.match(vue, /<template v-if="hn\.t\(\(props\.size === &quot;sm&quot;\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
+    assert.match(vue, /<template v-if="hn\.t\(\(props\.size === 'sm'\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
     assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
   });

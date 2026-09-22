@@ -87,7 +87,7 @@ describe("framework converter", () => {
 
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
-    assert.match(source, /const state_count = ref<unknown>\(0\)/);
+    assert.match(source, /const state_count = ref<any>\(0\)/);
     assert.match(source, /const computed_double = computed\(\(\) => hn\.op\("\*", state_count\.value, 2\)\)/);
     assert.match(source, /state_count\.value = hn\.op\("\+", state_count\.value, 1\);\n  dispatch\("count-change", state_count\.value\);/);
     assert.match(source, /"count-change": \(detail: unknown\) => \(typeof detail === "number" && Number\.isFinite\(detail\)\)/);

@@ -8,7 +8,7 @@ and verification live at the repository root.
 | --- | --- | --- |
 | [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Live browser runtime, the shared compiler and validation, and native-DOM/CSS/package generation |
 | [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Target-native React, Vue, and Svelte conversion |
+| [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Vue conversion (React in development) |
 | [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
 
 The Declarative HTML Components package authors a component once as inert,
@@ -34,7 +34,7 @@ modes:
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/declarative-components`](./packages/declarative-components) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to React, Vue, or Svelte | [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | A component graph plus a React, Vue, or Svelte target | Framework-native source generated *from* the graph, with bridges only for semantics the target lacks |
+| **Framework conversion** — to Vue (React in development) | [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | A component graph plus a Vue target | Vue single-file components that import only Vue and their own controllers |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
@@ -42,7 +42,7 @@ distributable, the **compiled build** emits tree-shaken native DOM for a known g
 output; it is **not** an ingest that imports Shadow DOM or any other format *into* Declarative
 Components. Such migrations are consumer-specific and live outside this repository.
 
-An application build may serve as a complete alternative to a React, Vue, or Svelte application.
+An application build may serve as a complete alternative to a framework application.
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
 must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
@@ -213,9 +213,9 @@ to arbitrary elements. Runtime size and speed changes follow the
 The package assembler emits:
 
 - side-effect registration and concrete component HTML;
-- Vanilla, React, Vue, and Svelte components with native roots;
+- Vanilla and Vue components with native roots;
 - typed props (as HTML attributes), events, slots, and exposed methods;
-- scoped component CSS and provenance markers;
+- scoped component CSS;
 - controller and dependency graphs preserved as static modules; and
 - explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.
 
