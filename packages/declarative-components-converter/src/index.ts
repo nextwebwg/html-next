@@ -8,7 +8,7 @@ import {
   HtmlDiagnosticError,
   loadNodeComponents,
   type GeneratedArtifact,
-} from "@nextwebwg/declarative-components";
+} from "@nextwebwg/html-next";
 
 export type FrameworkTarget = "vue";
 export type ConversionGraph = "application" | "library";

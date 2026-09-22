@@ -13,7 +13,7 @@ execution: code
 
 - **Objective:** Authors can choose live browser execution, an optimized native application or library build, or framework conversion without any mode being mistaken for another during design, measurement, or optimization.
 - **Means:** Define a shared delivery model and a separate normative specification, measurement contract, and tracked goal for each mode; then optimize the complete live browser distributable against native platform capabilities. (KTD1-KTD3)
-- **Authority:** The Product Contract below defines the delivery modes and optimization boundaries; `packages/declarative-components/docs/spec/` owns normative behavior; cross-target conformance tests own observable equivalence.
+- **Authority:** The Product Contract below defines the delivery modes and optimization boundaries; `packages/html-next/docs/spec/` owns normative behavior; cross-target conformance tests own observable equivalence.
 - **Execution profile:** Land the mode specifications and tracker first, then use a measurement-first optimization loop on the live distributable. Each custom browser layer requires evidence of the platform gap and owner review when its necessity or semantics remain uncertain.
 - **Stop condition:** Stop for a proposed optimization that removes a supported live capability, depends on a closed application graph, exceeds the repository performance guardrail, or requires an unresolved product decision.
 
@@ -166,12 +166,12 @@ flowchart TB
 
 ### Sources and Research
 
-- `packages/declarative-components/src/browser-loader.ts`, `browser-source.ts`, `parser.ts`, and `runtime.ts` define the current full live path.
-- `packages/declarative-components/scripts/measure-runtime-size.ts` reports the 33,199-byte gzip live baseline and isolated native-build capability fixtures.
-- `packages/declarative-components/docs/native-runtime-audit.md` records current native facilities, module attribution, and owner decisions.
-- `packages/declarative-components/docs/runtime-performance.md` owns the size-versus-speed guardrails.
-- `packages/declarative-components/docs/spec/targets-and-conformance.md` owns current cross-target equivalence.
-- `packages/declarative-components/docs/plans/2026-09-12-1008-feat-full-reference-implementation-plan.md` establishes one normalized language, live execution, native targets, framework adapters, and shared conformance.
+- `packages/html-next/src/browser-loader.ts`, `browser-source.ts`, `parser.ts`, and `runtime.ts` define the current full live path.
+- `packages/html-next/scripts/measure-runtime-size.ts` reports the 33,199-byte gzip live baseline and isolated native-build capability fixtures.
+- `packages/html-next/docs/native-runtime-audit.md` records current native facilities, module attribution, and owner decisions.
+- `packages/html-next/docs/runtime-performance.md` owns the size-versus-speed guardrails.
+- `packages/html-next/docs/spec/targets-and-conformance.md` owns current cross-target equivalence.
+- `packages/html-next/docs/plans/2026-09-12-1008-feat-full-reference-implementation-plan.md` establishes one normalized language, live execution, native targets, framework adapters, and shared conformance.
 
 ---
 
@@ -182,7 +182,7 @@ flowchart TB
 - **Goal:** Give each delivery mechanism a detailed normative contract and independent tracked goal.
 - **Requirements:** R1-R18; KTD1, KTD2, KTD5, KTD6.
 - **Dependencies:** None.
-- **Files:** `README.md`; `packages/declarative-components/README.md`; `packages/declarative-components/docs/spec/index.md`; `packages/declarative-components/docs/spec/delivery-modes.md`; `packages/declarative-components/docs/spec/live-browser-distributable.md`; `packages/declarative-components/docs/spec/native-application-build.md`; `packages/declarative-components/docs/spec/framework-conversion.md`; `packages/declarative-components/docs/delivery-goals.md`; `packages/declarative-components/docs/native-runtime-audit.md`; `packages/declarative-components/tests/spec.test.ts`.
+- **Files:** `README.md`; `packages/html-next/README.md`; `packages/html-next/docs/spec/index.md`; `packages/html-next/docs/spec/delivery-modes.md`; `packages/html-next/docs/spec/live-browser-distributable.md`; `packages/html-next/docs/spec/native-application-build.md`; `packages/html-next/docs/spec/framework-conversion.md`; `packages/html-next/docs/delivery-goals.md`; `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/tests/spec.test.ts`.
 - **Approach:** Put shared semantic authority and routing in the overview. Give every mode its own inputs, graph openness, runtime model, output artifacts, lifecycle, security boundary, optimization rules, measurements, and conformance cases. Make the tracker the concise operational index for baselines and next evidence.
 - **Test scenarios:**
   - The spec-index test requires all four delivery documents and validates their internal links.
@@ -195,7 +195,7 @@ flowchart TB
 - **Goal:** Make the full live distributable the active runtime metric while preserving isolated native-build feature attribution.
 - **Requirements:** R3, R4, R17-R19; KTD2, KTD3.
 - **Dependencies:** U1.
-- **Files:** `packages/declarative-components/scripts/measure-runtime-size.ts`; `packages/declarative-components/docs/runtime-performance.md`; `packages/declarative-components/docs/native-runtime-audit.md`; `packages/declarative-components/package.json`; `package.json`; `packages/declarative-components/tests/runtime-size.test.ts`; `.context/compound-engineering/ce-optimize/runtime-size/spec.yaml`; `.context/compound-engineering/ce-optimize/runtime-size/experiment-log.yaml`; `.context/compound-engineering/ce-optimize/live-runtime-size/spec.yaml`.
+- **Files:** `packages/html-next/scripts/measure-runtime-size.ts`; `packages/html-next/docs/runtime-performance.md`; `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/package.json`; `package.json`; `packages/html-next/tests/runtime-size.test.ts`; `.context/compound-engineering/ce-optimize/runtime-size/spec.yaml`; `.context/compound-engineering/ce-optimize/runtime-size/experiment-log.yaml`; `.context/compound-engineering/ce-optimize/live-runtime-size/spec.yaml`.
 - **Approach:** Emit separate named result groups for the complete live distributable, native-build capability fixtures, and module attribution. Add an assertion that the live artifact exposes the complete supported capability profile so closed-graph pruning cannot satisfy its gate. Preserve the completed `runtime-size` profile and its experiment history as native-build attribution evidence; create a fresh `live-runtime-size` profile whose primary metric is complete live gzip and whose mutable scope covers the audited live dependency path plus its measurement contract.
 - **Execution note:** Begin with a measurement-output test that fails when mode identity or the live capability assertion is absent.
 - **Test scenarios:**
@@ -210,7 +210,7 @@ flowchart TB
 - **Goal:** Give every byte-bearing live subsystem a current native-first disposition before further cuts are credited.
 - **Requirements:** R5-R8, R18, R19; KTD3, KTD7.
 - **Dependencies:** U2.
-- **Files:** `packages/declarative-components/docs/native-runtime-audit.md`; `packages/declarative-components/scripts/audit-native-features.ts`; `packages/declarative-components/scripts/measure-runtime-size.ts`; `packages/declarative-components/tests/native-feature-audit.test.ts`.
+- **Files:** `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/scripts/audit-native-features.ts`; `packages/html-next/scripts/measure-runtime-size.ts`; `packages/html-next/tests/native-feature-audit.test.ts`.
 - **Approach:** Attribute the browser-loader dependency graph, group modules by observable responsibility, probe the target browsers for candidate native facilities, and record the exact remaining gap. Separate universal reductions from conditional compatibility and build-only pruning. Ask the owner only when retaining or adding custom behavior requires a semantic choice.
 - **Test scenarios:**
   - Every module contributing to the live bundle belongs to one audited subsystem and the attribution sum matches the bundler metadata.
@@ -224,7 +224,7 @@ flowchart TB
 - **Goal:** Remove browser-redundant parsing and intermediate representation work while preserving arbitrary dynamic definitions and diagnostics.
 - **Requirements:** R5-R8, R18, R19; KTD3, KTD4, KTD7.
 - **Dependencies:** U3.
-- **Files:** `packages/declarative-components/src/browser-source.ts`; `packages/declarative-components/src/parser.ts`; `packages/declarative-components/src/contract.ts`; `packages/declarative-components/src/language.ts`; `packages/declarative-components/tests/parser.test.ts`; `packages/declarative-components/tests/browser-loader.test.ts`; `packages/declarative-components/tests/conformance/`.
+- **Files:** `packages/html-next/src/browser-source.ts`; `packages/html-next/src/parser.ts`; `packages/html-next/src/contract.ts`; `packages/html-next/src/language.ts`; `packages/html-next/tests/parser.test.ts`; `packages/html-next/tests/browser-loader.test.ts`; `packages/html-next/tests/conformance/`.
 - **Approach:** Measure DOM-to-source adaptation, declaration parsing, contract construction, and diagnostic generation separately. Prefer direct DOM state, native attribute reflection, template inertness, selector/query facilities, and shared normalized builders where they replace duplicated browser-only structures. Retain proposal grammar and stable diagnostics as explicit semantic work.
 - **Execution note:** Characterize browser-versus-Node definition and diagnostic parity before changing parser boundaries.
 - **Test scenarios:**
@@ -239,7 +239,7 @@ flowchart TB
 - **Goal:** Reduce universal runtime orchestration while retaining the complete reactive, structural, controller, hydration, and disconnect/reconnect contract.
 - **Requirements:** R5-R8, R18, R19; KTD3, KTD4, KTD7.
 - **Dependencies:** U3.
-- **Files:** `packages/declarative-components/src/runtime.ts`; `packages/declarative-components/src/reactivity.ts`; `packages/declarative-components/src/data.ts`; `packages/declarative-components/src/controller.ts`; `packages/declarative-components/tests/runtime.test.ts`; `packages/declarative-components/tests/browser-loader.test.ts`; `packages/declarative-components/scripts/measure-hydration.ts`.
+- **Files:** `packages/html-next/src/runtime.ts`; `packages/html-next/src/reactivity.ts`; `packages/html-next/src/data.ts`; `packages/html-next/src/controller.ts`; `packages/html-next/tests/runtime.test.ts`; `packages/html-next/tests/browser-loader.test.ts`; `packages/html-next/scripts/measure-hydration.ts`.
 - **Approach:** Attribute connection coordination, dependency tracking, scheduling, state projection, structural reconciliation, controller hosting, and hydration separately. Reuse shared document observation, DOM identity, native event propagation, native collections, microtasks, cancellation, and connection state wherever they preserve the full dynamic contract.
 - **Execution note:** Keep the cross-browser lifecycle and hydration identity tests active during every cut; size-only evidence is insufficient.
 - **Test scenarios:**
@@ -254,7 +254,7 @@ flowchart TB
 - **Goal:** Reduce the remaining universal validation, sanitization, styling, type/schema, and resource-graph layers through native composition and shared policy.
 - **Requirements:** R5-R9, R18, R19; KTD3, KTD7.
 - **Dependencies:** U3.
-- **Files:** `packages/declarative-components/src/validate.ts`; `packages/declarative-components/src/validity.ts`; `packages/declarative-components/src/sanitize.ts`; `packages/declarative-components/src/style.ts`; `packages/declarative-components/src/type-system.ts`; `packages/declarative-components/src/json-schema.ts`; `packages/declarative-components/src/graph.ts`; `packages/declarative-components/src/resolve.ts`; `packages/declarative-components/src/browser-loader.ts`; `packages/declarative-components/tests/validity.test.ts`; `packages/declarative-components/tests/native-feature-audit.test.ts`; `packages/declarative-components/tests/graph.test.ts`.
+- **Files:** `packages/html-next/src/validate.ts`; `packages/html-next/src/validity.ts`; `packages/html-next/src/sanitize.ts`; `packages/html-next/src/style.ts`; `packages/html-next/src/type-system.ts`; `packages/html-next/src/json-schema.ts`; `packages/html-next/src/graph.ts`; `packages/html-next/src/resolve.ts`; `packages/html-next/src/browser-loader.ts`; `packages/html-next/tests/validity.test.ts`; `packages/html-next/tests/native-feature-audit.test.ts`; `packages/html-next/tests/graph.test.ts`.
 - **Approach:** Evaluate each layer independently against browser behavior and measured hot paths. Preserve the approved custom sanitizer until target engines expose equivalent policy control. Preserve pure generalized validation where per-check native delegation violates the speed guardrail. Share parsing and policy representations when two retained layers encode the same rule.
 - **Test scenarios:**
   - Native controls and generalized elements retain cross-browser validity parity and selector behavior.
@@ -269,7 +269,7 @@ flowchart TB
 - **Goal:** Establish a defensible minimized full-capability release baseline and leave the other delivery goals independently actionable.
 - **Requirements:** R1-R19; KTD1-KTD7.
 - **Dependencies:** U1-U6.
-- **Files:** `packages/declarative-components/docs/delivery-goals.md`; `packages/declarative-components/docs/native-runtime-audit.md`; `packages/declarative-components/docs/runtime-performance.md`; `README.md`; `.github/workflows/ci.yml`.
+- **Files:** `packages/html-next/docs/delivery-goals.md`; `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/docs/runtime-performance.md`; `README.md`; `.github/workflows/ci.yml`.
 - **Approach:** Re-run the complete quality matrix, reconcile the audit with measured output, remove abandoned experiment code, and record the new full-live baseline. Preserve native-build and framework-conversion baselines and next evidence in their own tracker entries.
 - **Test scenarios:**
   - A full live graph exercising every supported capability loads through the public distributable in all three engines.
@@ -289,9 +289,9 @@ flowchart TB
 | Pull-request matrix | `pnpm verify:pr` | Foundation, package, dependency, consumer, and policy checks pass |
 | Live browsers | `pnpm test:browser` | Chromium, Firefox, and WebKit pass the complete live capability corpus |
 | Target parity | `pnpm test:targets` | Native, React, Vue, and Svelte preserve the shared observable contract |
-| Native audit | `pnpm --filter @nextwebwg/declarative-components audit:native` | Browser feature behavior and fallback evidence are current |
-| Runtime measurement | `pnpm --filter @nextwebwg/declarative-components measure:runtime` | Full live, native-build attribution, and module costs are reported under distinct identities |
-| Hydration | `pnpm --filter @nextwebwg/declarative-components measure:hydration` | Adoption preserves identity, edits, focus, and selection in every target engine |
+| Native audit | `pnpm --filter @nextwebwg/html-next audit:native` | Browser feature behavior and fallback evidence are current |
+| Runtime measurement | `pnpm --filter @nextwebwg/html-next measure:runtime` | Full live, native-build attribution, and module costs are reported under distinct identities |
+| Hydration | `pnpm --filter @nextwebwg/html-next measure:hydration` | Adoption preserves identity, edits, focus, and selection in every target engine |
 
 The target-parity command protects the behavior already implemented by each target; it does not claim graph-wide native-build or target-native converter completion. Those delivery goals own AE2-AE4 and expand this shared corpus as they are implemented.
 

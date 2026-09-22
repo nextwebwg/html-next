@@ -7,8 +7,8 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^@nextwebwg\/declarative-components$/,
-        replacement: fileURLToPath(new URL("./packages/declarative-components/src/index.ts", import.meta.url)),
+        find: /^@nextwebwg\/html-next$/,
+        replacement: fileURLToPath(new URL("./packages/html-next/src/index.ts", import.meta.url)),
       },
       {
         find: /^@nextwebwg\/html-forms$/,

@@ -12,14 +12,14 @@ const config = mergeConfig(baseConfig, {
 
 // mergeConfig concatenates arrays, so replace the base Node-test include list explicitly.
 config.test!.include = [
-  "packages/declarative-components/tests/browser-loader.test.ts",
-  "packages/declarative-components/tests/conformance.test.ts",
+  "packages/html-next/tests/browser-loader.test.ts",
+  "packages/html-next/tests/conformance.test.ts",
   "packages/html-forms/tests/forms.test.ts",
-  "packages/declarative-components/tests/runtime.test.ts",
-  "packages/declarative-components/tests/source-adapters.test.ts",
-  "packages/declarative-components/tests/validity.test.ts",
-  "packages/declarative-components/tests/component-library-smoke.test.ts",
-  "packages/declarative-components/tests/platform-scoping.test.ts",
+  "packages/html-next/tests/runtime.test.ts",
+  "packages/html-next/tests/source-adapters.test.ts",
+  "packages/html-next/tests/validity.test.ts",
+  "packages/html-next/tests/component-library-smoke.test.ts",
+  "packages/html-next/tests/platform-scoping.test.ts",
 ];
 
 export default config;

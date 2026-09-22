@@ -5,8 +5,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@nextwebwg/declarative-components": fileURLToPath(
-        new URL("../declarative-components/src/index.ts", import.meta.url),
+      "@nextwebwg/html-next": fileURLToPath(
+        new URL("../html-next/src/index.ts", import.meta.url),
       ),
     },
   },

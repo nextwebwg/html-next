@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const repositoryLicense = readFileSync(join(root, "LICENSE"), "utf8");
 const workspace = mkdtempSync(join(tmpdir(), "html-next-package-consumer-"));
 const useCommandShell = process.platform === "win32";
-const componentsPackage = "@nextwebwg/declarative-components";
+const componentsPackage = "@nextwebwg/html-next";
 const publicExports = [
   ".",
   "./runtime",
@@ -50,9 +50,9 @@ function specifier(path: typeof publicExports[number]): string {
 }
 
 describe("workspace package contracts", () => {
-  it("installs Declarative Components without the independent Forms package", () => {
-    const componentsTarball = pack("declarative-components");
-    const consumer = join(workspace, "declarative-components-consumer");
+  it("installs HTML Next without the independent Forms package", () => {
+    const componentsTarball = pack("html-next");
+    const consumer = join(workspace, "html-next-consumer");
     mkdirSync(consumer);
     writeFileSync(
       join(consumer, "package.json"),
@@ -74,7 +74,7 @@ describe("workspace package contracts", () => {
       consumer,
       "node_modules",
       "@nextwebwg",
-      "declarative-components",
+      "html-next",
     );
     const manifest = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8")) as {
       version: string;
@@ -91,7 +91,7 @@ describe("workspace package contracts", () => {
     expect(manifest.repository).toEqual({
       type: "git",
       url: "git+https://github.com/nextwebwg/html-next.git",
-      directory: "packages/declarative-components",
+      directory: "packages/html-next",
     });
     expect(manifest.publishConfig).toEqual({
       access: "public",
@@ -195,7 +195,7 @@ describe("workspace package contracts", () => {
 
   it("publishes every workspace package publicly on the next tag under MIT", () => {
     for (const packageDirectory of [
-      "declarative-components",
+      "html-next",
       "declarative-components-converter",
       "declarative-components-unplugin",
       "html-forms",

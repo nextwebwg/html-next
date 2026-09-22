@@ -1,5 +1,5 @@
 {
-  "name": "@nextwebwg/html-next",
+  "name": "html-next-workspace",
   "version": "0.0.0",
   "private": true,
   "description": "Reference implementations for HTML Next proposals.",
@@ -10,19 +10,19 @@
     "node": ">=22.13 <23 || >=24 <25"
   },
   "scripts": {
-    "audit:native": "pnpm --filter @nextwebwg/declarative-components audit:native",
+    "audit:native": "pnpm --filter @nextwebwg/html-next audit:native",
     "build": "pnpm --recursive --if-present build",
-    "build:example": "pnpm --filter @nextwebwg/declarative-components build:example",
-    "check:generated": "pnpm --filter @nextwebwg/declarative-components check:generated",
+    "build:example": "pnpm --filter @nextwebwg/html-next build:example",
+    "check:generated": "pnpm --filter @nextwebwg/html-next check:generated",
     "clean": "pnpm --recursive --if-present run clean",
-    "generate:dom": "pnpm --filter @nextwebwg/declarative-components generate:dom",
-    "generate:snapshots": "pnpm --filter @nextwebwg/declarative-components generate:snapshots",
+    "generate:dom": "pnpm --filter @nextwebwg/html-next generate:dom",
+    "generate:snapshots": "pnpm --filter @nextwebwg/html-next generate:snapshots",
     "lint": "oxlint --config oxlint.json --deny-warnings .",
-    "measure:runtime": "pnpm --filter @nextwebwg/declarative-components measure:runtime",
-    "measure:hydration": "pnpm --filter @nextwebwg/declarative-components measure:hydration",
-    "measure:performance": "pnpm --filter @nextwebwg/declarative-components measure:performance",
-    "measure:reactivity": "pnpm --filter @nextwebwg/declarative-components measure:reactivity",
-    "report:performance": "pnpm --filter @nextwebwg/declarative-components report:performance",
+    "measure:runtime": "pnpm --filter @nextwebwg/html-next measure:runtime",
+    "measure:hydration": "pnpm --filter @nextwebwg/html-next measure:hydration",
+    "measure:performance": "pnpm --filter @nextwebwg/html-next measure:performance",
+    "measure:reactivity": "pnpm --filter @nextwebwg/html-next measure:reactivity",
+    "report:performance": "pnpm --filter @nextwebwg/html-next report:performance",
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:consumer": "vitest run --config vitest.consumer.config.ts",
@@ -33,8 +33,8 @@
     "verify:pr": "pnpm verify:inner && pnpm build && pnpm test:package",
     "verify:compatibility": "pnpm test:browser && pnpm test:targets && pnpm test:consumer",
     "verify:extended": "pnpm verify:pr && pnpm verify:compatibility",
-    "verify:release": "pnpm --filter @nextwebwg/declarative-components check:release && pnpm test:consumer",
-    "release:dry-run": "pnpm --filter @nextwebwg/declarative-components release:dry-run"
+    "verify:release": "pnpm --filter @nextwebwg/html-next check:release && pnpm test:consumer",
+    "release:dry-run": "pnpm --filter @nextwebwg/html-next release:dry-run"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -6,12 +6,12 @@ and verification live at the repository root.
 
 | Package | Proposal | Current scope |
 | --- | --- | --- |
-| [`@nextwebwg/declarative-components`](./packages/declarative-components) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Live browser runtime, the shared compiler and validation, and native-DOM/CSS/package generation |
+| [`@nextwebwg/html-next`](./packages/html-next) | [Declarative HTML Components](https://nextwebwg.org/html-next/); validity from [HTML Forms](https://nextwebwg.org/html-forms/) | Live browser runtime, the shared compiler, validity on any element, and native-DOM/CSS/package generation |
 | [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Vue conversion (React in development) |
 | [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
 
-The Declarative HTML Components package authors a component once as inert,
+The `@nextwebwg/html-next` package authors a component once as inert,
 browser-parseable HTML. The same definition can run directly in a browser or compile to
 native DOM, CSS, types, and inspectable package artifacts. The component language is defined by the
 [proposal](https://nextwebwg.org/html-next/); this repository is its JavaScript tooling, verified by
@@ -32,7 +32,7 @@ modes:
 
 | Mode | Package | Input | Output |
 | --- | --- | --- | --- |
-| **Live browser runtime** — supports any graph | [`@nextwebwg/declarative-components`](./packages/declarative-components) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
+| **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
 | **Framework conversion** — to Vue (React in development) | [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | A component graph plus a Vue target | Vue single-file components that import only Vue and their own controllers |
 
@@ -50,7 +50,7 @@ behavior.
 
 The detailed contracts and independent progress tracks are in the
 [proposal](https://nextwebwg.org/html-next/) and
-[delivery goal ledger](./packages/declarative-components/docs/delivery-goals.md).
+[delivery goal ledger](./packages/html-next/docs/delivery-goals.md).
 
 ## Install and verify
 
@@ -123,7 +123,7 @@ component and controller dependencies, and the public browser loader follows tha
 <x-app></x-app>
 
 <script type="module">
-  import { startBrowserComponents } from "@nextwebwg/declarative-components/browser-loader";
+  import { startBrowserComponents } from "@nextwebwg/html-next/browser-loader";
   await startBrowserComponents();
 </script>
 ```
@@ -139,7 +139,7 @@ added later are registered and lowered, and reconnect/disconnect cleanup is bala
 Applications can call the lower-level loader and runtime APIs when they need explicit
 lifecycle control.
 
-The runnable [live graph example](./packages/declarative-components/examples/poc/README.md)
+The runnable [live graph example](./packages/html-next/examples/poc/README.md)
 uses this public API.
 
 ## Browser compatibility layer
@@ -166,7 +166,7 @@ scalar props. CI records zero live-parser and full-runtime contribution for thos
 fixtures. Keyed lists, declared reads, and controller lifecycle currently use the
 general runtime fallback. These fixtures attribute feature cost; the build product operates on an
 application or library graph and should share its required support across that graph. The measured
-inventory and owner decisions live in the [native runtime audit](./packages/declarative-components/docs/native-runtime-audit.md).
+inventory and owner decisions live in the [native runtime audit](./packages/html-next/docs/native-runtime-audit.md).
 
 The current public loader is one predictable bundle. A future packaging experiment may split
 compatibility features into progressively loaded modules selected by browser capability and
@@ -184,13 +184,13 @@ html-next build components/app.html --out-dir generated --target vue --target st
 ```
 
 Until the package is published, substitute
-`corepack pnpm exec tsx packages/declarative-components/src/cli.ts` for `html-next`.
+`corepack pnpm exec tsx packages/html-next/src/cli.ts` for `html-next`.
 `inspect` reports component, controller, and transitive module edges. `build`
 follows the complete graph and emits deterministic artifacts plus `html.manifest.json`,
 which is a build inventory—not a second component contract.
 
 Generated targets preserve the definition's native root; they do not add a component
-wrapper. The checked-in [button output](./packages/declarative-components/examples/generated)
+wrapper. The checked-in [button output](./packages/html-next/examples/generated)
 demonstrates each target.
 
 ## Types and validation
@@ -206,7 +206,7 @@ browser behavior without creating and configuring a detached control for every v
 Authors write ordinary `:valid`, `:invalid`, and `:user-invalid` selectors; the runtime and
 generated CSS carry the compatibility rewrite for browsers that cannot apply those pseudo-classes
 to arbitrary elements. Runtime size and speed changes follow the
-[performance guardrails](./packages/declarative-components/docs/runtime-performance.md).
+[performance guardrails](./packages/html-next/docs/runtime-performance.md).
 
 ## Package and framework output
 
@@ -227,9 +227,9 @@ only application resolution and trust differ.
 
 - [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
 - [Converter requirements](./packages/declarative-components-converter/docs/requirements.md)
-- [Conformance corpus](./packages/declarative-components/tests/conformance/README.md)
-- [Style-scoping note](./packages/declarative-components/docs/style-scoping.md)
-- [Historical component-generation plan](./packages/declarative-components/docs/mvp-plan.md)
+- [Conformance corpus](./packages/html-next/tests/conformance/README.md)
+- [Style-scoping note](./packages/html-next/docs/style-scoping.md)
+- [Historical component-generation plan](./packages/html-next/docs/mvp-plan.md)
 
 The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
 motivates the proposal. This repository and its conformance corpus are library-agnostic.

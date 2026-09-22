@@ -9,7 +9,7 @@ import {
   type ComponentGraphNode,
   type ElementNode,
   type TemplateNode,
-} from "@nextwebwg/declarative-components";
+} from "@nextwebwg/html-next";
 import { createUnplugin } from "unplugin";
 
 export const componentsModule = "virtual:html-next/components";
@@ -181,11 +181,11 @@ function collectInvocationEdges(
 
 function supportSource(imports: ReadonlySet<string>): string {
   const lines: string[] = [];
-  if (imports.has("@nextwebwg/declarative-components/generated-runtime")) {
-    lines.push('export { manageGeneratedProps } from "@nextwebwg/declarative-components/generated-runtime";');
+  if (imports.has("@nextwebwg/html-next/generated-runtime")) {
+    lines.push('export { manageGeneratedProps } from "@nextwebwg/html-next/generated-runtime";');
   }
-  if (imports.has("@nextwebwg/declarative-components/runtime")) {
-    lines.push('export { manageComponentLifecycle } from "@nextwebwg/declarative-components/runtime";');
+  if (imports.has("@nextwebwg/html-next/runtime")) {
+    lines.push('export { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";');
   }
   return lines.length === 0 ? "export {};\n" : `${lines.join("\n")}\n`;
 }
@@ -193,8 +193,8 @@ function supportSource(imports: ReadonlySet<string>): string {
 function routeSupportImports(module: string, imports: Set<string>): string {
   let routed = module;
   for (const source of [
-    "@nextwebwg/declarative-components/generated-runtime",
-    "@nextwebwg/declarative-components/runtime",
+    "@nextwebwg/html-next/generated-runtime",
+    "@nextwebwg/html-next/runtime",
   ]) {
     if (!routed.includes(source)) continue;
     imports.add(source);
