@@ -66,6 +66,9 @@ catalogs:
     playwright:
       specifier: 1.63.0
       version: 1.63.0
+    postcss:
+      specifier: 8.5.28
+      version: 8.5.28
     pota:
       specifier: 0.7.82
       version: 0.7.82
@@ -134,6 +137,9 @@ importers:
       parse5:
         specifier: 'catalog:'
         version: 8.0.1
+      postcss:
+        specifier: 'catalog:'
+        version: 8.5.28
       typescript-compiler:
         specifier: npm:@typescript/typescript6@6.0.2
         version: '@typescript/typescript6@6.0.2'

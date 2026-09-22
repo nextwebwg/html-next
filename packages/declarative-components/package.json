@@ -86,8 +86,9 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "typescript-compiler": "npm:@typescript/typescript6@6.0.2",
-    "parse5": "catalog:"
+    "parse5": "catalog:",
+    "postcss": "catalog:",
+    "typescript-compiler": "npm:@typescript/typescript6@6.0.2"
   },
   "devDependencies": {
     "@amadeus-it-group/tansu": "catalog:",

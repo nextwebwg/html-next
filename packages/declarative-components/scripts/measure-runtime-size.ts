@@ -37,7 +37,7 @@ const liveCapabilityModules = {
   proposalParser: "packages/declarative-components/src/parser.ts",
   reactivity: "packages/declarative-components/src/reactivity.ts",
   sanitization: "packages/declarative-components/src/sanitize.ts",
-  scopedStyles: "packages/declarative-components/src/style.ts",
+  scopedStyles: "packages/declarative-components/src/component-styles.ts",
   typeSystem: "packages/declarative-components/src/type-system.ts",
 } as const;
 

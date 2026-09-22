@@ -277,7 +277,6 @@ function renderNode(
   if (svg && node.name !== "foreignObject") counter.svgParents.add(variable);
   renderAttributes(node, variable, lines, props, valueCounter, "  ", direct, directProps);
   if (direct !== undefined) collectDirectEvents(node, variable, direct);
-  lines.push(`  ${variable}.setAttribute("data-component", ${js(owner)});`);
   for (const child of node.children) {
     renderNode(child, lines, counter, variable, props, valueCounter, owner, slots, direct, directProps);
   }
@@ -433,10 +432,7 @@ export function generateVanilla(
     directPropRender,
   );
   if (directRender !== undefined) collectDirectEvents(template, "element", directRender);
-  lines.push(
-    `  element.setAttribute("data-component", ${js(contract.tag)});`,
-    `  element.setAttribute("data-component-root", ${js(contract.tag)});`,
-  );
+  lines.push(`  element.setAttribute("data-component", ${js(contract.tag)});`);
   const counter: RenderCounter = { value: 0, svgParents: new Set() };
   for (const child of template.children) {
     renderNode(

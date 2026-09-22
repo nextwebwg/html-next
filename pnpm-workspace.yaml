@@ -29,6 +29,7 @@ catalog:
   mobx: 6.15.3
   oxlint: 1.83.0
   parse5: 8.0.1
+  postcss: 8.5.28
   playwright: 1.63.0
   pota: 0.7.82
   reactive-framework-test-suite: 0.0.2

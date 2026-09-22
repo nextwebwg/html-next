@@ -27,6 +27,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/declarative-components/src/validity.ts",
   ],
   styleAndContentPolicy: [
+    "packages/declarative-components/src/component-styles.ts",
     "packages/declarative-components/src/sanitize.ts",
     "packages/declarative-components/src/style.ts",
   ],
