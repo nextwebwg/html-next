@@ -11,7 +11,7 @@ The live runtime supports every declarative capability. Builds analyze an applic
 graph and share the support that graph requires; framework conversions preserve the same observable
 contract through target-native reactivity and small compatibility bridges.
 
-See the [delivery-mode specification](docs/spec/delivery-modes.md) and
+See the [proposal](https://nextwebwg.org/html-next/) and
 [independent goal ledger](docs/delivery-goals.md).
 
 The package is experimental and is not published yet. From the repository root:

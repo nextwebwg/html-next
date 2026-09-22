@@ -1,7 +1,7 @@
 # Style scoping: implementation
 
 This note explains how the reference implementation realizes the normative
-[styling contract](./spec/styling.md), including `:slotted()`. Matching is defined by
+[styling contract](https://nextwebwg.org/html-next/styling) in the proposal, including `:slotted()`. Matching is defined by
 **authorship**; native `@scope` is an optimization used only where it produces the identical
 result.
 

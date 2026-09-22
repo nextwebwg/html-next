@@ -13,9 +13,9 @@ and verification live at the repository root.
 
 The Declarative HTML Components package authors a component once as inert,
 browser-parseable HTML. The same definition can run directly in a browser or compile to
-native DOM, React, Vue, Svelte, CSS, types, and inspectable package artifacts. Its exact
-behavior is defined by the package's [reference specification](./packages/declarative-components/docs/spec/index.md),
-[support profile](./packages/declarative-components/docs/spec/support.json), and conformance tests.
+native DOM, CSS, types, and inspectable package artifacts. The component language is defined by the
+[proposal](https://nextwebwg.org/html-next/); this repository is its JavaScript tooling, verified by
+conformance tests.
 
 The HTML Forms package operates on native `HTMLFormElement` and submitter objects. Declarative
 Components consumes that API for its form declarations; the Forms package has no component,
@@ -49,7 +49,7 @@ must produce the same observable native DOM, state, events, validation, lifecycl
 behavior.
 
 The detailed contracts and independent progress tracks are in the
-[delivery-mode specification](./packages/declarative-components/docs/spec/delivery-modes.md) and
+[proposal](https://nextwebwg.org/html-next/) and
 [delivery goal ledger](./packages/declarative-components/docs/delivery-goals.md).
 
 ## Install and verify
@@ -104,8 +104,7 @@ export default function controller({ refs, state }) {
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
 named and data-derived slots, typed data sources, native form participation, and generalized
-validation. See the [specification modules](./packages/declarative-components/docs/spec/index.md)
-for the complete syntax.
+validation. See the [proposal](https://nextwebwg.org/html-next/) for the complete syntax.
 
 ## Run a live component graph
 
@@ -226,8 +225,8 @@ only application resolution and trust differ.
 
 ## Repository map
 
-- [Reference specification](./packages/declarative-components/docs/spec/index.md)
-- [Support profile](./packages/declarative-components/docs/spec/support.json)
+- [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
+- [Converter requirements](./packages/declarative-components-converter/docs/requirements.md)
 - [Conformance corpus](./packages/declarative-components/tests/conformance/README.md)
 - [Style-scoping note](./packages/declarative-components/docs/style-scoping.md)
 - [Historical component-generation plan](./packages/declarative-components/docs/mvp-plan.md)
