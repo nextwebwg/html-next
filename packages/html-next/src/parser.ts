@@ -466,12 +466,19 @@ function readDeclarations(
       const declaration: {
         kind: "state";
         name: string;
+        type?: string;
         value?: string;
         expression?: CompiledExpression;
       } = {
         kind,
         name,
       };
+      // A declared type states what the state holds, as a prop's does.
+      const stateType = attr(element, "type");
+      if (stateType !== undefined) {
+        parseTypeAttribute(stateType);
+        declaration.type = stateType;
+      }
       if (literal !== undefined) declaration.value = literal;
       if (expression !== undefined) declaration.expression = expression;
       declarations.push(declaration);
