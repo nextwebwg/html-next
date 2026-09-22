@@ -43,7 +43,7 @@ const HELPERS: readonly (readonly [name: string, source: string])[] = [
   // Vue types intrinsic attributes more narrowly than the strings the platform accepts.
   ["attr", `  attr: (v: unknown): any => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),`],
   ["enumerated", `  enumerated: (v: unknown): any => typeof v === "boolean" ? String(v) : hn.attr(v),`],
-  ["call", `  call: (fn: string, ...args: unknown[]): unknown => {
+  ["call", `  call: (fn: string, ...args: unknown[]): any => {
     if (fn === "format") {
       let index = 1;
       return typeof args[0] === "string" ? args[0].replace(/%s/g, () => index < args.length ? hn.text(args[index++]) : "%s") : undefined;
@@ -143,9 +143,13 @@ function compiled(plan: { ast: ExpressionNode } | undefined, names: ReadonlyMap<
   return expression(plan.ast, names);
 }
 
-/** A double-quoted HTML attribute value (Vue decodes character references in attributes). */
+/**
+ * A double-quoted HTML attribute value. Only `"` and an `&` that could begin a character reference
+ * are escaped, so expressions such as `a && b` stay readable to Vue's type checker, which does not
+ * decode references.
+ */
 function attributeValue(value: string): string {
-  return `"${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`;
+  return `"${value.replace(/&(?=[#A-Za-z])/g, "&amp;").replace(/"/g, "&quot;")}"`;
 }
 
 /**
@@ -262,7 +266,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       if (attribute.name === "html") fail("HT032", "`$html` is not supported in Vue conversion yet.");
       content = `{{ hn.text(${compiled(attribute.expressionPlan, names.template, attribute.expression)}) }}`;
     } else if (attribute.kind === "property") {
-      attributes.push(`:${attribute.name}.prop=${bound(compiled(attribute.expressionPlan, names.template, attribute.expression))}`);
+      // DOM property types are narrower than HTML Next values (a prop may be null).
+      attributes.push(`:${attribute.name}.prop=${bound(`(${compiled(attribute.expressionPlan, names.template, attribute.expression)}) as any`)}`);
     } else if (attribute.target === "class") {
       classes.push(`${quote(attribute.name)}: hn.t(${compiled(attribute.expressionPlan, names.template, attribute.expression)})`);
     } else if (attribute.target === "style") {
@@ -285,7 +290,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   if (node.ref !== undefined) {
     context.usesRefs.value = true;
-    attributes.push(`:ref=${bound(`(element) => { refs[${quote(node.ref)}] = element }`)}`);
+    attributes.push(`:ref=${bound(`(element) => { refs[${quote(node.ref)}] = element as Element }`)}`);
   }
   if (isRoot) {
     // The consumer's attributes win over the template's literals and lose to its bindings, as in

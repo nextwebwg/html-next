@@ -123,10 +123,10 @@ describe("generateComponent", () => {
     assert.match(byPath.get("vanilla/DemoAction.js")!, /=== undefined \? false/);
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
     const vue = byPath.get("vue/DemoAction.vue")!;
-    assert.match(vue, /:formAction\.prop="props\.destination"/);
+    assert.match(vue, /:formAction\.prop="\(props\.destination\) as any"/);
     assert.match(vue, /:disabled="hn\.attr\(props\.disabled\)"/);
     assert.match(vue, /:data-selected="hn\.attr\(props\.selected\)"/);
-    assert.match(vue, /title="A &amp; &quot;quote&quot;"/);
+    assert.match(vue, /title="A & &quot;quote&quot;"/);
     assert.match(vue, /Text &amp; &#123;literal&#125;/);
   });
 
