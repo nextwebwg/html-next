@@ -39,10 +39,19 @@ function directory(url: string): string {
  * so sibling components and shared controller modules in one package resolve, and nothing outside
  * the package is read or copied.
  */
+function hasPackageJson(directoryURL: URL): boolean {
+  try {
+    return existsSync(fileURLToPath(new URL("package.json", directoryURL)));
+  } catch {
+    // Not a local path on this platform (a synthetic file: URL); treat it as outside any package.
+    return false;
+  }
+}
+
 function packageRoot(url: string): string {
   if (!url.startsWith("file:")) return directory(url);
   for (let candidate = new URL("./", url); ; candidate = new URL("../", candidate)) {
-    if (existsSync(fileURLToPath(new URL("package.json", candidate)))) return candidate.href;
+    if (hasPackageJson(candidate)) return candidate.href;
     if (new URL("../", candidate).href === candidate.href) return directory(url);
   }
 }
