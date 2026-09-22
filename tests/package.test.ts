@@ -86,7 +86,7 @@ describe("workspace package contracts", () => {
       publishConfig?: { access: string; tag: string; registry: string };
     };
     expect(manifest.version).toBe("1.0.0-alpha.0");
-    expect(manifest.private).toBe(true);
+    expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
       type: "git",
@@ -193,7 +193,7 @@ describe("workspace package contracts", () => {
     ).toBe("ok");
   });
 
-  it("keeps every workspace package on the private MIT contract", () => {
+  it("publishes every workspace package publicly on the next tag under MIT", () => {
     for (const packageDirectory of [
       "declarative-components",
       "declarative-components-converter",
@@ -203,8 +203,9 @@ describe("workspace package contracts", () => {
       const packageRoot = join(root, "packages", packageDirectory);
       const manifest = JSON.parse(
         readFileSync(join(packageRoot, "package.json"), "utf8"),
-      ) as { private?: boolean; license?: string };
-      expect(manifest.private, packageDirectory).toBe(true);
+      ) as { private?: boolean; license?: string; publishConfig?: { access: string; tag: string } };
+      expect(manifest.private, packageDirectory).toBeUndefined();
+      expect(manifest.publishConfig, packageDirectory).toMatchObject({ access: "public", tag: "next" });
       expect(manifest.license, packageDirectory).toBe("MIT");
       expect(readFileSync(join(packageRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
     }
