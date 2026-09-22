@@ -1,11 +1,11 @@
 /**
- * Real-world proof (plan B smoke test): a representative subset of the reviewed Looma component
+ * Real-world proof (plan B smoke test): a representative subset of a reviewed third-party component
  * library, lowered through the current live runtime (`src/runtime.ts`, `lowerDocument`) in a real
  * browser. Confirms the post-U6 shrunk runtime still parses and lowers genuine third-party
  * declarative components to their native roots with structured projected content preserved.
  *
- * Run with:  HTMLNEXT_LOOMA_TEST=1 pnpm exec vitest run --config vitest.browser.config.ts \
- *              packages/declarative-components/tests/looma-smoke.test.ts
+ * Run with:  HTMLNEXT_LIBRARY_TEST=1 pnpm exec vitest run --config vitest.browser.config.ts \
+ *              packages/declarative-components/tests/component-library-smoke.test.ts
  */
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -16,9 +16,9 @@ import { build } from "esbuild";
 import { chromium } from "playwright";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
-const enabled = process.env.HTMLNEXT_LOOMA_TEST === "1";
+const enabled = process.env.HTMLNEXT_LIBRARY_TEST === "1";
 const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
-const components = new URL("../examples/looma/components/", import.meta.url);
+const components = new URL("../examples/component-library/components/", import.meta.url);
 
 // Pure declarative components — no controllers, no cross-component links.
 const DECLARATIVE_TAGS = [
@@ -26,7 +26,7 @@ const DECLARATIVE_TAGS = [
   "ui-search-shell", "ui-search-result-row", "ui-top-bar", "ui-form-field",
 ] as const;
 
-describe.skipIf(!enabled)("reviewed Looma declarative components (smoke)", () => {
+describe.skipIf(!enabled)("reviewed component library (smoke)", () => {
   let directory = "";
   let bundle = "";
   let controllerBundle = "";
@@ -34,7 +34,7 @@ describe.skipIf(!enabled)("reviewed Looma declarative components (smoke)", () =>
   let disclosureDefinition = "";
 
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), "html-next-looma-smoke-"));
+    directory = await mkdtemp(join(tmpdir(), "html-next-library-smoke-"));
     bundle = join(directory, "runtime.js");
     await build({
       entryPoints: [runtimeUrl.pathname], bundle: true, format: "iife", globalName: "HtmlRuntime",
@@ -44,7 +44,7 @@ describe.skipIf(!enabled)("reviewed Looma declarative components (smoke)", () =>
     await build({
       stdin: {
         contents: `import controller from ${JSON.stringify(new URL("ui-disclosure.js", components).pathname)};\n`
-          + `globalThis.LoomaDisclosure = controller;`,
+          + `globalThis.DisclosureController = controller;`,
         resolveDir: components.pathname,
       },
       bundle: true, format: "iife", outfile: controllerBundle, platform: "browser", target: ["es2022"],
@@ -123,7 +123,7 @@ describe.skipIf(!enabled)("reviewed Looma declarative components (smoke)", () =>
         window.HtmlRuntime.observeDocument(document, {
           onError(error) { runtimeErrors.push(error.message); },
           onConnect(root, definition) {
-            const controller = window.LoomaDisclosure;
+            const controller = window.DisclosureController;
             if (definition.contract.tag !== "ui-disclosure" || controller == null) return;
             window.HtmlRuntime.setControllerModule(root, Promise.resolve({ default: controller }));
             return controller(window.HtmlRuntime.getComponentHost(root));

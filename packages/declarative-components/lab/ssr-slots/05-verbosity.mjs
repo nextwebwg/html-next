@@ -1,6 +1,7 @@
-// R9: how much of a lowered Looma docs page is the provenance record today.
+// R9: how much of a lowered component-library docs page is the provenance record.
 import { chromium } from "playwright";
-const url = process.argv[2] ?? "http://127.0.0.1:4180/looma/components/ui-dialog";
+const url = process.argv[2];
+if (!url) throw new Error("Usage: node 05-verbosity.mjs <URL of a lowered page>");
 const browser = await chromium.launch(); const page = await browser.newPage();
 await page.goto(url, { waitUntil: "networkidle" });
 const r = await page.evaluate(() => {
