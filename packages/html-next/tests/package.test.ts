@@ -50,7 +50,7 @@ describe("component package assembler", () => {
     assert.match(await readFile(`${first.outDirectory}/components/ui-overlay.js`, "utf8"), /\.\/overlay-helper\.js/);
     // A source keeps its dependency links, which resolve beside it.
     assert.match(await readFile(`${first.outDirectory}/components/ui-overlay.html`, "utf8"), /<link rel="component" href="\.\/ui-button\.html">/);
-    assert.match(await readFile(`${first.outDirectory}/vue/UiOverlay.vue`, "utf8"), /from "\.\.\/components\/ui-overlay\.js"/);
+    assert.match(await readFile(`${first.outDirectory}/vue/UiOverlay.vue`, "utf8"), /from '\.\.\/components\/ui-overlay\.js'/);
     assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --component-accent: rebeccapurple; }\n");
 
     const entry = await readFile(`${first.outDirectory}/dist/index.js`, "utf8");

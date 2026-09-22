@@ -17,12 +17,12 @@ import type {
   TemplateNode,
 } from "../template.js";
 import type { WritablePathSegment } from "../expression.js";
-import postcss from "postcss";
 import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { normalizeType, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, propKey, propTypeSource, quote, typeSource } from "./shared.js";
+import { formatVue } from "./vue-format.js";
 import { category, Lowering, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 
 const VUE_APIS = ["computed", "onBeforeUnmount", "onMounted", "ref", "shallowRef", "useTemplateRef", "watchEffect"] as const;
@@ -114,8 +114,15 @@ function isComponentTag(name: string): boolean {
   return name.includes("-") && getDomInterface(name) === undefined;
 }
 
+/**
+ * Adjacent elements go on separate lines, for the formatter to lay out; Vue drops whitespace that
+ * holds a newline between elements, so the rendering is unchanged. Text keeps its own whitespace.
+ */
 function renderChildren(nodes: readonly TemplateNode[], names: Names, context: Context): string {
-  return nodes.map((child) => renderNode(child, names, context)).join("");
+  return nodes.map((child, index) => {
+    const markup = renderNode(child, names, context);
+    return index > 0 && child.kind !== "text" && nodes[index - 1]!.kind !== "text" ? `\n${markup}` : markup;
+  }).join("");
 }
 
 /** Names bound by `$each`, `$with`, and `$match`, read the same way in template and script. */
@@ -139,7 +146,8 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
     const name = node.nameExpression !== undefined
       ? ` :name=${bound(lowering.value(ast(node.nameExpression, "slot name"), names.template))}`
       : node.name === undefined ? "" : ` name=${quote(node.name)}`;
-    return `<slot${name}>${renderChildren(node.fallback ?? [], names, context)}</slot>`;
+    const fallback = renderChildren(node.fallback ?? [], names, context);
+    return fallback === "" ? `<slot${name} />` : `<slot${name}>${fallback}</slot>`;
   }
   const flow = node.flow;
   if (flow?.kind === "each") {
@@ -175,7 +183,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context): string 
         const test = armFlow?.kind === "when" ? lowering.condition(ast(armFlow.testPlan, armFlow.test), local.template) : undefined;
         const directive = test === undefined ? "v-else" : `${index === 0 ? "v-if" : "v-else-if"}=${bound(test)}`;
         return wrap(armBody, [directive], local, context);
-      }).join("");
+      }).join("\n");
     const inner = node.name === "template" ? arms : `<${node.name}${literalAttributes(node)}>${arms}</${node.name}>`;
     if (value === undefined) return inner;
     return `<template v-for=${bound(`${flow.alias} in [${lowering.value(value, names.template)}]`)}>${inner}</template>`;
@@ -265,6 +273,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const children = content ?? renderChildren(node.children, names, context);
+  // An empty component closes itself, as Vue's style guide has it.
+  if (component && children === "") return `${open.slice(0, -1)} />`;
   return `${open}${children}</${name}>`;
 }
 
@@ -487,14 +497,15 @@ export function generateVue(definition: ComponentDefinition, version: string): s
       "/** Dispatches a component event to Vue listeners and, for controllers and page code, on the root. */",
       "function dispatch(name: string, detail?: unknown): boolean {",
       ...(events.length === 0 ? [] : [
-        `  const declared = ${JSON.stringify(Object.fromEntries(events.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))} as Record<string, EventInit | undefined>;`,
+        `  const declared: Record<string, EventInit | undefined> = ${JSON.stringify(Object.fromEntries(events.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))};`,
         "  const checks: Record<string, (detail: unknown) => boolean> = {",
-        ...events.map((event) => `    ${quote(event.name)}: (detail: unknown) => ${typeCheck(parseTypeExpression(event.type), "detail")},`),
+        ...events.map((event) => `    ${quote(event.name)}: (detail) => ${typeCheck(parseTypeExpression(event.type), "detail").replace(/^\((.*)\)$/s, "$1")},`),
         "  };",
         "  if (detail !== undefined && checks[name] !== undefined && !checks[name]!(detail)) {",
         "    throw new TypeError(`HR002: Event \\`${name}\\` detail does not satisfy its declared type.`);",
         "  }",
-        "  (emit as (name: string, detail: unknown) => void)(name, detail);",
+        "  const emitEvent = emit as (name: string, detail: unknown) => void;",
+        "  emitEvent(name, detail);",
       ]),
       `  return root.value?.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ${events.length === 0 ? "" : "...declared[name], "}detail })) ?? true;`,
       "}",
@@ -536,99 +547,12 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     "</script>",
     "",
     "<template>",
-    formatTemplate(rootMarkup, "  "),
+    rootMarkup,
     "</template>",
   ];
-  if (styles.css !== "") lines.push("", "<style scoped>", formatStyles(styles.css), "</style>");
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/(?<=<script setup lang="ts">\n)\n/, "").replace(/\n\n(?=<\/script>)/, "\n")}\n`;
-}
-
-/**
- * Indents generated markup the way a Vue author lays it out: one element per line, text kept inline
- * with its element, and a long start tag's attributes one per line. Vue's compiler drops the
- * whitespace-only text this adds between elements.
- */
-function formatTemplate(markup: string, indent: string): string {
-  interface Element { readonly open: string; readonly name: string; readonly children: Node[]; closed: boolean }
-  type Node = Element | string;
-  const root: Element = { open: "", name: "", children: [], closed: true };
-  const stack: Element[] = [root];
-  const tag = /<(\/?)([A-Za-z][\w-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/y;
-  let index = 0;
-  while (index < markup.length) {
-    const next = markup.indexOf("<", index);
-    if (next !== index) {
-      const text = markup.slice(index, next === -1 ? undefined : next);
-      stack.at(-1)!.children.push(text);
-      if (next === -1) break;
-      index = next;
-      continue;
-    }
-    tag.lastIndex = index;
-    const match = tag.exec(markup);
-    if (match === null) {
-      stack.at(-1)!.children.push("<");
-      index += 1;
-      continue;
-    }
-    index = tag.lastIndex;
-    const [whole, closing, name] = match;
-    if (closing) {
-      while (stack.length > 1 && stack.pop()!.name !== name);
-      continue;
-    }
-    const element: Element = { open: whole, name: name!, children: [], closed: isVoidElement(name!) };
-    stack.at(-1)!.children.push(element);
-    if (!element.closed) stack.push(element);
-  }
-  // An empty slot or component closes itself, as Vue authors write them.
-  const selfClosing = (element: Element): boolean =>
-    !element.closed && element.children.length === 0 && (element.name === "slot" || /^[A-Z]/.test(element.name));
-  const close = (element: Element): string => element.closed || selfClosing(element) ? "" : `</${element.name}>`;
-  const opening = (element: Element, open: string): string => selfClosing(element) ? open.replace(/>$/, " />").replace(/\n( *) \/>$/, "\n$1/>") : open;
-  const inline = (node: Node): string => typeof node === "string" ? node
-    : `${opening(node, node.open)}${node.children.map(inline).join("")}${close(node)}`;
-  const openTag = (element: Element, depth: string): string => {
-    if (element.open.length + depth.length <= 100) return element.open;
-    const attributes = element.open.slice(element.name.length + 1, -1).match(/[^\s=]+(?:="[^"]*"|='[^']*')?/g) ?? [];
-    return `<${element.name}\n${attributes.map((attribute) => `${depth}  ${attribute}`).join("\n")}\n${depth}>`;
-  };
-  const print = (element: Element, depth: string): string => {
-    const children = element.children.filter((child) => typeof child !== "string" || child.trim() !== "");
-    const hasText = children.some((child) => typeof child === "string");
-    if (element.closed || children.length === 0 || hasText) {
-      const body = element.children.map(inline).join("");
-      const line = `${depth}${opening(element, element.open)}${body}${close(element)}`;
-      if (line.length <= 100 || hasText) return line;
-      return `${depth}${opening(element, openTag(element, depth))}${body}${close(element)}`;
-    }
-    return [
-      `${depth}${openTag(element, depth)}`,
-      ...children.map((child) => print(child as Element, `${depth}  `)),
-      `${depth}</${element.name}>`,
-    ].join("\n");
-  };
-  return root.children
-    .filter((child): child is Element => typeof child !== "string")
-    .map((child) => print(child, indent))
-    .join("\n");
-}
-
-/** Re-indents compiled component CSS two spaces per level, one blank line between top-level rules. */
-function formatStyles(css: string): string {
-  const root = postcss.parse(css);
-  root.walk((node) => {
-    let depth = 0;
-    for (let parent = node.parent as postcss.Node | undefined; parent !== undefined && parent.type !== "root"; parent = parent.parent as postcss.Node | undefined) depth++;
-    const indent = "  ".repeat(depth);
-    node.raws.before = node.parent === root ? (node === root.first ? "" : "\n\n") : `\n${indent}`;
-    if (node.type === "rule" || node.type === "atrule") {
-      node.raws.after = `\n${indent}`;
-      if (node.type === "rule") node.raws.between = " ";
-    }
-    if (node.type === "decl") node.raws.between = ": ";
-  });
-  return root.toString().trim();
+  if (styles.css !== "") lines.push("", "<style scoped>", styles.css, "</style>");
+  const source = `${lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/(?<=<script setup lang="ts">\n)\n/, "").replace(/\n\n(?=<\/script>)/, "\n")}\n`;
+  return formatVue(source, `${componentName(contract.tag)}.vue`);
 }
 
 function defaultSource(value: unknown): string {

@@ -196,6 +196,18 @@ importers:
 
   packages/html-next:
     dependencies:
+      '@dprint/formatter':
+        specifier: ^0.5.1
+        version: 0.5.1
+      '@dprint/typescript':
+        specifier: ^0.96.1
+        version: 0.96.1
+      dprint-plugin-malva:
+        specifier: ^0.16.0
+        version: 0.16.0
+      dprint-plugin-markup:
+        specifier: ^0.27.3
+        version: 0.27.3
       parse5:
         specifier: 'catalog:'
         version: 8.0.1
@@ -405,6 +417,12 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@dprint/formatter@0.5.1':
+    resolution: {integrity: sha512-cdZUrm0iv/FnnY3CKE2dEcVhNEzrC551aE2h2mTFwQCRBrqyARLDnb7D+3PlXTUVp3s34ftlnGOVCmhLT9DeKA==}
+
+  '@dprint/typescript@0.96.1':
+    resolution: {integrity: sha512-mz/nINSFQh1R5i2Qy90SWOCCK4SgNGRkNhCZba7LYmUkE4Zi8/45p8l8pqc9yN1fb4XY5Muhrzdh5Q3jFsYimw==}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -1079,6 +1097,12 @@ packages:
   devalue@5.9.2:
     resolution: {integrity: sha512-po4PAY5c53tw5XMocSnf8A/5OHhbbUftpr93aEN6BBoAdntUmK7vu7wOATqvt7cXO7m1Cl4gMVn6p7n6n4mj0w==}
 
+  dprint-plugin-malva@0.16.0:
+    resolution: {integrity: sha512-cHisdhrNcBHfvTG/jgHUkVyL6zeY+C5yLO+E/UyiTbp6wzauB3d25YyPZeMlsd7M/PDT8W4Yre8jKJ/xMwthiw==}
+
+  dprint-plugin-markup@0.27.3:
+    resolution: {integrity: sha512-uN0An1G9qyETguOTGg50JKsOeX77HJ3wLpTLYFeFNqBgVDN63eSxh4kU/S95MskpY1iBzMTsXG233ummLue9iw==}
+
   electron-to-chromium@1.5.432:
     resolution: {integrity: sha512-4qa5o+sI3qFR+p1C6wZvY99x6q/3tR34n+ezZvWiJ9s0HJaaKwN6h1HTupFfv4fiSdQYMZWtVFBuzHdAXo1BnA==}
 
@@ -1692,6 +1716,10 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@dprint/formatter@0.5.1': {}
+
+  '@dprint/typescript@0.96.1': {}
+
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
 
@@ -2106,6 +2134,10 @@ snapshots:
   detect-libc@2.1.2: {}
 
   devalue@5.9.2: {}
+
+  dprint-plugin-malva@0.16.0: {}
+
+  dprint-plugin-markup@0.27.3: {}
 
   electron-to-chromium@1.5.432: {}
 
