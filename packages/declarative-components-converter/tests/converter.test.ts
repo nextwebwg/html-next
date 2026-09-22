@@ -57,7 +57,7 @@ describe("framework converter", () => {
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.deepEqual([...source.matchAll(/^import[^"\n]*"([^"]+)"/gm)].map((match) => match[1]).filter((from) => from !== "vue"), []);
-    assert.match(source, /<style scoped>\n\[data-component~="x-card"\] \{ display: block; \}/);
+    assert.match(source, /<style scoped>\n\[data-component~="x-card"\] \{\n  display: block;\n\}/);
     assert.equal(manifest.graph, "application");
     assert.deepEqual(manifest.entries, [{ source: "x-card.html", tag: "x-card", artifact: "vue/XCard.vue" }]);
     assert.equal(manifest.output.entry, "vue/application.ts");
@@ -87,11 +87,11 @@ describe("framework converter", () => {
 
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
-    assert.match(source, /const state_count = ref<any>\(0\)/);
-    assert.match(source, /const computed_double = computed\(\(\) => hn\.op\("\*", state_count\.value, 2\)\)/);
-    assert.match(source, /state_count\.value = hn\.op\("\+", state_count\.value, 1\);\n  dispatch\("count-change", state_count\.value\);/);
+    assert.match(source, /const count = ref\(0\);/);
+    assert.match(source, /const double = computed\(\(\) => count\.value \* 2\);/);
+    assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1;\n  dispatch\("count-change", count\.value\);/);
     assert.match(source, /"count-change": \(detail: unknown\) => \(typeof detail === "number" && Number\.isFinite\(detail\)\)/);
-    assert.match(source, /:data-count="hn\.attr\(state_count\)"/);
+    assert.match(source, /:data-count="count"/);
   });
 
   it("copies the controller beside the component and imports it", async () => {

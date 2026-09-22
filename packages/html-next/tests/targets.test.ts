@@ -99,10 +99,11 @@ describe("official target compilers", () => {
     compileVue(vue, "XField.vue");
     assert.match(vue, /modelValue\?: string \| null;/);
     assert.match(vue, /"update:modelValue": \[value: string\];/);
-    assert.match(vue, /@input="updateModel"/);
-    assert.match(vue, /:value="hn\.attr\(\(props\.modelValue \?\? props\.value\)\)"/);
+    assert.match(vue, /<input data-component="x-field" v-bind="\$attrs" v-model="model">/);
+    assert.match(vue, /const model = computed\(\{\n  get: \(\) => props\.modelValue \?\? props\.value \?\? undefined,/);
+    // A select takes v-model too, so Vue selects the model's option once the slotted options exist.
     const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select :value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
-    assert.match(select, /@change="updateModel"/);
+    assert.match(select, /<select data-component="x-choice" v-bind="\$attrs" v-model="model">/);
   });
 
   it("keeps logical operators readable in Vue attribute values", () => {
@@ -112,7 +113,8 @@ describe("official target compilers", () => {
       '<button :hidden="a and b" :title="a" :data-b="b"></button>',
     )).get("vue/XBoth.vue")!;
     compileVue(vue, "XBoth.vue");
-    assert.match(vue, /:hidden="hn\.attr\(\(hn\.t\(props\.a\) && hn\.t\(props\.b\)\)\)"/);
+    assert.match(vue, /:hidden="a && b"/);
+    assert.match(vue, /:title="a \? '' : undefined"/);
   });
 
   it("serializes booleans on enumerated attributes as true and false", () => {
@@ -123,8 +125,9 @@ describe("official target compilers", () => {
     ));
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
-    assert.match(vue, /:aria-expanded="hn\.enumerated\(props\.open\)"/);
-    assert.match(vue, /:hidden="hn\.attr\(props\.gone\)"/);
+    // Vue writes a boolean on an ARIA attribute as "true" or "false", and removes a false boolean attribute.
+    assert.match(vue, /:aria-expanded="open"/);
+    assert.match(vue, /:hidden="gone"/);
     const vanilla = outputs.get("vanilla/XAria.js")!;
     assert.match(vanilla, /setAttribute\("aria-expanded", String\(value\d+\)\)/);
     assert.match(vanilla, /setAttribute\("hidden", ""\)/);
@@ -142,19 +145,25 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /@nextwebwg|html-next|attachComponent|manageGeneratedProps/);
   });
 
-  it("maps each construct to Vue's own facility", () => {
+  it("maps each construct to Vue's own facility, as a Vue author writes it", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
-    assert.match(vue, /const state_open = ref<any>\(false\)/);
-    assert.match(vue, /const computed_count = computed\(/);
-    assert.match(vue, /<template v-if="hn\.t\(state_open\)">/);
-    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\.items, \(item\) => \(item\)\?\.done, \['name'\], undefined\)"/);
-    assert.match(vue, /v-model="state_query"/);
-    assert.match(vue, /:ref="\(element\) => \{ refs\['search'\] = element as Element \}"/);
-    assert.match(vue, /@click="handler_flip"/);
-    assert.match(vue, /:class="\{ 'compact': hn\.t\(/);
-    assert.match(vue, /:style="\{ '--gap': hn\.text\(/);
-    assert.match(vue, /<XBadge :tone="props\.size"><slot name="badge">none<\/slot><\/XBadge>/);
-    assert.match(vue, /<template v-if="hn\.t\(\(props\.size === 'sm'\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
+    assert.doesNotMatch(vue, /\bhn\b/);
+    assert.match(vue, /const open = ref\(false\);/);
+    assert.match(vue, /const query = ref\(""\);/);
+    assert.match(vue, /const count = computed\(\(\) => props\.items\?\.length\);/);
+    assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\("search"\);/);
+    assert.match(vue, /const hostState = computed\(\(\) => \[\n  open\.value && "open",\n  props\.size && `size size=\$\{props\.size\}`,\n\]\.filter\(Boolean\)\.join\(" "\)\);/);
+    assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value;/);
+    assert.match(vue, /<ul v-if="open">/);
+    assert.match(vue, /v-for="\(item, index\) in sortBy\(\(items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)"/);
+    assert.match(vue, /:key="item\.id"/);
+    assert.match(vue, /<span>\{\{ item\.name \}\}<\/span>/);
+    assert.match(vue, /<input v-model="query" ref="search">/);
+    assert.match(vue, /@click="flip"/);
+    assert.match(vue, /:class="\{ 'compact': size === 'sm' \}"/);
+    assert.match(vue, /:style="\{ '--gap': size \}"/);
+    assert.match(vue, /<XBadge :tone="size">\n\s+<slot name="badge">none<\/slot>\n\s+<\/XBadge>/);
+    assert.match(vue, /<small v-if="size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
     assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
   });
@@ -167,8 +176,8 @@ describe("official target compilers", () => {
         `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
       ).get("vue/XRow.vue")!;
       compileVue(vue, "XRow.vue");
-      assert.match(vue, /<h2>\{\{ hn\.text\(props\.label\) \}\}<\/h2>/, `${controller}: element text`);
-      assert.match(vue, /<slot name="label">\{\{ hn\.text\(props\.label\) \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
+      assert.match(vue, /<h2>\{\{ label \}\}<\/h2>/, `${controller}: element text`);
+      assert.match(vue, /<slot name="label">\{\{ label \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
     }
   });
 
@@ -179,7 +188,7 @@ describe("official target compilers", () => {
       `<select :disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
     ).get("vue/XChoice.vue")!;
     compileVue(vue, "XChoice.vue");
-    assert.match(vue, /<select[^>]*><option value="">None<\/option><slot><\/slot><\/select>/);
+    assert.match(vue, /<select[^>]*>\n\s+<option value="">None<\/option>\n\s+<slot \/>\n\s+<\/select>/);
   });
 
   it("types optional nullable props once", () => {
@@ -297,7 +306,7 @@ describe("official target compilers", () => {
 
     const vue = artifacts.get("vue/XFeature.vue")!;
     const style = vue.slice(vue.indexOf("<style scoped>"));
-    assert.match(style, /\[data-component~="x-feature"\] \{ display: block; \}/);
+    assert.match(style, /\[data-component~="x-feature"\] \{\n  display: block;\n\}/);
     assert.match(style, /\[data-component~="x-feature"\]\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
     assert.match(vue, /data-component="x-feature"/);
