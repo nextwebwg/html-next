@@ -404,7 +404,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     const inferred = state.expression === undefined ? UNKNOWN : typeOf(state.expression.ast, script);
     const declared = state.type === undefined ? undefined : present(parseTypeExpression(state.type));
     // A declared type wins; an absent initial value keeps the state nullable.
-    const initial = declared === undefined ? inferred : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN };
+    const initial = declared === undefined ? inferred : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN, null: (declared.null ?? false) || inferred === UNKNOWN };
     define(state.name, name, `${name}.value`, initial);
   }
   for (const value of computedValues) {

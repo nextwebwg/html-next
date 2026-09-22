@@ -18,13 +18,14 @@ export interface Scope {
   readonly types: ReadonlyMap<string, Static>;
 }
 
-/** A value's static type and whether it may be absent. */
+/** A value's static type, whether it may be absent, and whether that absence may be `null`. */
 export interface Static {
   readonly type: TypeNode;
   readonly nullable: boolean;
+  readonly null?: boolean;
 }
 
-export const UNKNOWN: Static = { type: { kind: "terminal", name: "unknown" }, nullable: true };
+export const UNKNOWN: Static = { type: { kind: "terminal", name: "unknown" }, nullable: true, null: true };
 
 const terminal = (name: "string" | "number" | "boolean"): Static => ({ type: { kind: "terminal", name }, nullable: false });
 
@@ -37,7 +38,8 @@ export function present(type: TypeNode): Static {
   const members = type.members.filter((member) => !(member.kind === "terminal" && (member.name === "null" || member.name === "absent")));
   const nullable = members.length !== type.members.length;
   if (members.length === 0) return UNKNOWN;
-  return { type: members.length === 1 ? members[0]! : { kind: "union", members }, nullable };
+  const hasNull = type.members.some((member) => member.kind === "terminal" && member.name === "null");
+  return { type: members.length === 1 ? members[0]! : { kind: "union", members }, nullable, null: hasNull };
 }
 
 export function category(type: TypeNode): Category {
@@ -87,7 +89,7 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
         const field = type.fields.find((candidate) => candidate.name === node.key);
         if (field !== undefined) {
           const value = present(field.type);
-          result = { type: value.type, nullable: value.nullable || field.optional };
+          result = { type: value.type, nullable: value.nullable || field.optional, null: value.null ?? false };
         }
       } else if (type.kind === "record") {
         result = { ...present(type.value), nullable: true };
@@ -289,9 +291,11 @@ export class Lowering {
     if (kind === "boolean" && !BOOLEAN_ATTRIBUTES.has(name) && !isEnumeratedBoolean(name)) {
       return `${this.#wrap(node, this.condition(node, scope))} ? "" : undefined`;
     }
-    if (kind === "boolean" || kind === "string" || kind === "number") return code;
+    // Vue removes an attribute bound to null, but its attribute types accept only undefined.
+    const plain = type.null === true ? `${this.#wrap(node, code)} ?? undefined` : code;
+    if (kind === "boolean" || kind === "string" || kind === "number") return plain;
     // A string-or-number union serializes as Vue writes it; one with a boolean member needs the rule.
-    if (kind === "scalar" && !hasBoolean(type.type)) return code;
+    if (kind === "scalar" && !hasBoolean(type.type)) return plain;
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
     if (item !== undefined && isScalar(item)) return `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
     if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.#use("attribute")}(${code})`;
