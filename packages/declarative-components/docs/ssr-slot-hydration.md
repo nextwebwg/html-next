@@ -1,5 +1,9 @@
 # The rendered form (design study)
 
+> **Note (2026-09-22).** This study predates the root-only component marker. Where it says
+> `data-component-root`, the current attribute is `data-component`, written on component roots only
+> (see [Styling: Component markers](./spec/styling.md#component-markers)).
+
 Status: design study behind the normative [Rendered form](spec/rendered-form.md) module. Every claim
 links to a lab script in `lab/ssr-slots/`; results are from Chromium, Firefox, and WebKit as bundled with
 Playwright (September 2026). Earlier drafts below used a lab-only flag and comment markers; the runtime

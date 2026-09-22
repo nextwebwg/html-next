@@ -31,6 +31,7 @@ Every slot the template renders is delimited in the rendered form by processing 
 | Named slot | `<?start slot="title"?>` … `<?end?>` |
 | Slot showing its fallback | `<?start slot="title" fallback=""?>` … `<?end?>` |
 | Slot rendered empty, no fallback | `<?marker slot="title"?>` |
+| Carrier for unrendered projection | `<?carrier?>` immediately before the carrier `<template>` |
 
 - The data of `start` and `marker` follows the pseudo-attribute syntax: `name="value"` pairs, values
   quoted, no duplicates. A bare attribute (`slot`, `fallback`) is a parse error that leaves the
@@ -67,7 +68,7 @@ A root owns the marks in its **own region**: its subtree, minus the contents of 
 (consumer content), minus the own regions of nested component roots, plus the contents of nested roots'
 slot ranges (what this root's template projected into them). No mark names its owner.
 
-A root that carries several lineages (`data-component-root` lists the delegating component first)
+A root that carries several lineages (`data-component` lists the delegating component first)
 resolves them outermost last: the innermost component owns the marks in the element's own region, and
 each outer component owns the marks inside the next inner component's ranges.
 
@@ -80,15 +81,15 @@ serialization.
 The serializer appends, as the last child of each component root that has any, an inert `<template>`
 whose content holds those nodes in authored order. This **carrier** exists only in serialized output,
 like the `<template shadowrootmode>` that `getHTML({ serializableShadowRoots: true })` writes for a shadow
-root. The lowered live DOM never contains it, and hydration removes it. It needs no name: template output
-is always stamped with `data-component`, and rendered consumer content is always inside a slot range, so
-an unstamped `<template>` child of the root outside every range is the carrier.
+root. The lowered live DOM never contains it, and hydration removes it together with its mark. The carrier
+is identified by the `<?carrier?>` mark immediately before it, not by its position: a component's own
+template may contain a `<template>` element, and only the root carries a component marker.
 
 The runtime exposes `serializeRenderedForm(container)`.
 
 ## Hydration
 
-Hydrating a server-rendered root (one carrying `data-component-root`) builds its instance from the
+Hydrating a server-rendered root (one carrying `data-component`) builds its instance from the
 rendered form:
 
 1. Read explicit props from `data-<name>` attributes, as for any hydration.
