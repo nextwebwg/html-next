@@ -448,7 +448,14 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     ...(modelProp === undefined ? [] : [`  modelValue?: ${propTypeSource(modelProp.contract)};`]),
     "}",
   ].join("\n");
+  // An event whose detail reports a prop's new value (query-change's { query }, open and close's
+  // { open }) also updates that prop, so Vue consumers can write v-model:query and v-model:open.
+  const modeled = target.props.filter((prop) => prop !== modelProp && events.some((event) => {
+    const detail = parseTypeExpression(event.type);
+    return detail.kind === "object" && detail.fields.some((field) => field.name === prop.name);
+  }));
   const emits = [
+    ...modeled.map((prop) => `  ${quote(`update:${prop.name}`)}: [value: ${typeSource(prop.contract.type)}];`),
     ...events.map((event) => {
       const typed = target.events.find((candidate) => candidate.name === event.name);
       return `  ${quote(event.name)}: [detail: ${typed?.detailType ?? "unknown"}];`;
@@ -506,6 +513,8 @@ export function generateVue(definition: ComponentDefinition, version: string): s
         "  }",
         "  const emitEvent = emit as (name: string, detail: unknown) => void;",
         "  emitEvent(name, detail);",
+        ...modeled.map((prop) =>
+          `  if (detail !== null && typeof detail === "object" && ${quote(prop.name)} in detail) emitEvent(${quote(`update:${prop.name}`)}, (detail as Record<string, unknown>)[${quote(prop.name)}]);`),
       ]),
       `  return root.value?.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ${events.length === 0 ? "" : "...declared[name], "}detail })) ?? true;`,
       "}",

@@ -193,6 +193,18 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /function truthy\(/);
   });
 
+  it("updates a prop from an event that reports it, for v-model:<prop>", () => {
+    const vue = generated(`<template component="x-picker" status="experimental" summary="Reported props.">` +
+      `<defs><prop name="query" type="string" default="">Query.</prop><prop name="open" type="boolean" default="false">Open.</prop>` +
+      `<event name="query-change" type="object({ query: string })"></event><event name="close" type="object({ open: boolean })"></event></defs>` +
+      `<div></div></template>`,
+    ).get("vue/XPicker.vue")!;
+    compileVue(vue, "XPicker.vue");
+    assert.match(vue, /'update:query': \[value: string\]/);
+    assert.match(vue, /'update:open': \[value: boolean\]/);
+    assert.match(vue, /if \(detail !== null && typeof detail === 'object' && 'query' in detail\) \{?\s*emitEvent\('update:query'/);
+  });
+
   it("rejects a state type that does not parse", () => {
     assert.throws(() => generated(`<template component="x-bad" status="experimental" summary="Bad state type.">` +
       `<defs><state name="rows" type="list(" :value="[]"></state></defs><div></div></template>`), /HC013/);
