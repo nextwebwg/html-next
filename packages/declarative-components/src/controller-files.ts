@@ -19,7 +19,7 @@ async function readControllerGraph(sourceURL: string, files: Map<string, string>
 }
 
 /** The deepest directory containing every path. */
-function commonDirectory(paths: readonly string[]): string {
+export function commonDirectory(paths: readonly string[]): string {
   let common = dirname(paths[0]!);
   for (const path of paths.slice(1)) {
     while (relative(common, path).startsWith(`..${sep}`)) common = dirname(common);

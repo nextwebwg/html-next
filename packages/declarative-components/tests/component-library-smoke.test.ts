@@ -95,7 +95,7 @@ describe.skipIf(!enabled)("reviewed component library (smoke)", () => {
         roots: ["button", "button", "aside", "span", "span", "div", "button", "header", "fieldset"],
         same: true,
         disabled: true,
-        buttonState: "variant variant=solid size size=md",
+        buttonState: "size size=md variant variant=solid",
         iconLabel: "Settings",
         callout: ["note", "tone tone=warning"],
         selected: "true",

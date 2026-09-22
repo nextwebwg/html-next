@@ -1,11 +1,12 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, posix, resolve, sep } from "node:path";
+import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
 import { generateComponent, GENERATOR_VERSION } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
-import { parseComponent } from "./source-parser.js";
+import { commonDirectory } from "./controller-files.js";
+import { parseComponentResource } from "./source-graph.js";
 import type { ComponentDefinition } from "./template.js";
 
 export interface AssembledPackage {
@@ -21,11 +22,6 @@ function inside(root: string, path: string): string {
   return output;
 }
 
-function controllerTarget(definition: ComponentDefinition): string | undefined {
-  if (definition.controller === undefined) return undefined;
-  const extension = extname(definition.controller) || ".js";
-  return `controllers/${definition.contract.tag}${extension}`;
-}
 
 async function addStaticModuleGraph(
   source: string,
@@ -141,17 +137,21 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   const moduleDependencies = new Map<string, readonly string[]>();
   const passThroughModules = new Set<string>();
   const names = new Set<string>();
+  // Component sources keep their layout under components/, so their dependency links and
+  // controller specifiers resolve there as they do in the source tree, with no build.
+  const sources = config.components.map((input) => resolve(input.source));
+  const sourceRoot = commonDirectory(sources);
+  const componentPath = (path: string): string => posix.join("components", relative(sourceRoot, path).split(sep).join("/"));
 
-  for (const input of [...config.components].sort((left, right) => left.source.localeCompare(right.source))) {
-    const sourcePath = resolve(input.source);
-    const parsed = parseComponent(await readFile(sourcePath, "utf8"), sourcePath);
-    const definition = Object.freeze({
-      ...parsed,
-      source: Object.freeze({ file: `./components/${basename(sourcePath)}` }),
-    });
+  for (const sourcePath of [...sources].sort()) {
+    const parsed = parseComponentResource(await readFile(sourcePath, "utf8"), sourcePath).definition;
+    const source = componentPath(sourcePath);
+    const definition = Object.freeze({ ...parsed, source: Object.freeze({ file: `./${source}` }) });
     if (names.has(definition.contract.tag)) throw new Error(`Duplicate package component <${definition.contract.tag}>.`);
     names.add(definition.contract.tag);
-    const controller = controllerTarget(definition);
+    const controller = parsed.controller === undefined
+      ? undefined
+      : componentPath(resolve(dirname(sourcePath), parsed.controller));
     definitions.push(controller === undefined ? definition : Object.freeze({ ...definition, controller: `./${controller}` }));
     if (controller !== undefined) {
       controllers.set(definition.contract.tag, controller);
@@ -168,7 +168,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
       if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
       files.set(artifact.path, artifact.content);
     }
-    files.set(`components/${basename(sourcePath)}`, { copy: sourcePath });
+    files.set(source, { copy: sourcePath });
   }
 
   for (const edge of config.passThrough ?? []) {
