@@ -19,6 +19,7 @@ config.test!.include = [
   "packages/declarative-components/tests/source-adapters.test.ts",
   "packages/declarative-components/tests/validity.test.ts",
   "packages/declarative-components/tests/component-library-smoke.test.ts",
+  "packages/declarative-components/tests/platform-scoping.test.ts",
 ];
 
 export default config;
