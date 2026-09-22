@@ -26,7 +26,7 @@ catalog:
   alien-signals: 3.2.0
   anod: 0.9.1
   esbuild: 0.28.2
-  mobx: 6.15.3
+  mobx: 7.0.3
   oxlint: 1.83.0
   parse5: 8.0.1
   postcss: 8.5.28
