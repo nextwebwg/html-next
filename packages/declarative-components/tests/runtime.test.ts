@@ -1748,7 +1748,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["data-variant", "outline"],
               ["data-x-button", ""],
               ["id", "primary"],
-              ["type", "button"],
+              // The author's attribute wins over the template's literal.
+              ["type", "submit"],
             ],
             children: [
               { text: "Save " },

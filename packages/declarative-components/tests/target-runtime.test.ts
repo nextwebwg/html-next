@@ -48,7 +48,7 @@ const panelSource = `<template component="demo-panel" status="early" summary="Di
     <prop name="align" type="start | center | end">Alignment.</prop>
     <prop name="label" type="string">Label.</prop>
   </props>
-  <div><span :data-align="align" :data-label="label"></span></div>
+  <div class="base" role="group"><span :data-align="align" :data-label="label"></span></div>
 </template>`;
 
 describe.skipIf(!enabled)("generated target runtime parity", () => {
@@ -94,12 +94,12 @@ const title = document.createElement("h1"); title.slot = "title"; title.textCont
 const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
-document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready" }));`,
+document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready", attributes: { class: "consumer", role: "region" } }));`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 import DemoPanel from "./vue/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready" })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" })]) }).mount(document.querySelector("main"));`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -169,6 +169,8 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
               ownAlign: Object.hasOwn(panel, "align"),
               dataAlign: panel.getAttribute("data-align"),
               dataLabel: panel.getAttribute("data-label"),
+              className: panel.className,
+              role: panel.getAttribute("role"),
             },
             provenance: root.getAttribute("data-component"),
           };
@@ -186,7 +188,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           ownTitle: false,
           // HTML Next records explicit props as data-* for its rendered form; a converted Vue
           // component owns its props and writes no record.
-          panel: { ownAlign: false, dataAlign: "center", dataLabel: target === "vue" ? null : "Ready" },
+          panel: { ownAlign: false, dataAlign: "center", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
         // Vue reports an error thrown by an event handler through console.error, not as uncaught.

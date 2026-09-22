@@ -31,7 +31,7 @@ function read(name: string): unknown {
 </script>
 
 <template>
-  <button v-bind="$attrs" data-component="x-button" :data-x-button-state="hostState || undefined"><slot></slot></button>
+  <button data-component="x-button" v-bind="$attrs" :data-x-button-state="hostState || undefined"><slot></slot></button>
 </template>
 
 <style scoped>

@@ -83,6 +83,19 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "lets invocation attributes win over template literals and combines class and style",
+    source: scene({
+      tag: "x-pre",
+      defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
+      root: `<button type="button" role="button" class="base" style="color: red" :aria-label="label"></button>`,
+      use: `<x-pre id="p" type="submit" class="cta" style="margin: 0" aria-label="Ignored"></x-pre>`,
+    }),
+    expect: {
+      probe: `const b = q('#p'); return [b.type, b.getAttribute('role'), b.className, b.style.color, b.style.margin, b.getAttribute('aria-label')];`,
+      result: ["submit", "button", "base cta", "red", "0px", "Bound"],
+    },
+  },
+  {
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,

@@ -137,6 +137,6 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio v-bind="\$attrs" data-component="demo-player" controls/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio data-component="demo-player" controls="" v-bind="\$attrs"/);
   });
 });

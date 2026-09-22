@@ -325,10 +325,18 @@ function renderAttributes(
   indent: string,
   direct?: DirectRenderContext,
   directProps?: DirectPropRenderContext,
+  root = false,
 ): void {
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      lines.push(`${indent}${variable}.setAttribute(${js(attribute.name)}, ${js(attribute.value)});`);
+      const name = js(attribute.name);
+      const value = js(attribute.value);
+      // On the root the invocation's attributes win over the template's; class and style combine.
+      lines.push(!root
+        ? `${indent}${variable}.setAttribute(${name}, ${value});`
+        : attribute.name === "class" || attribute.name === "style"
+          ? `${indent}${variable}.setAttribute(${name}, [${value}, ${variable}.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
+          : `${indent}if (!${variable}.hasAttribute(${name})) ${variable}.setAttribute(${name}, ${value});`);
       continue;
     }
     if (attribute.kind === "directive") {
@@ -436,6 +444,7 @@ export function generateVanilla(
     "  ",
     directRender,
     directPropRender,
+    true,
   );
   if (directRender !== undefined) collectDirectEvents(template, "element", directRender);
   lines.push(`  element.setAttribute("data-component", ${js(contract.tag)});`);

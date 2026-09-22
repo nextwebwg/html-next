@@ -1033,10 +1033,17 @@ function renderInstance(
         : {}),
     } : undefined;
   if (node.ref !== undefined) context.refs[node.ref] = element;
-  for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
-    else if (attribute.kind === "attribute") {
+  }
+  // The invocation's attributes win over the template's literals; class and style combine. Bound
+  // attributes, applied next, are the component's own output.
+  for (const attribute of passThrough) {
+    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
+    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
+  }
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute") {
       ownEffect(context, scope, () => {
         const value = evalValue(attribute.expression, scope);
         if (attribute.target === "class") {

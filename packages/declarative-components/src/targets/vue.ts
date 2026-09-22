@@ -249,13 +249,14 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   const component = isComponentTag(node.name);
   const name = component ? componentName(node.name) : node.name;
   if (component) context.imports.add(node.name);
+  const literals: string[] = [];
   const attributes: string[] = [];
   const classes: string[] = [];
   const styles: string[] = [];
   let content: string | undefined;
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      attributes.push(`${attribute.name}=${attributeValue(attribute.value)}`);
+      literals.push(`${attribute.name}=${attributeValue(attribute.value)}`);
     } else if (attribute.kind === "directive") {
       if (attribute.name === "html") fail("HT032", "`$html` is not supported in Vue conversion yet.");
       content = `{{ hn.text(${compiled(attribute.expressionPlan, names.template, attribute.expression)}) }}`;
@@ -285,13 +286,17 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     attributes.push(`:ref=${bound(`(element) => { refs[${quote(node.ref)}] = element }`)}`);
   }
   if (isRoot) {
+    // The consumer's attributes win over the template's literals and lose to its bindings, as in
+    // the runtime; Vue combines class and style itself.
     const tag = context.definition.contract.tag;
-    attributes.unshift("v-bind=\"$attrs\"", `data-component=${attributeValue(tag)}`);
+    literals.unshift(`data-component=${attributeValue(tag)}`);
+    literals.push("v-bind=\"$attrs\"");
     if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
     if (context.root) attributes.push("ref=\"root\"");
   }
   // A <template> without structural flow produces its content with no wrapper element.
   if (node.name === "template" && !isRoot) return content ?? renderChildren(node.children, names, context);
+  attributes.unshift(...literals);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const children = content ?? renderChildren(node.children, names, context);
