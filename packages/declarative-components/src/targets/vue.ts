@@ -5,7 +5,7 @@
  * Vue refs, effects, and lifecycle; styles become `<style scoped>`.
  */
 import { fail } from "../diagnostics.js";
-import type { ExpressionNode } from "../expression.js";
+import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import { componentName } from "../names.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -42,6 +42,7 @@ const HELPERS: readonly (readonly [name: string, source: string])[] = [
   ["text", `  text: (v: unknown): string => v === undefined || v === null ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? "" : String(v),`],
   // Vue types intrinsic attributes more narrowly than the strings the platform accepts.
   ["attr", `  attr: (v: unknown): any => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),`],
+  ["enumerated", `  enumerated: (v: unknown): any => typeof v === "boolean" ? String(v) : hn.attr(v),`],
   ["call", `  call: (fn: string, ...args: unknown[]): unknown => {
     if (fn === "format") {
       let index = 1;
@@ -270,7 +271,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       attributes.push(`v-model=${bound(writableTarget(attribute.writablePath, names.template))}`);
     } else {
       const value = compiled(attribute.expressionPlan, names.template, attribute.expression);
-      attributes.push(component ? `:${attribute.name}=${bound(value)}` : `:${attribute.name}=${bound(`hn.attr(${value})`)}`);
+      const helper = isEnumeratedBoolean(attribute.name) ? "hn.enumerated" : "hn.attr";
+      attributes.push(component ? `:${attribute.name}=${bound(value)}` : `:${attribute.name}=${bound(`${helper}(${value})`)}`);
     }
   }
   if (classes.length > 0) attributes.push(`:class=${bound(`{ ${classes.join(", ")} }`)}`);

@@ -96,6 +96,19 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "serializes booleans on enumerated attributes as true and false",
+    source: scene({
+      tag: "x-aria",
+      defs: `<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop><prop name="edit" type="boolean" default="false">Edit.</prop>`,
+      root: `<button :aria-expanded="open" :hidden="gone" :contenteditable="edit"></button>`,
+      use: `<x-aria id="closed"></x-aria><x-aria id="open" open gone edit></x-aria>`,
+    }),
+    expect: {
+      probe: `return ["#closed", "#open"].map((id) => { const b = q(id); return [b.getAttribute("aria-expanded"), b.getAttribute("hidden"), b.getAttribute("contenteditable")]; });`,
+      result: [["false", null, "false"], ["true", "", "true"]],
+    },
+  },
+  {
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,

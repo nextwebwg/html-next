@@ -89,6 +89,21 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("serializes booleans on enumerated attributes as true and false", () => {
+    const outputs = generated(componentSource(
+      "x-aria",
+      '<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop>',
+      '<button :aria-expanded="open" :hidden="gone"></button>',
+    ));
+    const vue = outputs.get("vue/XAria.vue")!;
+    compileVue(vue, "XAria.vue");
+    assert.match(vue, /:aria-expanded="hn\.enumerated\(props\.open\)"/);
+    assert.match(vue, /:hidden="hn\.attr\(props\.gone\)"/);
+    const vanilla = outputs.get("vanilla/XAria.js")!;
+    assert.match(vanilla, /setAttribute\("aria-expanded", String\(value\d+\)\)/);
+    assert.match(vanilla, /setAttribute\("hidden", ""\)/);
+  });
+
   it("parses generated Vanilla source", async () => {
     const generated = await targets();
     await transform(generated.get("vanilla/XButton.js")!, { loader: "js" });

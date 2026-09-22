@@ -471,8 +471,14 @@ export function toText(value: Value): string {
   return String(value);
 }
 
+/** Enumerated attributes whose true and false are the strings "true" and "false", not presence. */
+export function isEnumeratedBoolean(name: string): boolean {
+  return name.startsWith("aria-") || name === "contenteditable" || name === "draggable" || name === "spellcheck";
+}
+
 /** Serialize an ordinary bound attribute. */
-export function toAttribute(value: Value): string | null {
+export function toAttribute(value: Value, name = ""): string | null {
+  if (typeof value === "boolean" && isEnumeratedBoolean(name)) return String(value);
   if (isAbsent(value) || value === false) return null;
   if (value === true) return "";
   if (typeof value === "number" || typeof value === "string") return String(value);
