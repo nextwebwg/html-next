@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/declarative-components-converter",
-  "version": "1.0.0-alpha.0",
+  "version": "1.0.0-alpha.1",
   "description": "Vue conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
