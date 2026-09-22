@@ -80,6 +80,19 @@ describe("official target compilers", () => {
     }
   });
 
+  it("keeps a slot inside a select, as the HTML Standard's select parsing does", () => {
+    const output = generated(
+      `<template component="x-choice" status="experimental" summary="A target compiler fixture.">` +
+      `<defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>` +
+      `<select :disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
+    );
+    const vue = output.get("vue/XChoice.vue")!;
+    assert.match(vue, /<select[^>]*>[\s\S]*<option value=""[\s\S]*<slot><\/slot>[\s\S]*<\/select>/);
+    assert.doesNotMatch(vue, /s-lect/);
+    assert.match(output.get("react/XChoice.tsx")!, /<select[\s\S]*\{children/);
+    assert.match(output.get("svelte/XChoice.svelte")!, /<select[\s\S]*@render children/);
+  });
+
   it("uses framework rendering directly for prop-and-slot components", async () => {
     const output = await targets();
     for (const path of ["react/XButton.tsx", "vue/XButton.vue", "svelte/XButton.svelte"]) {
