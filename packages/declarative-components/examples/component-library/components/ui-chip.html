@@ -3,5 +3,8 @@
     <prop name="appearance" type="tag | pill" default="tag">Visual shape.</prop>
     <prop name="size" type="xs | sm" default="xs">Compact typography size.</prop>
   </defs>
-  <span class="chip__surface" :data-appearance="appearance" :data-size="size"><span class="chip__label"><slot></slot></span></span>
+  <span><slot></slot></span>
+  <style>
+    :host-state([appearance="pill"]) { border-radius: 999px; }
+  </style>
 </template>

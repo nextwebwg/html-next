@@ -24,11 +24,13 @@ import {
 } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
 import {
+  addAttributeToken,
+  COMPONENT_ATTRIBUTE,
+  compileComponentStyles,
   markProjectedRoot,
-  stampAuthoredElement,
-  stampComponentRoot,
-  transformNativeComponentStyles,
-} from "./style.js";
+  stateAttribute,
+  stateAttributeValue,
+} from "./component-styles.js";
 import { parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
 import type {
   ComponentDefinition,
@@ -41,7 +43,6 @@ import type {
   LiteralAttribute,
   SlotNode,
   TemplateNode,
-  TextNode,
 } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { PropContract, PropValue } from "./types.js";
@@ -130,6 +131,15 @@ function registryFor(root: Document): DocumentRegistry {
   return registry;
 }
 
+/** The props and state each definition's `:host-state()` rules test, recorded when its styles compile. */
+const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
+
+function compileStyles(css: string, definition: ComponentDefinition, document: Document): string {
+  const compiled = compileComponentStyles(css, definition, document);
+  stateNamesByDefinition.set(definition, compiled.stateNames);
+  return compiled.css;
+}
+
 function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
   registry.definitions.set(tag, definition);
   if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
@@ -139,7 +149,7 @@ function discoverySelector(registry: DocumentRegistry): string {
   return registry.discoverySelector ??=
     [
       "template[component]",
-      "[data-component-root]",
+      "[data-component]",
       ...Array.from(registry.definitions.keys()),
     ].join(",");
 }
@@ -175,12 +185,7 @@ export function installComponentGraph(
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
     const style = node.definition.css === "" ? undefined : root.createElement("style");
     if (style !== undefined) {
-      style.textContent = transformNativeComponentStyles(
-        node.definition.css,
-        tag,
-        node.definition.template.name,
-      );
-      style.dataset.htmlNextComponent = tag;
+      style.textContent = compileStyles(node.definition.css, node.definition, root);
       root.head.append(style);
     }
     registerDefinition(registry, tag, {
@@ -943,7 +948,6 @@ function renderMatch(
     if (attribute.kind === "literal") wrapper.setAttribute(attribute.name, attribute.value);
   }
   wrapper.append(...rendered);
-  stampAuthoredElement(wrapper, context.definition.contract.tag);
   return [wrapper];
 }
 
@@ -980,7 +984,7 @@ function renderInstance(
     context.frameworkOwned &&
     candidate instanceof Element &&
     candidate.localName !== elementName &&
-    (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(node.name)
+    (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(node.name)
   ) {
     // A framework renders nested declarative components as their native roots,
     // not as the authored invocation tag. That child owns its already-adopted
@@ -993,7 +997,7 @@ function renderInstance(
     !context.frameworkOwned &&
     candidate instanceof Element &&
     candidate.localName !== elementName &&
-    (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(node.name)
+    (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(node.name)
   ) {
     // A nested component the server already lowered. Keep its root, and bind this
     // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
@@ -1029,10 +1033,17 @@ function renderInstance(
         : {}),
     } : undefined;
   if (node.ref !== undefined) context.refs[node.ref] = element;
-  for (const attribute of passThrough) element.setAttribute(attribute.name, attribute.value);
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
-    else if (attribute.kind === "attribute") {
+  }
+  // The invocation's attributes win over the template's literals; class and style combine. Bound
+  // attributes, applied next, are the component's own output.
+  for (const attribute of passThrough) {
+    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
+    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
+  }
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute") {
       ownEffect(context, scope, () => {
         const value = evalValue(attribute.expression, scope);
         if (attribute.target === "class") {
@@ -1066,7 +1077,6 @@ function renderInstance(
     }
     // Content directives are handled below.
   }
-  stampAuthoredElement(element, context.definition.contract.tag);
 
   if (contentDirective !== undefined) {
     ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document));
@@ -1088,7 +1098,7 @@ function renderInstance(
         if (index < cursor) return false;
         return candidate instanceof Element && (
           candidate.localName === child.name ||
-          (candidate.getAttribute("data-component-root") ?? "").split(/\s+/).includes(child.name)
+          (candidate.getAttribute("data-component") ?? "").split(/\s+/).includes(child.name)
         );
       });
       if (matchingIndex < 0 && child.flow !== undefined) {
@@ -1188,9 +1198,7 @@ function renderSlot(
     `"${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
   // Where the parser does not produce PIs, write the comment it would produce, so a lowered DOM and a
   // hydrated DOM hold the same nodes.
-  const instruction = (target: string, data: string): Node => documentParsesInstructions(document)
-    ? document.createProcessingInstruction(target, data)
-    : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
+  const instruction = (target: string, data: string): Node => renderedFormMark(document, target, data);
   const ranged = (nodes: Node[], fallback: boolean): Node[] => {
     if (nodes.length === 0) return [instruction("marker", `slot=${quoted(name)}`)];
     const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}`;
@@ -1239,6 +1247,16 @@ function documentParsesInstructions(document: Document): boolean {
   }
   return piParsing;
 }
+/**
+ * A rendered-form mark: a processing instruction, or, where the parser does not produce them, the
+ * comment it would produce instead, so a lowered DOM and a hydrated DOM hold the same nodes.
+ */
+function renderedFormMark(document: Document, target: string, data: string): Node {
+  return documentParsesInstructions(document)
+    ? document.createProcessingInstruction(target, data)
+    : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
+}
+
 function serverMark(node: Node): ServerMark | undefined {
   if (node.nodeType === 7) {
     const pi = node as ProcessingInstruction;
@@ -1279,19 +1297,22 @@ function serverRanges(root: Element, consume = true): { ranges: HydrationRange[]
         continue;
       }
       if (!(node instanceof Element)) continue;
-      if (node !== root && node.hasAttribute("data-component-root")) {
+      if (node !== root && node.hasAttribute("data-component")) {
         const nested = serverRanges(node, false);
         for (const range of nested?.ranges ?? []) collect(range.content, into);
       } else collect(Array.from(node.childNodes), into);
     }
   };
   collect(Array.from(root.childNodes), ranges);
+  // The carrier is the <template> child that follows a `carrier` mark, outside every range.
   const carrier = Array.from(root.children).find((child): child is HTMLTemplateElement =>
-    child instanceof HTMLTemplateElement && !child.hasAttribute("data-component") && !inRanges.has(child));
+    child instanceof HTMLTemplateElement && !inRanges.has(child) &&
+    child.previousSibling !== null && serverMark(child.previousSibling)?.target === "carrier");
   if (ranges.length === 0 && carrier === undefined) return undefined;
   const carried: Node[] = [];
   if (carrier !== undefined && consume) {
     for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
+    carrier.previousSibling!.remove();
     carrier.remove();
   } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
   return { ranges, carried };
@@ -1313,7 +1334,7 @@ export function serializeRenderedForm(container: Element): string {
     if (unrendered.length === 0) return;
     const carrier = clone.ownerDocument.createElement("template");
     for (const node of unrendered) carrier.content.append(node.cloneNode(true));
-    copies[index]!.append(carrier);
+    copies[index]!.append(renderedFormMark(clone.ownerDocument, "carrier", ""), carrier);
   });
   return clone.innerHTML;
 }
@@ -1351,6 +1372,21 @@ function renderTemplateNode(
   }
   if (node.kind === "slot") return renderSlot(node, scope, document, context);
   return renderNode(node, scope, document, [], context, candidate);
+}
+
+/**
+ * Keeps `data-<tag>-state` in step with the resolved props and state the definition's `:host-state()`
+ * rules test, so styles see defaults and state as well as explicit props.
+ */
+function installStateAttribute(root: Element, instance: RuntimeInstance): void {
+  const names = stateNamesByDefinition.get(instance.definition) ?? [];
+  if (names.length === 0) return;
+  const attribute = stateAttribute(instance.definition.contract.tag);
+  instance.effects.push(createEffect(instance.scope.scheduler, () => {
+    const value = stateAttributeValue(names, (name) => instance.scope.get(name));
+    if (value === "") root.removeAttribute(attribute);
+    else if (root.getAttribute(attribute) !== value) root.setAttribute(attribute, value);
+  }, 2));
 }
 
 /**
@@ -1476,8 +1512,12 @@ function prepareRuntimeInvocation(
       }
       nodes.push(...server.carried);
       hydratedNodes = nodes;
+    } else if ((definition.slots ?? []).length > 0) {
+      // Only the root carries a component marker, so nothing tells template output from projected
+      // content without slot marks. Guessing would build a different instance.
+      fail("HR005", `<${definition.contract.tag}> has slots but its server-rendered root has no slot marks.`);
     } else {
-      ({ projected: hydratedNodes, projectedSlotNames } = serverProjection(invocation, definition));
+      hydratedNodes = [];
     }
   }
   const children = hydration ? hydratedNodes! : Array.from(invocation.childNodes);
@@ -1529,7 +1569,7 @@ function prepareRuntimeInvocation(
       typeof focusedSelection[1] === "number"
     ) focusedControl.setSelectionRange(focusedSelection[0], focusedSelection[1]);
   }
-  stampComponentRoot(nativeRoot, definition.contract.tag);
+  addAttributeToken(nativeRoot, COMPONENT_ATTRIBUTE, definition.contract.tag);
   instance.element = nativeRoot;
   return {
     invocation,
@@ -1561,6 +1601,7 @@ function commitRuntimeInvocations(
     invocation.context.committed = true;
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
     installPropReflection(invocation.nativeRoot, invocation.instance);
+    installStateAttribute(invocation.nativeRoot, invocation.instance);
     installPublicMethods(invocation.nativeRoot, invocation.instance);
     connectRuntimeInstance(invocation.instance);
   }
@@ -1575,9 +1616,9 @@ function collectWithin(scope: QueryRoot, selector: string, elements: Set<Element
 
 function visitComponentRoots(scope: QueryRoot, visit: (element: Element) => void): void {
   const element = scope.nodeType === 1 ? scope as Element : undefined;
-  if (element?.matches("[data-component-root]") === true) visit(element);
+  if (element?.matches("[data-component]") === true) visit(element);
   if (element?.childElementCount === 0) return;
-  for (const descendant of scope.querySelectorAll("[data-component-root]")) visit(descendant);
+  for (const descendant of scope.querySelectorAll("[data-component]")) visit(descendant);
 }
 
 interface LoweredScopes {
@@ -1625,14 +1666,14 @@ function lowerScopes(
     for (const element of elements) {
       const live = byTag.get(element.localName);
       if (live !== undefined) prepare(live, element, false);
-      if (!element.hasAttribute("data-component-root")) continue;
+      if (!element.hasAttribute("data-component")) continue;
       const existing = runtimeInstance(element);
       if (existing !== undefined) {
         if (!existing.frameworkOwned) roots.add(element);
         continue;
       }
       let accepted = false;
-      for (const tag of new Set((element.getAttribute("data-component-root") ?? "").split(/\s+/))) {
+      for (const tag of new Set((element.getAttribute("data-component") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
         if (owner !== undefined && prepare(owner, element, true)) accepted = true;
       }
@@ -1643,7 +1684,7 @@ function lowerScopes(
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
     const selector = [
-      "[data-component-root]",
+      "[data-component]",
       ...Array.from(newDefinitions.keys()),
     ].join(",");
     const existing = new Set<Element>();
@@ -1654,11 +1695,7 @@ function lowerScopes(
   for (const live of definitions) {
     registerDefinition(registry, live.definition.contract.tag, live);
     if (live.style !== undefined) {
-      live.style.textContent = transformNativeComponentStyles(
-        live.style.textContent ?? "",
-        live.definition.contract.tag,
-        live.definition.template.name,
-      );
+      live.style.textContent = compileStyles(live.style.textContent ?? "", live.definition, live.wrapper!.ownerDocument);
       live.wrapper!.ownerDocument.head.append(live.style);
     }
     live.wrapper!.remove();
@@ -1681,6 +1718,11 @@ export function lowerDocument(root: Document = document): number {
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
+  /**
+   * The nodes the caller placed in slots, with each one's slot name. Only the root carries a
+   * component marker, so a generated factory that renders slot content itself reports it here.
+   */
+  readonly projected?: readonly (readonly [node: Node, slot: string])[];
 }
 
 interface ManagedComponentLifecycle {
@@ -1832,87 +1874,12 @@ export function registerComponentDefinitions(
     });
     if (definition.css !== "") {
       const style = root.createElement("style");
-      style.dataset.htmlNextPackage = definition.contract.tag;
-      style.textContent = transformNativeComponentStyles(
-        definition.css,
-        definition.contract.tag,
-        definition.template.name,
-      );
+      style.textContent = compileStyles(definition.css, definition, root);
       root.head.append(style);
     }
   }
 }
 
-/**
- * Finds the slot content inside a server-rendered root. Nodes stamped with the component's
- * `data-component` lineage are template output; everything else was projected into a slot, whoever
- * rendered it (HTML Next's server renderer or a framework).
- */
-function serverProjection(element: Element, definition: ComponentDefinition): {
-  readonly projected: Node[];
-  readonly projectedSlotNames: WeakMap<Node, string>;
-} {
-  const projected: Node[] = [];
-  const projectedSlotNames = new WeakMap<Node, string>();
-  const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
-    const slots = authored.children.filter((child): child is SlotNode => child.kind === "slot");
-    const slot = slots[0];
-    const slotName = slot?.name ?? "";
-    // Text cannot carry a slot attribute; like HTML slotting, it belongs to the default slot.
-    const textSlotName = slots.some((candidate) => (candidate.name ?? "") === "") ? "" : slotName;
-    const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
-      .map((child) => child.value);
-    let literalCursor = 0;
-    const authoredElements = authored.children.filter((child): child is ElementNode => child.kind === "element");
-    let elementCursor = 0;
-    for (const child of Array.from(parent.childNodes)) {
-      if (child instanceof Element) {
-        const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
-        const componentRoots = (child.getAttribute("data-component-root") ?? "").split(/\s+/);
-        while (
-          elementCursor < authoredElements.length &&
-          authoredElements[elementCursor]!.name !== child.localName &&
-          !componentRoots.includes(authoredElements[elementCursor]!.name)
-        ) elementCursor += 1;
-        const authoredChild = authoredElements[elementCursor];
-        const nestedFrameworkRoot = authoredChild !== undefined &&
-          child.localName !== authoredChild.name &&
-          componentRoots.includes(authoredChild.name);
-        if (!lineage.includes(definition.contract.tag) && !nestedFrameworkRoot) {
-          projectedSlotNames.set(
-            child,
-            child.getAttribute("slot") ?? slotName,
-          );
-          markProjectedRoot(child);
-          projected.push(child);
-        } else {
-          elementCursor += 1;
-          // Nested framework roots are opaque. Their own attachment maps
-          // slots and controllers against the nested component definition.
-          if (authoredChild !== undefined && !nestedFrameworkRoot) {
-            markFrameworkProjection(child, authoredChild);
-          }
-        }
-        continue;
-      }
-      if (child instanceof Comment && slot !== undefined) {
-        projectedSlotNames.set(child, slotName);
-        projected.push(child);
-        continue;
-      }
-      if (child instanceof Text && child.data.trim() !== "") {
-        while (literalCursor < literalText.length && literalText[literalCursor] !== child.data) literalCursor += 1;
-        if (literalCursor < literalText.length) literalCursor += 1;
-        else {
-          projectedSlotNames.set(child, textSlotName);
-          projected.push(child);
-        }
-      }
-    }
-  };
-  markFrameworkProjection(element, definition.template);
-  return { projected, projectedSlotNames };
-}
 
 /**
  * Framework-host adapter. The framework emits the declared native root and owns its outer
@@ -1947,9 +1914,13 @@ export function attachComponent(
   }
   const instance = runtimeInstance(element);
   if (instance === undefined) {
-    const { projected, projectedSlotNames } = serverProjection(element, definition);
-    stampAuthoredElement(element, definition.contract.tag);
-    stampComponentRoot(element, definition.contract.tag);
+    const projected = (options.projected ?? []).map(([node]) => node);
+    const projectedSlotNames = new WeakMap<Node, string>();
+    for (const [node, slot] of options.projected ?? []) {
+      projectedSlotNames.set(node, slot);
+      markProjectedRoot(node);
+    }
+    addAttributeToken(element, COMPONENT_ATTRIBUTE, definition.contract.tag);
     // The framework's explicit props become the same data-* attributes hydration reads; defaults
     // stay implicit, exactly as for HTML authors.
     for (const [name, prop] of Object.entries(definition.contract.props)) {
@@ -2015,19 +1986,6 @@ export function updateComponentProps(
     }
     if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
   }
-}
-
-/** Adopts a framework-owned native root using a definition already installed in its document. */
-export function attachRegisteredComponent(
-  element: Element,
-  tag: string,
-  options: ComponentAttachmentOptions = {},
-): () => void {
-  const registered = registryFor(element.ownerDocument).definitions.get(tag);
-  if (registered === undefined) {
-    fail("HR005", `No registered definition declares <${tag}>.`);
-  }
-  return attachComponent(element, registered.definition, options);
 }
 
 /**

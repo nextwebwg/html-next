@@ -8,9 +8,7 @@
       "artifacts": [
         "vanilla/XButton.js",
         "vanilla/XButton.d.ts",
-        "react/XButton.tsx",
         "vue/XButton.vue",
-        "svelte/XButton.svelte",
         "styles/x-button.css",
         "docs/x-button.md"
       ],

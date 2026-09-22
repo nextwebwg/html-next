@@ -237,13 +237,12 @@ function routeComponentInvocations(
       diagnostic("HN013", `The native generator did not expose compiled invocation <${tag}>.`, node.url);
     }
     for (const variable of variables) {
-      for (const attribute of ["data-component", "data-component-root"]) {
-        const marker = `${variable}.setAttribute(${JSON.stringify(attribute)}, ${JSON.stringify(node.definition.contract.tag)});`;
-        const ownership = `${variable}.setAttribute(${JSON.stringify(attribute)}, [` +
-          `${variable}.getAttribute(${JSON.stringify(attribute)}), ${JSON.stringify(node.definition.contract.tag)}` +
-          `].filter(Boolean).join(" "));`;
-        routed = routed.replace(marker, ownership);
-      }
+      // A delegated root carries every owner's token.
+      const tag = JSON.stringify(node.definition.contract.tag);
+      routed = routed.replace(
+        `${variable}.setAttribute("data-component", ${tag});`,
+        `${variable}.setAttribute("data-component", [${variable}.getAttribute("data-component"), ${tag}].filter(Boolean).join(" "));`,
+      );
     }
   }
   return `${imports.join("\n")}\n${routed}`;

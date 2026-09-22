@@ -4,6 +4,7 @@ import "../styles/x-button.css";
 
 export function createXButton(options = {}) {
   const { attributes = {}, children = [], slots = {}, as, ...componentProps } = options;
+  const projected = [];
   const prop0 = componentProps["size"] === undefined ? "md" : componentProps["size"];
   const prop1 = componentProps["variant"] === undefined ? "outline" : componentProps["variant"];
   const element = document.createElement("button");
@@ -11,22 +12,18 @@ export function createXButton(options = {}) {
     if (value === null || value === undefined || value === false) continue;
     element.setAttribute(name, value === true ? "" : String(value));
   }
-  element.setAttribute("data-x-button", "");
-  const value0 = prop1;
-  if (value0 === null || value0 === undefined) element.removeAttribute("data-variant");
-  else element.setAttribute("data-variant", String(value0));
-  const value1 = prop0;
-  if (value1 === null || value1 === undefined) element.removeAttribute("data-size");
-  else element.setAttribute("data-size", String(value1));
   element.setAttribute("data-component", "x-button");
-  element.setAttribute("data-component-root", "x-button");
   if (children.length > 0) {
-    for (const child of children) element.append(child);
+    for (const child of children) {
+      const node = typeof child === "string" ? document.createTextNode(child) : child;
+      projected.push([node, ""]);
+      element.append(node);
+    }
   } else {
   }
   manageGeneratedProps(element, [
-    { name: "size", attribute: "data-size", value: componentProps["size"], default: "md", bound: true, type: ["sm","md","lg"], required: false },
-    { name: "variant", attribute: "data-variant", value: componentProps["variant"], default: "outline", bound: true, type: ["outline","solid","destructive","ghost"], required: false },
+    { name: "size", attribute: "data-size", value: componentProps["size"], default: "md", type: ["sm","md","lg"], required: false },
+    { name: "variant", attribute: "data-variant", value: componentProps["variant"], default: "outline", type: ["outline","solid","destructive","ghost"], required: false },
   ]);
   return element;
 }

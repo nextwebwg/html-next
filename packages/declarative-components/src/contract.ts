@@ -220,10 +220,10 @@ export function defineContractWithNativeCheck(
     fail("HC005", "The `component` tag must be lowercase and contain a hyphen.", source);
   }
   const name = componentName(tag);
-  if (typeof object.status !== "string" || !STATUS_RE.test(object.status)) {
+  if (object.status !== undefined && (typeof object.status !== "string" || !STATUS_RE.test(object.status))) {
     fail("HC007", "Component `status` is not recognized.", source);
   }
-  const summary = requiredString(object.summary, "summary", source);
+  const summary = object.summary === undefined ? undefined : requiredString(object.summary, "summary", source);
   const nativeElement = requiredString(object.nativeElement, "nativeElement", source);
   if (
     !/^[a-z][a-z0-9-]*$/.test(nativeElement) ||
@@ -256,8 +256,8 @@ export function defineContractWithNativeCheck(
     version: 1,
     name,
     tag,
-    status: object.status as ContractStatus,
-    summary,
+    ...(object.status === undefined ? {} : { status: object.status as ContractStatus }),
+    ...(summary === undefined ? {} : { summary }),
     nativeElement,
     props,
   });

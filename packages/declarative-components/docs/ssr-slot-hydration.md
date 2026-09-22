@@ -1,5 +1,9 @@
 # The rendered form (design study)
 
+> **Superseded in part.** The proposal and runtime now mark slots with `<?start slot="…"?>` … `<?end?>`
+> and `<?marker slot="…"?>`, and only component roots carry `data-component` (there is no
+> `data-component-root`). The study below keeps its original notation.
+
 Status: design study behind the [Rendered form](https://nextwebwg.org/html-next/rendered-form) section of the proposal. Every claim
 links to a lab script in `lab/ssr-slots/`; results are from Chromium, Firefox, and WebKit as bundled with
 Playwright (September 2026). Earlier drafts below used a lab-only flag and comment markers; the runtime

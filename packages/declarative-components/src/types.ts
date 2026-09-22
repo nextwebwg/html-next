@@ -50,8 +50,8 @@ export interface ComponentContract {
   readonly version: 1;
   readonly name: string;
   readonly tag: string;
-  readonly status: ContractStatus;
-  readonly summary: string;
+  readonly status?: ContractStatus;
+  readonly summary?: string;
   readonly nativeElement: string;
   readonly props: Readonly<Record<string, PropContract>>;
 }

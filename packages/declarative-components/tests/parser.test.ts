@@ -65,6 +65,12 @@ describe("parseComponent", () => {
     assert.ok(Object.isFrozen(definition.contract.props));
   });
 
+  it("treats status and summary as optional", () => {
+    const definition = parseComponent('<template component="x-plain"><div></div></template>', "plain.html");
+    assert.equal(definition.contract.status, undefined);
+    assert.equal(definition.contract.summary, undefined);
+  });
+
   it("accepts prop names that exist on Object.prototype", () => {
     const definition = parseComponent(
       componentSource(

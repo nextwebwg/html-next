@@ -119,10 +119,6 @@ function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Re
   ).join("\n") + "\n";
   return Object.freeze({
     "vue/index.js": exportsFor("vue"),
-    "svelte/index.js": exportsFor("svelte"),
-    "react/index.js": entries.map((definition) =>
-      `export { ${definition.contract.name} as ${publicName(definition)} } from ${JSON.stringify(`./${definition.contract.name}.tsx`)};`
-    ).join("\n") + "\n",
     "vanilla/index.js": entries.map((definition) =>
       `export * from ${JSON.stringify(`./${definition.contract.name}.js`)};`
     ).join("\n") + "\n",
@@ -210,14 +206,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
     exports: config.exports ?? {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
-      "./react": "./react/index.js",
       "./vue": { types: "./vue/index.d.ts", import: "./vue/index.js" },
-      "./svelte": "./svelte/index.js",
       "./vanilla": "./vanilla/index.js",
       "./components/*": "./components/*",
-      "./react/*": "./react/*",
       "./vue/*": "./vue/*",
-      "./svelte/*": "./svelte/*",
       "./vanilla/*": "./vanilla/*",
       "./styles/*": "./styles/*",
     },

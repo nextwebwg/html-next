@@ -3,18 +3,18 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  generateComponent,
+  addControllerGraph,
+  generateVueComponent,
+  HtmlDiagnosticError,
   loadNodeComponents,
   type GeneratedArtifact,
 } from "@nextwebwg/declarative-components";
 
-export type FrameworkTarget = "react" | "vue" | "svelte";
+export type FrameworkTarget = "vue";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
-  react: "19",
   vue: "3.5",
-  svelte: "5",
 };
 
 interface BaseConvertOptions {
@@ -43,7 +43,7 @@ export interface ConversionEntry {
 
 export interface ConversionOutput {
   readonly path: string;
-  readonly kind: "component" | "style" | "entry" | "inventory";
+  readonly kind: "component" | "controller" | "entry" | "inventory";
   readonly source?: string;
 }
 
@@ -63,8 +63,8 @@ export interface ConversionManifest {
     readonly tag: string;
     readonly source: string;
     readonly artifact: string;
-    readonly style: string;
-    readonly bridges: readonly string[];
+    /** The copied controller module the component imports, if it has one. */
+    readonly controller?: string;
   }[];
 }
 
@@ -112,28 +112,16 @@ export class FrameworkConversionError extends Error {
     readonly target: FrameworkTarget,
     readonly source: string,
     readonly tag: string,
+    readonly reason?: string,
   ) {
     super(
-      `${source}: HTC001: ${target} conversion for ${tag} requires semantics that are not yet expressed through target-native facilities.`,
+      `${source}: HTC001: ${target} conversion of <${tag}> failed${reason === undefined ? "" : `: ${reason}`}`,
     );
     this.name = "FrameworkConversionError";
   }
 }
 
-function frameworkArtifact(
-  artifacts: readonly GeneratedArtifact[],
-  target: FrameworkTarget,
-): GeneratedArtifact {
-  const artifact = artifacts.find((candidate) => candidate.path.startsWith(`${target}/`));
-  if (artifact === undefined) throw new Error(`The ${target} generator produced no component artifact.`);
-  return artifact;
-}
 
-function styleArtifact(artifacts: readonly GeneratedArtifact[]): GeneratedArtifact {
-  const artifact = artifacts.find((candidate) => candidate.path.startsWith("styles/"));
-  if (artifact === undefined) throw new Error("The framework generator produced no style artifact.");
-  return artifact;
-}
 
 async function emit(root: string, artifact: GeneratedArtifact): Promise<void> {
   const output = resolve(root, artifact.path);
@@ -151,11 +139,8 @@ function frameworkEntry(
 ): GeneratedArtifact {
   const exports = [...entries].sort((left, right) => left.artifact.localeCompare(right.artifact)).map((entry) => {
     const artifact = entry.artifact.slice(entry.artifact.lastIndexOf("/") + 1);
-    const name = artifact.replace(/\.(?:tsx|vue|svelte)$/, "");
-    const file = `./${artifact}`;
-    return target === "react"
-      ? `export { ${name} } from ${JSON.stringify(file.replace(/\.tsx$/, ".js"))};`
-      : `export { default as ${name} } from ${JSON.stringify(file)};`;
+    const name = artifact.replace(/\.vue$/, "");
+    return `export { default as ${name} } from ${JSON.stringify(`./${artifact}`)};`;
   });
   return {
     path: `${target}/${mode === "application" ? "application.ts" : "index.ts"}`,
@@ -196,33 +181,32 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
-    const artifacts = generateComponent(node.definition);
-    const component = frameworkArtifact(artifacts, options.target);
-    if (/[@/]nextwebwg\/declarative-components\/runtime|attachComponent/.test(component.content)) {
-      throw new FrameworkConversionError(
-        options.target,
-        source,
-        node.definition.contract.tag,
-      );
+    const tag = node.definition.contract.tag;
+    // The controller and its relative imports are copied beside the component, which imports them.
+    const controllerFiles = new Map<string, GeneratedArtifact>();
+    const controller = node.controller === undefined
+      ? undefined
+      : await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles);
+    const definition = controller === undefined
+      ? node.definition
+      : Object.freeze({ ...node.definition, controller: `./${controller.slice(`${options.target}/`.length)}` });
+    let content: string;
+    try {
+      content = generateVueComponent(definition);
+    } catch (error) {
+      if (error instanceof HtmlDiagnosticError) throw new FrameworkConversionError(options.target, source, tag, error.message);
+      throw error;
     }
-    const style = styleArtifact(artifacts);
-    const declarations = node.definition.declarations ?? [];
-    const hasDeclaredEvents = declarations.some(({ kind }) => kind === "event");
-    const hasDispatchedEvents = declarations.some((declaration) =>
-      declaration.kind === "handler" && declaration.steps.some(({ kind }) => kind === "dispatch")
-    );
+    if (/@nextwebwg\//.test(content)) throw new FrameworkConversionError(options.target, source, tag);
+    const component: GeneratedArtifact = { path: `${options.target}/${node.definition.contract.name}.vue`, content };
     claim(component, "component", source);
-    claim(style, "style", source);
+    for (const file of controllerFiles.values()) claim(file, "controller", source);
     manifestComponents.push(Object.freeze({
       name: node.definition.contract.name,
-      tag: node.definition.contract.tag,
+      tag,
       source,
       artifact: component.path,
-      style: style.path,
-      bridges: Object.freeze([
-        ...(hasDeclaredEvents ? ["dom-event-callback"] : []),
-        ...(hasDispatchedEvents ? ["typed-event-validation"] : []),
-      ]),
+      ...(controller === undefined ? {} : { controller }),
     }));
   }
 

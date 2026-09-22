@@ -2,9 +2,11 @@ export { defineContract, serializePropTarget } from "./contract-platform.js";
 export { HtmlDiagnosticError } from "./diagnostics.js";
 export {
   generateComponent,
+  generateVueComponent,
   GENERATOR_VERSION,
   type GeneratedArtifact,
 } from "./generate.js";
+export { addControllerGraph } from "./controller-files.js";
 export { parseComponent } from "./source-parser.js";
 export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
@@ -46,15 +48,13 @@ export {
 } from "./validity.js";
 export { rewriteValiditySelectors } from "./validity-css.js";
 export {
-  COMPONENT_PROVENANCE_ATTRIBUTE,
-  COMPONENT_ROOT_ATTRIBUTE,
-  PROJECTED_ROOT_ATTRIBUTE,
-  componentStyleMode,
-  transformComponentStyles,
-  transformGlobalStyles,
-  transformValidityStyles,
-} from "./style.js";
-export type { ComponentStyleMode, ComponentStyleOptions } from "./style.js";
+  COMPONENT_ATTRIBUTE,
+  compileComponentStyles,
+  type CompiledComponentStyles,
+  PROJECTED_ATTRIBUTE,
+  stateAttribute,
+} from "./component-styles.js";
+export { compileComponentStylesForBuild, compileComponentStylesForVue } from "./component-styles-build.js";
 export {
   NATIVE_FLAG,
   validate,

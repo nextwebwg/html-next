@@ -84,9 +84,9 @@ describe.skipIf(!enabled)("reviewed component library (smoke)", () => {
             .map((id) => document.getElementById(id)?.localName),
           same: original.every((node) => node === document.getElementById(node!.id)),
           disabled: (document.getElementById("button") as HTMLButtonElement).disabled,
-          variant: document.getElementById("button")?.getAttribute("data-variant"),
+          buttonState: document.getElementById("button")?.getAttribute("data-ui-button-state"),
           iconLabel: document.getElementById("icon")?.getAttribute("aria-label"),
-          callout: [document.getElementById("callout")?.getAttribute("role"), document.getElementById("callout")?.getAttribute("data-tone")],
+          callout: [document.getElementById("callout")?.getAttribute("role"), document.getElementById("callout")?.getAttribute("data-ui-callout-state")],
           selected: document.getElementById("row")?.getAttribute("aria-selected"),
           fieldLegend: document.querySelector("#field legend")?.textContent,
         };
@@ -95,9 +95,9 @@ describe.skipIf(!enabled)("reviewed component library (smoke)", () => {
         roots: ["button", "button", "aside", "span", "span", "div", "button", "header", "fieldset"],
         same: true,
         disabled: true,
-        variant: "solid",
+        buttonState: "variant variant=solid size size=md",
         iconLabel: "Settings",
-        callout: ["note", "warning"],
+        callout: ["note", "tone tone=warning"],
         selected: "",
         fieldLegend: "Email",
       });

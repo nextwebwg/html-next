@@ -107,13 +107,6 @@ export function literalAttribute(value: string): string {
   return `"${escapeHtml(value)}"`;
 }
 
-export function provenanceAttributes(tag: string, root = false): readonly string[] {
-  return [
-    `data-component=${literalAttribute(tag)}`,
-    ...(root ? [`data-component-root=${literalAttribute(tag)}`] : []),
-  ];
-}
-
 export function serializedDefinition(definition: ComponentDefinition): string {
   const props = Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [
     name,

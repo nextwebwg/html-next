@@ -277,7 +277,6 @@ function renderNode(
   if (svg && node.name !== "foreignObject") counter.svgParents.add(variable);
   renderAttributes(node, variable, lines, props, valueCounter, "  ", direct, directProps);
   if (direct !== undefined) collectDirectEvents(node, variable, direct);
-  lines.push(`  ${variable}.setAttribute("data-component", ${js(owner)});`);
   for (const child of node.children) {
     renderNode(child, lines, counter, variable, props, valueCounter, owner, slots, direct, directProps);
   }
@@ -304,7 +303,12 @@ function renderSlot(
 ): void {
   const assigned = node.name === undefined ? "children" : `${slots}[${js(node.name)}] ?? []`;
   lines.push(`  if (${assigned}.length > 0) {`);
-  lines.push(`    for (const child of ${assigned}) ${parent}.append(child);`);
+  // Only the root carries a component marker, so the factory records what it projects.
+  lines.push(`    for (const child of ${assigned}) {`);
+  lines.push(`      const node = typeof child === "string" ? document.createTextNode(child) : child;`);
+  lines.push(`      projected.push([node, ${js(node.name ?? "")}]);`);
+  lines.push(`      ${parent}.append(node);`);
+  lines.push("    }");
   lines.push("  } else {");
   for (const child of node.fallback ?? []) {
     renderNode(child, lines, counter, parent, props, valueCounter, owner, slots, direct, directProps);
@@ -321,10 +325,18 @@ function renderAttributes(
   indent: string,
   direct?: DirectRenderContext,
   directProps?: DirectPropRenderContext,
+  root = false,
 ): void {
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      lines.push(`${indent}${variable}.setAttribute(${js(attribute.name)}, ${js(attribute.value)});`);
+      const name = js(attribute.name);
+      const value = js(attribute.value);
+      // On the root the invocation's attributes win over the template's; class and style combine.
+      lines.push(!root
+        ? `${indent}${variable}.setAttribute(${name}, ${value});`
+        : attribute.name === "class" || attribute.name === "style"
+          ? `${indent}${variable}.setAttribute(${name}, [${value}, ${variable}.getAttribute(${name})].filter(Boolean).join(${js(attribute.name === "class" ? " " : "; ")}));`
+          : `${indent}if (!${variable}.hasAttribute(${name})) ${variable}.setAttribute(${name}, ${value});`);
       continue;
     }
     if (attribute.kind === "directive") {
@@ -398,6 +410,7 @@ export function generateVanilla(
     ...(needsRuntime ? [`const definition = ${serializedDefinition(definition)};`, ""] : []),
     `export function create${contract.name}(options${hasRequired ? "" : " = {}"}) {`,
     `  const { attributes = {}, children = [], slots = {}, as${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
+    "  const projected = [];",
     ...(direct === undefined
       ? []
       : [
@@ -431,12 +444,10 @@ export function generateVanilla(
     "  ",
     directRender,
     directPropRender,
+    true,
   );
   if (directRender !== undefined) collectDirectEvents(template, "element", directRender);
-  lines.push(
-    `  element.setAttribute("data-component", ${js(contract.tag)});`,
-    `  element.setAttribute("data-component-root", ${js(contract.tag)});`,
-  );
+  lines.push(`  element.setAttribute("data-component", ${js(contract.tag)});`);
   const counter: RenderCounter = { value: 0, svgParents: new Set() };
   for (const child of template.children) {
     renderNode(
@@ -521,7 +532,7 @@ export function generateVanilla(
   }
   if (needsRuntime) {
     lines.push(
-      "  manageComponentLifecycle(element, definition, { props: componentProps," ,
+      "  manageComponentLifecycle(element, definition, { props: componentProps, projected,",
       ...(definition.controller === undefined ? [] : ["    controller,"]),
       "  });",
     );

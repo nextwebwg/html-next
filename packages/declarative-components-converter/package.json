@@ -1,7 +1,7 @@
 {
   "name": "@nextwebwg/declarative-components-converter",
   "version": "1.0.0-alpha.0",
-  "description": "React, Vue, and Svelte conversion for Declarative HTML Components.",
+  "description": "Vue conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -34,7 +34,6 @@
     "@types/node": "catalog:",
     "@vue/compiler-sfc": "catalog:",
     "esbuild": "catalog:",
-    "svelte": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
