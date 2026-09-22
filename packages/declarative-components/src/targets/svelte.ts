@@ -68,6 +68,8 @@ function renderNode(
   const valueChild = value?.kind === "directive" && value.expressionPlan !== undefined
     ? `{${nativeExpression(value.expressionPlan.ast, aliases)}}`
     : "";
+  // `<template $value>` produces its text with no wrapper element, as in the live runtime.
+  if (node.name === "template" && valueChild !== "") return valueChild;
   const children = [
     valueChild,
     ...node.children.map((child) =>

@@ -23,6 +23,11 @@ import {
   type NativeReactivePlan,
 } from "./native-reactive.js";
 
+/** Template names for expression roots: the reactive plan's, or each prop's template access. */
+function templateValues(definition: ComponentDefinition, reactive: NativeReactivePlan | undefined): ReadonlyMap<string, string> {
+  return reactive?.values ?? new Map(Object.keys(definition.contract.props).map((name) => [name, access(name)]));
+}
+
 function access(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? `props.${name}` : `props['${name}']`;
 }
@@ -75,8 +80,10 @@ function renderNode(
   if (isVoidElement(node.name)) return open;
   const value = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "value");
   const valueChild = value?.kind === "directive" && value.expressionPlan !== undefined
-    ? `{{ ${nativeExpression(value.expressionPlan.ast, reactive?.values ?? new Map())} }}`
+    ? `{{ ${nativeExpression(value.expressionPlan.ast, templateValues(definition, reactive))} }}`
     : "";
+  // `<template $value>` produces its text with no wrapper element, as in the live runtime.
+  if (node.name === "template" && valueChild !== "") return valueChild;
   const children = [
     valueChild,
     ...node.children.map((child) =>
@@ -143,7 +150,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   );
   const children = [
     rootValue?.kind === "directive" && rootValue.expressionPlan !== undefined
-      ? `{{ ${nativeExpression(rootValue.expressionPlan.ast, reactive?.values ?? new Map())} }}`
+      ? `{{ ${nativeExpression(rootValue.expressionPlan.ast, templateValues(definition, reactive))} }}`
       : "",
     ...template.children.map((child) => renderNode(child, definition, 1, reactive, needsBridge)),
   ].filter(Boolean).join("\n");
