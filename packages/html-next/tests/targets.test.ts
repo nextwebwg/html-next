@@ -168,6 +168,23 @@ describe("official target compilers", () => {
     assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
   });
 
+  it("reads a typed state list's items as plainly as a typed prop's", () => {
+    const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
+      `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" :value="[]"></state></defs>` +
+      `<div><button $each="tab of tabs" $key="tab.id" :id="tab.id" :aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
+    ).get("vue/XTabs.vue")!;
+    compileVue(vue, "XTabs.vue");
+    assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\);/);
+    assert.match(vue, /v-for="tab in tabs"/);
+    assert.match(vue, /:id="tab\.id" :aria-selected="tab\.active" :class="\{ 'active': tab\.active \}">\{\{ tab\.label \}\}/);
+    assert.doesNotMatch(vue, /function (truthy|text|attribute)\(/);
+  });
+
+  it("rejects a state type that does not parse", () => {
+    assert.throws(() => generated(`<template component="x-bad" status="experimental" summary="Bad state type.">` +
+      `<defs><state name="rows" type="list(" :value="[]"></state></defs><div></div></template>`), /HC013/);
+  });
+
   it("renders $value text, including a wrapper-less <template $value> slot fallback", () => {
     for (const controller of ["", ' controller="./x-row.js"']) {
       const vue = generated(

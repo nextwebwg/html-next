@@ -400,7 +400,10 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   for (const state of states) {
     const name = identifiers.take(state.name, "State");
     stateNames.set(state, name);
-    const initial = state.expression === undefined ? UNKNOWN : typeOf(state.expression.ast, script);
+    const inferred = state.expression === undefined ? UNKNOWN : typeOf(state.expression.ast, script);
+    const declared = state.type === undefined ? undefined : present(parseTypeExpression(state.type));
+    // A declared type wins; an absent initial value keeps the state nullable.
+    const initial = declared === undefined ? inferred : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN };
     define(state.name, name, `${name}.value`, initial);
   }
   for (const value of computedValues) {
@@ -426,7 +429,8 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   };
   const rootMarkup = renderElement(template, names, context, true);
   const defaults = target.props.filter((prop) => "default" in prop.contract);
-  const propType = (prop: (typeof target.props)[number]): string => optional(prop) ? propTypeSource(prop.contract) : typeSource(prop.contract.type);
+  // An optional prop is declared as Vue authors declare one, `name?: T`; absent is undefined.
+  const propType = (prop: (typeof target.props)[number]): string => typeSource(prop.contract.type);
   const propsType = [
     "{",
     ...target.props.map((prop) => `  ${propKey(prop.name)}?: ${propType(prop)};`),

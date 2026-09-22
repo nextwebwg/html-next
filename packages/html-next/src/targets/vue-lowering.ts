@@ -132,7 +132,7 @@ export function typeScript(value: Static): string {
           : "any";
       case "keyword": return JSON.stringify(type.value);
       case "union": return type.members.map(source).join(" | ");
-      case "list": return `${/[ |]/.test(source(type.item)) ? `(${source(type.item)})` : source(type.item)}[]`;
+      case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;
       case "object": return `{ ${type.fields.map((field) => `${/^[A-Za-z_$][\w$]*$/.test(field.name) ? field.name : quote(field.name)}: ${source(field.type)}`).join("; ")} }`;
     }
@@ -152,7 +152,7 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   if (Array.isArray(value)) return value.map(text).join(" ");
   return value === null || value === undefined || typeof value === "object" ? "" : String(value);
 }`,
-  attribute: `function attribute(value: unknown): string | undefined {
+  attribute: `function attribute(value: unknown): any {
   if (value === null || value === undefined || value === false || (typeof value === "object" && !Array.isArray(value))) return undefined;
   return value === true ? "" : text(value);
 }`,

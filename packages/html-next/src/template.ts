@@ -33,6 +33,8 @@ export type ComponentDeclaration =
 export interface ReactiveDeclaration {
   readonly kind: "state" | "computed";
   readonly name: string;
+  /** A state's declared type, in the type-expression syntax props use. */
+  readonly type?: string;
   readonly value?: string;
   readonly expression?: CompiledExpression;
 }
