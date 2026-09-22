@@ -57,7 +57,7 @@ export interface InspectedComponentGraph {
     readonly source: string;
     readonly dependencies: readonly string[];
     readonly controller: null | string;
-    readonly support: string;
+    readonly support: string | null;
   }[];
   readonly modules: readonly string[];
 }
@@ -74,7 +74,7 @@ export async function inspectComponents(entries: readonly string[]): Promise<Ins
       source: display(node.url),
       dependencies: Object.freeze(node.dependencies.map(display)),
       controller: node.controller === undefined ? null : display(node.controller.url),
-      support: node.definition.contract.status,
+      support: node.definition.contract.status ?? null,
     }))),
     modules: Object.freeze(graph.moduleInputs.map(display)),
   });

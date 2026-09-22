@@ -294,12 +294,12 @@ function readContract(
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(tag)) {
     fail("HC005", "The `component` tag must be lowercase and contain a hyphen.", source);
   }
-  const status = attr(wrapper, "status") ?? "";
-  if (!/^(?:early|experimental|stable|deprecated)$/.test(status)) {
+  const status = attr(wrapper, "status");
+  if (status !== undefined && !/^(?:early|experimental|stable|deprecated)$/.test(status)) {
     fail("HC007", "Component `status` is not recognized.", source);
   }
-  const summary = attr(wrapper, "summary") ?? "";
-  if (summary.trim() === "") fail("HC003", "`summary` must be a non-empty string.", source);
+  const summary = attr(wrapper, "summary");
+  if (summary !== undefined && summary.trim() === "") fail("HC003", "`summary` must be a non-empty string.", source);
   if (
     !/^[a-z][a-z0-9-]*$/.test(nativeElement) ||
     (delegatedRoot && !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(nativeElement))
@@ -310,8 +310,8 @@ function readContract(
     version: 1,
     name: componentName(tag),
     tag,
-    status: status as ContractStatus,
-    summary,
+    ...(status === undefined ? {} : { status: status as ContractStatus }),
+    ...(summary === undefined ? {} : { summary }),
     nativeElement,
     props: readProps(group, targets, source, requireBinding),
   };
