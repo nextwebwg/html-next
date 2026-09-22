@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/declarative-components-converter",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.2",
   "description": "Vue conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -28,7 +28,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/declarative-components": "workspace:*"
+    "@nextwebwg/html-next": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

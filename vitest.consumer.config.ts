@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     ...baseConfig.test,
     env: { HTMLNEXT_CONSUMER_TEST: "1" },
-    include: ["packages/declarative-components/tests/installed-package.test.ts"],
+    include: ["packages/html-next/tests/installed-package.test.ts"],
     hookTimeout: 60_000,
     testTimeout: 60_000
   }

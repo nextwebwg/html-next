@@ -29,7 +29,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/declarative-components": "workspace:*",
+    "@nextwebwg/html-next": "workspace:*",
     "unplugin": "catalog:"
   },
   "devDependencies": {

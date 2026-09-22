@@ -132,7 +132,69 @@ importers:
         specifier: 'catalog:'
         version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
 
-  packages/declarative-components:
+  packages/declarative-components-converter:
+    dependencies:
+      '@nextwebwg/html-next':
+        specifier: workspace:*
+        version: link:../html-next
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.3
+      '@vue/compiler-sfc':
+        specifier: 'catalog:'
+        version: 3.5.42
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
+
+  packages/declarative-components-unplugin:
+    dependencies:
+      '@nextwebwg/html-next':
+        specifier: workspace:*
+        version: link:../html-next
+      unplugin:
+        specifier: 'catalog:'
+        version: 3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
+
+  packages/html-forms:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.3
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+      playwright:
+        specifier: 'catalog:'
+        version: 1.63.0
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
+
+  packages/html-next:
     dependencies:
       parse5:
         specifier: 'catalog:'
@@ -234,68 +296,6 @@ importers:
       vue:
         specifier: 'catalog:'
         version: 3.5.42(typescript@7.0.2)
-
-  packages/declarative-components-converter:
-    dependencies:
-      '@nextwebwg/declarative-components':
-        specifier: workspace:*
-        version: link:../declarative-components
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.20.3
-      '@vue/compiler-sfc':
-        specifier: 'catalog:'
-        version: 3.5.42
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
-
-  packages/declarative-components-unplugin:
-    dependencies:
-      '@nextwebwg/declarative-components':
-        specifier: workspace:*
-        version: link:../declarative-components
-      unplugin:
-        specifier: 'catalog:'
-        version: 3.3.0(esbuild@0.28.2)(rolldown@1.2.8)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.20.3
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
-
-  packages/html-forms:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.20.3
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
-      playwright:
-        specifier: 'catalog:'
-        version: 1.63.0
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.0(@types/node@22.20.3)(vite@8.3.0(@types/node@22.20.3)(esbuild@0.28.2)(tsx@4.23.13))
 
 packages:
 

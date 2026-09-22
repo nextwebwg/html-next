@@ -65,8 +65,8 @@ describe("HTML Next unplugin", () => {
       plugins: [htmlNext.vite({ entries: ["src/counter.html", "src/label.html"], root })],
       resolve: {
         alias: {
-          "@nextwebwg/declarative-components/generated-runtime": new URL(
-            "../../declarative-components/src/generated-runtime.ts",
+          "@nextwebwg/html-next/generated-runtime": new URL(
+            "../../html-next/src/generated-runtime.ts",
             import.meta.url,
           ).pathname,
         },
@@ -101,10 +101,10 @@ describe("HTML Next unplugin", () => {
     assert.deepEqual(manifest.publicEntries.map(({ module }) => module), [componentsModule, componentsModule]);
     assert.equal(manifest.delivery, "application");
     assert.ok(manifest.capabilities.includes("state"));
-    assert.deepEqual(manifest.supportImports, ["@nextwebwg/declarative-components/generated-runtime"]);
+    assert.deepEqual(manifest.supportImports, ["@nextwebwg/html-next/generated-runtime"]);
     assert.deepEqual(manifest.support, {
       module: supportModule,
-      imports: ["@nextwebwg/declarative-components/generated-runtime"],
+      imports: ["@nextwebwg/html-next/generated-runtime"],
       capabilities: manifest.capabilities,
     });
     assert.equal((output.match(/function manageGeneratedProps/g) ?? []).length, 1);
