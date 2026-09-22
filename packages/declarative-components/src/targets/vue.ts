@@ -174,6 +174,8 @@ interface Context {
   readonly usesRefs: { value: boolean };
   /** Whether the root needs a Vue ref (for dispatch and the controller host). */
   readonly root: boolean;
+  /** The native event that updates `v-model`, when the root is a native form control. */
+  readonly model?: "input" | "change";
   readonly hostState: boolean;
 }
 
@@ -299,6 +301,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     literals.unshift(`data-component=${attributeValue(tag)}`);
     literals.push("v-bind=\"$attrs\"");
     if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
+    if (context.model) attributes.push(`@${context.model}="updateModel"`);
     if (context.root) attributes.push("ref=\"root\"");
   }
   // A <template> without structural flow produces its content with no wrapper element.
@@ -382,9 +385,16 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const events = declarations.filter((declaration): declaration is EventDeclaration => declaration.kind === "event");
 
+  // A native form-control root with a `value` prop takes Vue's v-model: `modelValue` sets the value
+  // and the control's input (change, for a select) reports it.
+  const modelProp = ["input", "textarea", "select"].includes(template.name)
+    ? target.props.find((prop) => prop.name === "value")
+    : undefined;
   const names: Names = { template: new Map(), script: new Map() };
   for (const prop of target.props) {
-    const read = /^[A-Za-z_$][\w$]*$/.test(prop.name) ? `props.${prop.name}` : `props[${quote(prop.name)}]`;
+    const read = prop === modelProp
+      ? "(props.modelValue ?? props.value)"
+      : /^[A-Za-z_$][\w$]*$/.test(prop.name) ? `props.${prop.name}` : `props[${quote(prop.name)}]`;
     names.template.set(prop.name, read);
     names.script.set(prop.name, read);
   }
@@ -404,10 +414,29 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const controlled = definition.controller !== undefined;
   const dispatches = events.length > 0 || controlled;
   const reads = styles.stateNames.length > 0 || controlled;
-  const context: Context = { definition, imports: new Set(), usesRefs: { value: false }, root: dispatches, hostState: styles.stateNames.length > 0 };
+  const context: Context = {
+    definition,
+    imports: new Set(),
+    usesRefs: { value: false },
+    root: dispatches,
+    hostState: styles.stateNames.length > 0,
+    ...(modelProp === undefined ? {} : { model: template.name === "select" ? "change" : "input" }),
+  };
   const rootMarkup = renderElement(template, names, context, true);
   const defaults = target.props.filter((prop) => "default" in prop.contract);
-  const propsType = ["{", ...target.props.map((prop) => `  ${propKey(prop.name)}?: ${propTypeSource(prop.contract)};`), "}"].join("\n");
+  const propsType = [
+    "{",
+    ...target.props.map((prop) => `  ${propKey(prop.name)}?: ${propTypeSource(prop.contract)};`),
+    ...(modelProp === undefined ? [] : [`  modelValue?: ${propTypeSource(modelProp.contract)};`]),
+    "}",
+  ].join("\n");
+  const emits = [
+    ...events.map((event) => {
+      const typed = target.events.find((candidate) => candidate.name === event.name);
+      return `  ${quote(event.name)}: [detail: ${typed?.detailType ?? "unknown"}];`;
+    }),
+    ...(modelProp === undefined ? [] : ['  "update:modelValue": [value: string];']),
+  ];
 
   const body: string[] = [
     ...(target.props.length === 0 ? [] : defaults.length === 0 ? [`const props = defineProps<${propsType}>();`] : [
@@ -415,13 +444,9 @@ export function generateVue(definition: ComponentDefinition, version: string): s
       ...defaults.map((prop) => `  ${propKey(prop.name)}: ${defaultSource((prop.contract as { default: unknown }).default)},`),
       "});",
     ]),
-    ...(events.length === 0 ? [] : [
-      "const emit = defineEmits<{",
-      ...events.map((event) => {
-        const typed = target.events.find((candidate) => candidate.name === event.name);
-        return `  ${quote(event.name)}: [detail: ${typed?.detailType ?? "unknown"}];`;
-      }),
-      "}>();",
+    ...(emits.length === 0 ? [] : ["const emit = defineEmits<{", ...emits, "}>();"]),
+    ...(modelProp === undefined ? [] : [
+      'const updateModel = (event: Event): void => emit("update:modelValue", (event.target as HTMLInputElement).value);',
     ]),
     ...(dispatches ? ["const root = ref<HTMLElement | null>(null);"] : []),
     ...(context.usesRefs.value || controlled ? ["const refs: Record<string, Element | undefined> = {};"] : []),
