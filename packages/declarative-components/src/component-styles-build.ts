@@ -6,6 +6,7 @@ import postcss, { type AtRule, type ChildNode, type Container, type Rule } from 
 
 import {
   assembleComponentStyles,
+  COMPONENT_ATTRIBUTE,
   type CompiledComponentStyles,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
@@ -29,17 +30,16 @@ export function compileComponentStylesForBuild(
   const names = new Set<string>();
   const hoisted: string[] = [];
 
-  const rewrite = (rule: Rule, kind: StyleRuleKind): void => {
-    rule.selector = rewriteComponentSelector(rule.selector, tag, kind, names);
+  const rewrite = (rule: Rule): void => {
+    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names);
     rule.walkRules((nested) => {
-      nested.selector = rewriteComponentSelector(nested.selector, tag, kind, names);
+      nested.selector = rewriteComponentSelector(nested.selector, tag, ":scope", names);
     });
   };
   const prune = (container: Container<ChildNode>, want: StyleRuleKind, topLevel: boolean): void => {
     container.each((node) => {
       if (node.type === "rule") {
-        const kind = styleRuleKind(node.selector);
-        if (kind === want) rewrite(node, kind);
+        if (styleRuleKind(node.selector) === want) rewrite(node);
         else node.remove();
       } else if (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()) && node.nodes !== undefined) {
         prune(node as AtRule, want, false);
@@ -80,7 +80,7 @@ export function compileComponentStylesForVue(
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, "slotted", names);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names);
   });
   validateStateNames(definition, names, source);
   return { css: root.toString().trim(), stateNames: [...names] };

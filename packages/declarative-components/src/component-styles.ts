@@ -107,21 +107,20 @@ function rewriteComponentTags(selector: string): string {
 }
 
 /**
- * Rewrites one renamed selector for its scope. In the component's own scope `:host` is the scoping
- * root; in the projected-content scope it is the root's selector, since the subject is projected.
+ * Rewrites one renamed selector. `host` is what `:host` becomes: `:scope` inside the component's
+ * `@scope` rules (both of them are rooted at the component root), or the root's own selector where
+ * there is no `@scope` (Vue's scoped styles).
  */
 export function rewriteComponentSelector(
   selector: string,
   tag: string,
-  kind: StyleRuleKind,
+  host: string,
   names: Set<string>,
   canonical: (name: string) => string = (name) => name,
 ): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
   }
-  const root = `[${COMPONENT_ATTRIBUTE}~="${tag}"]`;
-  const host = kind === "own" ? ":scope" : root;
   let output = "";
   let index = 0;
   const state = /:where\(\s*\[--state\]\s*\):is\(/g;
@@ -207,10 +206,10 @@ export function compileComponentStyles(
     ...(definition.declarations ?? []).filter((declaration) => declaration.kind === "state").map((declaration) => declaration.name),
   ].map((name) => [name.toLowerCase(), name]));
   const canonical = (name: string): string => declared.get(name.toLowerCase()) ?? name;
-  const rewriteNested = (rule: CSSStyleRule, kind: StyleRuleKind): void => {
-    rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, kind, names, canonical);
+  const rewriteNested = (rule: CSSStyleRule): void => {
+    rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, ":scope", names, canonical);
     for (const child of Array.from(rule.cssRules ?? [])) {
-      if (child instanceof StyleRule) rewriteNested(child, kind);
+      if (child instanceof StyleRule) rewriteNested(child);
     }
   };
   // Keeps the rules of one kind, rewriting their selectors; grouping rules keep their structure.
@@ -220,9 +219,8 @@ export function compileComponentStyles(
     for (let index = 0; index < rules.length;) {
       const rule = rules[index]!;
       if (rule instanceof StyleRule) {
-        const kind = styleRuleKind(rule.selectorText);
-        if (kind === want) {
-          rewriteNested(rule, kind);
+        if (styleRuleKind(rule.selectorText) === want) {
+          rewriteNested(rule);
           index += 1;
         } else container.deleteRule(index);
       } else if (rule instanceof GroupingRule) {
