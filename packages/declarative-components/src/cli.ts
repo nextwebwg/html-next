@@ -31,32 +31,56 @@ export interface BuildManifest {
   }[];
 }
 
+/** The controller module and its static relative imports, by file URL. */
+async function readControllerGraph(sourceURL: string, files: Map<string, string>): Promise<void> {
+  if (files.has(sourceURL)) return;
+  const content = await readFile(fileURLToPath(sourceURL), "utf8");
+  files.set(sourceURL, content);
+  for (const item of ts.preProcessFile(content, true, true).importedFiles) {
+    if (!item.fileName.startsWith(".") && !item.fileName.startsWith("/")) continue;
+    await readControllerGraph(new URL(item.fileName, sourceURL).href, files);
+  }
+}
+
+/** The deepest directory containing every path. */
+function commonDirectory(paths: readonly string[]): string {
+  let common = dirname(paths[0]!);
+  for (const path of paths.slice(1)) {
+    while (relative(common, path).startsWith(`..${sep}`)) common = dirname(common);
+  }
+  return common;
+}
+
+/**
+ * Copies a controller and its relative imports under `targetRoot`, named relative to the deepest
+ * directory that holds the whole graph: the component's own directory unless the controller imports
+ * a shared module beside it. The graph must stay inside the component's package (`trustRoot`).
+ */
 async function addControllerGraph(
   sourceURL: string,
   trustRoot: string,
   targetRoot: string,
   artifacts: Map<string, GeneratedArtifact>,
-  seen: Set<string>,
 ): Promise<string> {
-  const source = fileURLToPath(sourceURL);
+  const files = new Map<string, string>();
+  await readControllerGraph(sourceURL, files);
   const root = fileURLToPath(trustRoot);
-  const sourceRelative = relative(root, source);
-  if (sourceRelative === ".." || sourceRelative.startsWith(`..${sep}`)) {
-    throw new Error(`Controller module escaped its component root: ${source}.`);
+  const paths = [...files.keys()].map((url) => fileURLToPath(url));
+  for (const path of paths) {
+    const withinRoot = relative(root, path);
+    if (withinRoot === ".." || withinRoot.startsWith(`..${sep}`)) {
+      throw new Error(`Controller module escaped its component root: ${path}.`);
+    }
   }
-  const target = `${targetRoot}/${sourceRelative.split(sep).join("/")}`;
-  const key = `${targetRoot}\0${sourceURL}`;
-  if (seen.has(key)) return target;
-  seen.add(key);
-  const content = await readFile(source, "utf8");
-  const prior = artifacts.get(target);
-  if (prior !== undefined && prior.content !== content) throw new Error(`Generated artifact collision at ${target}.`);
-  artifacts.set(target, { path: target, content });
-  for (const item of ts.preProcessFile(content, true, true).importedFiles) {
-    if (!item.fileName.startsWith(".") && !item.fileName.startsWith("/")) continue;
-    await addControllerGraph(new URL(item.fileName, sourceURL).href, trustRoot, targetRoot, artifacts, seen);
+  const base = commonDirectory(paths);
+  const target = (path: string) => `${targetRoot}/${relative(base, path).split(sep).join("/")}`;
+  for (const [url, content] of files) {
+    const path = target(fileURLToPath(url));
+    const prior = artifacts.get(path);
+    if (prior !== undefined && prior.content !== content) throw new Error(`Generated artifact collision at ${path}.`);
+    artifacts.set(path, { path, content });
   }
-  return target;
+  return target(fileURLToPath(sourceURL));
 }
 
 async function componentGraph(entries: readonly string[]): Promise<NodeComponentGraph> {
@@ -127,7 +151,6 @@ export async function buildComponents(
   const components: Array<BuildManifest["components"][number]> = [];
   const selected = new Set(options.targets ?? ["docs", "react", "styles", "svelte", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
-  const controllerModules = new Set<string>();
   const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
@@ -137,7 +160,6 @@ export async function buildComponents(
       node.trustRoot,
       `controllers/${node.definition.contract.tag}`,
       artifacts,
-      controllerModules,
     );
     const definition = controllerTarget === undefined
       ? node.definition
