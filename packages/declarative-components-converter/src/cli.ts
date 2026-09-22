@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { convertComponents, type ConversionGraph, type FrameworkTarget } from "./index.js";
 
 function usage(): string {
-  return "Usage: html-next-convert <react|vue|svelte> <component.html...> --mode <application|library> --out-dir <directory>";
+  return "Usage: html-next-convert vue <component.html...> --mode <application|library> --out-dir <directory>";
 }
 
 async function main(argv: readonly string[]): Promise<void> {
@@ -15,7 +15,7 @@ async function main(argv: readonly string[]): Promise<void> {
   const outIndex = argv.indexOf("--out-dir");
   const outDirectory = argv[outIndex + 1];
   if (
-    target === undefined || !(["react", "vue", "svelte"] as const).includes(target) ||
+    target === undefined || !(["vue"] as const).includes(target) ||
     mode === undefined || !(["application", "library"] as const).includes(mode) ||
     modeIndex < 2 || outIndex !== modeIndex + 2 || outDirectory === undefined ||
     outIndex !== argv.length - 2

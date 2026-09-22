@@ -8,13 +8,11 @@ import {
   type GeneratedArtifact,
 } from "@nextwebwg/declarative-components";
 
-export type FrameworkTarget = "react" | "vue" | "svelte";
+export type FrameworkTarget = "vue";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
-  react: "19",
   vue: "3.5",
-  svelte: "5",
 };
 
 interface BaseConvertOptions {
@@ -151,11 +149,8 @@ function frameworkEntry(
 ): GeneratedArtifact {
   const exports = [...entries].sort((left, right) => left.artifact.localeCompare(right.artifact)).map((entry) => {
     const artifact = entry.artifact.slice(entry.artifact.lastIndexOf("/") + 1);
-    const name = artifact.replace(/\.(?:tsx|vue|svelte)$/, "");
-    const file = `./${artifact}`;
-    return target === "react"
-      ? `export { ${name} } from ${JSON.stringify(file.replace(/\.tsx$/, ".js"))};`
-      : `export { default as ${name} } from ${JSON.stringify(file)};`;
+    const name = artifact.replace(/\.vue$/, "");
+    return `export { default as ${name} } from ${JSON.stringify(`./${artifact}`)};`;
   });
   return {
     path: `${target}/${mode === "application" ? "application.ts" : "index.ts"}`,

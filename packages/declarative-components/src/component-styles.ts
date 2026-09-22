@@ -28,10 +28,13 @@ export type StyleRuleKind = "own" | "slotted";
 const SENTINEL = { slotted: "[--slotted]", state: "[--state]" } as const;
 const RENAMABLE = /\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:(slotted|host-state)\(/g;
 
-/** Renames `:slotted(` and `:host-state(` into valid selectors, skipping comments and strings. */
-export function renameComponentPseudoClasses(css: string): string {
-  return css.replace(RENAMABLE, (match, kind: string | undefined) =>
-    kind === undefined ? match : `:where(${kind === "slotted" ? SENTINEL.slotted : SENTINEL.state}):is(`);
+/**
+ * Renames `:slotted(` and `:host-state(` into valid selectors, skipping comments and strings. A
+ * target that has its own `:slotted()` (Vue) renames only `:host-state(`.
+ */
+export function renameComponentPseudoClasses(css: string, kinds: readonly ("slotted" | "host-state")[] = ["slotted", "host-state"]): string {
+  return css.replace(RENAMABLE, (match, kind: "slotted" | "host-state" | undefined) =>
+    kind === undefined || !kinds.includes(kind) ? match : `:where(${kind === "slotted" ? SENTINEL.slotted : SENTINEL.state}):is(`);
 }
 
 /** Whether a renamed selector belongs to projected content rather than the component's own markup. */
@@ -97,6 +100,9 @@ function rewriteComponentTags(selector: string): string {
  * root; in the projected-content scope it is the root's selector, since the subject is projected.
  */
 export function rewriteComponentSelector(selector: string, tag: string, kind: StyleRuleKind, names: Set<string>): string {
+  if (/:scope(?![\w-])/.test(selector)) {
+    fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
+  }
   const root = `[${COMPONENT_ATTRIBUTE}~="${tag}"]`;
   const host = kind === "own" ? ":scope" : root;
   let output = "";

@@ -1711,6 +1711,11 @@ export function lowerDocument(root: Document = document): number {
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
+  /**
+   * The nodes the caller placed in slots, with each one's slot name. Only the root carries a
+   * component marker, so a generated factory that renders slot content itself reports it here.
+   */
+  readonly projected?: readonly (readonly [node: Node, slot: string])[];
 }
 
 interface ManagedComponentLifecycle {
@@ -1868,76 +1873,6 @@ export function registerComponentDefinitions(
   }
 }
 
-/**
- * Finds the slot content inside a server-rendered root. Nodes stamped with the component's
- * `data-component` lineage are template output; everything else was projected into a slot, whoever
- * rendered it (HTML Next's server renderer or a framework).
- */
-function serverProjection(element: Element, definition: ComponentDefinition): {
-  readonly projected: Node[];
-  readonly projectedSlotNames: WeakMap<Node, string>;
-} {
-  const projected: Node[] = [];
-  const projectedSlotNames = new WeakMap<Node, string>();
-  const markFrameworkProjection = (parent: Element, authored: ElementNode): void => {
-    const slots = authored.children.filter((child): child is SlotNode => child.kind === "slot");
-    const slot = slots[0];
-    const slotName = slot?.name ?? "";
-    // Text cannot carry a slot attribute; like HTML slotting, it belongs to the default slot.
-    const textSlotName = slots.some((candidate) => (candidate.name ?? "") === "") ? "" : slotName;
-    const literalText = authored.children.filter((child): child is TextNode => child.kind === "text")
-      .map((child) => child.value);
-    let literalCursor = 0;
-    const authoredElements = authored.children.filter((child): child is ElementNode => child.kind === "element");
-    let elementCursor = 0;
-    for (const child of Array.from(parent.childNodes)) {
-      if (child instanceof Element) {
-        const lineage = child.getAttribute("data-component")?.split(/\s+/) ?? [];
-        const componentRoots = (child.getAttribute("data-component-root") ?? "").split(/\s+/);
-        while (
-          elementCursor < authoredElements.length &&
-          authoredElements[elementCursor]!.name !== child.localName &&
-          !componentRoots.includes(authoredElements[elementCursor]!.name)
-        ) elementCursor += 1;
-        const authoredChild = authoredElements[elementCursor];
-        const nestedFrameworkRoot = authoredChild !== undefined &&
-          child.localName !== authoredChild.name &&
-          componentRoots.includes(authoredChild.name);
-        if (!lineage.includes(definition.contract.tag) && !nestedFrameworkRoot) {
-          projectedSlotNames.set(
-            child,
-            child.getAttribute("slot") ?? slotName,
-          );
-          markProjectedRoot(child);
-          projected.push(child);
-        } else {
-          elementCursor += 1;
-          // Nested framework roots are opaque. Their own attachment maps
-          // slots and controllers against the nested component definition.
-          if (authoredChild !== undefined && !nestedFrameworkRoot) {
-            markFrameworkProjection(child, authoredChild);
-          }
-        }
-        continue;
-      }
-      if (child instanceof Comment && slot !== undefined) {
-        projectedSlotNames.set(child, slotName);
-        projected.push(child);
-        continue;
-      }
-      if (child instanceof Text && child.data.trim() !== "") {
-        while (literalCursor < literalText.length && literalText[literalCursor] !== child.data) literalCursor += 1;
-        if (literalCursor < literalText.length) literalCursor += 1;
-        else {
-          projectedSlotNames.set(child, textSlotName);
-          projected.push(child);
-        }
-      }
-    }
-  };
-  markFrameworkProjection(element, definition.template);
-  return { projected, projectedSlotNames };
-}
 
 /**
  * Framework-host adapter. The framework emits the declared native root and owns its outer
@@ -1972,7 +1907,12 @@ export function attachComponent(
   }
   const instance = runtimeInstance(element);
   if (instance === undefined) {
-    const { projected, projectedSlotNames } = serverProjection(element, definition);
+    const projected = (options.projected ?? []).map(([node]) => node);
+    const projectedSlotNames = new WeakMap<Node, string>();
+    for (const [node, slot] of options.projected ?? []) {
+      projectedSlotNames.set(node, slot);
+      markProjectedRoot(node);
+    }
     addAttributeToken(element, COMPONENT_ATTRIBUTE, definition.contract.tag);
     // The framework's explicit props become the same data-* attributes hydration reads; defaults
     // stay implicit, exactly as for HTML authors.

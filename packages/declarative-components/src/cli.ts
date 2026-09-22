@@ -13,7 +13,7 @@ import {
 } from "./generate.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
 
-export type BuildTarget = "docs" | "react" | "styles" | "svelte" | "vanilla" | "vue";
+export type BuildTarget = "docs" | "styles" | "vanilla" | "vue";
 
 export interface BuildOptions {
   readonly targets?: readonly BuildTarget[];
@@ -149,7 +149,7 @@ export async function buildComponents(
   const outputRoot = resolve(outDirectory);
   const artifacts = new Map<string, GeneratedArtifact>();
   const components: Array<BuildManifest["components"][number]> = [];
-  const selected = new Set(options.targets ?? ["docs", "react", "styles", "svelte", "vanilla", "vue"]);
+  const selected = new Set(options.targets ?? ["docs", "styles", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
   const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
 
@@ -226,7 +226,7 @@ async function main(argv: readonly string[]): Promise<void> {
     if (targetArgs[index] !== "--target" || targetArgs[index + 1] === undefined) throw new Error(usage());
     targets.push(targetArgs[index + 1] as BuildTarget);
   }
-  const allowed = new Set<BuildTarget>(["docs", "react", "styles", "svelte", "vanilla", "vue"]);
+  const allowed = new Set<BuildTarget>(["docs", "styles", "vanilla", "vue"]);
   if (targets.some((target) => !allowed.has(target))) throw new Error(`Unknown build target: ${targets.find((target) => !allowed.has(target))}.`);
   await buildComponents(argv.slice(1, outIndex), outDirectory, targets.length === 0 ? {} : { targets });
 }

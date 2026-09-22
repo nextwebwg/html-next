@@ -303,7 +303,12 @@ function renderSlot(
 ): void {
   const assigned = node.name === undefined ? "children" : `${slots}[${js(node.name)}] ?? []`;
   lines.push(`  if (${assigned}.length > 0) {`);
-  lines.push(`    for (const child of ${assigned}) ${parent}.append(child);`);
+  // Only the root carries a component marker, so the factory records what it projects.
+  lines.push(`    for (const child of ${assigned}) {`);
+  lines.push(`      const node = typeof child === "string" ? document.createTextNode(child) : child;`);
+  lines.push(`      projected.push([node, ${js(node.name ?? "")}]);`);
+  lines.push(`      ${parent}.append(node);`);
+  lines.push("    }");
   lines.push("  } else {");
   for (const child of node.fallback ?? []) {
     renderNode(child, lines, counter, parent, props, valueCounter, owner, slots, direct, directProps);
@@ -397,6 +402,7 @@ export function generateVanilla(
     ...(needsRuntime ? [`const definition = ${serializedDefinition(definition)};`, ""] : []),
     `export function create${contract.name}(options${hasRequired ? "" : " = {}"}) {`,
     `  const { attributes = {}, children = [], slots = {}, as${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
+    "  const projected = [];",
     ...(direct === undefined
       ? []
       : [
@@ -517,7 +523,7 @@ export function generateVanilla(
   }
   if (needsRuntime) {
     lines.push(
-      "  manageComponentLifecycle(element, definition, { props: componentProps," ,
+      "  manageComponentLifecycle(element, definition, { props: componentProps, projected,",
       ...(definition.controller === undefined ? [] : ["    controller,"]),
       "  });",
     );

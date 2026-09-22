@@ -4,7 +4,6 @@ import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { transform } from "esbuild";
-import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -34,144 +33,127 @@ async function targets(): Promise<Map<string, string>> {
   );
 }
 
+/** Compiles a generated SFC with Vue's own compiler, failing on any parse or template error. */
+function compileVue(source: string, filename: string): string {
+  const parsed = parseVue(source, { filename });
+  assert.deepEqual(parsed.errors, [], `${filename}: parse`);
+  const script = compileScript(parsed.descriptor, { id: filename, inlineTemplate: true });
+  const template = compileTemplate({
+    id: filename,
+    filename,
+    source: parsed.descriptor.template!.content,
+    compilerOptions: { bindingMetadata: script.bindings ?? {} },
+  });
+  assert.deepEqual(template.errors, [], `${filename}: template`);
+  return script.content;
+}
+
+/** Module specifiers a converted component imports. */
+function importsOf(source: string): string[] {
+  return [...source.matchAll(/^import[^"\n]*"([^"]+)"/gm)].map((match) => match[1]!);
+}
+
+const featureSource = `<template component="x-feature" status="experimental" summary="Every convertible construct." controller="./x-feature.js">
+  <defs>
+    <prop name="label" type="string" default="Items">Heading.</prop>
+    <prop name="items" type="list(object({ id: string, name: string, done: boolean }))">Rows.</prop>
+    <prop name="size" type="sm | md" default="md">Size.</prop>
+    <state name="open" :value="false"></state>
+    <state name="query" :value="''"></state>
+    <computed name="count" from="items.length"></computed>
+    <event name="toggle" type="object({ open: boolean })"></event>
+    <handler name="flip"><set name="open" :value="not open"></set><dispatch event="toggle" :detail="{ open: open }"></dispatch></handler>
+    <method name="focusSearch" export="focusSearch" returns="promise(undefined)"></method>
+  </defs>
+  <section class="panel" class:compact="size = 'sm'" style:--gap="size">
+    <h2 $value="label"></h2>
+    <input $ref="search" bind:value="query">
+    <button type="button" on:click="flip"><template $value="open"></template></button>
+    <ul $if="open">
+      <li $each="item, index of items" $key="item.id" $where="item.done" $sort="name"><span $value="item.name"></span></li>
+    </ul>
+    <template $match>
+      <small $when="size = 'sm'">small</small>
+      <span $else>regular</span>
+    </template>
+    <x-badge :tone="size"><slot name="badge">none</slot></x-badge>
+    <slot></slot>
+  </section>
+  <style>
+    :host { display: block; }
+    :host-state([open]) .panel { outline: 1px solid; }
+    :host-state([size="sm"]) h2 { font-size: small; }
+    :slotted(p) { margin: 0; }
+    x-badge { margin-inline: auto; }
+  </style>
+</template>`;
+
 describe("official target compilers", () => {
-  it("parses generated Vanilla and React source", async () => {
+  it("parses generated Vanilla source", async () => {
     const generated = await targets();
     await transform(generated.get("vanilla/XButton.js")!, { loader: "js" });
-    await transform(generated.get("react/XButton.tsx")!, { loader: "tsx" });
   });
 
-  it("compiles the generated Vue 3.5 SFC", async () => {
-    const generated = await targets();
-    const source = generated.get("vue/XButton.vue")!;
-    const parsed = parseVue(source, { filename: "XButton.vue" });
-    assert.deepEqual(parsed.errors, []);
-    const script = compileScript(parsed.descriptor, { id: "html-next-button" });
-    const template = compileTemplate({
-      id: "html-next-button",
-      filename: "XButton.vue",
-      source: parsed.descriptor.template!.content,
-      compilerOptions: { bindingMetadata: script.bindings ?? {} },
-    });
-    assert.deepEqual(template.errors, []);
+  it("converts to a Vue SFC that imports only Vue and the component's own modules", () => {
+    const vue = generated(featureSource).get("vue/XFeature.vue")!;
+    compileVue(vue, "XFeature.vue");
+    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./x-feature.js", "vue"]);
+    assert.doesNotMatch(vue, /@nextwebwg|declarative-components|attachComponent|manageGeneratedProps/);
   });
 
-  it("compiles the generated Svelte 5 component", async () => {
-    const generated = await targets();
-    const result = compileSvelte(generated.get("svelte/XButton.svelte")!, {
-      filename: "XButton.svelte",
-      generate: "client",
-    });
-    assert.ok(result.js.code.length > 0);
+  it("maps each construct to Vue's own facility", () => {
+    const vue = generated(featureSource).get("vue/XFeature.vue")!;
+    assert.match(vue, /const state_open = ref<unknown>\(false\)/);
+    assert.match(vue, /const computed_count = computed\(/);
+    assert.match(vue, /<template v-if="hn\.t\(state_open\)">/);
+    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\[&quot;items&quot;\], \(item\) => \(item\)\?\.\[&quot;done&quot;\], \[&quot;name&quot;\], undefined\)"/);
+    assert.match(vue, /v-model="state_query"/);
+    assert.match(vue, /:ref="\(element\) => \{ refs\[&quot;search&quot;\] = element \}"/);
+    assert.match(vue, /@click="handler_flip"/);
+    assert.match(vue, /:class="\{ &quot;compact&quot;: hn\.t\(/);
+    assert.match(vue, /:style="\{ &quot;--gap&quot;: hn\.text\(/);
+    assert.match(vue, /<XBadge :tone="props\[&quot;size&quot;\]"><slot name="badge">none<\/slot><\/XBadge>/);
+    assert.match(vue, /<template v-if="hn\.t\(\(props\[&quot;size&quot;\] === &quot;sm&quot;\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
+    assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
+    assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
   });
 
-  it("renders $value text, including a wrapper-less <template $value> slot fallback, in every target", () => {
+  it("renders $value text, including a wrapper-less <template $value> slot fallback", () => {
     for (const controller of ["", ' controller="./x-row.js"']) {
-      const output = generated(
+      const vue = generated(
         `<template component="x-row" status="experimental" summary="A target compiler fixture."${controller}>` +
         `<defs><prop name="label" type="string" default="">Row label.</prop></defs>` +
         `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
-      );
-      for (const path of ["vue/XRow.vue", "react/XRow.tsx", "svelte/XRow.svelte"]) {
-        const source = output.get(path)!;
-        assert.doesNotMatch(source, /\{\{ undefined \}\}|\{undefined\}/, `${path}${controller}: text resolves the prop`);
-        assert.doesNotMatch(source, /<template data-component/, `${path}${controller}: no literal <template> wrapper`);
-      }
+      ).get("vue/XRow.vue")!;
+      compileVue(vue, "XRow.vue");
+      assert.match(vue, /<h2>\{\{ hn\.text\(props\["label"\]\) \}\}<\/h2>/, `${controller}: element text`);
+      assert.match(vue, /<slot name="label">\{\{ hn\.text\(props\["label"\]\) \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
     }
   });
 
   it("keeps a slot inside a select, as the HTML Standard's select parsing does", () => {
-    const output = generated(
+    const vue = generated(
       `<template component="x-choice" status="experimental" summary="A target compiler fixture.">` +
       `<defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>` +
       `<select :disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
-    );
-    const vue = output.get("vue/XChoice.vue")!;
-    assert.match(vue, /<select[^>]*>[\s\S]*<option value=""[\s\S]*<slot><\/slot>[\s\S]*<\/select>/);
-    assert.doesNotMatch(vue, /s-lect/);
-    assert.match(output.get("react/XChoice.tsx")!, /<select[\s\S]*\{children/);
-    assert.match(output.get("svelte/XChoice.svelte")!, /<select[\s\S]*@render children/);
+    ).get("vue/XChoice.vue")!;
+    compileVue(vue, "XChoice.vue");
+    assert.match(vue, /<select[^>]*><option value="">None<\/option><slot><\/slot><\/select>/);
   });
 
-  it("uses framework rendering directly for prop-and-slot components", async () => {
-    const output = await targets();
-    for (const path of ["react/XButton.tsx", "vue/XButton.vue", "svelte/XButton.svelte"]) {
-      assert.doesNotMatch(output.get(path)!, /declarative-components\/runtime|attachComponent/);
-    }
-  });
-
-  it("installs the declarative prop boundary when framework templates do not bind public props", () => {
-    const output = generated(componentSource(
-      "demo-panel",
-      `<prop name="align" type="start | center | end">Alignment.</prop>
-       <prop name="label" type="string">Label.</prop>`,
-      `<div><span :data-align="align" :data-label="label"></span><slot></slot></div>`,
-    ));
-
-    for (const path of ["react/DemoPanel.tsx", "vue/DemoPanel.vue", "svelte/DemoPanel.svelte"]) {
-      const module = output.get(path)!;
-      assert.match(module, /manageGeneratedProps/);
-      assert.match(module, /data-align/);
-      assert.match(module, /data-label/);
-      assert.doesNotMatch(module, /declarative-components\/runtime|attachComponent/);
-    }
-  });
-
-  it("passes only explicit props and never assigns element properties in framework adapters", () => {
-    const output = generated(componentSource(
-      "demo-toggle",
-      `<prop name="pressed" type="boolean" default="false">Pressed.</prop>`,
-      `<button :aria-pressed="pressed"><slot></slot></button>`,
-    ));
-
-    for (const path of ["react/DemoToggle.tsx", "vue/DemoToggle.vue", "svelte/DemoToggle.svelte"]) {
-      const module = output.get(path)!;
-      assert.doesNotMatch(module, /Object\.assign\(/);
-      assert.doesNotMatch(module, /\)\[name\] = /);
-      assert.match(module, /update(?:Generated|Component)Props/);
-      assert.match(module, /default: false/);
-    }
-  });
-
-  it("does not duplicate null in optional nullable target types", () => {
-    const output = generated(componentSource(
+  it("types optional nullable props once", () => {
+    const vue = generated(componentSource(
       "demo-anchor",
       `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
-    ));
-
-    for (const path of [
-      "vanilla/DemoAnchor.d.ts",
-      "react/DemoAnchor.tsx",
-      "vue/DemoAnchor.vue",
-      "svelte/DemoAnchor.svelte",
-    ]) {
-      assert.match(output.get(path)!, /anchor\?: "start" \| "end" \| null;/);
-      assert.doesNotMatch(output.get(path)!, /null \| null/);
-    }
+    )).get("vue/DemoAnchor.vue")!;
+    assert.match(vue, /anchor\?: "start" \| "end" \| null;/);
+    assert.doesNotMatch(vue, /null \| null/);
   });
 
-  it("compiles non-button and native-boolean target projections", async () => {
-    const audio = generated(componentSource(
-      "demo-player",
-      "",
-      `<audio controls><slot></slot></audio>`,
-    ));
-    const action = generated(componentSource(
-      "demo-action",
-      `<prop name="disabled" type="boolean" default="false">Disabled state.</prop>`,
-      `<button :disabled="disabled"><slot></slot></button>`,
-    ));
-
-    await transform(audio.get("react/DemoPlayer.tsx")!, { loader: "tsx" });
-    await transform(action.get("react/DemoAction.tsx")!, { loader: "tsx" });
-    await transform(audio.get("vanilla/DemoPlayer.js")!, { loader: "js" });
-    for (const [source, filename] of [
-      [audio.get("svelte/DemoPlayer.svelte")!, "DemoPlayer.svelte"],
-      [action.get("svelte/DemoAction.svelte")!, "DemoAction.svelte"],
-    ] as const) {
-      assert.ok(compileSvelte(source, { filename, generate: "client" }).js.code.length > 0);
-    }
+  it("rejects constructs Vue conversion does not map yet instead of approximating them", () => {
+    assert.throws(() => generated(`<template component="demo-html" status="experimental" summary="Html.">
+      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`), /HT032/);
   });
 
   it("emits a standalone Vanilla module when the component has no runtime behavior", () => {
@@ -256,24 +238,31 @@ describe("official target compilers", () => {
     assert.match(module, /manageComponentLifecycle/);
   });
 
-  it("emits provenance-scoped CSS and matching target markers", async () => {
-    const artifacts = generated(componentSource(
-      "demo-card",
-      "",
-      `<article><div class="body"><x-badge></x-badge></div></article><style>.body, x-badge { color: red; }</style>`,
-    ));
-    const css = artifacts.get("styles/demo-card.css")!;
+  it("scopes styles to the region with root-only markers, :host, :host-state(), and :slotted()", () => {
+    const artifacts = generated(featureSource);
+    const css = artifacts.get("styles/x-feature.css")!;
+    assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\], \[data-slotted\]\)/);
+    assert.match(css, /:scope \{ display: block; \}/);
+    assert.match(css, /:scope\[data-x-feature-state~="open"\] \.panel/);
+    assert.match(css, /:scope\[data-x-feature-state~="size=sm"\] h2/);
+    assert.match(css, /@scope \(\[data-component~="x-feature"\]\) to \(\[data-component\]\) \{\n:where\(\[data-slotted\], \[data-slotted\] \*\):is\(p\)/);
+    assert.match(css, /:is\(x-badge, :where\(\[data-component~="x-badge"\]\)\)/);
+    assert.doesNotMatch(css, /data-component-root/);
 
-    assert.match(css, /\.body:where\(\[data-component~="demo-card"\]\)/);
-    assert.match(css, /data-component-root~="x-badge"[\s\S]*data-component~="demo-card"/);
-    for (const path of [
-      "vanilla/DemoCard.js",
-      "react/DemoCard.tsx",
-      "vue/DemoCard.vue",
-      "svelte/DemoCard.svelte",
-    ]) {
-      assert.match(artifacts.get(path)!, /data-component/);
-      assert.match(artifacts.get(path)!, /data-component-root/);
-    }
+    const vue = artifacts.get("vue/XFeature.vue")!;
+    const style = vue.slice(vue.indexOf("<style scoped>"));
+    assert.match(style, /\[data-component~="x-feature"\] \{ display: block; \}/);
+    assert.match(style, /\[data-component~="x-feature"\]\[data-x-feature-state~="open"\] \.panel/);
+    assert.match(style, /:slotted\(p\)/);
+    assert.match(vue, /data-component="x-feature"/);
+    assert.match(vue, /:data-x-feature-state="hostState \|\| undefined"/);
+
+    const vanilla = artifacts.get("vanilla/XFeature.js")!;
+    assert.equal([...vanilla.matchAll(/setAttribute\("data-component"/g)].length, 1, "only the vanilla root is marked");
+  });
+
+  it("rejects :scope and undeclared :host-state() names", () => {
+    assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
+    assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host-state([missing]) { color: red; }</style>`)), /HY001/);
   });
 });

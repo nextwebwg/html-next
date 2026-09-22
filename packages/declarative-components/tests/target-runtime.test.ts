@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
-import { compile as compileSvelte } from "svelte/compiler";
 
 import { generateComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -67,7 +66,7 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       if (parent !== "") await mkdir(join(directory, parent), { recursive: true });
       await writeFile(join(directory, path), content);
     }
-    for (const target of ["vanilla", "react", "vue", "svelte"]) {
+    for (const target of ["vanilla", "vue"]) {
       await writeFile(join(directory, target, "demo-controller.js"), "export default function controller() {}\n");
     }
 
@@ -87,19 +86,6 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       inlineTemplate: true,
     }).content);
 
-    const svelteModule = compileSvelte(artifacts.get("svelte/DemoCounter.svelte")!, {
-      filename: "DemoCounter.svelte",
-      generate: "client",
-    }).js.code;
-    await writeFile(join(directory, "svelte/DemoCounter.js"), svelteModule);
-    await writeFile(
-      join(directory, "svelte/DemoPanel.js"),
-      compileSvelte(artifacts.get("svelte/DemoPanel.svelte")!, {
-        filename: "DemoPanel.svelte",
-        generate: "client",
-      }).js.code,
-    );
-
     const entries: Record<string, string> = {
       vanilla: `import { createDemoCounter } from "./vanilla/DemoCounter.js";
 import { createDemoPanel } from "./vanilla/DemoPanel.js";
@@ -109,29 +95,15 @@ const component = createDemoCounter({ children: ["Projected"], slots: { title: [
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
 document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready" }));`,
-      react: `import React from "react";
-import { createRoot } from "react-dom/client";
-import { DemoCounter } from "./react/DemoCounter";
-import { DemoPanel } from "./react/DemoPanel";
-const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createRoot(document.querySelector("main")).render(<><DemoCounter onCountChange={detail => events.push(detail)} onInvalidChange={detail => window.invalidTargetEvents.push(detail)} slots={{ title: <h1 slot="title">Title</h1> }}>Projected</DemoCounter><DemoPanel align="end" label="Ready" /></>);`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 import DemoPanel from "./vue/DemoPanel";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready" })]) }).mount(document.querySelector("main"));`,
-      svelte: `import { createRawSnippet, mount } from "svelte";
-import DemoCounter from "./svelte/DemoCounter";
-import DemoPanel from "./svelte/DemoPanel";
-const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-const title = createRawSnippet(() => ({ render: () => '<h1 slot="title">Title</h1>' }));
-const children = createRawSnippet(() => ({ render: () => 'Projected' }));
-mount(DemoCounter, { target: document.querySelector("main"), props: { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail), children, slots: { title } } });
-mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end", label: "Ready" } });`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
-      const extension = target === "react" ? "tsx" : "ts";
+      const extension = "ts";
       const entryPath = join(directory, `${target}.${extension}`);
       const outfile = join(directory, `${target}.js`);
       await writeFile(entryPath, entry);
@@ -159,7 +131,7 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
     if (directory !== "") await rm(directory, { recursive: true, force: true });
   });
 
-  for (const target of ["vanilla", "react", "vue", "svelte"] as const) {
+  for (const target of ["vanilla", "vue"] as const) {
     it(`${target} preserves shared state, events, identity, slots, and native validation`, async () => {
       const browser = await chromium.launch({ headless: true });
       try {
@@ -170,12 +142,12 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
         await page.addScriptTag({ path: bundles.get(target)! });
         await page.waitForTimeout(50);
         assert.deepEqual(pageErrors, []);
-        await page.waitForSelector('[data-component-root~="demo-counter"] output', { state: "attached", timeout: 3_000 });
+        await page.waitForSelector('[data-component~="demo-counter"] output', { state: "attached", timeout: 3_000 });
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component-root~="demo-counter"]') as HTMLElement;
+          const root = document.querySelector('[data-component~="demo-counter"]') as HTMLElement;
           const output = root.querySelector("output")!;
           const input = root.querySelector("input") as HTMLInputElement;
-          const panel = document.querySelector('[data-component-root~="demo-panel"]') as HTMLElement;
+          const panel = document.querySelector('[data-component~="demo-panel"]') as HTMLElement;
           const before = output;
           panel.setAttribute("data-align", "center");
           (root.querySelector("button") as HTMLButtonElement).click();
@@ -198,7 +170,7 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
               dataAlign: panel.getAttribute("data-align"),
               dataLabel: panel.getAttribute("data-label"),
             },
-            provenance: root.getAttribute("data-component-root"),
+            provenance: root.getAttribute("data-component"),
           };
         });
         assert.deepEqual(result, {
@@ -212,12 +184,18 @@ mount(DemoPanel, { target: document.querySelector("main"), props: { align: "end"
           invalid: true,
           optionalTitle: "",
           ownTitle: false,
-          panel: { ownAlign: false, dataAlign: "center", dataLabel: "Ready" },
+          // HTML Next records explicit props as data-* for its rendered form; a converted Vue
+          // component owns its props and writes no record.
+          panel: { ownAlign: false, dataAlign: "center", dataLabel: target === "vue" ? null : "Ready" },
           provenance: "demo-counter",
         });
-        const invalidError = page.waitForEvent("pageerror");
-        await page.locator('[data-component-root~="demo-counter"] button[data-invalid]').click();
-        assert.match((await invalidError).message, /HR002: Event `invalid-change` detail does not satisfy its declared type/);
+        // Vue reports an error thrown by an event handler through console.error, not as uncaught.
+        const invalidError = new Promise<string>((resolve) => {
+          page.on("pageerror", (error) => resolve(error.message));
+          page.on("console", (message) => { if (message.type() === "error") resolve(message.text()); });
+        });
+        await page.locator('[data-component~="demo-counter"] button[data-invalid]').click();
+        assert.match(await invalidError, /HR002: Event `invalid-change` detail does not satisfy its declared type/);
         assert.deepEqual(
           await page.evaluate(() => (window as unknown as { invalidTargetEvents: unknown[] }).invalidTargetEvents),
           [],
@@ -247,10 +225,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       if (parent !== "") await mkdir(join(directory, parent), { recursive: true });
       await writeFile(join(directory, path), content);
     }
-    for (const target of ["react", "vue", "svelte"]) {
-      const source = artifacts.get(`${target}/ComputedCounter.${target === "react" ? "tsx" : target === "vue" ? "vue" : "svelte"}`)!;
-      assert.doesNotMatch(source, /declarative-components\/runtime|attachComponent/);
-    }
+    assert.doesNotMatch(artifacts.get("vue/ComputedCounter.vue")!, /@nextwebwg|declarative-components/);
 
     const vueParsed = parseVue(artifacts.get("vue/ComputedCounter.vue")!, {
       filename: "ComputedCounter.vue",
@@ -260,28 +235,13 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       id: "computed-counter",
       inlineTemplate: true,
     }).content);
-    await writeFile(
-      join(directory, "svelte/ComputedCounter.js"),
-      compileSvelte(artifacts.get("svelte/ComputedCounter.svelte")!, {
-        filename: "ComputedCounter.svelte",
-        generate: "client",
-      }).js.code,
-    );
-
     const entries: Readonly<Record<string, string>> = {
-      react: `import React from "react";
-import { createRoot } from "react-dom/client";
-import { ComputedCounter } from "./react/ComputedCounter";
-createRoot(document.querySelector("main")).render(<ComputedCounter />);`,
       vue: `import { createApp, h } from "vue";
 import ComputedCounter from "./vue/ComputedCounter";
 createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("main"));`,
-      svelte: `import { mount } from "svelte";
-import ComputedCounter from "./svelte/ComputedCounter";
-mount(ComputedCounter, { target: document.querySelector("main") });`,
     };
     for (const [target, entry] of Object.entries(entries)) {
-      const entryPath = join(directory, `${target}.${target === "react" ? "tsx" : "ts"}`);
+      const entryPath = join(directory, `${target}.ts`);
       const outfile = join(directory, `${target}.js`);
       await writeFile(entryPath, entry);
       await build({
@@ -303,16 +263,16 @@ mount(ComputedCounter, { target: document.querySelector("main") });`,
     if (directory !== "") await rm(directory, { recursive: true, force: true });
   });
 
-  for (const target of ["react", "vue", "svelte"] as const) {
+  for (const target of ["vue"] as const) {
     it(`${target} owns state, computed updates, and event scheduling`, async () => {
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage();
         await page.setContent("<main></main>");
         await page.addScriptTag({ path: bundles.get(target)! });
-        await page.waitForSelector('[data-component-root="computed-counter"] output');
+        await page.waitForSelector('[data-component~="computed-counter"] output');
         const result = await page.evaluate(async () => {
-          const root = document.querySelector('[data-component-root="computed-counter"]')!;
+          const root = document.querySelector('[data-component~="computed-counter"]')!;
           const output = root.querySelector("output")!;
           const before = output.textContent;
           (root as HTMLButtonElement).click();

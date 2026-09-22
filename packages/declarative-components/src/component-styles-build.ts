@@ -61,3 +61,27 @@ export function compileComponentStylesForBuild(
   validateStateNames(definition, names, source);
   return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
 }
+
+/**
+ * Styles for a converted Vue component, emitted as `<style scoped>`. Vue's scoping already bounds
+ * the region: projected content carries the consumer's scope, and Vue's own `:slotted()` reaches it.
+ * The generated root carries `data-component` and the state attribute, so `:host` and
+ * `:host-state()` become attribute selectors on it.
+ */
+export function compileComponentStylesForVue(
+  css: string,
+  definition: ComponentDefinition,
+  source?: string,
+): CompiledComponentStyles {
+  const tag = definition.contract.tag;
+  if (css.trim() === "") return { css: "", stateNames: [] };
+  const names = new Set<string>();
+  const root = postcss.parse(renameComponentPseudoClasses(css, ["host-state"]));
+  root.walkRules((rule) => {
+    const parent = rule.parent;
+    if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
+    rule.selector = rewriteComponentSelector(rule.selector, tag, "slotted", names);
+  });
+  validateStateNames(definition, names, source);
+  return { css: root.toString().trim(), stateNames: [...names] };
+}
