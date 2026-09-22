@@ -1,4 +1,4 @@
-import type { ExpressionNode } from "../expression.js";
+import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import type {
   ComponentDefinition,
   ElementNode,
@@ -372,6 +372,9 @@ function renderAttributes(
     lines.push(`${indent}const ${local} = ${expression};`);
     if (attribute.kind === "property") {
       lines.push(`${indent}if (${local} !== undefined) ${variable}[${js(attribute.name)}] = ${local};`);
+    } else if (prop.type === "boolean" && isEnumeratedBoolean(attribute.name)) {
+      lines.push(`${indent}if (typeof ${local} === "boolean") ${variable}.setAttribute(${js(attribute.name)}, String(${local}));`);
+      lines.push(`${indent}else ${variable}.removeAttribute(${js(attribute.name)});`);
     } else if (prop.type === "boolean") {
       lines.push(`${indent}if (${local} === true) ${variable}.setAttribute(${js(attribute.name)}, "");`);
       lines.push(`${indent}else ${variable}.removeAttribute(${js(attribute.name)});`);
@@ -521,8 +524,9 @@ export function generateVanilla(
           if (binding.kind === "text") {
             lines.push(`      ${binding.element}.textContent = value == null ? "" : String(value);`);
           } else {
-            lines.push(`      if (value === null || value === undefined || value === false) ${binding.element}.removeAttribute(${js(binding.name!)});`);
-            lines.push(`      else ${binding.element}.setAttribute(${js(binding.name!)}, value === true ? "" : String(value));`);
+            const enumerated = isEnumeratedBoolean(binding.name!);
+            lines.push(`      if (value === null || value === undefined${enumerated ? "" : " || value === false"}) ${binding.element}.removeAttribute(${js(binding.name!)});`);
+            lines.push(`      else ${binding.element}.setAttribute(${js(binding.name!)}, ${enumerated ? "String(value)" : "value === true ? \"\" : String(value)"});`);
           }
         }
         lines.push("    }");

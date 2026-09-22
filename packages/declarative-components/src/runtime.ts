@@ -1053,7 +1053,7 @@ function renderInstance(
         } else if (attribute.twoWay === true && applyBoundControlValue(element, attribute.name, value)) {
           // Native form-control properties carry the live value; no duplicate attribute write.
         } else {
-          setAttribute(element, attribute.name, toAttribute(value));
+          setAttribute(element, attribute.name, toAttribute(value, attribute.name));
         }
       });
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {

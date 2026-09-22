@@ -98,7 +98,7 @@ describe.skipIf(!enabled)("reviewed component library (smoke)", () => {
         buttonState: "variant variant=solid size size=md",
         iconLabel: "Settings",
         callout: ["note", "tone tone=warning"],
-        selected: "",
+        selected: "true",
         fieldLegend: "Email",
       });
     } finally {
