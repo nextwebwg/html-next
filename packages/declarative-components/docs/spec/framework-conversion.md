@@ -32,19 +32,7 @@ normalized component plan through those facilities.
 Converted output has **no runtime dependency on HTML Next**: it imports only the target framework
 and the component's own modules (its controller and preserved ordinary modules), never an HTML Next
 package, runtime, or bridge. HTML Next either runs a component itself or converts it; once converted,
-it is gone. Anything the target cannot express directly is generated as target-native source in the
-output, not imported:
-
-- the controller host (`host.element`, `host.state`, `host.refs`, `host.effect`, `host.dispatch`)
-  is generated per component from the target's own state, effect, event, and lifecycle facilities;
-- diagnostics are reported at conversion time;
-- styles compile to the target's own scoping (for Vue, `<style scoped>`), with `:host`,
-  `:host-state()`, and `:slotted()` mapped by the converter.
-
-Because the target owns the DOM, a controller used in converted output must not add or remove
-nodes: it may read and write host state, set attributes, properties, and focus, and add listeners.
-Structure belongs in the template, driven by state. Controllers receive the elements they need
-through `host.element` and `host.refs` rather than querying the DOM.
+it is gone. Whatever the target cannot express directly is part of the generated output.
 
 ## Output artifacts
 

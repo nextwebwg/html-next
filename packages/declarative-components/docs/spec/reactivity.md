@@ -55,6 +55,12 @@ a declared `state` are writable. Controller-local signals do not silently create
 a controller must explicitly project them into names declared by the component when template access
 is required. Page code cannot retrieve the private host through the component element.
 
+A controller never adds or removes nodes. It reads and writes host state, sets attributes,
+properties, and focus, and adds listeners; structure belongs in the template, driven by state. It
+reaches elements through `host.element` and `host.refs` rather than by querying the DOM. The rule
+holds in every delivery mode, so a component behaves the same whether HTML Next runs it or a
+framework owns its DOM after conversion.
+
 `host.effect(callback)` exists for effects on systems outside runtime-owned DOM, such as charts, observers, media objects, and imperative native APIs. Declarative template bindings subscribe directly to their compiled dependencies and do not run through controller effects.
 
 An effect runs once while connecting and tracks the `host.state` paths read during its most recent successful run. A dependency change marks it dirty; repeated writes coalesce, and it reruns in the ordered microtask flush after state and computed values settle. If the callback returns a disposer, that disposer runs before rerun. Disconnection runs the current disposer, removes observations, and prevents detached work. Reconnection runs the effect once and establishes a fresh dependency set. The stop function returned by `host.effect` performs the same cleanup permanently and is idempotent.
