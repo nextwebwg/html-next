@@ -23,11 +23,11 @@ import { parseTypeExpression, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, propKey, propTypeSource, quote } from "./shared.js";
 
-/** Expression helpers with HTML Next semantics, emitted into each component (not imported). */
-const HELPERS = `const hn = {
-  t: (v: unknown): boolean => v === true || (typeof v === "string" ? v.length > 0 : typeof v === "number" ? v !== 0 && v === v : Array.isArray(v) ? v.length > 0 : v !== null && typeof v === "object" ? Object.keys(v).length > 0 : false),
-  n: (v: unknown): number | undefined => typeof v === "number" && v === v ? v : undefined,
-  op: (op: string, a: unknown, b: unknown): unknown => {
+/** Expression helpers with HTML Next semantics, emitted into each component (not imported) as used. */
+const HELPERS: readonly (readonly [name: string, source: string])[] = [
+  ["t", `  t: (v: unknown): boolean => v === true || (typeof v === "string" ? v.length > 0 : typeof v === "number" ? v !== 0 && v === v : Array.isArray(v) ? v.length > 0 : v !== null && typeof v === "object" ? Object.keys(v).length > 0 : false),`],
+  ["n", `  n: (v: unknown): number | undefined => typeof v === "number" && v === v ? v : undefined,`],
+  ["op", `  op: (op: string, a: unknown, b: unknown): unknown => {
     const x = hn.n(a), y = hn.n(b);
     if (x === undefined || y === undefined) return undefined;
     switch (op) {
@@ -35,13 +35,13 @@ const HELPERS = `const hn = {
       case "+": return x + y; case "-": return x - y; case "*": return x * y; case "/": return x / y; case "%": return x % y;
     }
     return undefined;
-  },
-  match: (op: string, a: unknown, b: unknown): boolean | undefined => typeof a === "string" && typeof b === "string"
+  },`],
+  ["match", `  match: (op: string, a: unknown, b: unknown): boolean | undefined => typeof a === "string" && typeof b === "string"
     ? op === "^=" ? a.startsWith(b) : op === "$=" ? a.endsWith(b) : a.includes(b)
-    : undefined,
-  text: (v: unknown): string => v === undefined || v === null ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? "" : String(v),
-  attr: (v: unknown): string | undefined => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),
-  call: (fn: string, ...args: unknown[]): unknown => {
+    : undefined,`],
+  ["text", `  text: (v: unknown): string => v === undefined || v === null ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? "" : String(v),`],
+  ["attr", `  attr: (v: unknown): string | undefined => v === undefined || v === null || v === false ? undefined : v === true ? "" : Array.isArray(v) ? v.map(hn.text).join(" ") : typeof v === "object" ? undefined : String(v),`],
+  ["call", `  call: (fn: string, ...args: unknown[]): unknown => {
     if (fn === "format") {
       let index = 1;
       return typeof args[0] === "string" ? args[0].replace(/%s/g, () => index < args.length ? hn.text(args[index++]) : "%s") : undefined;
@@ -57,8 +57,8 @@ const HELPERS = `const hn = {
       case "clamp": return v.length === 3 ? Math.min(Math.max(v[0]!, v[1]!), v[2]!) : undefined;
     }
     return undefined;
-  },
-  shape: (items: unknown, where: ((item: unknown) => unknown) | undefined, sort: readonly string[], limit: unknown): unknown[] => {
+  },`],
+  ["shape", `  shape: (items: unknown, where: ((item: unknown) => unknown) | undefined, sort: readonly string[], limit: unknown): unknown[] => {
     let list = Array.isArray(items) ? items.slice() : [];
     if (where !== undefined) list = list.filter((item) => hn.t(where(item)));
     if (sort.length > 0) {
@@ -76,8 +76,25 @@ const HELPERS = `const hn = {
       });
     }
     return typeof limit === "number" ? list.slice(0, Math.max(0, Math.trunc(limit))) : list;
-  },
-};`;
+  },`],
+];
+
+/** The `hn` object holding the helpers `code` uses, and the helpers they use. */
+function helperSource(code: string): string {
+  const used = new Set<string>();
+  const visit = (source: string): void => {
+    for (const [, name] of source.matchAll(/\bhn\.(\w+)/g)) {
+      if (used.has(name!)) continue;
+      used.add(name!);
+      visit(HELPERS.find(([helper]) => helper === name)?.[1] ?? "");
+    }
+  };
+  visit(code);
+  const entries = HELPERS.filter(([name]) => used.has(name));
+  return entries.length === 0 ? "" : `const hn = {\n${entries.map(([, source]) => source).join("\n")}\n};\n`;
+}
+
+const VUE_APIS = ["computed", "onBeforeUnmount", "onMounted", "ref", "shallowRef", "watchEffect"] as const;
 
 interface Names {
   /** How each expression root is read, by context. */
@@ -143,6 +160,9 @@ interface Context {
   readonly definition: ComponentDefinition;
   readonly imports: Set<string>;
   readonly usesRefs: { value: boolean };
+  /** Whether the root needs a Vue ref (for dispatch and the controller host). */
+  readonly root: boolean;
+  readonly hostState: boolean;
 }
 
 function isComponentTag(name: string): boolean {
@@ -260,7 +280,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   if (isRoot) {
     const tag = context.definition.contract.tag;
     attributes.unshift("v-bind=\"$attrs\"", `data-component=${attributeValue(tag)}`);
-    attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`, "ref=\"root\"");
+    if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
+    if (context.root) attributes.push("ref=\"root\"");
   }
   // A <template> without structural flow produces its content with no wrapper element.
   if (node.name === "template" && !isRoot) return content ?? renderChildren(node.children, names, context);
@@ -344,8 +365,9 @@ export function generateVue(definition: ComponentDefinition, version: string): s
 
   const names: Names = { template: new Map(), script: new Map() };
   for (const prop of target.props) {
-    names.template.set(prop.name, `props[${quote(prop.name)}]`);
-    names.script.set(prop.name, `props[${quote(prop.name)}]`);
+    const read = /^[A-Za-z_$][\w$]*$/.test(prop.name) ? `props.${prop.name}` : `props[${quote(prop.name)}]`;
+    names.template.set(prop.name, read);
+    names.script.set(prop.name, read);
   }
   for (const state of states) {
     names.template.set(state.name, `state_${safe(state.name)}`);
@@ -359,76 +381,92 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   if (template.flow !== undefined) {
     fail("HT036", `<${contract.tag}> has a structural directive on its root, which Vue conversion does not support yet.`);
   }
-  const context: Context = { definition, imports: new Set(), usesRefs: { value: false } };
-  const rootMarkup = renderElement(template, names, context, true);
   const styles = compileComponentStylesForVue(definition.css, definition);
-  const stateNames = styles.stateNames;
-
+  const controlled = definition.controller !== undefined;
+  const dispatches = events.length > 0 || controlled;
+  const reads = styles.stateNames.length > 0 || controlled;
+  const context: Context = { definition, imports: new Set(), usesRefs: { value: false }, root: dispatches, hostState: styles.stateNames.length > 0 };
+  const rootMarkup = renderElement(template, names, context, true);
   const defaults = target.props.filter((prop) => "default" in prop.contract);
+  const propsType = ["{", ...target.props.map((prop) => `  ${propKey(prop.name)}?: ${propTypeSource(prop.contract)};`), "}"].join("\n");
+
+  const body: string[] = [
+    ...(target.props.length === 0 ? [] : defaults.length === 0 ? [`const props = defineProps<${propsType}>();`] : [
+      `const props = withDefaults(defineProps<${propsType}>(), {`,
+      ...defaults.map((prop) => `  ${propKey(prop.name)}: ${defaultSource((prop.contract as { default: unknown }).default)},`),
+      "});",
+    ]),
+    ...(events.length === 0 ? [] : [
+      "const emit = defineEmits<{",
+      ...events.map((event) => {
+        const typed = target.events.find((candidate) => candidate.name === event.name);
+        return `  ${quote(event.name)}: [detail: ${typed?.detailType ?? "unknown"}];`;
+      }),
+      "}>();",
+    ]),
+    ...(dispatches ? ["const root = ref<HTMLElement | null>(null);"] : []),
+    ...(context.usesRefs.value || controlled ? ["const refs: Record<string, Element | undefined> = {};"] : []),
+    ...states.map((state) => `const state_${safe(state.name)} = ref<unknown>(${state.expression === undefined ? "undefined" : expression(state.expression.ast, names.script)});`),
+    ...computedValues.map((value) => `const computed_${safe(value.name)} = computed(() => ${value.expression === undefined ? "undefined" : expression(value.expression.ast, names.script)});`),
+    ...(!dispatches ? [] : [
+      "",
+      "/** Dispatches a component event to Vue listeners and, for controllers and page code, on the root. */",
+      "const dispatch = (name: string, detail?: unknown): boolean => {",
+      ...(events.length === 0 ? [] : [
+        `  const declared = ${JSON.stringify(Object.fromEntries(events.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))} as Record<string, EventInit | undefined>;`,
+        "  const checks: Record<string, (detail: unknown) => boolean> = {",
+        ...events.map((event) => `    ${quote(event.name)}: (detail: unknown) => ${typeCheck(parseTypeExpression(event.type), "detail")},`),
+        "  };",
+        "  if (detail !== undefined && checks[name] !== undefined && !checks[name]!(detail)) {",
+        "    throw new TypeError(`HR002: Event \\`${name}\\` detail does not satisfy its declared type.`);",
+        "  }",
+        "  (emit as (name: string, detail: unknown) => void)(name, detail);",
+      ]),
+      `  return root.value?.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ${events.length === 0 ? "" : "...declared[name], "}detail })) ?? true;`,
+      "};",
+    ]),
+    ...handlers.map((handler) => handlerSource(handler, names, events)),
+    ...(styles.stateNames.length === 0 ? [] : [
+      "",
+      "/** The resolved values the styles' :host-state() rules test. */",
+      `const hostState = computed(() => (${JSON.stringify(styles.stateNames)} as const).flatMap((name) => {`,
+      "  const value = read(name);",
+      "  const tokens: string[] = hn.t(value) ? [name] : [];",
+      "  if (typeof value === \"string\" || typeof value === \"number\") tokens.push(`${name}=${encodeURIComponent(String(value))}`);",
+      "  return tokens;",
+      "}).join(\" \"));",
+    ]),
+    ...(!reads ? [] : [
+      "",
+      "function read(name: string): unknown {",
+      ...states.map((state) => `  if (name === ${quote(state.name)}) return state_${safe(state.name)}.value;`),
+      ...computedValues.map((value) => `  if (name === ${quote(value.name)}) return computed_${safe(value.name)}.value;`),
+      target.props.length === 0 ? "  return undefined;" : "  return (props as Record<string, unknown>)[name];",
+      "}",
+    ]),
+    ...(!controlled ? [] : [
+      "",
+      "function write(name: string, value: unknown): boolean {",
+      ...states.map((state) => `  if (name === ${quote(state.name)}) { state_${safe(state.name)}.value = value; return true; }`),
+      "  throw new TypeError(`Only declared state is writable; \\`${name}\\` is not.`);",
+      "}",
+    ]),
+    "",
+    ...hostSource(definition, target.methods),
+  ];
+  const code = `${body.join("\n")}\n${rootMarkup}`;
+  const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
   const script: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
     '<script setup lang="ts">',
-    'import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watchEffect } from "vue";',
+    ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(`./${componentName(tag)}.vue`)};`),
     ...(definition.controller === undefined ? [] : [`import * as controllerModule from ${quote(definition.controller)};`]),
     "",
     "defineOptions({ inheritAttrs: false });",
     "",
-    "const props = withDefaults(defineProps<{",
-    ...target.props.map((prop) => `  ${propKey(prop.name)}?: ${propTypeSource(prop.contract)};`),
-    `}>(), {`,
-    ...defaults.map((prop) => `  ${propKey(prop.name)}: ${defaultSource((prop.contract as { default: unknown }).default)},`),
-    "});",
-    "",
-    "const emit = defineEmits<{",
-    ...events.map((event) => {
-      const typed = target.events.find((candidate) => candidate.name === event.name);
-      return `  ${quote(event.name)}: [detail: ${typed?.detailType ?? "unknown"}];`;
-    }),
-    "}>();",
-    "",
-    HELPERS,
-    "",
-    "const root = ref<HTMLElement | null>(null);",
-    "const refs: Record<string, Element | undefined> = {};",
-    ...states.map((state) => `const state_${safe(state.name)} = ref<unknown>(${state.expression === undefined ? "undefined" : expression(state.expression.ast, names.script)});`),
-    ...computedValues.map((value) => `const computed_${safe(value.name)} = computed(() => ${value.expression === undefined ? "undefined" : expression(value.expression.ast, names.script)});`),
-    "",
-    "/** Dispatches a component event to Vue listeners and, for controllers and page code, on the root. */",
-    "const dispatch = (name: string, detail?: unknown): boolean => {",
-    `  const declared = ${JSON.stringify(Object.fromEntries(events.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))} as Record<string, EventInit | undefined>;`,
-    "  const checks: Record<string, (detail: unknown) => boolean> = {",
-    ...events.map((event) => `    ${quote(event.name)}: (detail: unknown) => ${typeCheck(parseTypeExpression(event.type), "detail")},`),
-    "  };",
-    "  if (detail !== undefined && checks[name] !== undefined && !checks[name]!(detail)) {",
-    "    throw new TypeError(`HR002: Event \\`${name}\\` detail does not satisfy its declared type.`);",
-    "  }",
-    "  (emit as (name: string, detail: unknown) => void)(name, detail);",
-    "  return root.value?.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ...declared[name], detail })) ?? true;",
-    "};",
-    ...handlers.map((handler) => handlerSource(handler, names, events)),
-    "",
-    `const stateNames = ${JSON.stringify(stateNames)};`,
-    "/** The resolved values the styles' :host-state() rules test. */",
-    "const hostState = computed(() => stateNames.flatMap((name) => {",
-    "  const value = read(name);",
-    "  const tokens: string[] = hn.t(value) ? [name] : [];",
-    "  if (typeof value === \"string\" || typeof value === \"number\") tokens.push(`${name}=${encodeURIComponent(String(value))}`);",
-    "  return tokens;",
-    "}).join(\" \"));",
-    "",
-    "function read(name: string): unknown {",
-    ...states.map((state) => `  if (name === ${quote(state.name)}) return state_${safe(state.name)}.value;`),
-    ...computedValues.map((value) => `  if (name === ${quote(value.name)}) return computed_${safe(value.name)}.value;`),
-    "  return (props as Record<string, unknown>)[name];",
-    "}",
-    "",
-    "function write(name: string, value: unknown): boolean {",
-    ...states.map((state) => `  if (name === ${quote(state.name)}) { state_${safe(state.name)}.value = value; return true; }`),
-    "  throw new TypeError(`Only declared state is writable; \\`${name}\\` is not.`);",
-    "}",
-    "",
-    ...hostSource(definition, target.methods),
+    helperSource(code),
+    ...body,
     "</script>",
     "",
     "<template>",
@@ -436,7 +474,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     "</template>",
   ];
   if (styles.css !== "") script.push("", "<style scoped>", styles.css, "</style>");
-  return `${script.join("\n")}\n`;
+  return `${script.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
 }
 
 function defaultSource(value: unknown): string {

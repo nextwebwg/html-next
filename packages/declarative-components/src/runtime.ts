@@ -23,10 +23,11 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
-import { addAttributeToken, markProjectedRoot } from "./style.js";
 import {
+  addAttributeToken,
   COMPONENT_ATTRIBUTE,
   compileComponentStyles,
+  markProjectedRoot,
   stateAttribute,
   stateAttributeValue,
 } from "./component-styles.js";
@@ -42,7 +43,6 @@ import type {
   LiteralAttribute,
   SlotNode,
   TemplateNode,
-  TextNode,
 } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { PropContract, PropValue } from "./types.js";
@@ -1979,19 +1979,6 @@ export function updateComponentProps(
     }
     if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
   }
-}
-
-/** Adopts a framework-owned native root using a definition already installed in its document. */
-export function attachRegisteredComponent(
-  element: Element,
-  tag: string,
-  options: ComponentAttachmentOptions = {},
-): () => void {
-  const registered = registryFor(element.ownerDocument).definitions.get(tag);
-  if (registered === undefined) {
-    fail("HR005", `No registered definition declares <${tag}>.`);
-  }
-  return attachComponent(element, registered.definition, options);
 }
 
 /**

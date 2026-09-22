@@ -145,8 +145,9 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /function createXChild/);
     assert.match(output, /createXChild\(\)/);
     assert.doesNotMatch(output, /createElement\("x-child"\)/);
-    assert.match(output, /getAttribute\("data-component"\).*x-app/);
-    assert.match(output, /setAttribute\("data-component-root", "x-child"\)/);
+    // Only component roots carry a marker, naming their own component.
+    assert.match(output, /setAttribute\("data-component", "x-child"\)/);
+    assert.doesNotMatch(output, /data-component-root|getAttribute\("data-component"\)/);
     assert.deepEqual(manifest.publicEntries.map(({ tag }) => tag), ["x-app"]);
     assert.deepEqual(manifest.components.map(({ tag }) => tag), ["x-app", "x-child"]);
 
@@ -164,8 +165,7 @@ describe("HTML Next unplugin", () => {
       assert.equal(app.localName, "main");
       assert.equal(child.localName, "strong");
       assert.deepEqual(child.childNodes, ["Compiled child"]);
-      assert.equal(child.getAttribute("data-component"), "x-child x-app");
-      assert.equal(child.getAttribute("data-component-root"), "x-child");
+      assert.equal(child.getAttribute("data-component"), "x-child");
     } finally {
       if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
       else Object.defineProperty(globalThis, "document", priorDocument);

@@ -5,7 +5,7 @@ import { describe, it } from "vitest";
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { transform } from "esbuild";
 
-import { generateComponent } from "../src/generate.js";
+import { generateComponent, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -106,14 +106,14 @@ describe("official target compilers", () => {
     assert.match(vue, /const state_open = ref<unknown>\(false\)/);
     assert.match(vue, /const computed_count = computed\(/);
     assert.match(vue, /<template v-if="hn\.t\(state_open\)">/);
-    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\[&quot;items&quot;\], \(item\) => \(item\)\?\.\[&quot;done&quot;\], \[&quot;name&quot;\], undefined\)"/);
+    assert.match(vue, /v-for="\(item, index\) in hn\.shape\(props\.items, \(item\) => \(item\)\?\.\[&quot;done&quot;\], \[&quot;name&quot;\], undefined\)"/);
     assert.match(vue, /v-model="state_query"/);
     assert.match(vue, /:ref="\(element\) => \{ refs\[&quot;search&quot;\] = element \}"/);
     assert.match(vue, /@click="handler_flip"/);
     assert.match(vue, /:class="\{ &quot;compact&quot;: hn\.t\(/);
     assert.match(vue, /:style="\{ &quot;--gap&quot;: hn\.text\(/);
-    assert.match(vue, /<XBadge :tone="props\[&quot;size&quot;\]"><slot name="badge">none<\/slot><\/XBadge>/);
-    assert.match(vue, /<template v-if="hn\.t\(\(props\[&quot;size&quot;\] === &quot;sm&quot;\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
+    assert.match(vue, /<XBadge :tone="props\.size"><slot name="badge">none<\/slot><\/XBadge>/);
+    assert.match(vue, /<template v-if="hn\.t\(\(props\.size === &quot;sm&quot;\)\)"><small>small<\/small><\/template><template v-else><span>regular<\/span><\/template>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
     assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
   });
@@ -126,8 +126,8 @@ describe("official target compilers", () => {
         `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
       ).get("vue/XRow.vue")!;
       compileVue(vue, "XRow.vue");
-      assert.match(vue, /<h2>\{\{ hn\.text\(props\["label"\]\) \}\}<\/h2>/, `${controller}: element text`);
-      assert.match(vue, /<slot name="label">\{\{ hn\.text\(props\["label"\]\) \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
+      assert.match(vue, /<h2>\{\{ hn\.text\(props\.label\) \}\}<\/h2>/, `${controller}: element text`);
+      assert.match(vue, /<slot name="label">\{\{ hn\.text\(props\.label\) \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
     }
   });
 
@@ -152,8 +152,13 @@ describe("official target compilers", () => {
   });
 
   it("rejects constructs Vue conversion does not map yet instead of approximating them", () => {
-    assert.throws(() => generated(`<template component="demo-html" status="experimental" summary="Html.">
-      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`), /HT032/);
+    const source = `<template component="demo-html" status="experimental" summary="Html.">
+      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`;
+    assert.throws(() => generateVueComponent(parseComponent(source)), /HT032/);
+    // HTML Next's own outputs still build; only the Vue artifact is left out.
+    const artifacts = generated(source);
+    assert.equal(artifacts.has("vue/DemoHtml.vue"), false);
+    assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
   });
 
   it("emits a standalone Vanilla module when the component has no runtime behavior", () => {

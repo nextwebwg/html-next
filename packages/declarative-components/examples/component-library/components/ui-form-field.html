@@ -4,5 +4,8 @@
     <prop name="label" type="string" default="">Field label.</prop>
     <prop name="required" type="boolean" default="false">Required state.</prop>
   </defs>
-  <fieldset :disabled="disabled" :data-label="label" :data-required="required"><legend $value="label"></legend><slot></slot></fieldset>
+  <fieldset :disabled="disabled"><legend $value="label"></legend><slot></slot></fieldset>
+  <style>
+    :host-state([required]) legend::after { content: " *"; }
+  </style>
 </template>

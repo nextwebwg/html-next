@@ -74,7 +74,6 @@ const successes: ConformanceCase[] = [
           ["aria-label", "Save"],
           ["class", "cta"],
           ["data-component", "x-btn"],
-          ["data-component-root", "x-btn"],
           ["data-label", "Save"],
           ["id", "b"],
           ["type", "button"],

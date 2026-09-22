@@ -3,9 +3,13 @@
     <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
     <prop name="selected" type="boolean" default="false">Selected state.</prop>
   </defs>
-  <button class="search-result-row" type="button" :disabled="disabled" :aria-selected="selected">
-    <span class="search-result-row__leading"><slot name="leading"></slot></span>
-    <span class="search-result-row__content"><span class="search-result-row__title"><slot name="title"></slot></span><span class="search-result-row__meta"><slot name="meta"></slot></span><span class="search-result-row__excerpt"><slot name="excerpt"></slot></span></span>
-    <span class="search-result-row__trailing"><slot name="trailing"></slot></span>
+  <button type="button" :disabled="disabled" :aria-selected="selected">
+    <slot name="leading"></slot>
+    <span class="content"><slot name="title"></slot><slot name="meta"></slot><slot name="excerpt"></slot></span>
+    <slot name="trailing"></slot>
   </button>
+  <style>
+    :host { display: flex; align-items: center; gap: 0.5rem; }
+    .content { display: grid; flex: 1; }
+  </style>
 </template>

@@ -1,3 +1,7 @@
 <template component="ui-top-bar" status="early" summary="A semantic application top bar.">
-  <header class="top-bar" part="base"><div class="top-bar__leading"><slot name="leading"></slot></div><div class="top-bar__title"><slot></slot></div><div class="top-bar__search"><slot name="search"></slot></div><div class="top-bar__actions"><slot name="actions"></slot></div></header>
+  <header><slot name="leading"></slot><div class="title"><slot></slot></div><slot name="search"></slot><slot name="actions"></slot></header>
+  <style>
+    :host { display: flex; align-items: center; gap: 0.5rem; }
+    .title { flex: 1; }
+  </style>
 </template>

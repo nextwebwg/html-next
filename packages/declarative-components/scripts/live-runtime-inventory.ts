@@ -29,7 +29,6 @@ export const liveRuntimeSubsystemModules = {
   styleAndContentPolicy: [
     "packages/declarative-components/src/component-styles.ts",
     "packages/declarative-components/src/sanitize.ts",
-    "packages/declarative-components/src/style.ts",
   ],
   componentResources: [
     "packages/declarative-components/src/graph.ts",

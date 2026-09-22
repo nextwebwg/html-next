@@ -11,9 +11,7 @@ const snapshotUrl = new URL("./snapshots/x-button.json", import.meta.url);
 const expectedPaths = [
   "vanilla/XButton.js",
   "vanilla/XButton.d.ts",
-  "react/XButton.tsx",
   "vue/XButton.vue",
-  "svelte/XButton.svelte",
   "styles/x-button.css",
   "docs/x-button.md",
 ] as const;
@@ -62,23 +60,12 @@ describe("generateComponent", () => {
     assert.match(vanilla, /document\.createElement\("button"\)/);
     assert.ok(vanilla.indexOf("attributes") < vanilla.indexOf('setAttribute("data-x-button"'));
 
-    const react = byPath.get("react/XButton.tsx")!;
-    assert.match(react, /ref\?: Ref<XButtonHandle>/);
-    assert.doesNotMatch(react, /forwardRef/);
-    assert.ok(react.lastIndexOf("{...nativeProps}") < react.lastIndexOf("data-x-button"));
-
     const vue = byPath.get("vue/XButton.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
     assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
     assert.ok(vue.lastIndexOf('v-bind="$attrs"') < vue.lastIndexOf("data-x-button"));
 
-    const svelte = byPath.get("svelte/XButton.svelte")!;
-    assert.match(svelte, /from "svelte\/elements"/);
-    assert.match(svelte, /Snippet/);
-    assert.match(svelte, /\$props\(\)/);
-    assert.ok(svelte.lastIndexOf("{...nativeProps}") < svelte.lastIndexOf("data-x-button"));
-
-    for (const content of [vanilla, react, vue, svelte]) {
+    for (const content of [vanilla, vue]) {
       assert.doesNotMatch(content, /<x-button\b|createElement\("x-button"\)/);
     }
   });
@@ -107,7 +94,7 @@ describe("generateComponent", () => {
 
     assert.match(
       byPath.get("styles/demo-action.css")!,
-      /button:invalid/,
+      /button:is\(:invalid, \[data-invalid\]\)/,
     );
   });
 
@@ -135,17 +122,12 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoAction.js")!, /=== undefined \? false/);
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
-    assert.match(byPath.get("react/DemoAction.tsx")!, /formAction=\{prop0\}/);
-    assert.match(byPath.get("react/DemoAction.tsx")!, /disabled=\{prop1\}/);
-    assert.match(byPath.get("react/DemoAction.tsx")!, /data-selected=\{prop2 \? "" : undefined\}/);
-    assert.match(byPath.get("vue/DemoAction.vue")!, /:formAction="props.destination"/);
-    assert.match(byPath.get("vue/DemoAction.vue")!, /:disabled="props.disabled"/);
-    assert.match(byPath.get("vue/DemoAction.vue")!, /:data-selected="props.selected \? '' : undefined"/);
-    assert.match(byPath.get("svelte/DemoAction.svelte")!, /formAction=\{prop0\}/);
-    assert.match(byPath.get("svelte/DemoAction.svelte")!, /disabled=\{prop1\}/);
-    assert.match(byPath.get("svelte/DemoAction.svelte")!, /data-selected=\{prop2 \? "" : undefined\}/);
-    assert.match(byPath.get("vue/DemoAction.vue")!, /A &amp; &quot;quote&quot;/);
-    assert.match(byPath.get("svelte/DemoAction.svelte")!, /&#123;literal&#125;/);
+    const vue = byPath.get("vue/DemoAction.vue")!;
+    assert.match(vue, /:formAction\.prop="props\.destination"/);
+    assert.match(vue, /:disabled="hn\.attr\(props\.disabled\)"/);
+    assert.match(vue, /:data-selected="hn\.attr\(props\.selected\)"/);
+    assert.match(vue, /title="A &amp; &quot;quote&quot;"/);
+    assert.match(vue, /Text &amp; &#123;literal&#125;/);
   });
 
   it("derives non-button native types from platform and framework contracts", () => {
@@ -155,9 +137,6 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("react/DemoPlayer.tsx")!, /ComponentPropsWithoutRef<"audio">/);
-    assert.match(byPath.get("react/DemoPlayer.tsx")!, /type DemoPlayerHandle = ComponentRef<"audio">/);
-    assert.match(byPath.get("react/DemoPlayer.tsx")!, /ref\?: Ref<DemoPlayerHandle>/);
-    assert.match(byPath.get("svelte/DemoPlayer.svelte")!, /SvelteHTMLElements\["audio"\]/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio v-bind="\$attrs" data-component="demo-player" controls/);
   });
 });

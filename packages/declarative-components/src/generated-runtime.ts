@@ -106,7 +106,7 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       const element = node as Element;
       if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
       if (element.childElementCount === 0) return;
-      for (const descendant of element.querySelectorAll("[data-component-root]")) {
+      for (const descendant of element.querySelectorAll("[data-component]")) {
         if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
       }
     };

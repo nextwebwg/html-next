@@ -12,11 +12,22 @@
  */
 import { fail } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
+import { rewriteValiditySelectors } from "./validity-css.js";
 
 /** Names a component on its root, and only its root. Delegated roots list every owner. */
 export const COMPONENT_ATTRIBUTE = "data-component";
 /** Marks each top-level projected node. */
 export const PROJECTED_ATTRIBUTE = "data-slotted";
+
+export function addAttributeToken(element: Element, attribute: string, token: string): void {
+  const tokens = new Set((element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean));
+  tokens.add(token);
+  element.setAttribute(attribute, Array.from(tokens).join(" "));
+}
+
+export function markProjectedRoot(node: Node): void {
+  if (node.nodeType === 1) (node as Element).setAttribute(PROJECTED_ATTRIBUTE, "");
+}
 
 /** The attribute carrying the resolved values a definition's `:host-state()` rules test. */
 export function stateAttribute(tag: string): string {
@@ -119,7 +130,7 @@ export function rewriteComponentSelector(selector: string, tag: string, kind: St
   output = output
     .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where([${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *):is(`)
     .replace(/:host(?![\w-])/g, host);
-  return rewriteComponentTags(output);
+  return rewriteComponentTags(rewriteValiditySelectors(output));
 }
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */

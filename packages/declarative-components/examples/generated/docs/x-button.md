@@ -13,8 +13,8 @@ A native button with a themed presentation.
 
 | Prop | Type | Required | Default | Target | Description |
 | --- | --- | --- | --- | --- | --- |
-| `size` | `sm` \| `md` \| `lg` | no | `"md"` | attribute `data-size` | Control size. |
-| `variant` | `outline` \| `solid` \| `destructive` \| `ghost` | no | `"outline"` | attribute `data-variant` | Visual treatment. |
+| `size` | `sm` \| `md` \| `lg` | no | `"md"` | attribute `size` | Control size. |
+| `variant` | `outline` \| `solid` \| `destructive` \| `ghost` | no | `"outline"` | attribute `variant` | Visual treatment. |
 
 Native attributes and framework-native event surfaces pass through to the native root. Declared prop targets and template-owned attributes take precedence.
 

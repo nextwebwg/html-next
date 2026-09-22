@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-import { transformComponentStyles } from "../src/style.js";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
@@ -68,7 +67,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="observed-card" status="early" summary="Observation filter fixture.">' +
           '<article><slot></slot></article></template>' +
-          '<main><article id="owned" data-component-root="observed-card" data-owned>Owned</article></main>',
+          '<main><article id="owned" data-component="observed-card" data-owned>Owned</article></main>',
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -142,72 +141,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} attaches framework roots through the registered declarative contract`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent(
-          '<template component="registered-button" status="early" summary="Registered adapter fixture.">' +
-          '<defs><prop name="label" type="string" default="">Accessible label.</prop>' +
-          '<prop name="pressed" type="boolean" default="false">Pressed state.</prop></defs>' +
-          '<button :aria-label="label" :aria-pressed="pressed"><slot></slot></button></template><main></main>',
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(async () => {
-          window.HtmlRuntime.lowerDocument();
-          const root = document.createElement("button");
-          root.textContent = "Save";
-          document.querySelector("main").append(root);
-          const detach = window.HtmlRuntime.attachRegisteredComponent(
-            root,
-            "registered-button",
-            { props: { label: "Save changes" } },
-          );
-          const initial = {
-            root: root.localName,
-            label: root.getAttribute("aria-label"),
-            pressed: root.getAttribute("aria-pressed"),
-            reflectedLabel: root.getAttribute("data-label"),
-            reflectedPressed: root.hasAttribute("data-pressed"),
-            ownProperties: ["label", "pressed"].filter((key) => Object.hasOwn(root, key)),
-            text: root.textContent,
-            customElement: customElements.get("registered-button") !== undefined,
-          };
-          window.HtmlRuntime.updateComponentProps(root, { pressed: true, label: undefined });
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          const updated = {
-            pressed: root.getAttribute("aria-pressed"),
-            reflectedPressed: root.getAttribute("data-pressed"),
-            label: root.getAttribute("aria-label"),
-            reflectedLabel: root.hasAttribute("data-label"),
-          };
-          detach();
-          return { initial, updated };
-        })()`);
-        assert.deepEqual(result, {
-          initial: {
-            root: "button",
-            label: "Save changes",
-            // A false boolean binding removes the attribute; true renders it present.
-            pressed: null,
-            reflectedLabel: "Save changes",
-            reflectedPressed: false,
-            ownProperties: [],
-            text: "Save",
-            customElement: false,
-          },
-          updated: {
-            pressed: "",
-            reflectedPressed: "true",
-            label: "",
-            reflectedLabel: false,
-          },
-        });
-      } finally {
-        await browser.close();
-      }
-    });
-
     it(`${name} rebuilds the same instance from its rendered form`, async () => {
       // Spec: live-browser-distributable.md, "Rendered form". Authored markup lowered in the browser and
       // the same instance's serialized rendered form hydrated must build equal instances, and behave the
@@ -247,7 +180,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             { name: "$each row added later", html: '<rf-list rows="[&quot;a&quot;]"><span slot="row-b">B</span></rf-list>', change: ["attr", "data-rows", '["a","b"]'] },
             { name: "slot passthrough into a nested component", html: '<rf-wrap><em slot="heading">H</em>Inner</rf-wrap>' },
           ];
-          const shapes = (box) => JSON.stringify([...box.querySelectorAll("[data-component-root]")].map((el) => R.inspectInstance(el)));
+          const shapes = (box) => JSON.stringify([...box.querySelectorAll("[data-component]")].map((el) => R.inspectInstance(el)));
           const failures = [];
           for (const { name, html, change } of cases) {
             const lowered = document.createElement("div");
@@ -276,173 +209,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return failures;
         })()`);
         assert.deepEqual(result, []);
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} lets a framework claim a server-rendered root in either order`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        const serverRoot = (id: string) =>
-          `<button id="${id}" data-component="claimed-button" data-component-root="claimed-button">Save</button>`;
-        await page.setContent(
-          '<template component="claimed-button" status="early" summary="Framework claim fixture.">' +
-          '<defs><prop name="label" type="string" default="">Accessible label.</prop></defs>' +
-          '<button :aria-label="label"><slot></slot></button></template>' +
-          `<main>${serverRoot("observed-first")}</main>`,
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(async () => {
-          const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-          const log = [];
-          const controller = (owner) => ({
-            default(host) {
-              log.push(owner + " start " + host.element.id);
-              return () => log.push(owner + " stop " + host.element.id);
-            },
-          });
-          const stop = window.HtmlRuntime.observeDocument(document, {
-            onConnect(root) { return controller("observer").default({ element: root }); },
-          });
-          await tick();
-
-          // 1. The observer hydrated the server root first; the framework claims it.
-          const observedFirst = document.getElementById("observed-first");
-          const detachObserved = window.HtmlRuntime.attachRegisteredComponent(observedFirst, "claimed-button", {
-            props: { label: "Save changes" },
-            controller: controller("framework"),
-          });
-          await tick();
-          const claimedLabel = observedFirst.getAttribute("aria-label");
-          const claimedText = observedFirst.textContent;
-
-          // Moving a claimed root must not hand it back to the observer.
-          document.querySelector("main").append(observedFirst);
-          await tick();
-
-          // 2. The framework attaches before the observer sees the root.
-          const container = document.createElement("div");
-          container.innerHTML = '<button id="framework-first" data-component="claimed-button" data-component-root="claimed-button">Save</button>';
-          const frameworkFirst = container.firstElementChild;
-          const detachFramework = window.HtmlRuntime.attachRegisteredComponent(frameworkFirst, "claimed-button", {
-            controller: controller("framework"),
-          });
-          document.querySelector("main").append(frameworkFirst);
-          await tick();
-
-          detachObserved();
-          detachFramework();
-          stop();
-          return { log, claimedLabel, claimedText };
-        })()`);
-        assert.deepEqual(result, {
-          log: [
-            "observer start observed-first",
-            "observer stop observed-first",
-            "framework start observed-first",
-            "framework start framework-first",
-            "framework stop observed-first",
-            "framework stop framework-first",
-          ],
-          claimedLabel: "Save changes",
-          claimedText: "Save",
-        });
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} leaves framework-owned slot regions and structural anchors intact`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent(
-          '<template component="framework-card" status="early" summary="Framework adoption fixture.">' +
-          '<defs><prop name="expanded" type="boolean" default="false">Shows details.</prop></defs>' +
-          '<article><header><slot name="leading"></slot><slot></slot><slot name="actions"></slot></header>' +
-          '<section $if="expanded"><slot name="details"></slot></section></article></template>' +
-          '<main><article id="root"><header>' +
-          '<span slot="leading"><i>Icon</i></span>' +
-          '<span slot=""><b>Title</b></span>' +
-          '<span slot="actions"><button>More</button></span>' +
-          '</header><!--framework-if--></article></main>',
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(() => {
-          window.HtmlRuntime.lowerDocument();
-          const root = document.querySelector("#root");
-          const regions = Array.from(root.querySelectorAll("span[slot]"));
-          const anchor = root.lastChild;
-          const detach = window.HtmlRuntime.attachRegisteredComponent(
-            root,
-            "framework-card",
-            { props: { expanded: false } },
-          );
-          regions[1].querySelector("b").textContent = "Updated";
-          const details = document.createElement("section");
-          details.innerHTML = '<span slot="details">Details</span>';
-          anchor.replaceWith(details);
-          root.expanded = true;
-          const result = {
-            regionIdentity: Array.from(root.querySelectorAll("span[slot]"))
-              .slice(0, 3).every((region, index) => region === regions[index]),
-            leading: root.querySelector('span[slot="leading"]')?.textContent,
-            title: root.querySelector('span[slot=""]')?.textContent,
-            actions: root.querySelector('span[slot="actions"]')?.textContent,
-            details: root.querySelector('span[slot="details"]')?.textContent,
-          };
-          detach();
-          return result;
-        })()`);
-        assert.deepEqual(result, {
-          regionIdentity: true,
-          leading: "Icon",
-          title: "Updated",
-          actions: "More",
-          details: "Details",
-        });
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} preserves nested framework components rendered as native roots`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent(
-          '<template component="framework-menu" status="early" summary="Nested framework fixture.">' +
-          '<ul><slot></slot></ul></template>' +
-          '<template component="framework-shell" status="early" summary="Framework composition fixture.">' +
-          '<section><div><framework-menu><slot></slot></framework-menu></div></section></template>' +
-          '<main><section id="root"><div>' +
-          '<ul id="menu" data-component="framework-menu">' +
-          '<li id="item">Rename</li></ul></div></section></main>',
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(() => {
-          window.HtmlRuntime.lowerDocument();
-          const root = document.querySelector("#root");
-          const menu = root.querySelector("#menu");
-          const item = root.querySelector("#item");
-          const detachMenu = window.HtmlRuntime.attachRegisteredComponent(menu, "framework-menu");
-          const detach = window.HtmlRuntime.attachRegisteredComponent(root, "framework-shell");
-          const result = {
-            menuRetained: root.querySelector('[data-component-root~="framework-menu"]') === menu,
-            itemRetained: root.querySelector("#item") === item,
-            text: menu?.textContent,
-          };
-          detach();
-          detachMenu();
-          return result;
-        })()`);
-        assert.deepEqual(result, {
-          menuRetained: true,
-          itemRetained: true,
-          text: "Rename",
-        });
       } finally {
         await browser.close();
       }
@@ -513,8 +279,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
           Element.prototype.querySelectorAll = function(selector) {
             if (selector === "*") wildcardQueries += 1;
-            if (selector === "[data-component-root]") rootMarkerQueries += 1;
-            if (["template[component]", "[data-component-root]", "demo-local", "demo-unused-a", "demo-unused-b"].every(part => selector.includes(part))) {
+            if (selector === "[data-component]") rootMarkerQueries += 1;
+            if (["template[component]", "[data-component]", "demo-local", "demo-unused-a", "demo-unused-b"].every(part => selector.includes(part))) {
               discoveryQueries += 1;
             }
             return nativeElementQuery.call(this, selector);
@@ -1517,7 +1283,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} scopes component styles by authored provenance`, async () => {
+    it(`${name} scopes component styles to their region`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -1525,17 +1291,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<style>.projected { background-color: rgb(240, 240, 0); }</style>` +
           `<template component="x-inner" status="early" summary="Inner component.">` +
             `<section class="inner"><div class="inside"><div class="own"><span class="marker"></span></div><slot></slot></div></section>` +
-            `<style>:scope { border-top: 3px solid rgb(1, 2, 3); } .inside { background-color: rgb(0, 120, 0); } .projected, .deep { background-color: rgb(0, 0, 200); } @media all { .inside:has(.own > .marker) { padding-top: 9px; } }</style>` +
+            `<style>:host { border-top: 3px solid rgb(1, 2, 3); } :slotted(.deep) { border-bottom: 2px solid; } .inside { background-color: rgb(0, 120, 0); } .projected, .deep { background-color: rgb(0, 0, 200); } @media all { .inside:has(.own > .marker) { padding-top: 9px; } }</style>` +
           `</template>` +
           `<template component="x-outer" status="early" summary="Outer component.">` +
             `<article><div class="own" required><span class="marker"></span><i class="leaf"></i></div><x-inner class="nested"><em class="projected"><b class="deep">Projected</b></em></x-inner></article>` +
-            `<style>:scope { color: rgb(12, 34, 56); --inherited-token: inherited; } .own { --bare: yes; } article .leaf { --descendant: yes; } article > .own { --child: yes; } .own + x-inner { margin-left: 13px; } :scope:has(.own > .marker) { padding-left: 11px; } .inside { background-color: rgb(200, 0, 0); } @media all { .own:invalid { border-left: 7px solid rgb(90, 0, 0); } }</style>` +
+            `<style>:host { color: rgb(12, 34, 56); --inherited-token: inherited; } .own { --bare: yes; } :host .leaf { --descendant: yes; } :host > .own { --child: yes; } article .leaf { --relative: yes; } .own + x-inner { margin-left: 13px; } :host:has(.own > .marker) { padding-left: 11px; } .inside { background-color: rgb(200, 0, 0); } @media all { .own:invalid { border-left: 7px solid rgb(90, 0, 0); } }</style>` +
           `</template>` +
           `<template component="x-base" status="early" summary="Base component.">` +
-            `<button><slot></slot></button><style id="base-style">:scope { border-right: 4px solid rgb(1, 2, 3); }</style>` +
+            `<button><slot></slot></button><style id="base-style">:host { border-right: 4px solid rgb(1, 2, 3); }</style>` +
           `</template>` +
           `<template component="x-primary" status="early" summary="Delegated component.">` +
-            `<x-base><slot></slot></x-base><style id="primary-style">:scope { padding-right: 6px; }</style>` +
+            `<x-base><slot></slot></x-base><style id="primary-style">:host { padding-right: 6px; }</style>` +
           `</template>` +
           `<x-outer id="outer"></x-outer><x-primary id="delegated">Label</x-primary>`,
         );
@@ -1563,7 +1329,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
               padding: value(outer, "padding-left"),
               color: value(outer, "color"),
               provenance: outer.getAttribute("data-component"),
-              roots: outer.getAttribute("data-component-root"),
             },
             own: {
               bare: value(own, "--bare"),
@@ -1571,11 +1336,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
               invalidBorder: value(own, "border-left-width"),
             },
             leaf: value(leaf, "--descendant"),
+            // A selector without :host is relative to the root, so its root type selector never matches.
+            relative: value(leaf, "--relative"),
             nested: {
               margin: value(nested, "margin-left"),
               border: value(nested, "border-top-width"),
               provenance: nested.getAttribute("data-component"),
-              roots: nested.getAttribute("data-component-root"),
             },
             inside: {
               background: value(inside, "background-color"),
@@ -1588,12 +1354,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
               color: value(projected, "color"),
             },
             deepBackground: value(deep, "background-color"),
+            deepBorder: value(deep, "border-bottom-width"),
             delegated: {
               element: delegated.localName,
               border: value(delegated, "border-right-width"),
               padding: value(delegated, "padding-right"),
               provenance: delegated.getAttribute("data-component"),
-              roots: delegated.getAttribute("data-component-root"),
               baseStyles: document.querySelectorAll("#base-style").length,
               primaryStyles: document.querySelectorAll("#primary-style").length,
             },
@@ -1605,15 +1371,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
             padding: "11px",
             color: "rgb(12, 34, 56)",
             provenance: "x-outer",
-            roots: "x-outer",
           },
           own: { bare: "yes", child: "yes", invalidBorder: "0px" },
           leaf: "yes",
+          relative: "",
           nested: {
-            margin: "13px",
+            // The enclosing component's rules never match a nested component's root.
+            margin: "0px",
             border: "3px",
-            provenance: "x-outer x-inner",
-            roots: "x-inner",
+            provenance: "x-inner",
           },
           inside: {
             background: "rgb(0, 120, 0)",
@@ -1626,12 +1392,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
             color: "rgb(12, 34, 56)",
           },
           deepBackground: "rgba(0, 0, 0, 0)",
+          deepBorder: "2px",
           delegated: {
             element: "button",
             border: "4px",
             padding: "6px",
             provenance: "x-primary x-base",
-            roots: "x-primary x-base",
             baseStyles: 1,
             primaryStyles: 1,
           },
@@ -1853,9 +1619,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-hydrated" status="early" summary="Hydration.">` +
             `<defs><prop name="label" type="string" default="Default">Label.</prop></defs>` +
             `<article><h2 $value="label"></h2><input .value="label"><slot></slot></article></template>` +
-          `<article id="server" data-component="x-hydrated" data-component-root="x-hydrated" data-label="Server">` +
-            `<h3 data-component="x-hydrated">stale</h3>` +
-            `<input data-component="x-hydrated" value="server"><em id="projected" data-slotted>Projected</em>` +
+          `<article id="server" data-component="x-hydrated" data-label="Server">` +
+            `<h3>stale</h3>` +
+            `<input value="server"><?start slot=""?><em id="projected" data-slotted>Projected</em><?end?>` +
           `</article>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -1900,7 +1666,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const unsafe = await browser.newPage();
         await unsafe.setContent(
           `<template component="x-safe-root" status="early" summary="Safe root."><article>Expected</article></template>` +
-          `<section id="unsafe" data-component="x-safe-root" data-component-root="x-safe-root">Untouched</section>`,
+          `<section id="unsafe" data-component="x-safe-root">Untouched</section>`,
         );
         await unsafe.addScriptTag({ path: bundlePath });
         const rejected = await unsafe.evaluate(`(() => {
@@ -1911,76 +1677,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
         })()`);
         assert.deepEqual(rejected, { code: "HR005", same: true, text: "Untouched" });
         await unsafe.close();
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} renders native-scope and fallback CSS equivalently`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        const rules = [
-          "div { color: rgb(21, 43, 65); }",
-          ".own { --bare: yes; }",
-          "div > .own { --child: yes; }",
-          "div .leaf { --descendant: yes; }",
-          ".own + x-child { margin-left: 13px; }",
-          "div:has(.own > .leaf:invalid) { padding-left: 11px; }",
-          "@media all { .leaf:invalid { border-left: 7px solid rgb(90, 0, 0); } }",
-          ".inside, .projected { background-color: rgb(200, 0, 0); }",
-        ].join("\n");
-        const nativeCss = transformComponentStyles(rules, "x-native", {
-          mode: "scope",
-          rootElement: "div",
-        });
-        const fallbackCss = transformComponentStyles(rules, "x-fallback", {
-          mode: "attribute",
-          rootElement: "div",
-        });
-        const tree = (owner: string): string =>
-          `<div class="card" data-component="${owner}" data-component-root="${owner}">` +
-            `<p class="own" data-component="${owner}"><i class="leaf" data-invalid data-component="${owner}"></i></p>` +
-            `<section data-component="${owner} x-child" data-component-root="x-child">` +
-              `<span class="inside" data-component="x-child"></span>` +
-              `<em class="projected" data-slotted><b class="deep"></b></em>` +
-            `</section>` +
-          `</div>`;
-        await page.setContent(
-          `<style>${nativeCss}\n${fallbackCss}</style>` + tree("x-native") + tree("x-fallback"),
-        );
-
-        const result = await page.evaluate(`(() => {
-          const snapshot = (owner) => {
-            const root = document.querySelector('[data-component-root="' + owner + '"]');
-            const own = root.querySelector('.own');
-            const leaf = root.querySelector('.leaf');
-            const nested = root.querySelector('[data-component-root="x-child"]');
-            const inside = root.querySelector('.inside');
-            const projected = root.querySelector('.projected');
-            const value = (element, property) => getComputedStyle(element).getPropertyValue(property).trim();
-            return {
-              root: [value(root, 'color'), value(root, 'padding-left')],
-              own: [value(own, '--bare'), value(own, '--child')],
-              leaf: [value(leaf, '--descendant'), value(leaf, 'border-left-width')],
-              nested: value(nested, 'margin-left'),
-              inside: [value(inside, 'background-color'), value(inside, 'color')],
-              projected: [value(projected, 'background-color'), value(projected, 'color')],
-            };
-          };
-          return { supported: 'CSSScopeRule' in window, native: snapshot('x-native'), fallback: snapshot('x-fallback') };
-        })()`) as { supported: boolean; native: unknown; fallback: unknown };
-
-        assert.equal(result.supported, true);
-        assert.deepEqual(result.native, result.fallback);
-        assert.deepEqual(result.native, {
-          root: ["rgb(21, 43, 65)", "0px"],
-          own: ["yes", "yes"],
-          leaf: ["yes", "0px"],
-          nested: "13px",
-          inside: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
-          projected: ["rgba(0, 0, 0, 0)", "rgb(21, 43, 65)"],
-        });
       } finally {
         await browser.close();
       }
@@ -2046,7 +1742,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
               ["aria-label", "Save changes"],
               ["class", "cta"],
               ["data-component", "x-button"],
-              ["data-component-root", "x-button"],
               // `disabled` was not set by the author and the template does not bind data-disabled.
               ["data-size", "lg"],
               ["data-trace", "runtime"],
@@ -2070,7 +1765,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
             tag: "button",
             attributes: [
               ["data-component", "x-button"],
-              ["data-component-root", "x-button"],
               ["data-disabled", "true"],
               ["data-size", "md"],
               ["data-variant", "solid"],
@@ -2086,7 +1780,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
             tag: "output",
             attributes: [
               ["data-component", "x-status"],
-              ["data-component-root", "x-status"],
               ["data-message", "Ready"],
               ["id", "status"],
             ],

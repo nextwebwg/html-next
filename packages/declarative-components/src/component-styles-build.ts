@@ -36,7 +36,7 @@ export function compileComponentStylesForBuild(
     });
   };
   const prune = (container: Container<ChildNode>, want: StyleRuleKind, topLevel: boolean): void => {
-    for (const node of [...(container.nodes ?? [])]) {
+    container.each((node) => {
       if (node.type === "rule") {
         const kind = styleRuleKind(node.selector);
         if (kind === want) rewrite(node, kind);
@@ -49,7 +49,7 @@ export function compileComponentStylesForBuild(
       } else if (node.type === "decl") {
         node.remove();
       }
-    }
+    });
   };
   const compile = (want: StyleRuleKind): string => {
     const root = postcss.parse(renamed);
