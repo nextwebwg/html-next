@@ -86,6 +86,10 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@dprint/formatter": "^0.5.1",
+    "@dprint/typescript": "^0.96.1",
+    "dprint-plugin-malva": "^0.16.0",
+    "dprint-plugin-markup": "^0.27.3",
     "parse5": "catalog:",
     "postcss": "catalog:",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2"
@@ -110,9 +114,9 @@
     "mobx": "catalog:",
     "playwright": "catalog:",
     "pota": "catalog:",
-    "reactive-framework-test-suite": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "reactive-framework-test-suite": "catalog:",
     "s-js": "catalog:",
     "signal-polyfill": "catalog:",
     "solid-js": "catalog:",

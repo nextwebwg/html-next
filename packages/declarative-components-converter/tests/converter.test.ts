@@ -87,10 +87,10 @@ describe("framework converter", () => {
 
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
-    assert.match(source, /const count = ref\(0\);/);
-    assert.match(source, /const double = computed\(\(\) => count\.value \* 2\);/);
-    assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1;\n  dispatch\("count-change", count\.value\);/);
-    assert.match(source, /"count-change": \(detail: unknown\) => \(typeof detail === "number" && Number\.isFinite\(detail\)\)/);
+    assert.match(source, /const count = ref\(0\)\n/);
+    assert.match(source, /const double = computed\(\(\) => count\.value \* 2\)\n/);
+    assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1\n  dispatch\('count-change', count\.value\)\n/);
+    assert.match(source, /'count-change': \(detail\) => typeof detail === 'number' && Number\.isFinite\(detail\)/);
     assert.match(source, /:data-count="count"/);
   });
 
@@ -110,7 +110,7 @@ describe("framework converter", () => {
     const manifest = await convertComponents({ mode: "library", entries: ["components/x-toggle/x-toggle.html"], target: "vue", root, outDirectory });
     const source = await readFile(join(outDirectory, "vue", "XToggle.vue"), "utf8");
 
-    assert.match(source, /import \* as controllerModule from "\.\/controllers\/x-toggle\/x-toggle\/x-toggle\.js";/);
+    assert.match(source, /import \* as controllerModule from '\.\/controllers\/x-toggle\/x-toggle\/x-toggle\.js'\n/);
     assert.equal(manifest.components[0]?.controller, "vue/controllers/x-toggle/x-toggle/x-toggle.js");
     await access(join(outDirectory, "vue", "controllers", "x-toggle", "x-toggle", "x-toggle.js"));
     await access(join(outDirectory, "vue", "controllers", "x-toggle", "shared", "flip.js"));

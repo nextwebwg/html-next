@@ -50,7 +50,7 @@ function compileVue(source: string, filename: string): string {
 
 /** Module specifiers a converted component imports. */
 function importsOf(source: string): string[] {
-  return [...source.matchAll(/^import[^"\n]*"([^"]+)"/gm)].map((match) => match[1]!);
+  return [...source.matchAll(/^(?:import|\} from)[^'\n]*'([^']+)'/gm)].map((match) => match[1]!);
 }
 
 const featureSource = `<template component="x-feature" status="experimental" summary="Every convertible construct." controller="./x-feature.js">
@@ -97,8 +97,8 @@ describe("official target compilers", () => {
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
-    assert.match(vue, /modelValue\?: string \| null;/);
-    assert.match(vue, /"update:modelValue": \[value: string\];/);
+    assert.match(vue, /modelValue\?: string \| null\n/);
+    assert.match(vue, /'update:modelValue': \[value: string\]\n/);
     assert.match(vue, /<input data-component="x-field" v-bind="\$attrs" v-model="model">/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => props\.modelValue \?\? props\.value \?\? undefined,/);
     // A select takes v-model too, so Vue selects the model's option once the slotted options exist.
@@ -148,21 +148,21 @@ describe("official target compilers", () => {
   it("maps each construct to Vue's own facility, as a Vue author writes it", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
     assert.doesNotMatch(vue, /\bhn\b/);
-    assert.match(vue, /const open = ref\(false\);/);
-    assert.match(vue, /const query = ref\(""\);/);
-    assert.match(vue, /const count = computed\(\(\) => props\.items\?\.length\);/);
-    assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\("search"\);/);
-    assert.match(vue, /const hostState = computed\(\(\) => \[\n  open\.value && "open",\n  props\.size && `size size=\$\{props\.size\}`,\n\]\.filter\(Boolean\)\.join\(" "\)\);/);
-    assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value;/);
+    assert.match(vue, /const open = ref\(false\)\n/);
+    assert.match(vue, /const query = ref\(''\)\n/);
+    assert.match(vue, /const count = computed\(\(\) => props\.items\?\.length\)\n/);
+    assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('search'\)\n/);
+    assert.match(vue, /const hostState = computed\(\(\) =>\n  \[\n    open\.value && 'open',\n    props\.size && `size size=\$\{props\.size\}`,\n  \]\.filter\(Boolean\)\.join\(' '\)\n\)/);
+    assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value\n/);
     assert.match(vue, /<ul v-if="open">/);
     assert.match(vue, /v-for="\(item, index\) in sortBy\(\(items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)"/);
     assert.match(vue, /:key="item\.id"/);
     assert.match(vue, /<span>\{\{ item\.name \}\}<\/span>/);
     assert.match(vue, /<input v-model="query" ref="search">/);
     assert.match(vue, /@click="flip"/);
-    assert.match(vue, /:class="\{ 'compact': size === 'sm' \}"/);
+    assert.match(vue, /:class="\{ compact: size === 'sm' \}"/);
     assert.match(vue, /:style="\{ '--gap': size \}"/);
-    assert.match(vue, /<XBadge :tone="size">\n\s+<slot name="badge">none<\/slot>\n\s+<\/XBadge>/);
+    assert.match(vue, /<XBadge :tone="size"><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
     assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
@@ -174,9 +174,9 @@ describe("official target compilers", () => {
       `<div><button $each="tab of tabs" $key="tab.id" :id="tab.id" :aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
-    assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\);/);
+    assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
     assert.match(vue, /v-for="tab in tabs"/);
-    assert.match(vue, /:id="tab\.id" :aria-selected="tab\.active" :class="\{ 'active': tab\.active \}">\{\{ tab\.label \}\}/);
+    assert.match(vue, /:id="tab\.id"\n\s+:aria-selected="tab\.active"\n\s+:class="\{ active: tab\.active \}"\n\s+>\n?\s*\{\{ tab\.label \}\}/);
     assert.doesNotMatch(vue, /function (truthy|text|attribute)\(/);
   });
 
@@ -187,7 +187,7 @@ describe("official target compilers", () => {
       `<div><span $if="hovered" :title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
-    assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\);/);
+    assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
     assert.match(vue, /<span v-if="hovered" :title="hovered\?\.label"/);
     assert.match(vue, /<p v-if="!issues\.length">Valid<\/p>/);
     assert.doesNotMatch(vue, /function truthy\(/);
@@ -227,7 +227,7 @@ describe("official target compilers", () => {
       `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor\?: "start" \| "end" \| null;/);
+    assert.match(vue, /anchor\?: 'start' \| 'end' \| null\n/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
