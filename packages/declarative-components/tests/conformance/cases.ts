@@ -123,6 +123,20 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "matches :host in :slotted() rules as the component root",
+    source: scene({
+      tag: "x-rail",
+      defs: `<prop name="wide" type="boolean" default="false">Wide.</prop>`,
+      root: `<div><slot></slot></div>`,
+      style: `:host > :slotted(*) { margin-left: 7px; } :host-state([wide]) > :slotted(p) { width: 55px; }`,
+      use: `<x-rail wide><p id="child"><span id="grandchild">A</span></p></x-rail>`,
+    }),
+    expect: {
+      probe: `const style = (id) => getComputedStyle(q('#' + id)); return [style("child").marginLeft, style("child").width, style("grandchild").marginLeft];`,
+      result: ["7px", "55px", "0px"],
+    },
+  },
+  {
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,
