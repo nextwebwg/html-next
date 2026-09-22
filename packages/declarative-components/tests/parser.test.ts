@@ -192,15 +192,20 @@ describe("parseComponent", () => {
     assert.equal(definition.contract.nativeElement, "a");
   });
 
-  it("rejects undeclared expressions and props bound to conflicting targets", () => {
+  it("rejects undeclared expressions", () => {
     expectDiagnostic("HT003", componentSource(`<button :title="missing"></button>`));
-    expectDiagnostic(
-      "HT004",
+  });
+
+  it("targets a prop's first binding and lets it bind in more places", () => {
+    const definition = parseComponent(
       componentSource(
-        `<button :title="label" :aria-label="label"></button>`,
+        `<button :title="label" :aria-label="label"><span $value="label"></span></button>`,
         `<prop name="label" type="string">Label.</prop>`,
       ),
+      "label.html",
     );
+    assert.deepEqual(definition.contract.props.label?.target, { attribute: "title" });
+    assert.deepEqual(definition.template.attributes.map((attribute) => attribute.name), ["title", "aria-label"]);
   });
 
   it("rejects props declared without a name, type, or binding", () => {

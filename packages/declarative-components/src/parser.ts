@@ -165,7 +165,8 @@ function validateCompiledExpression(
 
 /**
  * A prop's target is defined by where it is bound in the markup, not restated: a
- * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property.
+ * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property. A prop
+ * bound in several places targets its first binding in document order; the others only render it.
  */
 function collectTargets(
   root: Element,
@@ -174,16 +175,7 @@ function collectTargets(
 ): Record<string, PropTarget> {
   const targets: Record<string, PropTarget> = Object.create(null) as Record<string, PropTarget>;
   const record = (name: string, target: PropTarget): void => {
-    const prior = targets[name];
-    if (
-      prior !== undefined &&
-      ("attribute" in prior
-        ? !("attribute" in target) || prior.attribute !== target.attribute
-        : !("property" in target) || prior.property !== target.property)
-    ) {
-      fail("HT004", `Prop \`${name}\` is bound to conflicting targets.`, source);
-    }
-    targets[name] = target;
+    targets[name] ??= target;
   };
   const visit = (element: Element): void => {
     for (const attribute of sourceAttributes(element)) {
@@ -647,10 +639,6 @@ function parseAttributes(
         fail("HT007", `\`:${name}\` cannot bind a raw content sink.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
-      const prop = contract.props[attribute.value];
-      if (prop !== undefined && (!("attribute" in prop.target) || prop.target.attribute !== name)) {
-        fail("HT004", `Binding \`:${name}\` does not match prop \`${attribute.value}\`'s target.`, source);
-      }
       parsed.push({ kind: "attribute", name, expression: attribute.value, expressionPlan });
       continue;
     }
@@ -658,10 +646,6 @@ function parseAttributes(
     if (attribute.name.startsWith(".")) {
       const key = attribute.name.slice(1).toLowerCase();
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
-      const prop = contract.props[attribute.value];
-      if (prop !== undefined && (!("property" in prop.target) || prop.target.property.toLowerCase() !== key)) {
-        fail("HT004", `Property binding \`.${key}\` does not match prop \`${attribute.value}\`'s target.`, source);
-      }
       // Property bindings reach native DOM properties only; component inputs are attributes.
       const name = platform.resolveDomProperty(tagName, key);
       if (name === undefined) {
