@@ -30,7 +30,7 @@ shows which options produced it and server output can reconstruct the instance s
 text, and fallback state have no representation.
 
 The format must stay small, and must not change accessibility, SEO, layout, selectors, or native
-element and form behavior. Measured on Looma's docs pages, today's record is already 22-23% of
+element and form behavior. Measured on a component library's docs pages, today's record is already 22-23% of
 component markup, most of it `data-component` stamped on every authored element (P7).
 
 The record has two readers with different abilities:
@@ -185,7 +185,7 @@ Findings:
   writes the effective value (defaults included), so `<x-card>` recovers as `<x-card tone="info">`.
   Either `data-<prop>` names belong to the record alone (a template may not bind them; components
   that style by effective value bind another name or style the absent case), or explicitness gets its
-  own mark. The first keeps the record minimal; the second keeps existing templates (Looma binds
+  own mark. The first keeps the record minimal; the second keeps existing templates (a library that binds
   `:data-variant`, `:data-size`, …). **Decision needed.**
 - **F3 The runtime already writes structural markers**: `$each` renders
   `<!--html-next:each-start-->`, `<!--html-next:item-start-->`, and matching ends. They are part of the
