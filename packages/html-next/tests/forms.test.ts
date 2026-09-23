@@ -8,7 +8,7 @@ import { build } from "esbuild";
 import { chromium, type Browser } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
-const formsUrl = new URL("../src/index.ts", import.meta.url);
+const formsUrl = new URL("../src/forms.ts", import.meta.url);
 
 describe.skipIf(!enabled)("enhanced forms", () => {
   let browser: Browser;

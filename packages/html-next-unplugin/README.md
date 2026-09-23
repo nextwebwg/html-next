@@ -1,4 +1,4 @@
-# `@nextwebwg/declarative-components-unplugin`
+# `@nextwebwg/html-next-unplugin`
 
 Build integration for a closed Declarative Components application or library graph. The plugin
 parses component sources during the build, emits native DOM factories, combines the graph's support
@@ -8,7 +8,7 @@ inventory.
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import htmlNext from "@nextwebwg/declarative-components-unplugin/vite";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
 
 export default defineConfig({
   plugins: [htmlNext({

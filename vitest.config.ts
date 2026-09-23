@@ -10,10 +10,6 @@ export default defineConfig({
         find: /^@nextwebwg\/html-next$/,
         replacement: fileURLToPath(new URL("./packages/html-next/src/index.ts", import.meta.url)),
       },
-      {
-        find: /^@nextwebwg\/html-forms$/,
-        replacement: fileURLToPath(new URL("./packages/html-forms/src/index.ts", import.meta.url)),
-      },
     ],
   },
   test: {

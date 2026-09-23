@@ -53,7 +53,7 @@ metadata.
 **Tracked goal.** Convert application and library graphs into React, Vue, and Svelte components that
 use target-native rendering, reactivity, lifecycle, lists, and hydration.
 
-- Contract: [converter requirements](../../declarative-components-converter/docs/requirements.md)
+- Contract: [converter requirements](../../html-next-converter/docs/requirements.md)
 - Input boundary: application or library entries plus a target framework and supported version
 - Primary metrics: generated output, HTML Next bridge cost, target framework/runtime cost, and total
   production output

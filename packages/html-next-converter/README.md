@@ -1,4 +1,4 @@
-# `@nextwebwg/declarative-components-converter`
+# `@nextwebwg/html-next-converter`
 
 Converts a Declarative Components application or library graph into Vue 3.5 single-file components.
 Once converted, HTML Next is gone: each `.vue` file imports only Vue, the components it nests, and

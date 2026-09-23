@@ -1,6 +1,6 @@
 {
-  "name": "@nextwebwg/declarative-components-converter",
-  "version": "1.0.0-alpha.2",
+  "name": "@nextwebwg/html-next-converter",
+  "version": "1.0.0-alpha.3",
   "description": "Vue conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -45,6 +45,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nextwebwg/html-next.git",
-    "directory": "packages/declarative-components-converter"
+    "directory": "packages/html-next-converter"
   }
 }
