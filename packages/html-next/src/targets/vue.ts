@@ -23,14 +23,17 @@ import { normalizeType, parseTypeExpression, type TypeNode } from "../type-syste
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, propKey, propTypeSource, quote, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
+import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { category, Lowering, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 
-const VUE_APIS = ["computed", "onBeforeUnmount", "onMounted", "ref", "shallowRef", "useTemplateRef", "watchEffect"] as const;
+/** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
+const VUE_APIS = ["computed", "ref", "useTemplateRef"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
   "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "sortBy",
+  "useComponentHost", "createDispatch",
   "String", "Boolean", "Number", "Math", "Object", "Array", "CustomEvent", "Promise", "Proxy", "TypeError",
   "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS,
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
@@ -463,6 +466,35 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     ...(modelProp === undefined ? [] : ['  "update:modelValue": [value: string];']),
   ];
   const handlerSources = handlers.map((handler) => handlerSource(handler, handlerNames.get(handler.name)!, names, events, context));
+
+  // One check per distinct declared detail type, named once and shared by the events that declare it.
+  const checkSources: string[] = [];
+  const checkNames = new Map<EventDeclaration, string>();
+  const checksBySource = new Map<string, string>();
+  for (const event of events) {
+    const source = typeCheck(parseTypeExpression(event.type), "detail").replace(/^\((.*)\)$/s, "$1");
+    let name = checksBySource.get(source);
+    if (name === undefined) {
+      name = identifiers.take(`is${pascal(event.name)}Detail`, "Check");
+      checksBySource.set(source, name);
+      checkSources.push(`const ${name} = (detail: unknown): boolean => ${source};`);
+    }
+    checkNames.set(event, name);
+  }
+  // createDispatch already dispatches a bubbling, composed, uncancelable event; only an event that
+  // differs from that needs to declare its own init.
+  const declared = events.filter((event) => !(event.bubbles && event.composed && !event.cancelable));
+  const dispatchSource = events.length === 0 ? "const dispatch = createDispatch(root);" : [
+    "const dispatch = createDispatch(root, emit as (name: string, detail: unknown) => void, {",
+    ...(declared.length === 0 ? [] : [
+      `  declared: ${JSON.stringify(Object.fromEntries(declared.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))},`,
+    ]),
+    "  checks: {",
+    ...events.map((event) => `    ${propKey(event.name)}: ${checkNames.get(event)},`),
+    "  },",
+    ...(modeled.length === 0 ? [] : [`  modeled: [${modeled.map((prop) => quote(prop.name)).join(", ")}],`]),
+    "});",
+  ].join("\n");
   const stateSource = (declaration: ReactiveDeclaration): string => {
     const name = stateNames.get(declaration)!;
     const initial = declaration.expression === undefined ? "undefined" : lowering.value(declaration.expression.ast, script);
@@ -499,41 +531,15 @@ export function generateVue(definition: ComponentDefinition, version: string): s
       ...styles.stateNames.flatMap((name) => stateTokens(name, script, lowering)).map((token) => `  ${token},`),
       "].filter(Boolean).join(\" \"));",
     ]),
-    ...(!dispatches ? [] : [
-      "",
-      "/** Dispatches a component event to Vue listeners and, for controllers and page code, on the root. */",
-      "function dispatch(name: string, detail?: unknown): boolean {",
-      ...(events.length === 0 ? [] : [
-        `  const declared: Record<string, EventInit | undefined> = ${JSON.stringify(Object.fromEntries(events.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))};`,
-        "  const checks: Record<string, (detail: unknown) => boolean> = {",
-        ...events.map((event) => `    ${quote(event.name)}: (detail) => ${typeCheck(parseTypeExpression(event.type), "detail").replace(/^\((.*)\)$/s, "$1")},`),
-        "  };",
-        "  if (detail !== undefined && checks[name] !== undefined && !checks[name]!(detail)) {",
-        "    throw new TypeError(`HR002: Event \\`${name}\\` detail does not satisfy its declared type.`);",
-        "  }",
-        "  const emitEvent = emit as (name: string, detail: unknown) => void;",
-        "  emitEvent(name, detail);",
-        ...modeled.map((prop) =>
-          `  if (detail !== null && typeof detail === "object" && ${quote(prop.name)} in detail) emitEvent(${quote(`update:${prop.name}`)}, (detail as Record<string, unknown>)[${quote(prop.name)}]);`),
-      ]),
-      `  return root.value?.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ${events.length === 0 ? "" : "...declared[name], "}detail })) ?? true;`,
-      "}",
-    ]),
+    ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),
     ...handlerSources.flatMap((source) => ["", source]),
-    ...(!controlled ? [] : [
-      "",
-      "function read(name: string): unknown {",
-      ...[...states, ...computedValues].map((declaration) => `  if (name === ${quote(declaration.name)}) return ${stateNames.get(declaration)}.value;`),
-      target.props.length === 0 ? "  return undefined;" : "  return (props as Record<string, unknown>)[name];",
-      "}",
-      "",
-      "function write(name: string, value: unknown): boolean {",
-      ...states.map((state) => `  if (name === ${quote(state.name)}) { ${stateNames.get(state)}.value = value as never; return true; }`),
-      "  throw new TypeError(`Only declared state is writable; \\`${name}\\` is not.`);",
-      "}",
-    ]),
     "",
-    ...hostSource(definition, target.methods, context.refs),
+    ...hostSource(definition, target.methods, {
+      props: target.props.length > 0,
+      refs: context.refs,
+      state: new Map(states.map((state) => [state.name, stateNames.get(state)!])),
+      computed: new Map(computedValues.map((value) => [value.name, stateNames.get(value)!])),
+    }),
     ...lowering.fallbacks().flatMap((source) => ["", source]),
   );
   // `props` is named only when the script reads it; the template reads props by name.
@@ -543,10 +549,13 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   }
   const code = `${body.join("\n")}\n${rootMarkup}`;
   const apis = VUE_APIS.filter((api) => new RegExp(`\\b${api}[<(]`).test(code));
+  // The shared module holds what every component's host and dispatcher do the same way.
+  const shared = ["createDispatch", "useComponentHost"].filter((name) => code.includes(`${name}(`));
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
     '<script setup lang="ts">',
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
+    ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(`./${componentName(tag)}.vue`)};`),
     ...(definition.controller === undefined ? [] : [`import * as controllerModule from ${quote(definition.controller)};`]),
     "",
@@ -569,78 +578,46 @@ function defaultSource(value: unknown): string {
   return value !== null && typeof value === "object" ? `() => (${JSON.stringify(value)})` : JSON.stringify(value);
 }
 
-/** The controller host, built from Vue refs, effects, and lifecycle. */
+/** The controller host and the methods it exposes: the shared module holds everything repeated. */
 function hostSource(
   definition: ComponentDefinition,
   methods: ReturnType<typeof targetComponent>["methods"],
-  refs: ReadonlyMap<string, string>,
+  values: {
+    readonly props: boolean;
+    readonly refs: ReadonlyMap<string, string>;
+    readonly state: ReadonlyMap<string, string>;
+    readonly computed: ReadonlyMap<string, string>;
+  },
 ): string[] {
-  if (definition.controller === undefined) return methods.length === 0 ? [] : [
-    `defineExpose({ ${methods.map((method) => `${propKey(method.name)}: () => Promise.reject(new TypeError(${quote(`<${definition.contract.tag}> has no controller.`)}))`).join(", ")} });`,
-  ];
-  return [
-    "const stops: Array<() => void> = [];",
-    "const host = {",
-    "  get element(): Element { return root.value as Element; },",
-    "  state: new Proxy({} as Record<string, unknown>, {",
-    "    get: (_target, name) => typeof name === \"string\" ? read(name) : undefined,",
-    "    set: (_target, name, value) => typeof name === \"string\" && write(name, value),",
-    "  }),",
-    "  refs: {",
-    ...[...refs].map(([ref, name]) => `    get ${propKey(ref)}(): Element { return ${name}.value as Element; },`),
-    "  } as Readonly<Record<string, Element>>,",
-    "  elements: new Proxy({} as Record<string, Element | RadioNodeList | undefined>, {",
-    "    get: (_target, name) => {",
-    "      if (typeof name !== \"string\" || root.value === null) return undefined;",
-    "      const form = root.value instanceof HTMLFormElement ? root.value : root.value.querySelector(\"form\");",
-    "      return form?.elements.namedItem(name) ?? root.value.querySelector(`[name=\"${CSS.escape(name)}\"]`) ?? undefined;",
-    "    },",
-    "  }),",
-    "  signal<T>(initialValue: T) {",
-    "    const value = shallowRef(initialValue);",
-    "    return {",
-    "      get: (): T => value.value,",
-    "      set: (next: T): void => { if (!Object.is(value.value, next)) value.value = next; },",
-    "      update: (next: (current: T) => T): void => { const updated = next(value.value); if (!Object.is(value.value, updated)) value.value = updated; },",
-    "    };",
-    "  },",
-    "  computed<T>(compute: () => T) {",
-    "    const value = computed(compute);",
-    "    return { get: (): T => value.value };",
-    "  },",
-    "  effect(run: () => void | (() => void)): () => void {",
-    "    const stop = watchEffect((onCleanup) => {",
-    "      const cleanup = run();",
-    "      if (typeof cleanup === \"function\") onCleanup(cleanup);",
-    "    }, { flush: \"post\" });",
-    "    stops.push(stop);",
-    "    return stop;",
-    "  },",
-    "  on(event: string, listener: EventListener): () => void {",
-    "    const element = root.value;",
-    "    element?.addEventListener(event, listener);",
-    "    const off = (): void => element?.removeEventListener(event, listener);",
-    "    stops.push(off);",
-    "    return off;",
-    "  },",
+  if (definition.controller === undefined) {
+    return methods.length === 0 ? [] : [
+      `defineExpose({ ${methods.map((method) => `${propKey(method.name)}: () => Promise.reject(new TypeError(${quote(`<${definition.contract.tag}> has no controller.`)}))`).join(", ")} });`,
+    ];
+  }
+  const record = (entries: ReadonlyMap<string, string>): string =>
+    `{ ${[...entries].map(([name, identifier]) => name === identifier ? name : `${propKey(name)}: ${identifier}`).join(", ")} }`;
+  const call = [
+    "useComponentHost(controllerModule.default, {",
+    "  root,",
     "  dispatch,",
-    "};",
+    ...(values.props ? ["  props,"] : []),
+    ...(values.refs.size === 0 ? [] : [`  refs: ${record(values.refs)},`]),
+    ...(values.state.size === 0 ? [] : [`  state: ${record(values.state)},`]),
+    ...(values.computed.size === 0 ? [] : [`  computed: ${record(values.computed)},`]),
+    "})",
+  ].join("\n");
+  if (methods.length === 0) return [`${call};`];
+  return [
+    `const { host, ready } = ${call};`,
     "",
-    "let cleanup: void | (() => void);",
-    "let ready: Promise<void> | undefined;",
-    "onMounted(() => {",
-    "  ready = Promise.resolve(controllerModule.default(host as never)).then((result) => { cleanup = result; });",
+    "defineExpose({",
+    ...methods.map((method) =>
+      `  ${propKey(method.name)}: async (...args: unknown[]) => { await ready(); return (controllerModule as Record<string, (...values: unknown[]) => unknown>)[${quote(method.exportName)}]!(host, ...args); },`),
     "});",
-    "onBeforeUnmount(() => {",
-    "  for (const stop of stops.splice(0)) stop();",
-    "  if (typeof cleanup === \"function\") cleanup();",
-    "});",
-    ...(methods.length === 0 ? [] : [
-      "defineExpose({",
-      ...methods.map((method) =>
-        `  ${propKey(method.name)}: async (...args: unknown[]) => { await ready; return (controllerModule as Record<string, (...values: unknown[]) => unknown>)[${quote(method.exportName)}]!(host, ...args); },`),
-      "});",
-    ]),
   ];
 }
 
+/** `query-change` as `QueryChange`, for a name derived from a declared event. */
+function pascal(name: string): string {
+  return name.replace(/(?:^|[^A-Za-z0-9])([A-Za-z0-9])/g, (_match, character: string) => character.toUpperCase());
+}

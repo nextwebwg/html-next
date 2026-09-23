@@ -8,7 +8,7 @@ import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-import { generateComponent } from "../src/generate.js";
+import { generateComponent, vueHostArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
@@ -60,6 +60,7 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
     const artifacts = new Map([
       ...generateComponent(parseComponent(source, "demo-counter.html")),
       ...generateComponent(parseComponent(panelSource, "demo-panel.html")),
+      vueHostArtifact(),
     ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -220,7 +221,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       computedFixtureUrl.href,
     );
     const artifacts = new Map(
-      generateComponent(definition).map((artifact) => [artifact.path, artifact.content]),
+      [...generateComponent(definition), vueHostArtifact()].map((artifact) => [artifact.path, artifact.content]),
     );
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");

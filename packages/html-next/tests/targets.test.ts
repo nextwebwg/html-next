@@ -141,7 +141,7 @@ describe("official target compilers", () => {
   it("converts to a Vue SFC that imports only Vue and the component's own modules", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
     compileVue(vue, "XFeature.vue");
-    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./x-feature.js", "vue"]);
+    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./host", "./x-feature.js", "vue"]);
     assert.doesNotMatch(vue, /@nextwebwg|html-next|attachComponent|manageGeneratedProps/);
   });
 
@@ -165,7 +165,7 @@ describe("official target compilers", () => {
     assert.match(vue, /<XBadge :tone="size"><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
-    assert.match(vue, /onMounted\(\(\) => \{\n  ready = Promise\.resolve\(controllerModule\.default\(host as never\)\)/);
+    assert.match(vue, /const \{ host, ready \} = useComponentHost\(controllerModule\.default, \{\n  root,\n  dispatch,\n  props,\n/);
   });
 
   it("reads a typed state list's items as plainly as a typed prop's", () => {
@@ -202,7 +202,7 @@ describe("official target compilers", () => {
     compileVue(vue, "XPicker.vue");
     assert.match(vue, /'update:query': \[value: string\]/);
     assert.match(vue, /'update:open': \[value: boolean\]/);
-    assert.match(vue, /if \(detail !== null && typeof detail === 'object' && 'query' in detail\) \{?\s*emitEvent\('update:query'/);
+    assert.match(vue, /modeled: \['open', 'query'\]/);
   });
 
   it("rejects a state type that does not parse", () => {

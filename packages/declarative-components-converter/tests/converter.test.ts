@@ -90,7 +90,7 @@ describe("framework converter", () => {
     assert.match(source, /const count = ref\(0\)\n/);
     assert.match(source, /const double = computed\(\(\) => count\.value \* 2\)\n/);
     assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1\n  dispatch\('count-change', count\.value\)\n/);
-    assert.match(source, /'count-change': \(detail\) => typeof detail === 'number' && Number\.isFinite\(detail\)/);
+    assert.match(source, /const isCountChangeDetail = \(detail: unknown\): boolean =>\n  typeof detail === 'number' && Number\.isFinite\(detail\)/);
     assert.match(source, /:data-count="count"/);
   });
 

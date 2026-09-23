@@ -3,7 +3,7 @@ import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent, GENERATOR_VERSION } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION, importsVueHost, vueHostArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { parseComponentResource } from "./source-graph.js";
@@ -184,6 +184,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
       );
       for (const path of moduleSources.keys()) if (!priorModules.has(path)) passThroughModules.add(path);
     } else files.set(edge.target, { copy: resolve(edge.source) });
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueHost(content))) {
+    const host = vueHostArtifact();
+    if (files.has(host.path)) throw new Error(`Package artifact collision at ${host.path}.`);
+    files.set(host.path, host.content);
   }
   for (const [target, content] of Object.entries(targetIndexes(definitions))) {
     if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);
