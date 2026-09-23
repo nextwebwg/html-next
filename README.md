@@ -1,29 +1,31 @@
 # HTML Next implementations
 
-This pnpm monorepo holds proposal-specific reference implementations for HTML Next.
-Each proposal owns an independently versioned package under `packages/`; shared policy
-and verification live at the repository root.
+This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
+`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it,
+named for it and versioned independently. Shared policy and verification live at the
+repository root.
 
-| Package | Proposal | Current scope |
+| Package | Role | Current scope |
 | --- | --- | --- |
-| [`@nextwebwg/html-next`](./packages/html-next) | [Declarative HTML Components](https://nextwebwg.org/html-next/); validity from [HTML Forms](https://nextwebwg.org/html-forms/) | Live browser runtime, the shared compiler, validity on any element, and native-DOM/CSS/package generation |
-| [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | [Declarative HTML Components](https://nextwebwg.org/html-next/) | Vue conversion (React in development) |
-| [`@nextwebwg/html-forms`](./packages/html-forms) | [HTML Forms](https://nextwebwg.org/html-forms/) | Native form request construction and abortable fetch enhancement |
+| [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
+| [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
+| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue conversion (React in development) |
 
-The `@nextwebwg/html-next` package authors a component once as inert,
-browser-parseable HTML. The same definition can run directly in a browser or compile to
+The tools package implements both proposals it needs:
+[Declarative HTML Components](https://nextwebwg.org/html-next/) and
+[HTML Forms](https://nextwebwg.org/html-forms/). A component is authored once as inert,
+browser-parseable HTML; the same definition can run directly in a browser or compile to
 native DOM, CSS, types, and inspectable package artifacts. The component language is defined by the
 [proposal](https://nextwebwg.org/html-next/); this repository is its JavaScript tooling, verified by
 conformance tests.
 
-The HTML Forms package operates on native `HTMLFormElement` and submitter objects. Declarative
-Components consumes that API for its form declarations; the Forms package has no component,
-template, or reactive-runtime dependency.
+HTML Forms lives at [`@nextwebwg/html-next/forms`](./packages/html-next/src/forms.ts) and operates
+on native `HTMLFormElement` and submitter objects. It has no component, template, or
+reactive-runtime dependency, so importing that subpath pulls in nothing else; the component runtime
+consumes its validity model for form declarations but does not re-export request construction.
 
-> Stage 0: the syntax and generated package shape may change. The repository is MIT-licensed,
-> but its packages remain private until the project selects a public-visibility and publication
-> policy.
+> Stage 0: the syntax and generated package shape may change. The repository and its packages are
+> MIT-licensed and publish to npm under the `next` tag as `1.0.0-alpha` prereleases.
 
 ## Declarative Components delivery modes
 
@@ -33,8 +35,8 @@ modes:
 | Mode | Package | Input | Output |
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
-| **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/declarative-components-unplugin`](./packages/declarative-components-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to Vue (React in development) | [`@nextwebwg/declarative-components-converter`](./packages/declarative-components-converter) | A component graph plus a Vue target | Vue single-file components that import only Vue and their own controllers |
+| **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
+| **Framework conversion** — to Vue (React in development) | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a Vue target | Vue single-file components that import only Vue and their own controllers |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
@@ -238,7 +240,7 @@ only application resolution and trust differ.
 ## Repository map
 
 - [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
-- [Converter requirements](./packages/declarative-components-converter/docs/requirements.md)
+- [Converter requirements](./packages/html-next-converter/docs/requirements.md)
 - [Conformance corpus](./packages/html-next/tests/conformance/README.md)
 - [Style-scoping note](./packages/html-next/docs/style-scoping.md)
 - [Historical component-generation plan](./packages/html-next/docs/mvp-plan.md)

@@ -1,5 +1,5 @@
 {
-  "name": "@nextwebwg/declarative-components-unplugin",
+  "name": "@nextwebwg/html-next-unplugin",
   "version": "1.0.0-alpha.0",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
@@ -46,6 +46,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nextwebwg/html-next.git",
-    "directory": "packages/declarative-components-unplugin"
+    "directory": "packages/html-next-unplugin"
   }
 }

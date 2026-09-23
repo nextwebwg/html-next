@@ -15,6 +15,7 @@ const publicExports = [
   ".",
   "./runtime",
   "./generated-runtime",
+  "./forms",
   "./validation",
   "./browser-loader",
   "./browser",
@@ -23,6 +24,7 @@ const publicExports = [
 const browserExports = [
   "./runtime",
   "./generated-runtime",
+  "./forms",
   "./validation",
   "./browser-loader",
   "./browser",
@@ -50,7 +52,7 @@ function specifier(path: typeof publicExports[number]): string {
 }
 
 describe("workspace package contracts", () => {
-  it("installs HTML Next without the independent Forms package", () => {
+  it("installs HTML Next with every public export", () => {
     const componentsTarball = pack("html-next");
     const consumer = join(workspace, "html-next-consumer");
     mkdirSync(consumer);
@@ -85,7 +87,7 @@ describe("workspace package contracts", () => {
       repository?: { type: string; url: string; directory: string };
       publishConfig?: { access: string; tag: string; registry: string };
     };
-    expect(manifest.version).toBe("1.0.0-alpha.3");
+    expect(manifest.version).toBe("1.0.0-alpha.4");
     expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
@@ -99,15 +101,12 @@ describe("workspace package contracts", () => {
       registry: "https://registry.npmjs.org/",
     });
     expect(readFileSync(join(installedRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
-    expect(manifest.dependencies).not.toHaveProperty("@nextwebwg/html-forms");
     expect(Object.keys(manifest.exports)).toEqual(publicExports);
     for (const path of publicExports) {
       const entry = manifest.exports[path]!;
       expect(existsSync(join(installedRoot, entry.import))).toBe(true);
       expect(existsSync(join(installedRoot, entry.types))).toBe(true);
     }
-    expect(existsSync(join(consumer, "node_modules", "@nextwebwg", "html-forms"))).toBe(false);
-
     const nodeEntry = join(consumer, "node-exports.mjs");
     writeFileSync(
       nodeEntry,
@@ -152,53 +151,11 @@ describe("workspace package contracts", () => {
     );
   });
 
-  it("installs the Forms package independently", () => {
-    const formsTarball = pack("html-forms");
-    const consumer = join(workspace, "forms-consumer");
-    mkdirSync(consumer);
-    writeFileSync(
-      join(consumer, "package.json"),
-      JSON.stringify({ name: "forms-consumer", private: true, type: "module" }),
-    );
-    execFileSync(
-      "npm",
-      ["install", "--ignore-scripts", "--no-audit", "--no-fund", formsTarball],
-      { cwd: consumer, shell: useCommandShell },
-    );
-
-    const manifest = JSON.parse(
-      readFileSync(
-        join(consumer, "node_modules", "@nextwebwg", "html-forms", "package.json"),
-        "utf8",
-      ),
-    ) as { license?: string };
-    expect(manifest.license).toBe("MIT");
-    expect(
-      readFileSync(
-        join(consumer, "node_modules", "@nextwebwg", "html-forms", "LICENSE"),
-        "utf8",
-      ),
-    ).toBe(repositoryLicense);
-
-    expect(
-      execFileSync(
-        process.execPath,
-        [
-          "--input-type=module",
-          "--eval",
-          "import('@nextwebwg/html-forms').then(() => process.stdout.write('ok'))",
-        ],
-        { cwd: consumer, encoding: "utf8" },
-      ),
-    ).toBe("ok");
-  });
-
   it("publishes every workspace package publicly on the next tag under MIT", () => {
     for (const packageDirectory of [
       "html-next",
-      "declarative-components-converter",
-      "declarative-components-unplugin",
-      "html-forms",
+      "html-next-converter",
+      "html-next-unplugin",
     ]) {
       const packageRoot = join(root, "packages", packageDirectory);
       const manifest = JSON.parse(

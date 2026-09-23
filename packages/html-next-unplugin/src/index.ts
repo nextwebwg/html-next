@@ -418,7 +418,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
   const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph(options);
 
   return {
-    name: "html-next-declarative-components",
+    name: "html-next",
     enforce: "pre",
     async buildStart() {
       compiled = compileGraph(options);

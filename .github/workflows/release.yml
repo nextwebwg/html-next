@@ -34,7 +34,7 @@ jobs:
       - name: Publish unpublished versions
         run: |
           mkdir -p .release
-          for directory in html-next declarative-components-converter; do
+          for directory in html-next html-next-converter html-next-unplugin; do
             name=$(node -p "require('./packages/$directory/package.json').name")
             version=$(node -p "require('./packages/$directory/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
