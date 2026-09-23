@@ -2,7 +2,8 @@ name: Release
 
 # Publishes each listed package whose version is not yet on npm, through npm trusted publishing
 # (OIDC): no npm token, and provenance is generated automatically. Each package needs this
-# repository and workflow configured as its trusted publisher on npmjs.com.
+# repository and workflow configured as its trusted publisher on npmjs.com. Trusted publishing
+# cannot create a package, so a new package name needs one manual first publish.
 on:
   push:
     branches: [main]
@@ -34,13 +35,29 @@ jobs:
       - name: Publish unpublished versions
         run: |
           mkdir -p .release
+          # One package's failure must not hide the others: attempt every package, record each
+          # outcome in the job summary, and fail the job at the end if any publish failed.
+          failed=""
+          echo "| Package | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           for directory in html-next html-next-converter html-next-unplugin; do
             name=$(node -p "require('./packages/$directory/package.json').name")
             version=$(node -p "require('./packages/$directory/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published"
+              echo "| \`$name@$version\` | already published |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
-            pnpm --filter "$name" pack --pack-destination .release
-            npm publish ".release/$(echo "${name#@}" | tr / -)-$version.tgz" --tag next --access public
+            if pnpm --filter "$name" pack --pack-destination .release &&
+              npm publish ".release/$(echo "${name#@}" | tr / -)-$version.tgz" --tag next --access public; then
+              echo "| \`$name@$version\` | published |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::$name@$version was not published. If this is a new package name, publish it once manually, then configure its trusted publisher."
+              echo "| \`$name@$version\` | **failed** |" >> "$GITHUB_STEP_SUMMARY"
+              failed="$failed $name@$version"
+            fi
           done
+          if [ -n "$failed" ]; then
+            echo "Not published:$failed"
+            exit 1
+          fi
