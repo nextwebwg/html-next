@@ -30,7 +30,11 @@ export async function loadBrowserComponents(
 ): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
   const root = options.document ?? document;
   const request = options.fetch ?? fetch;
-  const resolver = new ResourceResolver(options.importMap ?? readImportMap(root), root.baseURI);
+  const resolver = new ResourceResolver(
+    options.importMap ?? readImportMap(root),
+    root.baseURI,
+    root.URL,
+  );
   const graph = await buildComponentGraph(rootSpecifiers, {
     resolver,
     fetchComponent: async (url) => {
