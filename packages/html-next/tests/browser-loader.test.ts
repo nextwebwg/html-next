@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Route } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const browserLoaderUrl = new URL("../src/browser-loader.ts", import.meta.url);
@@ -86,11 +86,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {
     const page = await browser.newPage();
-    await page.route("https://app.example/**", async (route) => {
+    const serve = async (route: Route) => {
       const url = route.request().url();
       if (url.endsWith("/ui/app.html")) {
         await route.fulfill({
           contentType: "text/html",
+          headers: { "access-control-allow-origin": "*" },
           body:
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
             `<defs><state name="count" :value="1"></state>` +
@@ -100,6 +101,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       } else if (url.endsWith("/ui/app.js")) {
         await route.fulfill({
           contentType: "text/javascript",
+          headers: { "access-control-allow-origin": "*" },
           body:
             `export default (host) => {` +
             ` const add = () => { host.state.count += 1; };` +
@@ -112,11 +114,13 @@ describe.skipIf(!enabled)("browser graph loader", () => {
         await route.fulfill({
           contentType: "text/html",
           body:
-            `<script type="importmap">{"imports":{"@ui/":"https://app.example/ui/"}}</script>` +
+            `<script type="importmap">{"imports":{"@ui/":"https://components.example/ui/"}}</script>` +
             `<link rel="component" href="@ui/app.html"><x-app id="app"></x-app>`,
         });
       }
-    });
+    };
+    await page.route("https://app.example/**", serve);
+    await page.route("https://components.example/**", serve);
     await page.goto("https://app.example/");
     await page.addScriptTag({ path: bundlePath });
     const result = await page.evaluate(async () => {
@@ -224,6 +228,121 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     await page.close();
     assert.deepEqual(whileDisconnected, { controllerRuns: 0, effectRuns: 0 });
     assert.deepEqual(afterReconnect, { controllerRuns: 1, effectRuns: 1 });
+  });
+
+  it("loads same-origin components and rejects unmapped cross-origin roots", async () => {
+    const sameOriginPage = await browser.newPage();
+    await sameOriginPage.route("https://app.example/**", async (route) => {
+      const url = route.request().url();
+      if (url.endsWith("/same.html")) {
+        await route.fulfill({
+          contentType: "text/html",
+          body:
+            `<template component="x-same" status="early" summary="Same." controller="./same.js">` +
+            `<main>same origin</main></template>`,
+        });
+      } else if (url.endsWith("/same.js")) {
+        await route.fulfill({
+          contentType: "text/javascript",
+          body: `export default (host) => { host.element.dataset.controller = "ran"; };`,
+        });
+      } else {
+        await route.fulfill({
+          contentType: "text/html",
+          body: `<link rel="component" href="/same.html"><x-same id="same"></x-same>`,
+        });
+      }
+    });
+    await sameOriginPage.goto("https://app.example/");
+    await sameOriginPage.addScriptTag({ path: bundlePath });
+    const sameOrigin = await sameOriginPage.evaluate(async () => {
+      const api = (window as unknown as {
+        HtmlNextLoader: { startBrowserComponents(): Promise<{ stop(): void }> };
+      }).HtmlNextLoader;
+      const started = await api.startBrowserComponents();
+      for (
+        let attempt = 0;
+        attempt < 50 && !document.querySelector("#same")?.hasAttribute("data-controller");
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const root = document.querySelector("#same")!;
+      const value = {
+        tag: root.localName,
+        text: root.textContent,
+        controller: (root as HTMLElement).dataset.controller,
+      };
+      started.stop();
+      return value;
+    });
+    await sameOriginPage.close();
+
+    let remoteComponentRequests = 0;
+    let remoteControllerRequests = 0;
+    const crossOriginPage = await browser.newPage();
+    const serve = async (route: Route) => {
+      const url = route.request().url();
+      if (url === "https://components.example/remote.html") {
+        remoteComponentRequests += 1;
+        await route.fulfill({
+          contentType: "text/html",
+          headers: { "access-control-allow-origin": "*" },
+          body:
+            `<template component="x-remote" status="early" summary="Remote." controller="./remote.js">` +
+            `<main>remote</main></template>`,
+        });
+      } else if (url === "https://components.example/remote.js") {
+        remoteControllerRequests += 1;
+        await route.fulfill({
+          contentType: "text/javascript",
+          headers: { "access-control-allow-origin": "*" },
+          body: `globalThis.remoteControllerRan = true; export default () => {};`,
+        });
+      } else {
+        await route.fulfill({
+          contentType: "text/html",
+          body:
+            `<link rel="component" href="https://components.example/remote.html">` +
+            `<x-remote id="remote"></x-remote>`,
+        });
+      }
+    };
+    await crossOriginPage.route("https://app.example/**", serve);
+    await crossOriginPage.route("https://components.example/**", serve);
+    await crossOriginPage.goto("https://app.example/untrusted");
+    await crossOriginPage.addScriptTag({ path: bundlePath });
+    const crossOrigin = await crossOriginPage.evaluate(async () => {
+      const api = (window as unknown as {
+        HtmlNextLoader: { startBrowserComponents(): Promise<{ stop(): void }> };
+      }).HtmlNextLoader;
+      let error = "none";
+      try {
+        await api.startBrowserComponents();
+      } catch (caught) {
+        error = (caught as { diagnostic?: { code?: string } }).diagnostic?.code ?? "unknown";
+      }
+      return {
+        error,
+        rendered: document.querySelector("#remote")?.localName !== "x-remote",
+        controllerRan: (globalThis as typeof globalThis & { remoteControllerRan?: boolean })
+          .remoteControllerRan === true,
+      };
+    });
+    await crossOriginPage.close();
+
+    assert.deepEqual(sameOrigin, {
+      tag: "main",
+      text: "same origin",
+      controller: "ran",
+    });
+    assert.deepEqual(crossOrigin, {
+      error: "HL010",
+      rendered: false,
+      controllerRan: false,
+    });
+    assert.equal(remoteComponentRequests, 0);
+    assert.equal(remoteControllerRequests, 0);
   });
 
   it("keeps declarative output connected when a controller module is invalid", async () => {

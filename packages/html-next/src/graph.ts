@@ -113,11 +113,23 @@ export async function buildComponentGraph(
     drafts.set(finalURL, draft);
 
     if (definition.controller !== undefined) {
-      const controller = options.resolver.resolveDependency(
-        definition.controller,
-        finalURL,
-        resource.trustRoot,
-      );
+      let controller: ResolvedResource;
+      try {
+        controller = options.resolver.resolveDependency(
+          definition.controller,
+          finalURL,
+          resource.trustRoot,
+        );
+      } catch (error) {
+        if (error instanceof HtmlDiagnosticError && error.diagnostic.code === "HL003") {
+          fail(
+            "HL005",
+            `Controller \`${definition.controller}\` is outside the component's approved root.`,
+            finalURL,
+          );
+        }
+        throw error;
+      }
       draft.controller = Object.freeze({ specifier: definition.controller, url: controller.url });
     }
 
