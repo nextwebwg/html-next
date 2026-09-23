@@ -8,6 +8,8 @@ import ts from "typescript-compiler";
 
 import {
   generateComponent,
+  importsVueHost,
+  vueHostArtifact,
   GENERATOR_VERSION,
   type GeneratedArtifact,
 } from "./generate.js";
@@ -128,6 +130,11 @@ export async function buildComponents(
       dependencies: node.dependencies.map(displayPath),
       controller: node.controller === undefined ? null : displayPath(node.controller.url),
     });
+  }
+
+  if ([...artifacts.values()].some((artifact) => importsVueHost(artifact.content))) {
+    const host = vueHostArtifact();
+    artifacts.set(host.path, host);
   }
 
   await mkdir(outputRoot, { recursive: true });

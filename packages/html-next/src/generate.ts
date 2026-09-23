@@ -1,11 +1,12 @@
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
 import { generateVue } from "./targets/vue.js";
+import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.2";
+export const GENERATOR_VERSION = "1.0.0-alpha.3";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -31,6 +32,13 @@ export function generateComponent(
     Object.freeze({ path: `docs/${tag}.md`, content: docs }),
   ]);
 }
+
+/** The one module the converted Vue components share; every package that emits Vue ships it once. */
+export function vueHostArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_HOST_PATH, content: vueHostModule(GENERATOR_VERSION) });
+}
+
+export { importsVueHost } from "./targets/vue-host.js";
 
 export type { ComponentDefinition } from "./template.js";
 
