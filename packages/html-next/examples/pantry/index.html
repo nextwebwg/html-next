@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pantry — live component graph</title>
+  </head>
+  <body>
+    <!-- Live delivery: the page selects one root and the browser resolves the rest of the graph,
+         parsing component sources at runtime. -->
+    <link rel="component" href="./components/pantry-app.html" />
+
+    <pantry-app heading="Pantry"></pantry-app>
+
+    <script type="module" src="./live.js"></script>
+  </body>
+</html>

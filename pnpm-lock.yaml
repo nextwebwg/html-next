@@ -240,6 +240,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.0(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.13)
       vitest:
         specifier: 'catalog:'
         version: 5.0.0(@types/node@25.9.5)(vite@8.3.0(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.13))

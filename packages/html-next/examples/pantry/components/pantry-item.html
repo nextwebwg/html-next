@@ -1,0 +1,49 @@
+<!-- Declarative only: no controller. The row never mutates application data; it dispatches
+     declared events and the application component decides what they mean. -->
+<link rel="component" href="./ui-badge.html" />
+
+<template component="pantry-item" status="early" summary="One pantry row with its stock controls.">
+  <defs>
+    <prop name="itemId" type="string" required>Identity of the row this item shows.</prop>
+    <prop name="label" type="string" required>Product name.</prop>
+    <prop name="quantity" type="number" default="0">Units currently in stock.</prop>
+    <prop name="unit" type="string" default="pcs">Unit the quantity counts.</prop>
+    <prop name="threshold" type="number" default="1">At or below this the item is low.</prop>
+
+    <computed name="low" from="quantity <= threshold"></computed>
+
+    <event name="adjust" type="object({ id: string, delta: integer })">Stock was adjusted by the row.</event>
+    <event name="remove" type="string">The row asked to be removed; detail is its id.</event>
+
+    <handler name="increase"><dispatch event="adjust" :value="{ id: itemId, delta: 1 }"></dispatch></handler>
+    <handler name="decrease">
+      <dispatch event="adjust" :value="{ id: itemId, delta: -1 }" $if="quantity > 0"></dispatch>
+    </handler>
+    <handler name="discard"><dispatch event="remove" :value="itemId"></dispatch></handler>
+  </defs>
+
+  <li class="item" :data-low="low">
+    <span class="item__label" $value="label"></span>
+    <span class="item__count" $value="format('%s %s', quantity, unit)"></span>
+    <template $match>
+      <ui-badge $when="low" label="Low" tone="warning"></ui-badge>
+      <ui-badge $else label="Stocked" tone="neutral"></ui-badge>
+    </template>
+    <span class="item__controls">
+      <button type="button" class="item__step" on:click="decrease" :disabled="quantity <= 0"
+        :aria-label="format('Remove one %s', label)">−</button>
+      <button type="button" class="item__step" on:click="increase"
+        :aria-label="format('Add one %s', label)">+</button>
+      <button type="button" class="item__discard" on:click="discard"
+        :aria-label="format('Discard %s', label)">Discard</button>
+    </span>
+  </li>
+
+  <style>
+    .item { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e6eaf0; }
+    .item__label { flex: 1; }
+    .item__count { font-variant-numeric: tabular-nums; color: #42506a; }
+    .item[data-low="true"] .item__count { color: #8a5d00; font-weight: 600; }
+    .item__controls { display: flex; gap: 0.25rem; }
+  </style>
+</template>

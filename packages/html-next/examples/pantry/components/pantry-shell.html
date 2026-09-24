@@ -1,0 +1,21 @@
+<!-- Purely visual layout: every region is a slot, so the shell holds no app logic. -->
+<template component="pantry-shell" status="early" summary="The pantry page layout.">
+  <defs>
+    <prop name="heading" type="string" default="Pantry">Page heading.</prop>
+  </defs>
+  <section class="shell">
+    <header class="shell__header">
+      <h1 $value="heading"></h1>
+      <div class="shell__summary"><slot name="summary">No summary yet.</slot></div>
+    </header>
+    <div class="shell__toolbar"><slot name="toolbar"></slot></div>
+    <div class="shell__body"><slot name="body"></slot></div>
+    <footer class="shell__footer"><slot name="footer"></slot></footer>
+  </section>
+  <style>
+    .shell { font: 16px/1.5 system-ui, sans-serif; color: #14181f; max-width: 46rem; margin: 0 auto; }
+    .shell__summary { display: flex; gap: 1.5rem; }
+    .shell__toolbar { display: flex; gap: 0.75rem; align-items: end; margin: 1rem 0; }
+    .shell__footer { color: #5b667c; font-size: 0.85rem; margin-top: 1rem; }
+  </style>
+</template>

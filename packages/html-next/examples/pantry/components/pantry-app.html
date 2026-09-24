@@ -1,0 +1,77 @@
+<!-- The one stateful component. It owns the pantry list, and its controller turns row events
+     and the add form into state changes. Everything it renders is declarative. -->
+<link rel="component" href="./pantry-shell.html" />
+<link rel="component" href="./pantry-item.html" />
+<link rel="component" href="./ui-stat.html" />
+
+<template component="pantry-app" controller="./pantry-app.js" status="early"
+  summary="Pantry stock list with search, restocking, and an add form.">
+  <defs>
+    <prop name="heading" type="string" default="Pantry">Page heading.</prop>
+
+    <!-- Declared request: the runtime fetches it and exposes pending/ok/value/error. -->
+    <data name="stock" src="/api/pantry.json" type="json"></data>
+
+    <!-- The controller keeps these in step with the fetched data and the search box. -->
+    <state name="rows" :value="[]"></state>
+    <state name="lowCount" :value="0"></state>
+    <state name="visible" :value="0"></state>
+    <state name="query" :value="''"></state>
+    <state name="draftLabel" :value="''"></state>
+    <state name="draftQuantity" :value="1"></state>
+
+    <state name="total" :value="0"></state>
+    <computed name="loading" from="stock.pending"></computed>
+    <computed name="failed" from="not stock.pending and not stock.ok"></computed>
+
+    <method name="restockAll" export="restockAll" returns="undefined">Refill every low item.</method>
+  </defs>
+
+  <!-- The shell is a child, not this component's root: a delegated root would leave this
+       instance pointing at the element the shell replaces. -->
+  <main class="page">
+    <pantry-shell :heading="heading">
+      <span slot="summary">
+        <ui-stat label="Items" :value="total"></ui-stat>
+        <ui-stat label="Low" :value="lowCount"></ui-stat>
+      </span>
+
+      <span slot="toolbar">
+        <label class="field">Search
+          <input type="search" name="query" bind:value="query" placeholder="Filter by name" />
+        </label>
+        <form class="field field--add" $ref="addForm">
+          <label>Add
+            <input type="text" name="label" bind:value="draftLabel" required minlength="2"
+              placeholder="Olive oil" />
+          </label>
+          <label>Qty
+            <input type="number" name="quantity" bind:value="draftQuantity" min="0" max="99" required />
+          </label>
+          <button type="submit">Add item</button>
+        </form>
+      </span>
+
+      <span slot="body">
+        <p $if="loading" class="notice">Loading pantry…</p>
+        <p $if="failed" class="notice notice--error">The pantry list could not be loaded.</p>
+        <ul class="items" $if="not loading">
+          <pantry-item $each="row of rows" $key="row.id" $where="row.matches" $sort="label"
+            :item-id="row.id" :label="row.label" :quantity="row.quantity" :unit="row.unit"
+            :threshold="row.threshold"></pantry-item>
+        </ul>
+        <p class="notice" $if="not loading and visible = 0">Nothing matches that search.</p>
+      </span>
+
+      <span slot="footer">Data-driven pantry example. Rows are declarative; the shell has the controller.</span>
+    </pantry-shell>
+  </main>
+
+  <style>
+    .items { list-style: none; margin: 0; padding: 0; }
+    .field { display: flex; flex-direction: column; font-size: 0.85rem; gap: 0.25rem; }
+    .field--add { flex-direction: row; gap: 0.5rem; align-items: end; }
+    .notice { color: #5b667c; }
+    .notice--error { color: #a01e1e; }
+  </style>
+</template>
