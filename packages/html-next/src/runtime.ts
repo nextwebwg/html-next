@@ -1,4 +1,3 @@
-import { parseBrowserComponent } from "./browser-source.js";
 import type { ControllerModule } from "./controller.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
@@ -184,13 +183,34 @@ function discoverySelector(registry: DocumentRegistry): string {
     ].join(",");
 }
 
+/**
+ * Parses an inline `<template component>` carrier. Only a page that authors definitions in HTML
+ * needs a parser, so the live entry points install one and a build-time graph never carries it.
+ */
+export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition;
+
+let inlineDefinitionParser: InlineDefinitionParser | undefined;
+
+/** Lets the live delivery teach this runtime to read definitions authored in the document. */
+export function installInlineDefinitionParser(parse: InlineDefinitionParser): void {
+  inlineDefinitionParser = parse;
+}
+
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
   const tag = wrapper.getAttribute("component") ?? "";
   const source = `${wrapper.ownerDocument.URL}#template[component="${tag}"][${index + 1}]`;
   if (wrapper.hasAttribute("src")) {
     fail("HL001", "External definitions require the application-owned graph resolver.", source);
   }
-  const definition = parseBrowserComponent(wrapper, source);
+  if (inlineDefinitionParser === undefined) {
+    fail(
+      "HR007",
+      "Reading a definition from the document requires the live delivery's parser; " +
+        "a build-time graph registers already parsed definitions instead.",
+      source,
+    );
+  }
+  const definition = inlineDefinitionParser(wrapper, source);
   const style = Array.from(wrapper.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style",
   );

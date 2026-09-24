@@ -31,6 +31,10 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js"
     },
+    "./live": {
+      "types": "./dist/live.d.ts",
+      "import": "./dist/live.js"
+    },
     "./generated-runtime": {
       "types": "./dist/generated-runtime.d.ts",
       "import": "./dist/generated-runtime.js"

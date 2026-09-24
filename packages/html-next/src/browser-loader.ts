@@ -1,9 +1,15 @@
 import { buildComponentGraph, type ComponentGraph } from "./graph.js";
-import { parseBrowserComponentResource } from "./browser-source.js";
 import { ComponentRegistry } from "./registry.js";
 import { ResourceResolver, type ImportMapLike } from "./resolve.js";
 import { loadController, loadControllerModule, type ModuleImporter } from "./controller.js";
-import { getComponentHost, installComponentGraph, observeDocument, setControllerModule } from "./runtime.js";
+import { parseBrowserComponent, parseBrowserComponentResource } from "./browser-source.js";
+import {
+  getComponentHost,
+  installComponentGraph,
+  installInlineDefinitionParser,
+  observeDocument,
+  setControllerModule,
+} from "./runtime.js";
 
 export interface BrowserLoaderOptions {
   readonly document?: Document;
@@ -81,6 +87,9 @@ export async function startBrowserComponents(
   root: Document = document,
   options: Omit<BrowserLoaderOptions, "document"> = {},
 ): Promise<StartedBrowserComponents> {
+  // The live delivery discovers definitions authored in the page, so teach the runtime to read
+  // them. A build-time graph imports the runtime directly and never carries the parser.
+  installInlineDefinitionParser(parseBrowserComponent);
   const loaded = await loadDocumentComponents(root, options);
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));

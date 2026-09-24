@@ -331,8 +331,8 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     }
     assert.doesNotMatch(page, /<link[^>]*rel="component"/);
 
-    // Known gap: the general runtime still imports the browser parser for inline <template
-    // component> discovery, so pre-compiling does not yet drop the parser from the bundle.
-    assert.match(bundle, /parseComponentNodes/);
+    // Pre-compiling also leaves the parser behind: the graph is already parsed, and the runtime
+    // only reads definitions from a document when the live entry installs its parser.
+    assert.doesNotMatch(bundle, /parseComponentNodes|parseBrowserComponent/);
   }, 60_000);
 });

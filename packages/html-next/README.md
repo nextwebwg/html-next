@@ -14,6 +14,18 @@ The live runtime supports every declarative capability. Builds analyze an applic
 graph and share the support that graph requires; Vue conversion preserves the same observable
 contract through Vue's own reactivity.
 
+### Runtime entry points
+
+`@nextwebwg/html-next/runtime` is the general renderer: it registers already parsed definitions,
+lowers instances, and runs reactivity. It carries no component parser, so a build-time graph pays
+nothing for one (about 6 KB gzip on a representative app).
+
+`@nextwebwg/html-next/live` is the same runtime plus the parser that reads `<template component>`
+definitions authored in a document. `startBrowserComponents()` already installs it; import `live`
+directly when calling `lowerDocument()` or `observeDocument()` against a page that authors
+definitions in HTML. Reading a definition from a document without that parser is a stable `HR007`
+diagnostic rather than a silent no-op.
+
 `@nextwebwg/html-next/forms` builds requests from native forms and submitters, preserving
 successful-control, validation, encoding, and cancellation semantics. It accepts native DOM objects
 and imports nothing else from this package, so a consumer that only wants HTML Forms pays only for
