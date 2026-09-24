@@ -1,4 +1,4 @@
-import type { Scope, Value } from "./expression.js";
+import { NONCONFORMING, type Scope, type Value } from "./expression.js";
 import { fail } from "./diagnostics.js";
 
 type Cleanup = void | (() => void);
@@ -438,6 +438,12 @@ export class ReactiveComputed<T> implements ReactiveOwner {
     this.#dirty = false;
     try {
       const value = this.#compute();
+      // A computation that read a value its declaration forbids has nothing to publish: keep the
+      // last value and report no change, so nothing downstream recomputes from a broken contract.
+      if (value === NONCONFORMING) {
+        this.#changed = false;
+        return;
+      }
       this.#changed = !this.#initialized || !Object.is(this.#value, value);
       this.#value = value;
       this.#initialized = true;

@@ -5,8 +5,11 @@ import { fail } from "./diagnostics.js";
 import type { ComponentGraph } from "./graph.js";
 import {
   ABSENT,
+  NONCONFORMING,
   UndeclaredName,
+  compileExpression,
   evaluate,
+  type CompiledExpression,
   evaluateCompiled,
   toAttribute,
   toText,
@@ -32,9 +35,11 @@ import {
   stateAttributeValue,
 } from "./component-styles.js";
 import {
+  normalizeType,
   parseTypeExpression,
   parseTypedValue,
   serializeTypedValue,
+  typeAtKey,
   type TypeNode,
 } from "./type-system.js";
 import type {
@@ -374,7 +379,7 @@ function readInvocation(
     if (declaration.kind !== "computed" || declaration.expression === undefined) continue;
     effects.push(scope.defineComputed(
       declaration.name,
-      () => evaluateCompiled(declaration.expression!, scope),
+      () => evalConforming(declaration.expression!, scope, definition) as Value,
     ));
   }
   const definitionBase = (() => {
@@ -391,18 +396,6 @@ function readInvocation(
       ...(data.type === undefined ? {} : { type: data.type }),
       ...(data.debounce === undefined ? {} : { debounce: parseDuration(data.debounce) ?? 0 }),
       ...(data.poll === undefined ? {} : { poll: parseDuration(data.poll) ?? 0 }),
-      // A declared type is a contract on the response, so a mismatch is a failed request rather
-      // than a value the template renders. The parser already rejected unreadable type syntax.
-      ...(declaredResultType(data.type) === undefined ? {} : {
-        adapt: (raw: unknown) => {
-          const parsed = parseTypedValue(raw, declaredResultType(data.type)!);
-          if (!parsed.ok) {
-            throw new TypeError(`Data source \`${data.name}\` received a response that does not satisfy \`${data.type}\`: ${
-              parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}.`);
-          }
-          return parsed.value;
-        },
-      }),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
     effects.push(createEffect(scope.scheduler, () => {
@@ -424,15 +417,6 @@ function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveSc
   return parent.fork(Object.entries(locals));
 }
 
-/**
- * The declared type a `<data>` response must satisfy, or undefined when the declaration validates
- * nothing: an absent type, or a textual type whose body is read as text rather than JSON.
- */
-function declaredResultType(type: string | undefined): TypeNode | undefined {
-  if (type === undefined || type === "text" || type === "string") return undefined;
-  return parseTypeExpression(type);
-}
-
 function evalValue(expression: string, scope: Scope): Value {
   try {
     return evaluate(expression, scope);
@@ -440,6 +424,146 @@ function evalValue(expression: string, scope: Scope): Value {
     if (error instanceof UndeclaredName) fail("HB001", error.message);
     throw error;
   }
+}
+
+/** The state surface a declared read publishes, so a path through it resolves to a declared type. */
+const DATA_STATE_FIELDS: Readonly<Record<string, TypeNode | undefined>> = {
+  pending: { kind: "terminal", name: "boolean" },
+  ok: { kind: "terminal", name: "boolean" },
+  error: { kind: "terminal", name: "unknown" },
+};
+
+const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode | undefined>>();
+
+/**
+ * The type a reference must satisfy, or undefined when nothing declares one.
+ *
+ * Only a declaration carrying a type constrains a reference: a prop, a typed `<state>`/`<computed>`,
+ * or a `<data>` read (whose declared type describes `.value`). A loop alias or an untyped
+ * declaration says nothing, so references through it are unconstrained.
+ */
+function declaredTypeAt(definition: ComponentDefinition, path: string): TypeNode | undefined {
+  let cache = declaredPathTypes.get(definition);
+  if (cache === undefined) {
+    cache = new Map();
+    declaredPathTypes.set(definition, cache);
+  }
+  if (cache.has(path)) return cache.get(path);
+
+  const [root, ...steps] = path.split(".");
+  let type = rootDeclaredType(definition, root!, steps);
+  for (const step of type === undefined ? [] : steps) {
+    if (type === undefined) break;
+    type = typeAtKey(type, step);
+  }
+  cache.set(path, type);
+  return type;
+}
+
+/** Resolves the declared type of a path's root, consuming the steps a `<data>` surface owns. */
+function rootDeclaredType(
+  definition: ComponentDefinition,
+  root: string,
+  steps: string[],
+): TypeNode | undefined {
+  const prop = definition.contract.props[root];
+  if (prop !== undefined) return normalizeType(prop.type);
+  for (const declaration of definition.declarations ?? []) {
+    if (declaration.name !== root) continue;
+    if (declaration.kind === "state" || declaration.kind === "computed") {
+      return declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
+    }
+    if (declaration.kind !== "data") return undefined;
+    // `<data type>` describes the resolved value, reached through `.value`; the rest of the state
+    // surface has its own types.
+    const first = steps.shift();
+    if (first === undefined) return undefined;
+    if (first !== "value") return DATA_STATE_FIELDS[first];
+    return declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
+  }
+  return undefined;
+}
+
+/** Paths an expression reads that a declaration constrains, resolved once per definition. */
+const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly (readonly [string, TypeNode])[]>>();
+
+function constrainedReferences(
+  definition: ComponentDefinition,
+  expression: string,
+): readonly (readonly [string, TypeNode])[] {
+  let cache = constrainedPaths.get(definition);
+  if (cache === undefined) {
+    cache = new Map();
+    constrainedPaths.set(definition, cache);
+  }
+  const known = cache.get(expression);
+  if (known !== undefined) return known;
+  let paths: readonly (readonly [string, TypeNode])[] = [];
+  try {
+    paths = compileExpression(expression).dependencies
+      .map((path) => [path, declaredTypeAt(definition, path)] as const)
+      .filter((entry): entry is readonly [string, TypeNode] => entry[1] !== undefined);
+  } catch { /* an unreadable expression fails where it is evaluated, not here */ }
+  cache.set(expression, paths);
+  return paths;
+}
+
+/**
+ * Whether a value satisfies the type declared for the reference that read it.
+ *
+ * A reference is checked against its own type, not its subtree: a list reference needs a list, and
+ * whether an item's field satisfies its own type is that field reference's business. That keeps the
+ * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
+ */
+function conformsAtReference(value: Value, type: TypeNode): boolean {
+  switch (type.kind) {
+    case "list":
+      return Array.isArray(value);
+    case "record":
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "union":
+      return type.members.some((member) => conformsAtReference(value, member));
+    default:
+      return parseTypedValue(value, type).ok;
+  }
+}
+
+const reportedViolations = new Set<string>();
+
+/**
+ * Evaluates a binding expression, or reports that a reference broke its declared type.
+ *
+ * A reference is checked where it is read, not where its value arrived, so a payload stays exactly
+ * as it came back and only the references into its offending part go inert. Callers keep whatever
+ * they last had: a binding does not write, and a computed does not recompute, so nothing downstream
+ * of a broken contract moves.
+ */
+function evalConforming(
+  expression: string | CompiledExpression,
+  scope: ReactiveScope,
+  definition: ComponentDefinition,
+): Value | typeof NONCONFORMING {
+  const source = typeof expression === "string" ? expression : expression.source;
+  for (const [path, type] of constrainedReferences(definition, source)) {
+    const value = evalValue(path, scope);
+    // Absence is not a violation: a value that is not there yet has nothing to conform to.
+    if (value === ABSENT || value === undefined) continue;
+    if (conformsAtReference(value, type)) continue;
+    const key = `${definition.contract.tag}:${path}`;
+    if (!reportedViolations.has(key)) {
+      reportedViolations.add(key);
+      console.warn(
+        `[html-next] <${definition.contract.tag}> read \`${path}\`, whose value does not satisfy its ` +
+          "declared type. That reference is inert: bindings and computed values reading it keep " +
+          "their previous result.",
+      );
+    }
+    return NONCONFORMING;
+  }
+  return typeof expression === "string"
+    ? evalValue(expression, scope)
+    : evaluateCompiled(expression, scope);
 }
 
 interface HydrationRange {
@@ -592,9 +716,14 @@ function runHandler(
   context: RuntimeRenderContext,
 ): void {
   for (const step of declaration.steps) {
-    if (step.guard !== undefined && !truthy(evaluateCompiled(step.guard, scope))) continue;
+    if (step.guard !== undefined) {
+      const guard = evalConforming(step.guard, scope, context.definition);
+      if (guard === NONCONFORMING || !truthy(guard)) continue;
+    }
     if (step.kind === "set") {
-      setWritablePath(scope, step.writablePath, evaluateCompiled(step.value, scope));
+      const next = evalConforming(step.value, scope, context.definition);
+      if (next === NONCONFORMING) continue;
+      setWritablePath(scope, step.writablePath, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
       const detail = step.value === undefined ? undefined : evaluateCompiled(step.value, scope);
@@ -726,17 +855,25 @@ function setAttribute(element: Element, name: string, value: string | null): voi
 function applyContent(
   element: Element,
   directive: DirectiveAttribute,
-  scope: Scope,
+  scope: ReactiveScope,
   document: Document,
+  definition: ComponentDefinition,
 ): void {
-  const value = evalValue(directive.expression, scope);
+  const value = evalConforming(directive.expression, scope, definition);
+  if (value === NONCONFORMING) return;
   if (directive.name === "value") element.textContent = toText(value);
   else element.replaceChildren(sanitizeFragment(toText(value), document, (node) => contentOnly.add(node)));
 }
 
 /** A `<template $value>`/`<template $html>` produces inline nodes with no wrapper element. */
-function inlineDirective(directive: DirectiveAttribute, scope: Scope, document: Document): Node {
-  const value = evalValue(directive.expression, scope);
+function inlineDirective(
+  directive: DirectiveAttribute,
+  scope: ReactiveScope,
+  document: Document,
+  definition: ComponentDefinition,
+): Node {
+  const value = evalConforming(directive.expression, scope, definition);
+  if (value === NONCONFORMING) return document.createTextNode("");
   if (directive.name === "value") return document.createTextNode(toText(value));
   return sanitizeFragment(toText(value), document, (node) => contentOnly.add(node));
 }
@@ -820,12 +957,16 @@ function renderDynamicNode(
     const effectsStart = context.effects.length;
     let rendered: Node[] = [];
     if (node.flow?.kind === "if") {
-      if (truthy(evalValue(node.flow.test, scope))) {
+      const test = evalConforming(node.flow.test, scope, context.definition);
+      if (test === NONCONFORMING) return;
+      if (truthy(test)) {
         const { flow: _flow, ...body } = node;
         rendered = renderInstance(body, scope, document, passThrough, context);
       }
     } else if (node.flow?.kind === "with") {
-      const local = scope.fork([[node.flow.alias, evalValue(node.flow.expr, scope)]]);
+      const aliased = evalConforming(node.flow.expr, scope, context.definition);
+      if (aliased === NONCONFORMING) return;
+      const local = scope.fork([[node.flow.alias, aliased]]);
       const { flow: _flow, ...body } = node;
       rendered = renderInstance(body, local, document, passThrough, context);
     } else if (node.flow?.kind === "match") {
@@ -925,7 +1066,8 @@ function renderEachRegion(
   fragment.append(start, end);
   let blocks = new Map<unknown, EachBlock>();
   ownEffect(context, scope, () => {
-    const value = evalValue(flow.list, scope);
+    const value = evalConforming(flow.list, scope, context.definition);
+    if (value === NONCONFORMING) return;
     const items = Array.isArray(value) ? shapeList(value, flow, scope) : [];
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
@@ -1076,12 +1218,13 @@ function renderInstance(
     if (contentDirective !== undefined) {
       const text = document.createTextNode("");
       ownEffect(context, scope, () => {
-        const value = evalValue(contentDirective.expression, scope);
+        const value = evalConforming(contentDirective.expression, scope, context.definition);
+        if (value === NONCONFORMING) return;
         if (contentDirective.name === "value") text.data = toText(value);
       });
       return contentDirective.name === "value"
         ? [text]
-        : [inlineDirective(contentDirective, scope, document)];
+        : [inlineDirective(contentDirective, scope, document, context.definition)];
     }
     return renderChildren(node.children, scope, document, context);
   }
@@ -1152,7 +1295,10 @@ function renderInstance(
   for (const attribute of node.attributes) {
     if (attribute.kind === "attribute") {
       ownEffect(context, scope, () => {
-        const value = evalValue(attribute.expression, scope);
+        const value = evalConforming(attribute.expression, scope, context.definition);
+        // A reference that broke its declared type writes nothing, so this binding keeps whatever
+        // it last rendered rather than showing a value the declaration forbids.
+        if (value === NONCONFORMING) return;
         // A lowered child owns its props: write them through the same channel framework adapters
         // use, so the child re-parses the declared type and reflects the value itself.
         const lowered = loweredInvocations.get(element);
@@ -1189,14 +1335,16 @@ function renderInstance(
       }
     } else if (attribute.kind === "property") {
       ownEffect(context, scope, () => {
-        (element as unknown as Record<string, unknown>)[attribute.name] = evalValue(attribute.expression, scope);
+        const property = evalConforming(attribute.expression, scope, context.definition);
+        if (property === NONCONFORMING) return;
+        (element as unknown as Record<string, unknown>)[attribute.name] = property;
       });
     }
     // Content directives are handled below.
   }
 
   if (contentDirective !== undefined) {
-    ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document));
+    ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document, context.definition));
     bindEvents(element, node, scope, context);
     return [element];
   }

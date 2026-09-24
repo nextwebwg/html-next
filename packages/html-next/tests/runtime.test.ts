@@ -1500,37 +1500,60 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} fails a declared data read whose response breaks its declared type`, async () => {
+    it(`${name} leaves a reference inert when its value breaks its declared type`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        // The endpoint answers with the wrong shape: `label` is a number, not a string.
+        // Two responses: the first satisfies the declared type, the second breaks `label` and adds
+        // a field the declaration never mentioned.
+        let read = 0;
         await page.route("https://api.example/**", async (route) => {
+          read += 1;
           await route.fulfill({
             contentType: "application/json",
             headers: { "access-control-allow-origin": "*" },
-            body: JSON.stringify({ label: 42 }),
+            body: read === 1
+              ? JSON.stringify({ label: "first", note: "kept" })
+              : JSON.stringify({ label: 42, note: "second", addedByServer: true }),
           });
         });
         await page.setContent(
           `<template component="x-typed" status="early" summary="Typed data.">` +
-            `<defs><data name="result" src="https://api.example/search" type="object({ label: string })">` +
-            `</data></defs>` +
-            `<main><i class="ok" $value="result.ok"></i><i class="pending" $value="result.pending"></i>` +
-            `<output class="label" $value="result.value.label"></output></main>` +
+            `<defs><state name="round" :value="1"></state>` +
+            `<data name="result" src="https://api.example/search"` +
+            ` type="object({ label: string, note: string, ... })">` +
+            `<param name="round" :value="round"></param></data>` +
+            `<computed name="shouted" from="format('%s!', result.value.label)"></computed>` +
+            `<handler name="again"><set name="round" :value="round + 1"></set></handler></defs>` +
+            `<main><output class="label" $value="result.value.label"></output>` +
+            `<output class="note" $value="result.value.note"></output>` +
+            `<output class="shouted" $value="shouted"></output>` +
+            `<i class="ok" $value="result.ok"></i>` +
+            `<button type="button" class="again" on:click="again"></button></main>` +
             `</template><x-typed id="typed"></x-typed>`,
         );
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => {
           (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
         });
-        await page.waitForFunction(() => document.querySelector("#typed .pending")?.textContent === "false");
+        await page.waitForFunction(() => document.querySelector("#typed .label")?.textContent === "first");
+        await page.click("button.again");
+        await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "second");
         const result = await page.evaluate(() => ({
-          ok: document.querySelector("#typed .ok")?.textContent,
           label: document.querySelector("#typed .label")?.textContent,
+          note: document.querySelector("#typed .note")?.textContent,
+          shouted: document.querySelector("#typed .shouted")?.textContent,
+          ok: document.querySelector("#typed .ok")?.textContent,
         }));
-        // A type mismatch is a failed request, not a value the template renders.
-        assert.deepEqual(result, { ok: "false", label: "" });
+        assert.deepEqual(result, {
+          // `label` broke its declared type, so the binding kept what it had...
+          label: "first",
+          // ...while the sibling reference, and the request itself, carried on.
+          note: "second",
+          ok: "true",
+          // A computed that reads the offending reference does not recompute either.
+          shouted: "first!",
+        });
       } finally {
         await browser.close();
       }

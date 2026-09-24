@@ -7,6 +7,7 @@ import {
   parseTypeExpression,
   serializeTypedValue,
   trustedContent,
+  typeAtKey,
   typeScriptType,
 } from "../src/type-system.js";
 
@@ -86,4 +87,33 @@ describe("HTML Next type system", () => {
     assert.throws(() => parseTypeExpression("list()"), /Expected a type/);
     assert.throws(() => parseTypeExpression("object({ a: string, a: number })"), /Duplicate/);
   });
+
+  it("resolves the type one step into a shape, for reference conformance", () => {
+    const rows = parseTypeExpression("list(object({ id: string, count: integer }))");
+    const item = typeAtKey(rows, 0)!;
+    const open = parseTypeExpression("object({ id: string, ... })");
+    assert.deepEqual(
+      {
+        item: formatType(item),
+        field: formatType(typeAtKey(item, "count")!),
+        // A closed shape says an undeclared field is not there; an open one says nothing about it.
+        closedUnknown: formatType(typeAtKey(item, "extra")!),
+        openUnknown: typeAtKey(open, "extra"),
+        // A list is only indexable by number, and a record describes every key.
+        listByName: typeAtKey(rows, "id"),
+        recordValue: formatType(typeAtKey(parseTypeExpression("record(number)"), "anything")!),
+        terminal: typeAtKey(parseTypeExpression("string"), "length"),
+      },
+      {
+        item: "object({ id: string, count: integer })",
+        field: "integer",
+        closedUnknown: "absent",
+        openUnknown: undefined,
+        listByName: undefined,
+        recordValue: "number",
+        terminal: undefined,
+      },
+    );
+  });
+
 });
