@@ -74,7 +74,12 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
     );
     await settle();
   };
-  const snapshot = async (step: string) => { transcript[step] = await page.evaluate(snapshotScript); };
+  // Every snapshot waits for declared reads first: a debounced read in flight would otherwise be
+  // captured in one delivery and not the other, purely on timing.
+  const snapshot = async (step: string) => {
+    await settleReads();
+    transcript[step] = await page.evaluate(snapshotScript);
+  };
   const row = (label: string) => page.locator("li.item", { has: page.locator(`.item__label:text-is("${label}")`) });
   const retype = async (selector: string, value: string) => {
     const field = page.locator(selector);
@@ -110,12 +115,10 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   // that comes back. Typing re-requests; the debounce coalesces the keystrokes.
   await retype('input[name="catalog-query"]', "oli");
   await page.waitForFunction(`document.querySelectorAll("li.suggestion").length > 0`);
-  await settleReads();
   await snapshot("catalogSearched");
   // "Green olives" is not stocked yet; "Olive oil" already is, which the controller de-duplicates.
   await page.locator("li.suggestion", { has: page.locator('.suggestion__label:text-is("Green olives")') })
     .locator("button").click();
-  await settleReads();
   await snapshot("catalogAdded");
 
   // The add form is a native <form>: the browser blocks the empty required field, not the app.
