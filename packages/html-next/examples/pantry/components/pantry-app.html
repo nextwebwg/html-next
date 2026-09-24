@@ -41,8 +41,8 @@
     <method name="restockAll" export="restockAll" returns="undefined">Refill every low item.</method>
   </defs>
 
-  <!-- The shell is a child, not this component's root: a delegated root would leave this
-       instance pointing at the element the shell replaces. -->
+  <!-- The shell is a child here, so this component keeps its own <main> root. It could equally
+       delegate its root to pantry-shell and add no wrapper. -->
   <main class="page">
     <pantry-shell :heading="heading">
       <span slot="summary">

@@ -89,10 +89,5 @@ same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands
   would be smaller again, but it cannot express this app yet: compiled invocations carry no
   attributes or projected children (`HN009`), and a component using the general runtime cannot
   contain them at all (`HN003`). That is why the pre-compiled mode here keeps the general runtime.
-- A component's root must not be another component invocation (a delegated root). The outer
-  instance would keep pointing at the element the inner component replaces, and the observer then
-  disconnects it, which stops its effects and aborts its declared request.
-- Two-way `bind:value` reassigns the control's value, which clears the browser's dirty-value flag,
-  so `minlength`/`maxlength` stop applying to typed input. `required` is unaffected.
 - A write-side `<data>` (`method` plus `send="change"`, the proposal's synchronization half) is not
   implemented yet, so this example only reads.
