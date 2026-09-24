@@ -160,6 +160,9 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     compiledDirectory = join(directory, "compiled");
     await viteBuild({
       root: fileURLToPath(new URL("compiled/", example)),
+      // The example's own vite.config.mjs imports the package by name, which needs a built dist.
+      // This build supplies the plugin and source aliases itself, so skip config discovery.
+      configFile: false,
       logLevel: "silent",
       plugins: [pantryPrecompile(fileURLToPath(new URL("components/pantry-app.html", example)))],
       resolve: { alias },
