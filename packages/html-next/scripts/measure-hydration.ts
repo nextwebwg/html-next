@@ -22,11 +22,20 @@ function invocation(index: number): string {
   return `<hydration-row label="Row ${index}"><span>Projected ${index}</span></hydration-row>`;
 }
 
-function serverRoot(index: number): string {
-  return `<article data-component="hydration-row" data-component-root="hydration-row" data-label="Row ${index}">` +
-    `<h2 data-component="hydration-row">Row ${index}</h2>` +
-    `<input data-component="hydration-row" value="Row ${index}">` +
-    `<span data-slotted>Projected ${index}</span></article>`;
+/**
+ * The server markup to adopt, captured by lowering the authored instances once and serializing the
+ * result. Hand-written markup goes stale the moment the rendered form changes — it did, and this
+ * benchmark measured nothing for as long as it was wrong. A real lowering pass is the only honest
+ * source of "what a server would have sent".
+ */
+async function captureServerMarkup(page: Page): Promise<string> {
+  const authored = Array.from({ length: rows }, (_, index) => invocation(index)).join("");
+  await page.setContent(`${definition}<main>${authored}</main>`);
+  await page.addScriptTag({ path: bundlePath });
+  return page.evaluate(() => {
+    (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+    return document.querySelector("main")!.innerHTML;
+  });
 }
 
 interface RunResult {
@@ -39,11 +48,10 @@ interface RunResult {
   readonly value: string;
 }
 
-async function measurePage(page: Page, hydration: boolean): Promise<RunResult> {
-  const instances = Array.from(
-    { length: rows },
-    (_, index) => hydration ? serverRoot(index) : invocation(index),
-  ).join("");
+async function measurePage(page: Page, hydration: boolean, serverMarkup: string): Promise<RunResult> {
+  const instances = hydration
+    ? serverMarkup
+    : Array.from({ length: rows }, (_, index) => invocation(index)).join("");
   await page.setContent(`${definition}<main>${instances}</main>`);
   await page.addScriptTag({ path: bundlePath });
   return page.evaluate((adopt) => {
@@ -88,12 +96,19 @@ function summary(values: readonly number[]): { readonly median: number; readonly
 async function measureEngine(engine: BrowserType): Promise<Record<string, unknown>> {
   const browser = await engine.launch({ headless: true });
   try {
+    const capture = await browser.newPage();
+    let serverMarkup = "";
+    try {
+      serverMarkup = await captureServerMarkup(capture);
+    } finally {
+      await capture.close();
+    }
     const run = async (hydration: boolean): Promise<readonly number[]> => {
       const durations: number[] = [];
       for (let index = 0; index < warmups + samples; index += 1) {
         const page = await browser.newPage();
         try {
-          const result = await measurePage(page, hydration);
+          const result = await measurePage(page, hydration, serverMarkup);
           assert.equal(result.lowered, rows);
           assert.equal(result.rootIdentity, true);
           assert.equal(result.inputIdentity, true);
