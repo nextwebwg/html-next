@@ -45,9 +45,12 @@ GET /api/catalog?q=oli&limit=5
 ```
 
 Each `<param :value>` subscribes to the state it binds, so nothing calls the endpoint imperatively:
-changing state *is* the request, and a param change cancels the stale in-flight read. The response
-is validated against the declared `type`; a mismatch sets `catalog.error` instead of rendering a
-value that does not match its contract. The template then renders straight from the result:
+changing state *is* the request, and a param change cancels the stale in-flight read. The payload
+arrives as the endpoint sent it, and the declared `type` constrains the references into it: a
+reference whose value breaks its type cannot update a binding or recompute a computed value, so a
+mis-typed field leaves what it rendered alone instead of showing a value the declaration forbids.
+The last resolved value also stays bound while the next read runs, so typing does not blank the
+list. The template then renders straight from the result:
 
 ```html
 <p class="notice" $if="catalog.pending">Searching the catalog…</p>

@@ -289,6 +289,35 @@ export function formatType(type: TypeInput): string {
   }
 }
 
+/**
+ * The declared type of the value one step into `node`, or undefined when the declaration says
+ * nothing about it. Used to resolve the type a reference like `foo.bar.blah` must satisfy.
+ */
+export function typeAtKey(node: TypeNode, key: string | number): TypeNode | undefined {
+  switch (node.kind) {
+    case "list":
+      return typeof key === "number" || /^\d+$/.test(String(key)) ? node.item : undefined;
+    case "record":
+      return node.value;
+    case "object": {
+      const field = node.fields.find((candidate) => candidate.name === String(key));
+      if (field !== undefined) return field.type;
+      // A closed shape says the field does not exist; an open one says nothing about it.
+      return node.open ? undefined : ABSENT_TYPE;
+    }
+    case "union": {
+      // Any member that describes this key describes the reference.
+      const described = node.members.map((member) => typeAtKey(member, key)).filter((type) => type !== undefined);
+      if (described.length === 0) return undefined;
+      return described.length === 1 ? described[0]! : union(described as TypeNode[]);
+    }
+    default:
+      return undefined;
+  }
+}
+
+const ABSENT_TYPE: TypeNode = { kind: "terminal", name: "absent" };
+
 export function typeScriptType(type: TypeInput): string {
   const node = normalizeType(type);
   switch (node.kind) {

@@ -43,6 +43,8 @@ export class DataResource<T = unknown> {
   readonly #fetch: typeof fetch;
   readonly #setTimer: (callback: () => void, delay: number) => unknown;
   readonly #clearTimer: (handle: unknown) => void;
+  /** The most recent resolved value, kept so a refetch or failure does not unbind it. */
+  #value: T | null = null;
   #parameters: Readonly<Record<string, unknown>> = {};
   #abort: AbortController | undefined;
   #timer?: unknown;
@@ -91,7 +93,9 @@ export class DataResource<T = unknown> {
     const abort = new AbortController();
     this.#abort = abort;
     const previous = this.options;
-    previous.onState({ pending: true, value: null, error: null, ok: false });
+    // The last resolved value stays bound while the next request is in flight, and through a
+    // failure: a read of `.value` should not blank while `.pending` reports the reason.
+    previous.onState({ pending: true, value: this.#value, error: null, ok: false });
     try {
       const response = await this.#fetch(
         requestURL(previous.source, previous.baseURL, this.#parameters),
@@ -103,10 +107,11 @@ export class DataResource<T = unknown> {
       const raw = textual ? await response.text() : await response.json();
       const value = previous.adapt === undefined ? raw as T : previous.adapt(raw);
       if (this.#stale(generation)) return;
+      this.#value = value;
       previous.onState({ pending: false, value, error: null, ok: true });
     } catch (error) {
       if (abort.signal.aborted || this.#stale(generation)) return;
-      previous.onState({ pending: false, value: null, error, ok: false });
+      previous.onState({ pending: false, value: this.#value, error, ok: false });
     } finally {
       if (this.#abort === abort) this.#abort = undefined;
       if (!this.#stale(generation) && (previous.poll ?? 0) > 0) {

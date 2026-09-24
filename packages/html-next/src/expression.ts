@@ -1,5 +1,11 @@
 /** A missing read or an operation on missing/typed-invalid data. */
 export const ABSENT = Symbol("absent");
+/**
+ * The result of evaluating a reference whose value breaks its declared type. Absence means "no
+ * value here"; this means "a value that the declaration forbids", which must not reach the DOM or
+ * recompute anything. Consumers keep whatever they last had instead.
+ */
+export const NONCONFORMING = Symbol("nonconforming");
 export type Absent = typeof ABSENT;
 
 export type Value =

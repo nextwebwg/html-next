@@ -84,4 +84,35 @@ describe("declared data resource", () => {
     assert.deepEqual(final.value, { email: "ada@example.com", age: 37 });
   });
 
+
+  it("keeps the last resolved value bound through a refetch and a failure", async () => {
+    const states: DataState[] = [];
+    let attempt = 0;
+    const resource = new DataResource({
+      source: "/feed",
+      baseURL: "https://api.example/",
+      fetch: async () => {
+        attempt += 1;
+        if (attempt === 1) return new Response(JSON.stringify({ label: "first" }));
+        throw new TypeError("offline");
+      },
+      onState: (state) => states.push(state),
+    });
+
+    resource.update({ page: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(states.at(-1), { pending: false, value: { label: "first" }, error: null, ok: true });
+
+    resource.update({ page: 2 });
+    // A read in flight reports pending without unbinding the value a template already shows.
+    assert.deepEqual(states.at(-1)!.value, { label: "first" });
+    assert.equal(states.at(-1)!.pending, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const failed = states.at(-1)!;
+    assert.deepEqual(
+      { value: failed.value, ok: failed.ok, pending: failed.pending, failed: failed.error !== null },
+      { value: { label: "first" }, ok: false, pending: false, failed: true },
+    );
+  });
+
 });
