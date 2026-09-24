@@ -83,8 +83,6 @@ same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands
 
 ## Known gaps this example documents
 
-- The pre-compiled delivery still bundles the component parser: `runtime.ts` imports it statically
-  for inline `<template component>` discovery, so pre-parsing the graph does not yet shrink it.
 - `@nextwebwg/html-next-unplugin` compiles components to native DOM factories, which
   would be smaller again, but it cannot express this app yet: compiled invocations carry no
   attributes or projected children (`HN009`), and a component using the general runtime cannot

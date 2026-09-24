@@ -9,7 +9,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 const rows = 250;
 const warmups = 2;
 const samples = 7;
-const runtimeURL = new URL("../src/runtime.ts", import.meta.url);
+const runtimeURL = new URL("../src/live.ts", import.meta.url);
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-hydration-"));
 const bundlePath = join(temporaryDirectory, "runtime.js");
 

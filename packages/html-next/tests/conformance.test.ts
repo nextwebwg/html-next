@@ -21,7 +21,7 @@ import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } 
 import { cases, type ConformanceCase } from "./conformance/cases.js";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
-const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
+const runtimeUrl = new URL("../src/live.ts", import.meta.url);
 
 /** The in-page runner: lower, then either capture the diagnostic code or run the success probe. */
 function pageProgram(testCase: ConformanceCase): string {

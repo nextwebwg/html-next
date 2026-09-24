@@ -25,6 +25,7 @@ const repositoryLicense = await readFile(new URL("../../../LICENSE", import.meta
 const expectedExports = [
   ".",
   "./runtime",
+  "./live",
   "./generated-runtime",
   "./forms",
   "./validation",
