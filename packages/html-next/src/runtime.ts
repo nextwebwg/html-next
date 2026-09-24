@@ -93,6 +93,9 @@ interface DocumentRegistry {
 }
 
 const contentOnly = new WeakSet<Element>();
+// An invocation element is replaced by the component's own root when it lowers. A parent's bound
+// attributes keep their original target, so they resolve through this to reach the live root.
+const loweredInvocations = new WeakMap<Element, Element>();
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
 const definitionAttributes = new WeakMap<ComponentDefinition, readonly [
   Readonly<Record<string, string>>,
@@ -1046,6 +1049,19 @@ function renderInstance(
     if (attribute.kind === "attribute") {
       ownEffect(context, scope, () => {
         const value = evalValue(attribute.expression, scope);
+        // A lowered child owns its props: write them through the same channel framework adapters
+        // use, so the child re-parses the declared type and reflects the value itself.
+        const lowered = loweredInvocations.get(element);
+        if (lowered !== undefined && attribute.target === undefined) {
+          const instance = runtimeInstance(lowered);
+          const propName = instance === undefined
+            ? undefined
+            : propAttributeNames(instance.definition, false)[attribute.name.toLowerCase()];
+          if (propName !== undefined) {
+            updateComponentProps(lowered, { [propName]: toAttribute(value) });
+            return;
+          }
+        }
         if (attribute.target === "class") {
           element.classList.toggle(attribute.name, truthy(value));
         } else if (attribute.target === "style") {
@@ -1597,7 +1613,10 @@ function commitRuntimeInvocations(
       for (const child of insertion.nodes) markProjectedRoot(child);
       insertion.anchor.replaceWith(...insertion.nodes);
     }
-    if (invocation.replace) invocation.invocation.replaceWith(invocation.nativeRoot);
+    if (invocation.replace) {
+      invocation.invocation.replaceWith(invocation.nativeRoot);
+      loweredInvocations.set(invocation.invocation, invocation.nativeRoot);
+    }
     invocation.context.committed = true;
     runtimeInstances.set(invocation.nativeRoot, invocation.instance);
     installPropReflection(invocation.nativeRoot, invocation.instance);

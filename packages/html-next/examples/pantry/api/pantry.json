@@ -1,0 +1,8 @@
+[
+  { "id": "oats",    "label": "Rolled oats",   "quantity": 4, "unit": "kg",    "threshold": 1 },
+  { "id": "rice",    "label": "Basmati rice",  "quantity": 1, "unit": "kg",    "threshold": 1 },
+  { "id": "beans",   "label": "Black beans",   "quantity": 6, "unit": "tins",  "threshold": 2 },
+  { "id": "passata", "label": "Tomato passata","quantity": 0, "unit": "jars",  "threshold": 1 },
+  { "id": "coffee",  "label": "Ground coffee", "quantity": 2, "unit": "bags",  "threshold": 1 },
+  { "id": "olive",   "label": "Olive oil",     "quantity": 3, "unit": "bottles","threshold": 1 }
+]

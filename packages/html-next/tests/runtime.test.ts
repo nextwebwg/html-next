@@ -141,6 +141,44 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} keeps a lowered child component's bound props up to date`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The child's invocation element is replaced by its own root when it lowers, so the
+        // parent's binding has to follow the child rather than keep writing to the replaced node.
+        await page.setContent(
+          '<template component="x-child" status="early" summary="Child.">' +
+          '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
+          '<p class="child" $value="label"></p></template>' +
+          '<template component="x-parent" status="early" summary="Parent.">' +
+          '<defs><state name="count" :value="1"></state>' +
+          '<handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>' +
+          '<main><button type="button" class="bump" on:click="bump"></button>' +
+          '<x-child :label="format(\'count %s\', count)"></x-child></main></template>' +
+          '<x-parent></x-parent>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("p.child");
+        const before = await page.evaluate(() => document.querySelector("p.child")?.textContent);
+        await page.click("button.bump");
+        await page.click("button.bump");
+        await page.waitForTimeout(100);
+        const after = await page.evaluate(() => ({
+          text: document.querySelector("p.child")?.textContent,
+          reflected: document.querySelector("p.child")?.getAttribute("data-label"),
+        }));
+        assert.deepEqual({ before, ...after }, {
+          before: "count 1",
+          text: "count 3",
+          reflected: "count 3",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} rebuilds the same instance from its rendered form`, async () => {
       // Spec: live-browser-distributable.md, "Rendered form". Authored markup lowered in the browser and
       // the same instance's serialized rendered form hydrated must build equal instances, and behave the

@@ -1,0 +1,16 @@
+<!-- Purely visual: a labelled figure used in the summary bar. -->
+<template component="ui-stat" status="early" summary="A labelled summary figure.">
+  <defs>
+    <prop name="label" type="string" default="">What the number counts.</prop>
+    <prop name="value" type="string" default="0">The formatted figure.</prop>
+  </defs>
+  <div class="stat">
+    <span class="stat__value" $value="value"></span>
+    <span class="stat__label" $value="label"></span>
+  </div>
+  <style>
+    .stat { display: flex; flex-direction: column; min-width: 5rem; }
+    .stat__value { font-size: 1.4rem; font-weight: 600; }
+    .stat__label { font-size: 0.8rem; color: #5b667c; }
+  </style>
+</template>

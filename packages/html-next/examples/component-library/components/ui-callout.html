@@ -1,9 +1,0 @@
-<template component="ui-callout" status="early" summary="A static semantic message with a tone-specific presentation.">
-  <defs><prop name="tone" type="info | note | warning | success | error" default="info">Message tone.</prop></defs>
-  <aside role="note"><slot></slot></aside>
-  <style>
-    :host { border-inline-start: 4px solid; }
-    :host-state([tone="warning"]) { border-color: orange; }
-    :host-state([tone="error"]) { border-color: red; }
-  </style>
-</template>
