@@ -66,6 +66,11 @@ interface PreparedInvocation {
   readonly definition: ComponentDefinition;
   readonly instance: RuntimeInstance;
   readonly replace: boolean;
+  /**
+   * The element this instance ends up rooted at. It differs from `nativeRoot` for a delegated
+   * root, whose rendered root is another component's invocation that lowers to its own root.
+   */
+  host?: Element;
 }
 
 interface SlotInsertion {
@@ -90,6 +95,11 @@ interface RuntimeInstance {
   readonly frameworkOwned: boolean;
   /** Every projected node and its slot, rendered or not (for serialization). */
   projection?: { readonly nodes: readonly Node[]; readonly slotNames: WeakMap<Node, string> };
+  /**
+   * Instances sharing this instance's root because this component delegates its root to them.
+   * They are not separately discoverable, so this instance carries their lifecycle.
+   */
+  readonly delegates: RuntimeInstance[];
 }
 
 interface DocumentRegistry {
@@ -99,9 +109,20 @@ interface DocumentRegistry {
 }
 
 const contentOnly = new WeakSet<Element>();
-// An invocation element is replaced by the component's own root when it lowers. A parent's bound
-// attributes keep their original target, so they resolve through this to reach the live root.
-const loweredInvocations = new WeakMap<Element, Element>();
+/**
+ * An invocation element is replaced by the component's own root when it lowers. A parent renders
+ * against the invocation, so its bound props and event listeners resolve through this to reach the
+ * component that actually lowered there.
+ */
+const loweredInvocations = new WeakMap<Element, { root: Element; instance: RuntimeInstance }>();
+/** Work a parent deferred until its child invocation lowered, keyed by that invocation. */
+const rebindOnLower = new WeakMap<Element, ((root: Element) => void)[]>();
+
+function whenLowered(invocation: Element, rebind: (root: Element) => void): void {
+  const pending = rebindOnLower.get(invocation);
+  if (pending === undefined) rebindOnLower.set(invocation, [rebind]);
+  else pending.push(rebind);
+}
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
 const definitionAttributes = new WeakMap<ComponentDefinition, readonly [
   Readonly<Record<string, string>>,
@@ -611,11 +632,14 @@ function bindEvents(
       (candidate): candidate is HandlerDeclaration =>
         candidate.kind === "handler" && candidate.name === binding.handler,
     )!;
+    // A component invocation is replaced by that component's own root, so the listener has to
+    // follow it there; for an ordinary element the target never changes.
+    let target = element;
     const listener = (event: Event): void => {
-      if (!eventPasses(event, element, binding.modifiers)) return;
+      if (!eventPasses(event, target, binding.modifiers)) return;
       if (binding.modifiers.includes("prevent")) event.preventDefault();
       if (binding.modifiers.includes("stop")) event.stopPropagation();
-      runHandler(declaration, element, scope, context);
+      runHandler(declaration, target, scope, context);
     };
     if (binding.name === "connect" || binding.name === "disconnect") {
       const callbacks = binding.name === "connect"
@@ -624,16 +648,30 @@ function bindEvents(
       callbacks.add(() => listener(new Event(binding.name)));
       continue;
     }
-    ownEffect(context, scope, () => {
-      element.addEventListener(binding.name, listener, {
-        capture: binding.modifiers.includes("capture"),
+    const capture = binding.modifiers.includes("capture");
+    let attached = false;
+    const attach = (): void => {
+      target.addEventListener(binding.name, listener, {
+        capture,
         passive: binding.modifiers.includes("passive"),
         once: binding.modifiers.includes("once"),
       });
-      return () => element.removeEventListener(binding.name, listener, {
-        capture: binding.modifiers.includes("capture"),
-      });
+      attached = true;
+    };
+    const detach = (): void => {
+      target.removeEventListener(binding.name, listener, { capture });
+      attached = false;
+    };
+    ownEffect(context, scope, () => {
+      attach();
+      return detach;
     }, 2);
+    whenLowered(element, (root) => {
+      const live = attached;
+      if (live) detach();
+      target = root;
+      if (live) attach();
+    });
   }
 }
 
@@ -1080,12 +1118,9 @@ function renderInstance(
         // use, so the child re-parses the declared type and reflects the value itself.
         const lowered = loweredInvocations.get(element);
         if (lowered !== undefined && attribute.target === undefined) {
-          const instance = runtimeInstance(lowered);
-          const propName = instance === undefined
-            ? undefined
-            : propAttributeNames(instance.definition, false)[attribute.name.toLowerCase()];
+          const propName = propAttributeNames(lowered.instance.definition, false)[attribute.name.toLowerCase()];
           if (propName !== undefined) {
-            updateComponentProps(lowered, { [propName]: toAttribute(value) });
+            applyComponentProps(lowered.instance, lowered.root, { [propName]: toAttribute(value) });
             return;
           }
         }
@@ -1574,6 +1609,7 @@ function prepareRuntimeInvocation(
     connected: false,
     explicit,
     frameworkOwned,
+    delegates: [],
     projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
   };
   const context: RuntimeRenderContext = {
@@ -1635,22 +1671,66 @@ function commitRuntimeInvocations(
     if (right.invocation.contains(left.invocation)) return 1;
     return 0;
   });
+  // A delegated root renders another component's invocation, which this same pass lowers to its
+  // own root. Follow that chain so every instance installs on, and is rooted at, the element that
+  // actually survives in the document.
+  const byInvocation = new Map(prepared.map((entry) => [entry.invocation, entry]));
+  const hostRootFor = (entry: PreparedInvocation): Element => {
+    let root = entry.nativeRoot;
+    const seen = new Set<Element>([entry.invocation]);
+    for (let next = byInvocation.get(root); next !== undefined; next = byInvocation.get(root)) {
+      if (seen.has(root)) break;
+      seen.add(root);
+      root = next.nativeRoot;
+    }
+    return root;
+  };
+
   for (const invocation of prepared) {
     for (const insertion of invocation.context.slotInsertions) {
       for (const child of insertion.nodes) markProjectedRoot(child);
       insertion.anchor.replaceWith(...insertion.nodes);
     }
+    const host = hostRootFor(invocation);
+    invocation.host = host;
     if (invocation.replace) {
       invocation.invocation.replaceWith(invocation.nativeRoot);
-      loweredInvocations.set(invocation.invocation, invocation.nativeRoot);
+      loweredInvocations.set(invocation.invocation, { root: host, instance: invocation.instance });
+      runtimeInstances.delete(invocation.invocation);
+      // Whatever a parent deferred for this invocation now has the element it was waiting for.
+      for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) rebind(host);
+      rebindOnLower.delete(invocation.invocation);
     }
     invocation.context.committed = true;
-    runtimeInstances.set(invocation.nativeRoot, invocation.instance);
-    installPropReflection(invocation.nativeRoot, invocation.instance);
-    installStateAttribute(invocation.nativeRoot, invocation.instance);
-    installPublicMethods(invocation.nativeRoot, invocation.instance);
+    invocation.instance.element = host;
+    if (host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
+      // This component delegates its root to a component that has not lowered yet. Claim nothing
+      // until it does: installing on an element about to be replaced would leave this instance's
+      // reflection, public methods, and host stranded on a discarded node.
+      whenLowered(host, (finalRoot) => adoptComponentRoot(invocation.instance, finalRoot));
+    } else {
+      adoptComponentRoot(invocation.instance, host);
+    }
     connectRuntimeInstance(invocation.instance);
   }
+}
+
+/**
+ * Binds an instance to the root it ends up sharing. The component the author invoked claims the
+ * root, so page code reaches its host, public methods, and reflected props; a component it
+ * delegates to shares the element and rides the owner's connection lifecycle.
+ */
+function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
+  instance.element = root;
+  const owner = runtimeInstances.get(root);
+  if (owner === undefined) {
+    runtimeInstances.set(root, instance);
+    installPropReflection(root, instance);
+    installStateAttribute(root, instance);
+    installPublicMethods(root, instance);
+    return;
+  }
+  if (owner !== instance && !owner.delegates.includes(instance)) owner.delegates.push(instance);
 }
 
 type QueryRoot = Node & ParentNode;
@@ -1748,7 +1828,7 @@ function lowerScopes(
   }
 
   commitRuntimeInvocations(registry, prepared);
-  const lowered = prepared.map((invocation) => invocation.nativeRoot);
+  const lowered = prepared.map((invocation) => invocation.host ?? invocation.nativeRoot);
   for (const element of lowered) roots.add(element);
   return { lowered, roots: Array.from(roots) };
 }
@@ -2013,6 +2093,15 @@ export function updateComponentProps(
 ): void {
   const instance = runtimeInstance(element);
   if (instance === undefined) return;
+  applyComponentProps(instance, element, props);
+}
+
+/** Applies props to one named instance, which a shared root makes explicit. */
+function applyComponentProps(
+  instance: RuntimeInstance,
+  element: Element,
+  props: Readonly<Record<string, unknown>>,
+): void {
   for (const [name, input] of Object.entries(props)) {
     const prop = instance.definition.contract.props[name];
     if (prop === undefined) continue;
@@ -2082,6 +2171,8 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
   for (const callback of instance.connectCallbacks) callback();
+  // A delegated component shares this root and is not separately discoverable.
+  for (const delegate of instance.delegates) connectRuntimeInstance(delegate);
   instance.element?.dispatchEvent(new Event("connect"));
 }
 
@@ -2091,6 +2182,7 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   for (const callback of instance.disconnectCallbacks) callback();
   instance.connected = false;
   for (const effect of instance.effects) effect.pause();
+  for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
 }
 
 /** Returns the private lifecycle host for a lowered root; page code normally never needs it. */

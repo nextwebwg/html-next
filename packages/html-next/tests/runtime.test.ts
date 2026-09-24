@@ -141,6 +141,101 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} runs a parent's on: binding on a child component's declared event`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The listener is written on the <x-emit> invocation, which is replaced by that
+        // component's own <button> root, so the binding has to follow it there.
+        await page.setContent(
+          '<template component="x-emit" status="early" summary="Emitter.">' +
+          '<defs><event name="picked" type="string">A choice.</event>' +
+          '<handler name="choose"><dispatch event="picked" value="olives"></dispatch></handler></defs>' +
+          '<button type="button" class="pick" on:click="choose">pick</button></template>' +
+          '<template component="x-collect" status="early" summary="Collector.">' +
+          '<defs><state name="taken" :value="0"></state>' +
+          '<handler name="count"><set name="taken" :value="taken + 1"></set></handler></defs>' +
+          '<main><x-emit on:picked="count"></x-emit><i class="taken" $value="taken"></i></main>' +
+          '</template><x-collect></x-collect>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("button.pick");
+        await page.click("button.pick");
+        await page.click("button.pick");
+        await page.waitForTimeout(100);
+        assert.equal(await page.evaluate(() => document.querySelector(".taken")?.textContent), "2");
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps a component delegating its root reactive and connected`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://api.example/**", async (route) => {
+          await route.fulfill({
+            contentType: "application/json",
+            headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: "from the endpoint" }),
+          });
+        });
+        // x-outer's root is another component, so the element x-outer renders is replaced by
+        // x-frame's own root. The outer instance has to follow that root instead of being left on
+        // the discarded element, which used to disconnect it and abort its declared read.
+        await page.setContent(
+          '<template component="x-frame" status="early" summary="Frame.">' +
+          '<defs><prop name="heading" type="string" default="none">Heading.</prop></defs>' +
+          '<section class="frame"><h2 class="heading" $value="heading"></h2>' +
+          '<slot name="body"></slot></section></template>' +
+          '<template component="x-outer" status="early" summary="Outer.">' +
+          '<defs><prop name="label" type="string" default="none">Label.</prop>' +
+          '<state name="count" :value="1"></state>' +
+          '<data name="feed" src="https://api.example/feed" type="object({ label: string })"></data>' +
+          '<handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>' +
+          '<x-frame :heading="format(\'count %s\', count)">' +
+          '<span slot="body"><button type="button" class="bump" on:click="bump"></button>' +
+          '<i class="own" $value="count"></i>' +
+          '<output class="feed" $value="feed.value.label"></output></span></x-frame></template>' +
+          '<x-outer label="reflected"></x-outer>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("section.frame");
+        // The declared read must settle: the outer instance is still connected.
+        await page.waitForFunction(`document.querySelector(".feed")?.textContent === "from the endpoint"`);
+        await page.click("button.bump");
+        await page.waitForTimeout(100);
+        const result = await page.evaluate(() => ({
+          own: document.querySelector(".own")?.textContent,
+          heading: document.querySelector(".heading")?.textContent,
+          feed: document.querySelector(".feed")?.textContent,
+          lineage: document.querySelector("section.frame")?.getAttribute("data-component"),
+          // The component the author invoked owns the shared root, so page code reaching that root
+          // gets the outer component's host and state, not the component it delegates to.
+          hostState: (() => {
+            const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
+              getComponentHost(element: Element): { element: Element; state: Record<string, unknown> } | undefined;
+            };
+            const host = runtime.getComponentHost(document.querySelector("section.frame")!);
+            return host === undefined
+              ? "no host"
+              : `${host.element.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+          })(),
+        }));
+        assert.deepEqual(result, {
+          own: "2",
+          heading: "count 2",
+          feed: "from the endpoint",
+          lineage: "x-outer x-frame",
+          hostState: "section:count=2:label=reflected",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} keeps a lowered child component's bound props up to date`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
