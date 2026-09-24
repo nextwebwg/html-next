@@ -3,6 +3,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 import { parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
+import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
   isReservedElement,
@@ -22,7 +23,7 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import { isAttributeType, parseTypedValue } from "./type-system.js";
+import { isAttributeType, parseTypedValue, parseTypeExpression } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
 
 type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
@@ -501,6 +502,16 @@ function readDeclarations(
       const dataType = attr(element, "type");
       const dataDebounce = attr(element, "debounce");
       const dataPoll = attr(element, "poll");
+      // Validate here so an unreadable time value is a diagnostic, not a silently ignored delay.
+      for (const [timing, text] of [["debounce", dataDebounce], ["poll", dataPoll]] as const) {
+        if (text !== undefined && parseDuration(text) === undefined) {
+          fail("HC024", `Data source \`${name}\` has an unreadable \`${timing}\` time \`${text}\`.`, source);
+        }
+      }
+      if (dataType !== undefined) {
+        try { parseTypeExpression(dataType); }
+        catch { fail("HC024", `Data source \`${name}\` declares an unreadable type \`${dataType}\`.`, source); }
+      }
       const parameters = [];
       const parameterNames = new Set<string>();
       for (const parameter of directElements(element, "param")) {

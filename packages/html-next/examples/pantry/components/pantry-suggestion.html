@@ -1,0 +1,28 @@
+<!-- Declarative only: one catalog hit. It owns no data and dispatches what the user chose. -->
+<template component="pantry-suggestion" status="early" summary="One catalog search result.">
+  <defs>
+    <prop name="itemId" type="string" required>Catalog identity.</prop>
+    <prop name="label" type="string" required>Product name.</prop>
+    <prop name="unit" type="string" default="pcs">Unit the catalog stocks it in.</prop>
+
+    <event name="add" type="object({ id: string, label: string, unit: string })">
+      The user chose this catalog entry.
+    </event>
+
+    <handler name="choose">
+      <dispatch event="add" :value="{ id: itemId, label: label, unit: unit }"></dispatch>
+    </handler>
+  </defs>
+
+  <li class="suggestion">
+    <span class="suggestion__label" $value="label"></span>
+    <span class="suggestion__unit" $value="unit"></span>
+    <button type="button" on:click="choose" :aria-label="format('Add %s to the pantry', label)">Add</button>
+  </li>
+
+  <style>
+    .suggestion { display: flex; gap: 0.5rem; align-items: center; padding: 0.25rem 0; }
+    .suggestion__label { flex: 1; }
+    .suggestion__unit { color: #5b667c; font-size: 0.85rem; }
+  </style>
+</template>

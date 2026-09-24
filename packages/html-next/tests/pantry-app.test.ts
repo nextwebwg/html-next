@@ -8,12 +8,12 @@
  *  - live: the page links one root and the browser parses the graph at runtime;
  *  - pre-compiled: a Vite build parses the graph and ships only the definitions.
  *
- * One scenario script drives both and every step must observe the same DOM, which is the
- * delivery-mode agreement required by docs/spec/delivery-modes.md. Engine coverage is the
- * conformance suite's job; this test is about the two deliveries agreeing, so it uses Chromium.
+ * One scenario drives both, and every step must observe the same DOM: the proposal requires the
+ * delivery modes to agree on the observable result (https://nextwebwg.org/html-next/). Engine
+ * coverage is the conformance suite's job, so this test uses Chromium.
  *
  * Run with:  HTMLNEXT_BROWSER_TEST=1 pnpm exec vitest run --config vitest.browser.config.ts \
- *              packages/declarative-components/tests/pantry-app.test.ts
+ *              packages/html-next/tests/pantry-app.test.ts
  */
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -52,7 +52,9 @@ const snapshotScript = `(() => {
   const stats = Array.from(document.querySelectorAll(".stat")).map((stat) =>
     stat.querySelector(".stat__label").textContent + "=" + stat.querySelector(".stat__value").textContent);
   const notices = Array.from(document.querySelectorAll(".notice")).map((note) => note.textContent);
-  return { rows, stats, notices };
+  const suggestions = Array.from(document.querySelectorAll("li.suggestion")).map((hit) =>
+    hit.querySelector(".suggestion__label").textContent + " (" + hit.querySelector(".suggestion__unit").textContent + ")");
+  return { rows, stats, notices, suggestions };
 })()`;
 
 /**
@@ -62,7 +64,22 @@ const snapshotScript = `(() => {
 async function runScenario(page: Page): Promise<Record<string, unknown>> {
   const transcript: Record<string, unknown> = {};
   const settle = async () => { await page.waitForTimeout(150); };
-  const snapshot = async (step: string) => { transcript[step] = await page.evaluate(snapshotScript); };
+  // Declared reads are debounced and asynchronous, so snapshots wait for them to settle rather
+  // than racing them.
+  const settleReads = async () => {
+    // Wait past the 150ms debounce so a queued read has started, then for it to finish.
+    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      `!Array.from(document.querySelectorAll(".notice")).some((note) => note.textContent.includes("Searching"))`,
+    );
+    await settle();
+  };
+  // Every snapshot waits for declared reads first: a debounced read in flight would otherwise be
+  // captured in one delivery and not the other, purely on timing.
+  const snapshot = async (step: string) => {
+    await settleReads();
+    transcript[step] = await page.evaluate(snapshotScript);
+  };
   const row = (label: string) => page.locator("li.item", { has: page.locator(`.item__label:text-is("${label}")`) });
   const retype = async (selector: string, value: string) => {
     const field = page.locator(selector);
@@ -94,6 +111,16 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   await settle();
   await snapshot("discarded");
 
+  // A declared <data> read sends state to the endpoint as query parameters and renders the JSON
+  // that comes back. Typing re-requests; the debounce coalesces the keystrokes.
+  await retype('input[name="catalog-query"]', "oli");
+  await page.waitForFunction(`document.querySelectorAll("li.suggestion").length > 0`);
+  await snapshot("catalogSearched");
+  // "Green olives" is not stocked yet; "Olive oil" already is, which the controller de-duplicates.
+  await page.locator("li.suggestion", { has: page.locator('.suggestion__label:text-is("Green olives")') })
+    .locator("button").click();
+  await snapshot("catalogAdded");
+
   // The add form is a native <form>: the browser blocks the empty required field, not the app.
   await page.locator('.field--add button[type="submit"]').click();
   await settle();
@@ -113,15 +140,16 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   return transcript;
 }
 
-async function transcriptFor(browser: Browser, serve: (path: string) => Promise<string | undefined>) {
+async function transcriptFor(browser: Browser, serve: (url: URL) => Promise<string | undefined>) {
   const page: Page = await browser.newPage();
   const errors: string[] = [];
   const requested: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.route(`${origin}/**`, async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    requested.push(path);
-    const body = await serve(path);
+    const url = new URL(route.request().url());
+    requested.push(`${url.pathname}${url.search}`);
+    const body = await serve(url);
+    const path = url.pathname;
     if (body === undefined) return route.fulfill({ status: 404, body: "" });
     const type = path.endsWith(".json")
       ? "application/json"
@@ -176,21 +204,37 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
   });
 
   it("renders and behaves identically when parsed live and when pre-compiled", async () => {
-    const data = await readFile(new URL("api/pantry.json", example), "utf8");
+    // The same JSON endpoints the example's dev server provides, including the catalog's
+    // reactive query parameters.
+    const stock = await readFile(new URL("api/pantry.json", example), "utf8");
+    const catalog = JSON.parse(await readFile(new URL("api/catalog.json", example), "utf8")) as
+      { id: string; label: string; unit: string }[];
+    const endpoints = async (url: URL): Promise<string | undefined> => {
+      if (url.pathname === "/api/pantry") return stock;
+      if (url.pathname === "/api/catalog") {
+        const needle = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+        const limit = Number(url.searchParams.get("limit") ?? 5);
+        const hits = needle === "" ? [] : catalog.filter((entry) => entry.label.toLowerCase().includes(needle));
+        return JSON.stringify(hits.slice(0, limit));
+      }
+      return undefined;
+    };
 
-    const liveRun = await transcriptFor(browser, async (path) => {
-      if (path === "/") return readFile(new URL("index.html", example), "utf8");
-      if (path === "/dist/browser-loader.bundle.js") return loaderBundle;
-      if (path === "/api/pantry.json") return data;
-      if (path.startsWith("/components/") || path === "/live.js") {
-        return readFile(new URL(`.${path}`, example), "utf8").catch(() => undefined);
+    const liveRun = await transcriptFor(browser, async (url) => {
+      const served = await endpoints(url);
+      if (served !== undefined) return served;
+      if (url.pathname === "/") return readFile(new URL("index.html", example), "utf8");
+      if (url.pathname === "/dist/browser-loader.bundle.js") return loaderBundle;
+      if (url.pathname.startsWith("/components/") || url.pathname === "/live.js") {
+        return readFile(new URL(`.${url.pathname}`, example), "utf8").catch(() => undefined);
       }
       return undefined;
     });
 
-    const compiledRun = await transcriptFor(browser, async (path) => {
-      if (path === "/api/pantry.json") return data;
-      const file = path === "/" ? "index.html" : path.slice(1);
+    const compiledRun = await transcriptFor(browser, async (url) => {
+      const served = await endpoints(url);
+      if (served !== undefined) return served;
+      const file = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
       return readFile(join(compiledDirectory, file), "utf8").catch(() => undefined);
     });
 
@@ -205,10 +249,28 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     const sources = (paths: string[]) => paths.filter((path) => path.startsWith("/components/"));
     assert.ok(sources(liveRun.requested).length >= 5, "live delivery fetches component sources");
     assert.deepEqual(sources(compiledRun.requested), []);
-    assert.ok(liveRun.requested.includes("/api/pantry.json"));
-    assert.ok(compiledRun.requested.includes("/api/pantry.json"));
 
-    const steps = live as Record<string, { rows: { label: string; count: string; badge: string }[]; stats: string[]; notices: string[] }>;
+    // Both deliveries make the same declared requests: the typed read on connection, and the
+    // catalog read carrying the search state as serialized query parameters.
+    for (const run of [liveRun, compiledRun]) {
+      assert.ok(run.requested.includes("/api/pantry"), "declared read runs on connection");
+      const catalogReads = run.requested.filter((path) => path.startsWith("/api/catalog"));
+      // The state travels as serialized query parameters, and every param change re-reads:
+      // once for the typed search, and again when choosing a hit clears the box.
+      assert.ok(catalogReads.includes("/api/catalog?q=oli&limit=5"), catalogReads.join(" "));
+      assert.equal(catalogReads.at(-1), "/api/catalog?q=&limit=5");
+      // 150ms of debounce coalesces the three keystrokes into a single search read.
+      const searches = catalogReads.filter((path) => !path.includes("q=&"));
+      assert.ok(searches.length <= 2, `debounced catalog searches: ${searches.join(" ")}`);
+    }
+
+    interface Step {
+      readonly rows: { label: string; count: string; badge: string }[];
+      readonly stats: string[];
+      readonly notices: string[];
+      readonly suggestions: string[];
+    }
+    const steps = live as Record<string, Step>;
     assert.deepEqual(steps.loaded!.rows.map((row) => row.label), [
       "Basmati rice", "Black beans", "Ground coffee", "Olive oil", "Rolled oats", "Tomato passata",
     ]);
@@ -233,15 +295,27 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     assert.equal(passata.count, "0 jars");
 
     assert.ok(!steps.discarded!.rows.some((row) => row.label === "Ground coffee"));
+
+    // The endpoint filtered the catalog; the component rendered exactly what came back.
+    assert.deepEqual(steps.catalogSearched!.suggestions, ["Olive oil (bottles)", "Green olives (jars)"]);
+    assert.deepEqual(
+      steps.catalogAdded!.rows.find((row) => row.label === "Green olives"),
+      // A true boolean binding renders as the empty attribute value, like `disabled`.
+      { label: "Green olives", count: "1 jars", badge: "Low", tone: "warning", low: "", decrementDisabled: false },
+    );
+    // The already-stocked hit was not duplicated or reset.
+    assert.equal(steps.catalogAdded!.rows.filter((row) => row.label === "Olive oil").length, 1);
+    // Choosing a hit clears the search, so the suggestion list empties.
+    assert.deepEqual(steps.catalogAdded!.suggestions, []);
     // A required field left empty submits nothing: the row count is unchanged.
-    assert.equal(steps.rejectedEmptyLabel!.rows.length, steps.discarded!.rows.length);
+    assert.equal(steps.rejectedEmptyLabel!.rows.length, steps.catalogAdded!.rows.length);
     assert.deepEqual(
       steps.added!.rows.find((row) => row.label === "Peanut butter"),
       // `:data-low` removes the attribute when false, which is the ordinary attribute semantic.
       { label: "Peanut butter", count: "2 pcs", badge: "Stocked", tone: "neutral", low: null, decrementDisabled: false },
     );
     assert.ok(steps.restockedAll!.rows.every((row) => row.badge === "Stocked"));
-    assert.deepEqual(steps.restockedAll!.stats, ["Items=6", "Low=0"]);
+    assert.deepEqual(steps.restockedAll!.stats, ["Items=7", "Low=0"]);
   }, 180_000);
 
   it("carries the parsed graph in the pre-compiled bundle", async () => {

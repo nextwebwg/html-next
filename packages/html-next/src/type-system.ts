@@ -83,6 +83,8 @@ export interface TrustedContentValue {
   readonly value: unknown;
 }
 
+const UNKNOWN: TypeNode = { kind: "terminal", name: "unknown" };
+
 const TERMINALS = new Set<TerminalTypeName>([
   "string", "boolean", "number", "integer", "null", "absent",
   "trusted-html", "trusted-script", "function", "unknown",
@@ -139,13 +141,18 @@ class Parser {
 
     const name = this.#identifier();
     if (name === undefined) this.#error("Expected a type, keyword, or group");
+    // `list`, `record`, and `object` may also be written bare, meaning any list, any record, or
+    // any structured value, for declarations that only need the shape and not the item type.
     if (name === "list" || name === "record") {
+      if (!this.#peek("(")) {
+        return name === "list" ? { kind: "list", item: UNKNOWN } : { kind: "record", value: UNKNOWN };
+      }
       this.#expect("(");
       const nested = this.#union();
       this.#expect(")");
       return name === "list" ? { kind: "list", item: nested } : { kind: "record", value: nested };
     }
-    if (name === "object") return this.#object();
+    if (name === "object") return this.#peek("(") ? this.#object() : { kind: "record", value: UNKNOWN };
     if (TERMINALS.has(name as TerminalTypeName)) {
       return { kind: "terminal", name: name as TerminalTypeName };
     }
@@ -211,6 +218,11 @@ class Parser {
       result += escapes[escaped] ?? escaped;
     }
     this.#error("Unterminated quoted keyword");
+  }
+
+  #peek(token: string): boolean {
+    this.#space();
+    return this.source.startsWith(token, this.#index);
   }
 
   #take(token: string): boolean {

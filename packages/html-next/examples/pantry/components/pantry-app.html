@@ -2,6 +2,7 @@
      and the add form into state changes. Everything it renders is declarative. -->
 <link rel="component" href="./pantry-shell.html" />
 <link rel="component" href="./pantry-item.html" />
+<link rel="component" href="./pantry-suggestion.html" />
 <link rel="component" href="./ui-stat.html" />
 
 <template component="pantry-app" controller="./pantry-app.js" status="early"
@@ -9,14 +10,27 @@
   <defs>
     <prop name="heading" type="string" default="Pantry">Page heading.</prop>
 
-    <!-- Declared request: the runtime fetches it and exposes pending/ok/value/error. -->
-    <data name="stock" src="/api/pantry.json" type="json"></data>
+    <!-- Declared read: fetched on connection, validated against the declared type, and exposed
+         as pending/ok/value/error. -->
+    <data name="stock" src="/api/pantry"
+      type="list(object({ id: string, label: string, quantity: integer, unit: string, threshold: integer }))">
+    </data>
+
+    <!-- A reactive round trip. Each <param> subscribes to the state it binds, so editing
+         catalogQuery re-requests /api/catalog?q=…&limit=5 and cancels the stale read. The values
+         travel as serialized query parameters; the JSON that comes back renders below. -->
+    <data name="catalog" src="/api/catalog" debounce="150ms"
+      type="list(object({ id: string, label: string, unit: string }))">
+      <param name="q" :value="catalogQuery"></param>
+      <param name="limit" :value="5"></param>
+    </data>
 
     <!-- The controller keeps these in step with the fetched data and the search box. -->
     <state name="rows" :value="[]"></state>
     <state name="lowCount" :value="0"></state>
     <state name="visible" :value="0"></state>
     <state name="query" :value="''"></state>
+    <state name="catalogQuery" :value="''"></state>
     <state name="draftLabel" :value="''"></state>
     <state name="draftQuantity" :value="1"></state>
 
@@ -27,8 +41,8 @@
     <method name="restockAll" export="restockAll" returns="undefined">Refill every low item.</method>
   </defs>
 
-  <!-- The shell is a child, not this component's root: a delegated root would leave this
-       instance pointing at the element the shell replaces. -->
+  <!-- The shell is a child here, so this component keeps its own <main> root. It could equally
+       delegate its root to pantry-shell and add no wrapper. -->
   <main class="page">
     <pantry-shell :heading="heading">
       <span slot="summary">
@@ -53,6 +67,19 @@
       </span>
 
       <span slot="body">
+        <section class="catalog">
+          <label class="field">Add from catalog
+            <input type="search" name="catalog-query" bind:value="catalogQuery"
+              placeholder="Search the catalog" />
+          </label>
+          <p class="notice" $if="catalog.pending">Searching the catalog…</p>
+          <p class="notice notice--error" $if="catalog.error">The catalog search failed.</p>
+          <ul class="suggestions">
+            <pantry-suggestion $each="hit of catalog.value" $key="hit.id"
+              :item-id="hit.id" :label="hit.label" :unit="hit.unit"></pantry-suggestion>
+          </ul>
+        </section>
+
         <p $if="loading" class="notice">Loading pantry…</p>
         <p $if="failed" class="notice notice--error">The pantry list could not be loaded.</p>
         <ul class="items" $if="not loading">
@@ -71,6 +98,8 @@
     .items { list-style: none; margin: 0; padding: 0; }
     .field { display: flex; flex-direction: column; font-size: 0.85rem; gap: 0.25rem; }
     .field--add { flex-direction: row; gap: 0.5rem; align-items: end; }
+    .catalog { margin: 0 0 1rem; padding: 0 0 0.75rem; border-bottom: 1px solid #e6eaf0; }
+    .suggestions { list-style: none; margin: 0.25rem 0 0; padding: 0; }
     .notice { color: #5b667c; }
     .notice--error { color: #a01e1e; }
   </style>

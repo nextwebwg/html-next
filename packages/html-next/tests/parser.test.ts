@@ -275,7 +275,7 @@ describe("parseComponent", () => {
         `<prop name="query" type="string" required>Search query.</prop>` +
         `<state name="form" :value="{ selected: 0 }"></state>` +
         `<computed name="hasQuery" from="query != ''"></computed>` +
-        `<data name="results" src="/api/search" type="json" debounce="150" poll="30000">` +
+        `<data name="results" src="/api/search" type="object" debounce="150ms" poll="30s">` +
         `<param name="q" :value="query"></param></data>` +
         `<event name="selection-change" type="number" bubbles="false" composed="false" cancelable="true"></event>` +
         `<method name="refresh" export="refresh" returns="promise(undefined)"></method>` +
@@ -315,9 +315,9 @@ describe("parseComponent", () => {
       },
       {
         source: "/api/search",
-        type: "json",
-        debounce: "150",
-        poll: "30000",
+        type: "object",
+        debounce: "150ms",
+        poll: "30s",
         parameters: [{ name: "q", dependencies: ["query"] }],
       },
     );
@@ -426,4 +426,18 @@ describe("parseComponent", () => {
       componentSource(`<button><if test="ready"></if></button>`),
     );
   });
+
+  it("rejects a <data> time value or declared type it cannot read", () => {
+    const source = (attributes: string) =>
+      `<template component="x-d" status="early" summary="Data diagnostics.">` +
+      `<defs><data name="feed" src="/api/feed" ${attributes}></data></defs><output></output></template>`;
+    for (const attributes of ['debounce="soon"', 'poll="2 minutes"', 'type="list("']) {
+      assert.throws(() => parseComponent(source(attributes)), /HC024/);
+    }
+    // Time values with units and bare milliseconds are both readable.
+    for (const attributes of ['debounce="200ms"', 'poll="30s"', 'debounce="150"', 'type="object"']) {
+      assert.doesNotThrow(() => parseComponent(source(attributes)));
+    }
+  });
+
 });

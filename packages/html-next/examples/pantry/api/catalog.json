@@ -1,0 +1,12 @@
+[
+  { "id": "olive",    "label": "Olive oil",      "unit": "bottles" },
+  { "id": "olives",   "label": "Green olives",   "unit": "jars" },
+  { "id": "oats",     "label": "Rolled oats",    "unit": "kg" },
+  { "id": "oregano",  "label": "Dried oregano",  "unit": "jars" },
+  { "id": "peanut",   "label": "Peanut butter",  "unit": "jars" },
+  { "id": "pasta",    "label": "Penne pasta",    "unit": "kg" },
+  { "id": "passata",  "label": "Tomato passata", "unit": "jars" },
+  { "id": "rice",     "label": "Basmati rice",   "unit": "kg" },
+  { "id": "lentils",  "label": "Red lentils",    "unit": "kg" },
+  { "id": "coffee",   "label": "Ground coffee",  "unit": "bags" }
+]

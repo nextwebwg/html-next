@@ -12,21 +12,62 @@ at a time, and to keep the two browser delivery modes honest about producing the
 | `ui-stat` | no | A prop-driven summary figure. |
 | `pantry-shell` | no | Pure layout: every region is a named slot. |
 | `pantry-item` | no | A row that owns no data: it declares events and dispatches them. |
+| `pantry-suggestion` | no | One catalog hit; dispatches what the user chose. |
 | `pantry-app` | yes | The one stateful component: declared request, state, computed values, and a public method. |
 
 The split is the point. Only `pantry-app` has JavaScript, and it drives state, never the DOM. Rows
 never mutate the list; they dispatch `adjust` and `remove`, and the controller decides what those
 mean. The add form is a native `<form>`, so `required` and `min`/`max` stay the browser's job.
 
+## `<data>`: values to a JSON endpoint and back
+
+The app declares two reads. The first runs once on connection; the second is a reactive round trip.
+
+```html
+<!-- Sent as query parameters, re-requested whenever catalogQuery changes. -->
+<data name="catalog" src="/api/catalog" debounce="150ms"
+  type="list(object({ id: string, label: string, unit: string }))">
+  <param name="q" :value="catalogQuery"></param>
+  <param name="limit" :value="5"></param>
+</data>
+```
+
+Typing `oli` into the box bound to `catalogQuery` produces one request (the three keystrokes are
+coalesced by `debounce`):
+
+```http
+GET /api/catalog?q=oli&limit=5
+```
+
+```json
+[ { "id": "olive",  "label": "Olive oil",    "unit": "bottles" },
+  { "id": "olives", "label": "Green olives", "unit": "jars" } ]
+```
+
+Each `<param :value>` subscribes to the state it binds, so nothing calls the endpoint imperatively:
+changing state *is* the request, and a param change cancels the stale in-flight read. The response
+is validated against the declared `type`; a mismatch sets `catalog.error` instead of rendering a
+value that does not match its contract. The template then renders straight from the result:
+
+```html
+<p class="notice" $if="catalog.pending">Searching the catalog…</p>
+<ul class="suggestions">
+  <pantry-suggestion $each="hit of catalog.value" $key="hit.id"
+    :item-id="hit.id" :label="hit.label" :unit="hit.unit"></pantry-suggestion>
+</ul>
+```
+
+Choosing a hit dispatches an event the controller applies, then clears `catalogQuery` — which
+re-runs the read with an empty `q`, because the request is a function of state.
+
 ## Running it
 
-Serve this directory, so `/api/pantry.json` resolves:
+The example ships a dev server so the declared reads have a real JSON endpoint:
 
 ```sh
 pnpm --filter @nextwebwg/html-next build   # live mode loads dist/browser-loader.bundle.js
-python3 -m http.server 8799   # from this directory
-# live:         http://localhost:8799/
-# pre-compiled: npx vite build --config compiled/vite.config.mjs && http://localhost:8799/compiled/dist/
+node server.mjs                            # http://localhost:8799/
+# pre-compiled: npx vite build --config compiled/vite.config.mjs, then serve compiled/dist
 ```
 
 ## The two deliveries
@@ -38,7 +79,7 @@ rest of the graph at runtime. No build step, and definitions may arrive later.
 build and emits the already-parsed definitions, so the browser fetches no component sources.
 
 `tests/pantry-app.test.ts` drives one scenario against both and requires every step to observe the
-same DOM, which is the agreement [delivery modes](../../docs/spec/delivery-modes.md) demands.
+same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands of delivery modes.
 
 ## Known gaps this example documents
 
@@ -48,8 +89,5 @@ same DOM, which is the agreement [delivery modes](../../docs/spec/delivery-modes
   would be smaller again, but it cannot express this app yet: compiled invocations carry no
   attributes or projected children (`HN009`), and a component using the general runtime cannot
   contain them at all (`HN003`). That is why the pre-compiled mode here keeps the general runtime.
-- A component's root must not be another component invocation (a delegated root). The outer
-  instance would keep pointing at the element the inner component replaces, and the observer then
-  disconnects it, which stops its effects and aborts its declared request.
-- Two-way `bind:value` reassigns the control's value, which clears the browser's dirty-value flag,
-  so `minlength`/`maxlength` stop applying to typed input. `required` is unaffected.
+- A write-side `<data>` (`method` plus `send="change"`, the proposal's synchronization half) is not
+  implemented yet, so this example only reads.
