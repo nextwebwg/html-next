@@ -523,15 +523,26 @@ function controlValue(element: Element): Value {
   return (element as unknown as { value?: Value }).value ?? element.getAttribute("value");
 }
 
+/**
+ * Writes a bound value into a native control, skipping writes the control already agrees with.
+ *
+ * The skip is required, not an optimization: assigning `value` resets the control's dirty value
+ * flag even when the string is identical, and `minlength`/`maxlength` only constrain a dirty
+ * value. Echoing the user's own input back would therefore switch off their constraints.
+ */
 function applyBoundControlValue(element: Element, name: string, value: Value): boolean {
   const lowerName = name.toLowerCase();
   if (lowerName === "checked" && element instanceof HTMLInputElement) {
-    element.checked = truthy(value);
+    const next = truthy(value);
+    if (element.checked !== next) element.checked = next;
     return true;
   }
   if (lowerName === "value" && element instanceof HTMLSelectElement && element.multiple) {
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    for (const option of Array.from(element.options)) option.selected = selected.has(option.value);
+    for (const option of Array.from(element.options)) {
+      const next = selected.has(option.value);
+      if (option.selected !== next) option.selected = next;
+    }
     return true;
   }
   if (
@@ -540,7 +551,8 @@ function applyBoundControlValue(element: Element, name: string, value: Value): b
       element instanceof HTMLTextAreaElement ||
       element instanceof HTMLSelectElement)
   ) {
-    element.value = value == null ? "" : String(value);
+    const next = value == null ? "" : String(value);
+    if (element.value !== next) element.value = next;
     return true;
   }
   return false;

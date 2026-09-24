@@ -141,6 +141,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} leaves native length constraints applying to a two-way bound control`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // Assigning `value` clears the control's dirty value flag, and minlength only constrains a
+        // dirty value, so echoing the user's own input back would switch their constraint off.
+        await page.setContent(
+          '<template component="x-note" status="early" summary="Note.">' +
+          '<defs><state name="note"></state></defs>' +
+          '<form><input name="note" bind:value="note" minlength="3" maxlength="6">' +
+          '<output class="echo" $value="note"></output></form></template>' +
+          '<x-note></x-note>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+        });
+        await page.locator('input[name="note"]').pressSequentially("ab");
+        await page.waitForFunction(`document.querySelector(".echo")?.textContent === "ab"`);
+        const short = await page.evaluate(() => {
+          const field = document.querySelector('input[name="note"]') as HTMLInputElement;
+          return { tooShort: field.validity.tooShort, valid: field.checkValidity(), bound: field.value };
+        });
+        await page.locator('input[name="note"]').pressSequentially("cd");
+        await page.waitForFunction(`document.querySelector(".echo")?.textContent === "abcd"`);
+        const long = await page.evaluate(() => {
+          const field = document.querySelector('input[name="note"]') as HTMLInputElement;
+          return { tooShort: field.validity.tooShort, valid: field.checkValidity() };
+        });
+        assert.deepEqual(
+          { short, long },
+          {
+            short: { tooShort: true, valid: false, bound: "ab" },
+            long: { tooShort: false, valid: true },
+          },
+        );
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} runs a parent's on: binding on a child component's declared event`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
