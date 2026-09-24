@@ -1265,7 +1265,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-data" status="early" summary="Data.">` +
             `<defs><state name="query" :value="'hello'"></state>` +
-            `<data name="result" src="https://api.example/search" type="json">` +
+            `<data name="result" src="https://api.example/search" type="object({ label: string })">` +
             `<param name="q" :value="query"></param></data></defs>` +
             `<main><i class="pending" $value="result.pending"></i>` +
             `<output class="label" $value="result.value.label"></output></main>` +
@@ -1281,6 +1281,42 @@ describe.skipIf(!enabled)("browser runtime", () => {
           label: document.querySelector("#data .label")?.textContent,
         }));
         assert.deepEqual(result, { pending: "false", label: "Result hello" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} fails a declared data read whose response breaks its declared type`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The endpoint answers with the wrong shape: `label` is a number, not a string.
+        await page.route("https://api.example/**", async (route) => {
+          await route.fulfill({
+            contentType: "application/json",
+            headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: 42 }),
+          });
+        });
+        await page.setContent(
+          `<template component="x-typed" status="early" summary="Typed data.">` +
+            `<defs><data name="result" src="https://api.example/search" type="object({ label: string })">` +
+            `</data></defs>` +
+            `<main><i class="ok" $value="result.ok"></i><i class="pending" $value="result.pending"></i>` +
+            `<output class="label" $value="result.value.label"></output></main>` +
+            `</template><x-typed id="typed"></x-typed>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+        });
+        await page.waitForFunction(() => document.querySelector("#typed .pending")?.textContent === "false");
+        const result = await page.evaluate(() => ({
+          ok: document.querySelector("#typed .ok")?.textContent,
+          label: document.querySelector("#typed .label")?.textContent,
+        }));
+        // A type mismatch is a failed request, not a value the template renders.
+        assert.deepEqual(result, { ok: "false", label: "" });
       } finally {
         await browser.close();
       }

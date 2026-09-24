@@ -52,6 +52,15 @@ export default function controller({ effect, element, on, refs, state }) {
     apply((row) => (row.id === event.detail ? [] : [row]));
   });
 
+  // A catalog hit carries what the endpoint returned; stock and threshold are local decisions.
+  on("add", (event) => {
+    const { id, label, unit } = event.detail;
+    if (pantry.some((row) => row.id === id)) return;
+    pantry = [...pantry, { id, label, quantity: 1, unit, threshold: 1 }];
+    publish();
+    state.catalogQuery = "";
+  });
+
   // The add form is a native <form>: required, minlength, and min/max are the browser's job.
   const form = refs.addForm;
   const submit = (event) => {

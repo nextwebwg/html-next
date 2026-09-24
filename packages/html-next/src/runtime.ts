@@ -1,6 +1,7 @@
 import { parseBrowserComponent } from "./browser-source.js";
 import type { ControllerModule } from "./controller.js";
 import { DataResource } from "./data.js";
+import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
 import type { ComponentGraph } from "./graph.js";
 import {
@@ -31,7 +32,12 @@ import {
   stateAttribute,
   stateAttributeValue,
 } from "./component-styles.js";
-import { parseTypeExpression, parseTypedValue, serializeTypedValue } from "./type-system.js";
+import {
+  parseTypeExpression,
+  parseTypedValue,
+  serializeTypedValue,
+  type TypeNode,
+} from "./type-system.js";
 import type {
   ComponentDefinition,
   DataDeclaration,
@@ -335,8 +341,20 @@ function readInvocation(
       source: dataSource,
       baseURL: definitionBase,
       ...(data.type === undefined ? {} : { type: data.type }),
-      ...(data.debounce === undefined ? {} : { debounce: Number(data.debounce) }),
-      ...(data.poll === undefined ? {} : { poll: Number(data.poll) }),
+      ...(data.debounce === undefined ? {} : { debounce: parseDuration(data.debounce) ?? 0 }),
+      ...(data.poll === undefined ? {} : { poll: parseDuration(data.poll) ?? 0 }),
+      // A declared type is a contract on the response, so a mismatch is a failed request rather
+      // than a value the template renders. The parser already rejected unreadable type syntax.
+      ...(declaredResultType(data.type) === undefined ? {} : {
+        adapt: (raw: unknown) => {
+          const parsed = parseTypedValue(raw, declaredResultType(data.type)!);
+          if (!parsed.ok) {
+            throw new TypeError(`Data source \`${data.name}\` received a response that does not satisfy \`${data.type}\`: ${
+              parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}.`);
+          }
+          return parsed.value;
+        },
+      }),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
     effects.push(createEffect(scope.scheduler, () => {
@@ -356,6 +374,15 @@ function readInvocation(
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
 function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveScope {
   return parent.fork(Object.entries(locals));
+}
+
+/**
+ * The declared type a `<data>` response must satisfy, or undefined when the declaration validates
+ * nothing: an absent type, or a textual type whose body is read as text rather than JSON.
+ */
+function declaredResultType(type: string | undefined): TypeNode | undefined {
+  if (type === undefined || type === "text" || type === "string") return undefined;
+  return parseTypeExpression(type);
 }
 
 function evalValue(expression: string, scope: Scope): Value {

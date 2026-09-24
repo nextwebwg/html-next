@@ -98,7 +98,9 @@ export class DataResource<T = unknown> {
         { signal: abort.signal },
       );
       if (!response.ok) throw new TypeError(`Request failed with ${response.status}.`);
-      const raw = previous.type === "text" ? await response.text() : await response.json();
+      // A textual declared type reads the body as text; every other type is JSON.
+      const textual = previous.type === "text" || previous.type === "string";
+      const raw = textual ? await response.text() : await response.json();
       const value = previous.adapt === undefined ? raw as T : previous.adapt(raw);
       if (this.#stale(generation)) return;
       previous.onState({ pending: false, value, error: null, ok: true });
