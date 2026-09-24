@@ -140,25 +140,6 @@ function collectInvocationEdges(
           node.url,
         );
       }
-      if (
-        invocation.attributes.length > 0 || invocation.children.length > 0 ||
-        invocation.flow !== undefined || invocation.ref !== undefined ||
-        (invocation.events?.length ?? 0) > 0
-      ) {
-        diagnostic(
-          "HN009",
-          `Compiled invocation <${tag}> cannot yet carry attributes, projected children, events, refs, or structural flow.`,
-          node.url,
-        );
-      }
-      const targetNode = nodes.get(target)!;
-      if (Object.values(targetNode.definition.contract.props).some((prop) => prop.required)) {
-        diagnostic(
-          "HN014",
-          `Compiled invocation <${tag}> requires inputs, but invocation inputs are not implemented yet.`,
-          node.url,
-        );
-      }
       invoked.set(tag, target);
     });
     edges.set(node.url, invoked);
@@ -179,13 +160,71 @@ function collectInvocationEdges(
   return { edges, dynamicUses };
 }
 
-function supportSource(imports: ReadonlySet<string>): string {
+/**
+ * Checks the invocations a factory-compiled parent contains. Such a parent emits plain DOM, so an
+ * invocation becomes a bare factory call with nothing to carry inputs or projected content. A
+ * parent the general runtime renders has no such limit: it renders the invocation itself.
+ */
+function assertCompilableInvocations(
+  node: ComponentGraphNode,
+  invoked: ReadonlyMap<string, string>,
+  nodes: ReadonlyMap<string, ComponentGraphNode>,
+): void {
+  visitComponentNodes(node.definition.template, (invocation) => {
+    const target = invoked.get(invocation.name);
+    if (target === undefined) return;
+    if (
+      invocation.attributes.length > 0 || invocation.children.length > 0 ||
+      invocation.flow !== undefined || invocation.ref !== undefined ||
+      (invocation.events?.length ?? 0) > 0
+    ) {
+      diagnostic(
+        "HN009",
+        `Compiled invocation <${invocation.name}> cannot yet carry attributes, projected children, ` +
+          "events, refs, or structural flow. A component the general runtime renders can.",
+        node.url,
+      );
+    }
+    if (Object.values(nodes.get(target)!.definition.contract.props).some((prop) => prop.required)) {
+      diagnostic(
+        "HN014",
+        `Compiled invocation <${invocation.name}> requires inputs, but a compiled invocation ` +
+          "cannot pass them yet. A component the general runtime renders can.",
+        node.url,
+      );
+    }
+  });
+}
+
+function supportSource(
+  imports: ReadonlySet<string>,
+  runtimeRendered: ReadonlyMap<string, ComponentDefinition>,
+): string {
   const lines: string[] = [];
   if (imports.has("@nextwebwg/html-next/generated-runtime")) {
     lines.push('export { manageGeneratedProps } from "@nextwebwg/html-next/generated-runtime";');
   }
   if (imports.has("@nextwebwg/html-next/runtime")) {
     lines.push('export { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";');
+  }
+  if (runtimeRendered.size > 0) {
+    // Components another component's template invokes, where the general runtime renders that
+    // template. It builds them from these definitions; their styles arrive through the CSS each
+    // generated module imports, so the registered copies carry none.
+    const definitions = [...runtimeRendered.values()]
+      .map((definition) => JSON.stringify({ ...definition, css: "" }));
+    lines.push(
+      'import { registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
+      `const renderedComponents = [
+${definitions.map((text) => `  ${text},`).join("\n")}
+];`,
+      "let registered = false;",
+      "export function registerRenderedComponents(root) {",
+      "  if (registered) return;",
+      "  registered = true;",
+      "  registerComponentDefinitions(renderedComponents, root);",
+      "}",
+    );
   }
   return lines.length === 0 ? "export {};\n" : `${lines.join("\n")}\n`;
 }
@@ -203,6 +242,34 @@ function routeSupportImports(module: string, imports: Set<string>): string {
   return routed;
 }
 
+/**
+ * Wires the components a runtime-rendered template invokes. The runtime renders the template, so
+ * the invocations stay in it; it needs their definitions registered, and each one's stylesheet has
+ * to reach the build even though nothing imports its factory.
+ */
+function routeRenderedInvocations(
+  module: string,
+  invoked: ReadonlyMap<string, string>,
+  nodes: ReadonlyMap<string, ComponentGraphNode>,
+  rendered: Map<string, ComponentDefinition>,
+): string {
+  const imports = [`import { registerRenderedComponents } from ${JSON.stringify(supportModule)};`];
+  for (const [, url] of invoked) {
+    const target = nodes.get(url)!;
+    rendered.set(url, target.definition);
+    if (target.definition.css !== "") {
+      imports.push(`import ${JSON.stringify(`${stylePrefix}${encodeURIComponent(url)}.css`)};`);
+    }
+  }
+  const call = "  registerRenderedComponents(element.ownerDocument);";
+  const routed = module.replace(
+    /^(\s*)manageComponentLifecycle\(/m,
+    `${call}
+$1manageComponentLifecycle(`,
+  );
+  return `${imports.join("\n")}\n${routed}`;
+}
+
 function routeComponentInvocations(
   module: string,
   node: ComponentGraphNode,
@@ -210,13 +277,6 @@ function routeComponentInvocations(
   nodes: ReadonlyMap<string, ComponentGraphNode>,
 ): string {
   if (invoked.size === 0) return module;
-  if (module.includes("manageComponentLifecycle")) {
-    diagnostic(
-      "HN003",
-      "A component using the general runtime cannot yet contain compiled component invocations.",
-      node.url,
-    );
-  }
   const imports: string[] = [];
   let routed = module;
   for (const [tag, url] of invoked) {
@@ -301,6 +361,8 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
   const manifestComponents: HtmlNextBuildManifest["components"][number][] = [];
   const allCapabilities = new Set<string>();
   const supportImports = new Set<string>();
+  /** Definitions the general runtime builds because a runtime-rendered template invokes them. */
+  const renderedComponents = new Map<string, ComponentDefinition>();
   const dynamicBoundaries = new Map<string, HtmlNextDynamicBoundary>();
   const generatedNames = new Map<string, string>();
 
@@ -340,7 +402,14 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
       `../styles/${definition.contract.tag}.css`,
       styleId,
     );
-    module = routeComponentInvocations(module, node, invocations.edges.get(node.url) ?? new Map(), graph.nodes);
+    const invoked = invocations.edges.get(node.url) ?? new Map<string, string>();
+    if (invoked.size > 0 && module.includes("manageComponentLifecycle")) {
+      // The general runtime renders this template, so it renders the invocations too.
+      module = routeRenderedInvocations(module, invoked, graph.nodes, renderedComponents);
+    } else {
+      assertCompilableInvocations(node, invoked, graph.nodes);
+      module = routeComponentInvocations(module, node, invoked, graph.nodes);
+    }
     module = routeSupportImports(module, supportImports);
     components.set(resolvedComponentId(node.url), module);
     styles.set(`${resolvedStylePrefix}${encodedURL}.css`, definition.css);
@@ -393,7 +462,7 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     components,
     publicComponents,
     styles,
-    support: supportSource(supportImports),
+    support: supportSource(supportImports, renderedComponents),
     sourceFiles: Object.freeze([...graph.nodes.keys()].map((url) => fileURLToPath(url))),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",

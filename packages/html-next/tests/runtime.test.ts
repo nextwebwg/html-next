@@ -154,6 +154,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} lowers components that other components render in the same pass`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // A component's invocations only exist once it renders, so one explicit pass has to follow
+        // them. Otherwise nested components stay inert until something observes the document.
+        await page.setContent(
+          '<template component="x-chip" status="early" summary="Chip.">' +
+          '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
+          '<span class="chip" $value="label"></span></template>' +
+          '<template component="x-row" status="early" summary="Row.">' +
+          '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
+          '<li class="row"><x-chip :label="tone"></x-chip><slot></slot></li></template>' +
+          '<template component="x-bar" status="early" summary="Bar.">' +
+          '<main><ul><x-row $each="index of [1, 2]" :tone="format(\'t%s\', index)">' +
+          '<b>projected</b></x-row></ul></main></template>' +
+          '<x-bar></x-bar>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const lowered = await page.evaluate(() => {
+          return (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+        });
+        const result = await page.evaluate(() => ({
+          rows: Array.from(document.querySelectorAll("li.row"), (row) => row.getAttribute("data-tone")),
+          chips: Array.from(document.querySelectorAll("span.chip"), (chip) => chip.textContent),
+          projected: Array.from(document.querySelectorAll("li.row > b"), (node) => node.textContent),
+          pending: document.querySelectorAll("x-row, x-chip").length,
+        }));
+        assert.deepEqual({ lowered, ...result }, {
+          // x-bar, two x-row, and the x-chip each row renders.
+          lowered: 5,
+          rows: ["t1", "t2"],
+          chips: ["t1", "t2"],
+          projected: ["projected", "projected"],
+          pending: 0,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} reports a clear diagnostic when a document definition needs the live parser`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
