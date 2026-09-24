@@ -10,12 +10,15 @@ import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
-const runtimeUrl = new URL("../src/runtime.ts", import.meta.url);
+const runtimeUrl = new URL("../src/live.ts", import.meta.url);
 const generatedRuntimeUrl = new URL("../src/generated-runtime.ts", import.meta.url);
+/** The general runtime on its own: what a build-time graph ships, with no component parser. */
+const runtimeOnlyUrl = new URL("../src/runtime.ts", import.meta.url);
 
 describe.skipIf(!enabled)("browser runtime", () => {
   let bundlePath = "";
   let generatedBundlePath = "";
+  let runtimeOnlyBundlePath = "";
   let temporaryDirectory = "";
   let source = "";
 
@@ -27,6 +30,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-runtime-"));
     bundlePath = join(temporaryDirectory, "runtime.js");
     generatedBundlePath = join(temporaryDirectory, "generated-runtime.js");
+    runtimeOnlyBundlePath = join(temporaryDirectory, "runtime-only.js");
+    await build({
+      entryPoints: [runtimeOnlyUrl.pathname],
+      bundle: true,
+      format: "iife",
+      globalName: "BareRuntime",
+      outfile: runtimeOnlyBundlePath,
+      platform: "browser",
+      target: ["es2022"],
+    });
     await build({
       entryPoints: [runtimeUrl.pathname],
       bundle: true,
@@ -136,6 +149,71 @@ describe.skipIf(!enabled)("browser runtime", () => {
           boundUnits: "userSpaceOnUse",
           foreignChild: "http://www.w3.org/1999/xhtml",
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} lowers components that other components render in the same pass`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // A component's invocations only exist once it renders, so one explicit pass has to follow
+        // them. Otherwise nested components stay inert until something observes the document.
+        await page.setContent(
+          '<template component="x-chip" status="early" summary="Chip.">' +
+          '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
+          '<span class="chip" $value="label"></span></template>' +
+          '<template component="x-row" status="early" summary="Row.">' +
+          '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
+          '<li class="row"><x-chip :label="tone"></x-chip><slot></slot></li></template>' +
+          '<template component="x-bar" status="early" summary="Bar.">' +
+          '<main><ul><x-row $each="index of [1, 2]" :tone="format(\'t%s\', index)">' +
+          '<b>projected</b></x-row></ul></main></template>' +
+          '<x-bar></x-bar>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const lowered = await page.evaluate(() => {
+          return (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+        });
+        const result = await page.evaluate(() => ({
+          rows: Array.from(document.querySelectorAll("li.row"), (row) => row.getAttribute("data-tone")),
+          chips: Array.from(document.querySelectorAll("span.chip"), (chip) => chip.textContent),
+          projected: Array.from(document.querySelectorAll("li.row > b"), (node) => node.textContent),
+          pending: document.querySelectorAll("x-row, x-chip").length,
+        }));
+        assert.deepEqual({ lowered, ...result }, {
+          // x-bar, two x-row, and the x-chip each row renders.
+          lowered: 5,
+          rows: ["t1", "t2"],
+          chips: ["t1", "t2"],
+          projected: ["projected", "projected"],
+          pending: 0,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} reports a clear diagnostic when a document definition needs the live parser`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="x-plain" status="early" summary="Plain.">' +
+          '<p class="plain">plain</p></template><x-plain></x-plain>',
+        );
+        // The general runtime, without the live delivery's parser installed.
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const outcome = await page.evaluate(() => {
+          try {
+            (window as unknown as { BareRuntime: { lowerDocument(): number } }).BareRuntime.lowerDocument();
+            return "lowered";
+          } catch (error) {
+            return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? String(error);
+          }
+        });
+        assert.equal(outcome, "HR007");
       } finally {
         await browser.close();
       }

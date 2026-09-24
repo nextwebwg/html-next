@@ -83,11 +83,10 @@ same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands
 
 ## Known gaps this example documents
 
-- The pre-compiled delivery still bundles the component parser: `runtime.ts` imports it statically
-  for inline `<template component>` discovery, so pre-parsing the graph does not yet shrink it.
-- `@nextwebwg/html-next-unplugin` compiles components to native DOM factories, which
-  would be smaller again, but it cannot express this app yet: compiled invocations carry no
-  attributes or projected children (`HN009`), and a component using the general runtime cannot
-  contain them at all (`HN003`). That is why the pre-compiled mode here keeps the general runtime.
+- `@nextwebwg/html-next-unplugin` compiles components to native DOM factories, which is smaller
+  again. A component the general runtime renders may now invoke others (the build registers their
+  definitions), but a *factory-compiled* invocation still cannot carry inputs, projected children,
+  events, refs, or flow (`HN009`, `HN014`), so a graph of purely presentational components does not
+  yet compile all the way down.
 - A write-side `<data>` (`method` plus `send="change"`, the proposal's synchronization half) is not
   implemented yet, so this example only reads.

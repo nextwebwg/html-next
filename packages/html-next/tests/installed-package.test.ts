@@ -17,6 +17,7 @@ const enabled = process.env.HTMLNEXT_CONSUMER_TEST === "1";
 const publicExports = [
   ".",
   "./runtime",
+  "./live",
   "./generated-runtime",
   "./forms",
   "./validation",
@@ -26,6 +27,7 @@ const publicExports = [
 ] as const;
 const browserExports = [
   "./runtime",
+  "./live",
   "./generated-runtime",
   "./forms",
   "./validation",

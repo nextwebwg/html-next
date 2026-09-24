@@ -14,6 +14,7 @@ const componentsPackage = "@nextwebwg/html-next";
 const publicExports = [
   ".",
   "./runtime",
+  "./live",
   "./generated-runtime",
   "./forms",
   "./validation",
@@ -23,6 +24,7 @@ const publicExports = [
 ] as const;
 const browserExports = [
   "./runtime",
+  "./live",
   "./generated-runtime",
   "./forms",
   "./validation",
