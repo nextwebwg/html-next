@@ -148,6 +148,10 @@ export function createDispatch(
   options: DispatchOptions = {},
 ): (name: string, detail?: unknown) => boolean {
   const { declared = {}, checks = {}, modeled = [] } = options;
+  // One change can be reported by more than one event — a choice is both a select and a change —
+  // and each carries the new value. The prop updates once per change: a value already reported in
+  // this turn of the event loop is not reported again.
+  const reported = new Map<string, unknown>();
   return (name, detail) => {
     const check = checks[name];
     if (detail !== undefined && check !== undefined && !check(detail)) {
@@ -156,7 +160,12 @@ export function createDispatch(
     emit?.(name, detail);
     if (detail !== null && typeof detail === "object") {
       for (const prop of modeled) {
-        if (prop in detail) emit?.(\`update:\${prop}\`, (detail as Record<string, unknown>)[prop]);
+        if (!(prop in detail)) continue;
+        const value = (detail as Record<string, unknown>)[prop];
+        if (reported.has(prop) && Object.is(reported.get(prop), value)) continue;
+        if (reported.size === 0) queueMicrotask(() => reported.clear());
+        reported.set(prop, value);
+        emit?.(\`update:\${prop}\`, value);
       }
     }
     return root.value?.dispatchEvent(
