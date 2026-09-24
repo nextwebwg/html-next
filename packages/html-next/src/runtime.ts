@@ -114,6 +114,11 @@ const contentOnly = new WeakSet<Element>();
  * component that actually lowered there.
  */
 const loweredInvocations = new WeakMap<Element, { root: Element; instance: RuntimeInstance }>();
+/**
+ * Invocation elements a component has already replaced. A mutation batch can still name one, and
+ * lowering it again would build a second instance whose own root gets discovered in turn.
+ */
+const supersededInvocations = new WeakSet<Element>();
 /** Work a parent deferred until its child invocation lowered, keyed by that invocation. */
 const rebindOnLower = new WeakMap<Element, ((root: Element) => void)[]>();
 
@@ -123,6 +128,8 @@ function whenLowered(invocation: Element, rebind: (root: Element) => void): void
   else pending.push(rebind);
 }
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
+/** How deep one lowering pass follows component invocations that other components render. */
+const maximumNestedLoweringPasses = 32;
 const definitionAttributes = new WeakMap<ComponentDefinition, readonly [
   Readonly<Record<string, string>>,
   Readonly<Record<string, string>>,
@@ -1726,6 +1733,7 @@ function commitRuntimeInvocations(
     const host = hostRootFor(invocation);
     invocation.host = host;
     if (invocation.replace) {
+      supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
       loweredInvocations.set(invocation.invocation, { root: host, instance: invocation.instance });
       runtimeInstances.delete(invocation.invocation);
@@ -1736,10 +1744,14 @@ function commitRuntimeInvocations(
     invocation.context.committed = true;
     invocation.instance.element = host;
     if (host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
-      // This component delegates its root to a component that has not lowered yet. Claim nothing
-      // until it does: installing on an element about to be replaced would leave this instance's
-      // reflection, public methods, and host stranded on a discarded node.
-      whenLowered(host, (finalRoot) => adoptComponentRoot(invocation.instance, finalRoot));
+      // This component delegates its root to a component that has not lowered yet. Claim the
+      // element so discovery does not lower this component onto it a second time, but install
+      // nothing: reflection, public methods, and the host belong on the root that survives.
+      runtimeInstances.set(host, invocation.instance);
+      whenLowered(host, (finalRoot) => {
+        if (runtimeInstances.get(host) === invocation.instance) runtimeInstances.delete(host);
+        adoptComponentRoot(invocation.instance, finalRoot);
+      });
     } else {
       adoptComponentRoot(invocation.instance, host);
     }
@@ -1752,6 +1764,90 @@ function commitRuntimeInvocations(
  * root, so page code reaches its host, public methods, and reflected props; a component it
  * delegates to shares the element and rides the owner's connection lifecycle.
  */
+/**
+ * Lowers the components a committed batch rendered, and the components those render in turn.
+ *
+ * A component's invocations only exist once it renders, so one lowering call has to follow them.
+ * Otherwise nested components stay inert until something else observes the document, which a build
+ * -time delivery has no reason to do.
+ */
+function lowerRenderedComponents(
+  root: Document,
+  registry: DocumentRegistry,
+  committed: readonly PreparedInvocation[],
+  shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
+): Element[] {
+  const lowered: Element[] = [];
+  let batch = committed;
+  for (let pass = 0; ; pass += 1) {
+    // Only a component whose template can invoke another is worth rescanning.
+    const rendered = batch.filter((invocation) => mayInvokeComponents(invocation.definition));
+    if (rendered.length === 0) return lowered;
+    if (pass >= maximumNestedLoweringPasses) {
+      fail("HR008", "Component invocations nested deeper than the lowering limit.");
+    }
+    const nested = new Set<Element>();
+    const selector = discoverySelector(registry);
+    for (const invocation of rendered) {
+      collectWithin(invocation.host ?? invocation.nativeRoot, selector, nested);
+    }
+    const prepared: PreparedInvocation[] = [];
+    for (const element of nested) {
+      const live = registry.definitions.get(element.localName);
+      if (live === undefined) continue;
+      const { definition } = live;
+      if (
+        contentOnly.has(element) ||
+        supersededInvocations.has(element) ||
+        alreadyLowered(element, definition.contract.tag) ||
+        root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
+        shouldLower?.(element, definition, false) === false
+      ) continue;
+      prepared.push(prepareRuntimeInvocation(element, definition, false));
+    }
+    if (prepared.length === 0) return lowered;
+    commitRuntimeInvocations(registry, prepared);
+    for (const invocation of prepared) lowered.push(invocation.host ?? invocation.nativeRoot);
+    batch = prepared;
+  }
+}
+
+/**
+ * Whether a definition can invoke another component, which decides whether lowering it is worth
+ * rescanning its output for. A component tag always contains a hyphen, and a delegated root names
+ * one outright, so this answers from the definition alone. Cached: templates do not change.
+ */
+const componentInvokers = new WeakMap<ComponentDefinition, boolean>();
+
+function mayInvokeComponents(definition: ComponentDefinition): boolean {
+  let known = componentInvokers.get(definition);
+  if (known !== undefined) return known;
+  known = definition.root?.kind === "component";
+  const visit = (node: TemplateNode): void => {
+    if (known === true || node.kind === "text") return;
+    if (node.kind === "slot") {
+      for (const child of node.fallback ?? []) visit(child);
+      return;
+    }
+    if (node.name.includes("-")) {
+      known = true;
+      return;
+    }
+    for (const child of node.children) visit(child);
+  };
+  visit(definition.template);
+  componentInvokers.set(definition, known);
+  return known;
+}
+
+/** Whether this element is already the lowered root of the named component. */
+function alreadyLowered(element: Element, tag: string): boolean {
+  const claimed = runtimeInstances.get(element);
+  if (claimed === undefined) return false;
+  return claimed.definition.contract.tag === tag ||
+    claimed.delegates.some((delegate) => delegate.definition.contract.tag === tag);
+}
+
 function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
   instance.element = root;
   const owner = runtimeInstances.get(root);
@@ -1808,12 +1904,17 @@ function lowerScopes(
     newDefinitions.set(tag, live);
   }
 
-  const prepared: PreparedInvocation[] = [];
   const roots = new Set<Element>();
+  const lowered: Element[] = [];
+  const prepared: PreparedInvocation[] = [];
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
       contentOnly.has(element) ||
+      supersededInvocations.has(element) ||
+      // Already lowered here: a repeat pass must not build this component onto its own root a
+      // second time. Another component still may, which is how a delegated root lowers.
+      alreadyLowered(element, definition.contract.tag) ||
       root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
       shouldLower?.(element, definition, hydration) === false
     ) return false;
@@ -1841,12 +1942,12 @@ function lowerScopes(
   collect(registry.definitions, discovered);
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
-    const selector = [
+    const pendingSelector = [
       "[data-component]",
       ...Array.from(newDefinitions.keys()),
     ].join(",");
     const existing = new Set<Element>();
-    collectWithin(root, selector, existing);
+    collectWithin(root, pendingSelector, existing);
     collect(newDefinitions, existing);
   }
 
@@ -1860,8 +1961,16 @@ function lowerScopes(
   }
 
   commitRuntimeInvocations(registry, prepared);
-  const lowered = prepared.map((invocation) => invocation.host ?? invocation.nativeRoot);
-  for (const element of lowered) roots.add(element);
+  for (const invocation of prepared) {
+    const element = invocation.host ?? invocation.nativeRoot;
+    lowered.push(element);
+    roots.add(element);
+  }
+  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower)) {
+    lowered.push(element);
+    roots.add(element);
+  }
+
   return { lowered, roots: Array.from(roots) };
 }
 
@@ -2085,9 +2194,13 @@ export function attachComponent(
       const value = options.props?.[name];
       if (value !== undefined && value !== null) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
     }
-    commitRuntimeInvocations(registry, [
+    const attaching = [
       prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true),
-    ]);
+    ];
+    commitRuntimeInvocations(registry, attaching);
+    // Generated output attaches its own root, so nothing else will lower the components this
+    // template invokes; they lower here, from the definitions the graph registered.
+    lowerRenderedComponents(root, registry, attaching);
   }
 
   const attached = runtimeInstance(element);

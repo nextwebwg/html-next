@@ -238,25 +238,49 @@ describe("HTML Next unplugin", () => {
     }), /HN008: Stable public component modules are available only in library mode/);
   });
 
-  it("rejects linked invocations that still require the general runtime renderer", async () => {
+  it("lets the general runtime render the components its template invokes", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-runtime-parent-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="App.">
         <defs><state name="count" :value="0"></state></defs>
-        <main><output $value="count + 1"></output><x-child></x-child></main>
+        <main><output $value="count + 1"></output><x-child :label="count"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
-      <p>Child</p>
-    </template>`);
+      <defs><prop name="label" type="string" default="none">Label.</prop></defs>
+      <p $value="label"></p><style>p { color: rebeccapurple; }</style></template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
-    await assert.rejects(() => build({
+    await build({
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /app\.html: HN003:.*general runtime.*compiled component invocations/);
+      resolve: {
+        alias: {
+          "@nextwebwg/html-next/generated-runtime": new URL(
+            "../../html-next/src/generated-runtime.ts",
+            import.meta.url,
+          ).pathname,
+          "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+        },
+      },
+      build: {
+        minify: false,
+        lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" },
+      },
+    });
+
+    // The runtime renders x-app's template, so the invocation stays in it: the build registers the
+    // child's definition and includes its module, rather than compiling a factory call.
+    const output = await readFile(join(root, "dist/app.js"), "utf8");
+    assert.match(output, /registerComponentDefinitions/);
+    assert.match(output, /registerRenderedComponents\(element\.ownerDocument\)/);
+    assert.match(output, /"tag":\s*"x-child"/);
+    assert.doesNotMatch(output, /createXChild\(\)/);
+    // The registered copy carries no styles, so the child's stylesheet has to reach the build.
+    assert.match(output, /"css":\s*""/);
+    const css = await readFile(join(root, "dist/components.css"), "utf8");
+    assert.match(css, /rebeccapurple/);
   });
 
   it("rejects linked invocation inputs until they can preserve the full child contract", async () => {
