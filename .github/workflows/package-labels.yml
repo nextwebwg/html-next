@@ -1,0 +1,19 @@
+name: Package labels
+
+# Labels a pull request by the packages it changes. The labeler reads only the changed paths; it
+# does not check out or run code from the pull request.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0

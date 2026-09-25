@@ -8,8 +8,9 @@ status: early-release
 
 # HTML Next component-generation MVP plan
 
-> The HTML Next language specification and design record now live in the
-> [`nextwebwg/site`](https://github.com/nextwebwg/site) repository. Paths such as
+> The HTML Next language specification now lives in the
+> [`nextwebwg/specs`](https://github.com/nextwebwg/specs) repository and its design record in
+> `nextwebwg/site`. Paths such as
 > `docs/specification.md` referenced below point to their original location during MVP
 > development; this repository is the reference implementation (polyfill + converter).
 

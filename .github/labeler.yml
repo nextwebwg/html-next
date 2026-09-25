@@ -1,0 +1,10 @@
+# Pull requests are labeled by the packages they change (.github/workflows/package-labels.yml).
+"package: html-next":
+- changed-files:
+  - any-glob-to-any-file: "packages/html-next/**"
+"package: unplugin":
+- changed-files:
+  - any-glob-to-any-file: "packages/html-next-unplugin/**"
+"package: converter":
+- changed-files:
+  - any-glob-to-any-file: "packages/html-next-converter/**"

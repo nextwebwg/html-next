@@ -9,8 +9,8 @@
 ## No specification in this repository
 
 - This repository is the proposal's JavaScript tooling. It holds no specification, and none may be added.
-- The specification is the public proposal in the `nextwebwg/site` repository (published at https://nextwebwg.org/html-next/).
-- A request to "add to the spec", "update the spec", or "amend the spec" means editing the public proposal in `nextwebwg/site`, even when it is made while working here. Never create spec documents, support profiles, or spec tests in this repository.
+- The specification is the public proposal in the `nextwebwg/specs` repository, written in Markdown and rendered by the site at https://nextwebwg.org/html-next/.
+- A request to "add to the spec", "update the spec", or "amend the spec" means editing the public proposal in `nextwebwg/specs`, even when it is made while working here. Never create spec documents, support profiles, or spec tests in this repository.
 - Tooling documentation (implementation notes, converter requirements) may live here and links to the proposal for normative behavior.
 
 ## Workspace structure
