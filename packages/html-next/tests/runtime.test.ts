@@ -1500,6 +1500,45 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} checks a typed reference read by index, as ui-combobox reads its first item`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const messages: string[] = [];
+        page.on("console", (message) => messages.push(message.text()));
+        await page.setContent(
+          `<template component="x-first" status="early" summary="Indexed reads.">` +
+            `<defs><state name="items" type="list(object({ name: string, 'odd key': string }))"` +
+            ` :value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
+            `<state name="byId" type="record(object({ name: string }))" :value="{ '42': { name: 'Ann' } }"></state>` +
+            `<handler name="swap"><set name="items" :value="[{ name: 7, 'odd key': 'y' }]"></set>` +
+            `<set name="byId" :value="{ '42': { name: 7 } }"></set></handler></defs>` +
+            `<main><output $value="items[0].name"></output><b $value="items[0]['odd key']"></b><i $value="byId['42'].name"></i>` +
+            `<button type="button" on:click="swap"></button></main>` +
+            `</template><x-first id="first"></x-first>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const read = () => page.evaluate(() => [
+          document.querySelector("#first output")?.textContent,
+          document.querySelector("#first b")?.textContent,
+          document.querySelector("#first i")?.textContent,
+        ]);
+        await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+        });
+        const initial = await read();
+        await page.click("#first button");
+        await page.waitForTimeout(50);
+        // A dependency path names a list index and a record key alike (items.0.name, byId.42.name);
+        // reading it must not fail, and a value that breaks its declared type leaves only that
+        // reference inert, whether a list or a record holds it.
+        assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann"], swapped: ["Apple", "y", "Ann"] });
+        assert.deepEqual(messages.filter((text) => /SyntaxError/.test(text)), []);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} leaves a reference inert when its value breaks its declared type`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
