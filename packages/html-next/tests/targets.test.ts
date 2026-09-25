@@ -296,6 +296,12 @@ describe("official target compilers", () => {
     const source = `<template component="demo-html" status="experimental" summary="Html.">
       <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`;
     assert.throws(() => generateVueComponent(parseComponent(source)), /HT032/);
+    // Only a root <template $match> chooses between roots; $match on a real root element is not one.
+    assert.throws(() => generateVueComponent(parseComponent(componentSource(
+      "x-section",
+      '<prop name="as" type="a | b" default="a">Kind.</prop>',
+      `<section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
+    ))), /HT036/);
     // HTML Next's own outputs still build; only the Vue artifact is left out.
     const artifacts = generated(source);
     assert.equal(artifacts.has("vue/DemoHtml.vue"), false);

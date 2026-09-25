@@ -880,6 +880,8 @@ function parseElement(
     ? { defaults: slotState.defaults, names: [...slotState.names], refs: [...slotState.refs] }
     : undefined;
   const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
+  // Dynamic slots have no name to match, so arms' dynamic slots merge by position.
+  const dynamicSlots: SlotContract[] = [];
   for (const child of childNodes) {
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
@@ -925,10 +927,12 @@ function parseElement(
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
-      // Root arms repeat their slots; the contract lists each once.
-      if (dynamic || !slotState.contracts.some((contract) => !contract.dynamic && contract.name === name)) {
-        slotState.contracts.push(slotContract);
-      }
+      // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
+      const existing = dynamic
+        ? -1
+        : slotState.contracts.findIndex((contract) => !contract.dynamic && contract.name === name);
+      if (existing === -1) slotState.contracts.push(slotContract);
+      else if (slotContract.required) slotState.contracts[existing] = { ...slotState.contracts[existing]!, required: true };
       if (name === undefined && nameExpression === undefined && fallback.length === 0) {
         children.push({ kind: "slot" });
       } else {
@@ -958,12 +962,20 @@ function parseElement(
     slotState.refs.clear();
     for (const name of shared.names) slotState.names.add(name);
     for (const ref of shared.refs) slotState.refs.add(ref);
+    const before = slotState.contracts.length;
     children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
+    const armDynamic = slotState.contracts.slice(before).filter((slot) => slot.dynamic);
+    slotState.contracts.splice(0, slotState.contracts.length, ...slotState.contracts.filter((slot) => !armDynamic.includes(slot)));
+    for (const [index, slot] of armDynamic.entries()) {
+      const known = dynamicSlots[index];
+      dynamicSlots[index] = known === undefined ? slot : { ...known, required: known.required || slot.required };
+    }
     merged.defaults = Math.max(merged.defaults, slotState.defaults);
     for (const name of slotState.names) merged.names.add(name);
     for (const ref of slotState.refs) merged.refs.add(ref);
   }
   if (shared !== undefined) {
+    slotState.contracts.push(...dynamicSlots);
     slotState.defaults = merged.defaults;
     for (const name of merged.names) slotState.names.add(name);
     for (const ref of merged.refs) slotState.refs.add(ref);
@@ -1081,7 +1093,7 @@ export function parseComponentNodes(
     if (
       attr(root, "$match") !== "" ||
       last === undefined ||
-      rootArms.some((arm) => !isElement(arm) || sourceTag(arm) === "template" || !platform.isNativeElement(sourceTag(arm))) ||
+      rootArms.some((arm) => !isElement(arm) || ["template", "slot"].includes(sourceTag(arm)) || !platform.isNativeElement(sourceTag(arm))) ||
       attr(last as Element, "$else") === undefined
     ) {
       fail("HT021", "A root `$match` has no expression, and its arms are native elements ending in `$else`.", source);

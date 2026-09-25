@@ -55,6 +55,7 @@ import type {
   SlotNode,
   TemplateNode,
 } from "./template.js";
+import { rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { PropContract, PropValue } from "./types.js";
 
@@ -109,6 +110,10 @@ interface RuntimeInstance {
    * They are not separately discoverable, so this instance carries their lifecycle.
    */
   readonly delegates: RuntimeInstance[];
+  /** What a parent bound on this component's invocation; each follows the root when it is replaced. */
+  readonly followers: ((root: Element) => void)[];
+  /** What the current rendering of the root owns. */
+  owned: RenderOwned;
 }
 
 interface DocumentRegistry {
@@ -123,7 +128,7 @@ const contentOnly = new WeakSet<Element>();
  * against the invocation, so its bound props and event listeners resolve through this to reach the
  * component that actually lowered there.
  */
-const loweredInvocations = new WeakMap<Element, { root: Element; instance: RuntimeInstance }>();
+const loweredInvocations = new WeakMap<Element, { instance: RuntimeInstance }>();
 /**
  * Invocation elements a component has already replaced. A mutation batch can still name one, and
  * lowering it again would build a second instance whose own root gets discovered in turn.
@@ -571,12 +576,24 @@ interface HydrationRange {
   readonly content: readonly Node[];
 }
 
-interface RuntimeRenderContext {
-  readonly definition: ComponentDefinition;
+/**
+ * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
+ * add, and its `on:connect`/`on:disconnect` handlers. A root switch stops it all and starts afresh.
+ */
+interface RenderOwned {
   readonly effects: ReactiveOwner[];
-  readonly refs: Record<string, Element>;
   readonly connectCallbacks: Set<() => void>;
   readonly disconnectCallbacks: Set<() => void>;
+}
+
+function renderOwned(): RenderOwned {
+  return { effects: [], connectCallbacks: new Set(), disconnectCallbacks: new Set() };
+}
+
+interface RuntimeRenderContext {
+  readonly definition: ComponentDefinition;
+  owned: RenderOwned;
+  readonly refs: Record<string, Element>;
   root?: Element;
   readonly projectedNodes: readonly Node[];
   readonly projectedSlotNames: WeakMap<Node, string>;
@@ -633,7 +650,7 @@ function ownEffect(
   run: () => void | (() => void),
   priority = 1,
 ): void {
-  context.effects.push(createEffect(scope.scheduler, run, priority));
+  context.owned.effects.push(createEffect(scope.scheduler, run, priority));
 }
 
 function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value): void {
@@ -809,8 +826,8 @@ function bindEvents(
     };
     if (binding.name === "connect" || binding.name === "disconnect") {
       const callbacks = binding.name === "connect"
-        ? context.connectCallbacks
-        : context.disconnectCallbacks;
+        ? context.owned.connectCallbacks
+        : context.owned.disconnectCallbacks;
       callbacks.add(() => listener(new Event(binding.name)));
       continue;
     }
@@ -952,7 +969,7 @@ function renderDynamicNode(
     for (const effect of childEffects) effect.stop();
     childEffects = [];
     clearRange(start, end);
-    const effectsStart = context.effects.length;
+    const effectsStart = context.owned.effects.length;
     let rendered: Node[] = [];
     if (node.flow?.kind === "if") {
       const test = evalConforming(node.flow.test, scope, context.definition);
@@ -970,7 +987,7 @@ function renderDynamicNode(
     } else if (node.flow?.kind === "match") {
       rendered = renderMatch(node, scope, document, context);
     }
-    childEffects = context.effects.slice(effectsStart);
+    childEffects = context.owned.effects.slice(effectsStart);
     end.before(...materialize(rendered, document));
   });
   return [fragment];
@@ -1095,7 +1112,7 @@ function renderEachRegion(
       let block = blocks.get(key);
       if (block === undefined) {
         local ??= scope.fork(Object.entries(locals));
-        const effectsStart = context.effects.length;
+        const effectsStart = context.owned.effects.length;
         const rendered = materialize(
           renderInstance(body, local, document, passThrough, context),
           document,
@@ -1107,7 +1124,7 @@ function renderEachRegion(
           start: blockStart,
           end: blockEnd,
           scope: local,
-          effects: context.effects.slice(effectsStart),
+          effects: context.owned.effects.slice(effectsStart),
         };
       } else {
         block.scope.set(flow.item, item);
@@ -1162,11 +1179,11 @@ function renderNode(
 
 /** The root element to render: the definition's own, or the root `$match` arm its props choose. */
 function componentRoot(definition: ComponentDefinition, scope: Scope): ElementNode {
-  const template = definition.template;
-  if (template.flow?.kind !== "match") return template;
-  return template.children.find((arm): arm is ElementNode => arm.kind === "element" && (
+  const arms = rootArms(definition.template);
+  if (arms === undefined) return definition.template;
+  return arms.find((arm) =>
     arm.flow?.kind === "else" || (arm.flow?.kind === "when" && truthy(evalValue(arm.flow.test, scope)))
-  ))!;
+  )!;
 }
 
 /**
@@ -1178,9 +1195,11 @@ export function componentRootIndex(
   props: Readonly<Record<string, unknown>>,
 ): number {
   const values = Object.create(null) as Record<string, PropValue | undefined>;
-  // A framework's null leaves the prop to its default, as attachComponent does.
-  for (const name of Object.keys(definition.contract.props)) {
-    if (props[name] !== undefined && props[name] !== null) values[name] = props[name] as PropValue;
+  // The same conversion attachComponent applies: a framework's null leaves the prop to its
+  // default, and a value round-trips through its data-* form and declared type.
+  for (const [name, prop] of Object.entries(definition.contract.props)) {
+    const input = props[name];
+    if (input !== undefined && input !== null) values[name] = invocationValue(prop, serializeTypedValue(input, prop.type));
   }
   const { scope, effects } = componentScope(definition, values);
   try {
@@ -1333,7 +1352,7 @@ function renderInstance(
         if (lowered !== undefined && attribute.target === undefined) {
           const propName = propAttributeNames(lowered.instance.definition, false)[attribute.name.toLowerCase()];
           if (propName !== undefined) {
-            applyComponentProps(lowered.instance, lowered.root, { [propName]: toAttribute(value) });
+            applyComponentProps(lowered.instance, { [propName]: toAttribute(value) });
             return;
           }
         }
@@ -1685,10 +1704,10 @@ function installStateAttribute(instance: RuntimeInstance): void {
 }
 
 /**
- * Reflects the author's explicit props onto the lowered root as `data-<name>` so the element records
- * which options produced it (and server output can be hydrated). Defaults are never written, and no
- * JavaScript properties are added: the root keeps its native properties untouched. Later attribute
- * writes by the author are parsed back into the scope.
+ * Records the author's explicit props on the lowered root as `data-<name>` so the element shows
+ * which options produced it and server output can be hydrated. Defaults are not written unless the
+ * template binds the attribute itself, and no JavaScript properties are added. The record is output:
+ * props change through bindings and framework adapters, never by writing these attributes.
  */
 function installPropReflection(instance: RuntimeInstance): void {
   // `data-<name>` records the configuration; it is output, never read back after lowering.
@@ -1794,16 +1813,16 @@ function prepareRuntimeInvocation(
     explicit,
     frameworkOwned,
     delegates: [],
+    followers: [],
+    owned: renderOwned(),
     rootNode,
     rootElement: createSignal<Element | undefined>(undefined),
     projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
   };
   const context: RuntimeRenderContext = {
     definition,
-    effects,
+    owned: instance.owned,
     refs: instance.refs,
-    connectCallbacks: instance.connectCallbacks,
-    disconnectCallbacks: instance.disconnectCallbacks,
     projectedNodes: children,
     projectedSlotNames,
     slotInsertions: [],
@@ -1812,7 +1831,6 @@ function prepareRuntimeInvocation(
     committed: hydration,
     hydrationRanges,
   };
-  const renderStart = effects.length;
   const rendered = renderNode(
     rootNode,
     scope,
@@ -1837,7 +1855,7 @@ function prepareRuntimeInvocation(
   }
   addAttributeToken(nativeRoot, COMPONENT_ATTRIBUTE, definition.contract.tag);
   instance.element = nativeRoot;
-  if (definition.template.flow?.kind === "match") installRootSwitch(instance, context, effects.slice(renderStart));
+  if (rootArms(definition.template) !== undefined) installRootSwitch(instance, context);
   return {
     invocation,
     nativeRoot,
@@ -1858,11 +1876,13 @@ type RootAttribute = Pick<Attr, "name" | "value">;
 function attachRoot(instance: RuntimeInstance, element: Element): void {
   const previous = instance.rootElement.get();
   if (previous !== undefined && previous !== element) {
-    runtimeInstances.delete(previous);
+    // The replaced element keeps resolving to this instance, so a reference a caller kept, such
+    // as the element a factory returned, still reaches the component.
     const lifecycle = (previous as RuntimeElement)[lifecycleKey];
     if (lifecycle !== undefined) {
       delete (previous as RuntimeElement)[lifecycleKey];
       (element as RuntimeElement)[lifecycleKey] = lifecycle;
+      lifecycle.element = element;
     }
     documentState(element.ownerDocument).move?.(previous, element);
   }
@@ -1871,6 +1891,11 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   runtimeInstances.set(element, instance);
   installPublicMethods(element, instance);
   instance.rootElement.set(element);
+  if (previous !== undefined && previous !== element) {
+    for (const owner of [instance, ...instance.delegates]) {
+      for (const follow of owner.followers) follow(element);
+    }
+  }
 }
 
 /**
@@ -1878,15 +1903,17 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
  * native root takes the old one's place. It keeps every attribute the old arm's template did not
  * write, so the invocation's, a factory's, and page code's attributes carry over.
  */
-function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderContext, rendered: ReactiveOwner[]): void {
+function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderContext): void {
   const { definition, scope } = instance;
   const tag = definition.contract.tag;
-  let owned = rendered;
   instance.effects.push(createEffect(scope.scheduler, () => {
     const next = componentRoot(definition, scope);
     const previous = instance.element;
     if (next === instance.rootNode || !context.committed || previous === undefined) return;
-    // Reflected props and the state attribute are rewritten by their own effects.
+    // Reflected props, the state attribute, and bound attributes are rewritten by their own effects.
+    // A literal is the old arm's only when it still holds the arm's value; a different value is the
+    // consumer's override, which carries over as it would have applied to any arm.
+    const literals = new Map<string, string>();
     const written = new Set([
       stateAttribute(tag),
       ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`),
@@ -1904,8 +1931,14 @@ function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderCont
         ownStyle.cssText += `;${attribute.value}`;
       } else if (attribute.kind === "attribute" && attribute.target === "style") {
         ownStyle.setProperty(attribute.name, "initial");
-      } else if (attribute.kind === "literal" || attribute.kind === "attribute") {
+      } else if (attribute.kind === "literal") {
+        literals.set(attribute.name, attribute.value);
+      } else if (attribute.kind === "attribute") {
         written.add(attribute.name);
+      } else if (attribute.kind === "property") {
+        // A reflecting property writes its attribute: `.disabled` writes `disabled`.
+        // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
+        written.add(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
       }
     }
     const ownStyles = new Set(Array.from(ownStyle));
@@ -1920,27 +1953,36 @@ function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderCont
           `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
         ).join("; ");
         if (value !== "") carried.push({ name: "style", value });
-      } else if (!written.has(attribute.name)) {
+      } else if (!written.has(attribute.name) && literals.get(attribute.name) !== attribute.value) {
         carried.push({ name: attribute.name, value: attribute.value });
       }
     }
 
-    const stopped = new Set(owned);
-    for (const effect of owned) effect.stop();
-    for (let index = instance.effects.length - 1; index >= 0; index -= 1) {
-      if (stopped.has(instance.effects[index]!)) instance.effects.splice(index, 1);
-    }
+    for (const effect of instance.owned.effects) effect.stop();
+    instance.owned = context.owned = renderOwned();
     for (const ref of Object.keys(instance.refs)) delete instance.refs[ref];
     context.rootNode = instance.rootNode = next;
-    const start = instance.effects.length;
-    const element = renderNode(next, scope, previous.ownerDocument, carried, context)[0] as Element;
-    owned = instance.effects.slice(start);
-    const focused = previous.ownerDocument.activeElement === previous;
+    const document = previous.ownerDocument;
+    const active = document.activeElement;
+    const focusIndex = active !== null && active !== previous && previous.contains(active)
+      ? Array.from(previous.querySelectorAll(FOCUSABLE)).indexOf(active)
+      : -1;
+    const element = renderNode(next, scope, document, carried, context)[0] as Element;
     previous.replaceWith(element);
-    attachRoot(instance, element);
-    if (focused) (element as HTMLElement).focus({ preventScroll: true });
+    // When this component is another's root, the instance registered on the element is that one.
+    attachRoot(runtimeInstances.get(previous) ?? instance, element);
+    // Focus stays where it was: on the root, on moved projected content, or on the template's
+    // control in the same position among the root's focusable elements.
+    const target = active === previous ? element
+      : active?.isConnected === true && element.contains(active) ? active
+      : focusIndex >= 0 ? element.querySelectorAll(FOCUSABLE)[focusIndex]
+      : undefined;
+    (target as HTMLElement | undefined)?.focus?.({ preventScroll: true });
   }, 0));
 }
+
+// ponytail: a focusability approximation for restoring focus across a root switch.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]";
 
 function commitRuntimeInvocations(
   registry: DocumentRegistry,
@@ -1978,10 +2020,13 @@ function commitRuntimeInvocations(
     if (invocation.replace) {
       supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
-      loweredInvocations.set(invocation.invocation, { root: host, instance: invocation.instance });
+      loweredInvocations.set(invocation.invocation, { instance: invocation.instance });
       runtimeInstances.delete(invocation.invocation);
       // Whatever a parent deferred for this invocation now has the element it was waiting for.
-      for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) rebind(host);
+      for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {
+        rebind(host);
+        invocation.instance.followers.push(rebind);
+      }
       rebindOnLower.delete(invocation.invocation);
     }
     invocation.context.committed = true;
@@ -2237,6 +2282,8 @@ export interface ComponentAttachmentOptions {
 interface ManagedComponentLifecycle {
   readonly connect: (element: Element) => () => void;
   disconnect: undefined | (() => void);
+  /** The element that carries the record; a root switch moves it. */
+  element: Element;
 }
 
 interface LifecycleCoordinator {
@@ -2353,13 +2400,14 @@ export function manageComponentLifecycle(
   const record: ManagedComponentLifecycle = {
     connect: (current) => attachComponent(current, definition, options),
     disconnect: undefined,
+    element,
   };
   coordinator.add(element, record);
   let stopped = false;
   return () => {
     if (stopped) return;
     stopped = true;
-    coordinator.remove(element, record);
+    coordinator.remove(record.element, record);
   };
 }
 
@@ -2480,15 +2528,16 @@ export function updateComponentProps(
 ): void {
   const instance = runtimeInstance(element);
   if (instance === undefined) return;
-  applyComponentProps(instance, element, props);
+  applyComponentProps(instance, props);
 }
 
 /** Applies props to one named instance, which a shared root makes explicit. */
 function applyComponentProps(
   instance: RuntimeInstance,
-  element: Element,
   props: Readonly<Record<string, unknown>>,
 ): void {
+  // The current root: a root `$match` may have replaced the element a caller last saw.
+  const element = instance.element!;
   for (const [name, input] of Object.entries(props)) {
     const prop = instance.definition.contract.props[name];
     if (prop === undefined) continue;
@@ -2557,6 +2606,8 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
   if (instance.connected) return;
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
+  for (const effect of instance.owned.effects) effect.resume();
+  for (const callback of instance.owned.connectCallbacks) callback();
   for (const callback of instance.connectCallbacks) callback();
   // A delegated component shares this root and is not separately discoverable.
   for (const delegate of instance.delegates) connectRuntimeInstance(delegate);
@@ -2566,9 +2617,11 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
 function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   if (!instance.connected) return;
   instance.element?.dispatchEvent(new Event("disconnect"));
+  for (const callback of instance.owned.disconnectCallbacks) callback();
   for (const callback of instance.disconnectCallbacks) callback();
   instance.connected = false;
   for (const effect of instance.effects) effect.pause();
+  for (const effect of instance.owned.effects) effect.pause();
   for (const delegate of instance.delegates) disconnectRuntimeInstance(delegate);
 }
 

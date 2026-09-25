@@ -201,3 +201,10 @@ export interface PropertyBinding {
   readonly expression: string;
   readonly expressionPlan?: CompiledExpression;
 }
+
+/** A polymorphic root's arms: the native roots a root `<template $match>` chooses between. */
+export function rootArms(template: ElementNode): readonly ElementNode[] | undefined {
+  return template.name === "template" && template.flow?.kind === "match"
+    ? template.children as readonly ElementNode[]
+    : undefined;
+}

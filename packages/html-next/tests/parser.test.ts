@@ -363,6 +363,14 @@ describe("parseComponent", () => {
       `<prop name="as" type="button | a" default="button">Root.</prop><state name="open" :value="false"></state>` +
         `<computed name="linked" from="as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
+    // A slot required by any arm is required; arms' dynamic slots merge by position.
+    const merged = parseComponent(button(
+      `<template $match><a $when="as = 'a'"><slot name="icon"></slot><slot :name="as"></slot></a>` +
+        `<button $else><slot name="icon">★</slot><slot :name="as">fallback</slot></button></template>`,
+    ));
+    assert.deepEqual(merged.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: true, required: true }]);
+    // A slot is not a native root.
+    expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
     // A slot is still declared once within an arm.
     expectDiagnostic("HT008", button(`<template $match><a $when="as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`));
 

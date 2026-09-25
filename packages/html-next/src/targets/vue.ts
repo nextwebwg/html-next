@@ -16,6 +16,7 @@ import type {
   ReactiveDeclaration,
   TemplateNode,
 } from "../template.js";
+import { rootArms } from "../template.js";
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
@@ -378,7 +379,8 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const computedValues = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const events = declarations.filter((declaration): declaration is EventDeclaration => declaration.kind === "event");
-  if (template.flow !== undefined && template.flow.kind !== "match") {
+  const arms = rootArms(template);
+  if (template.flow !== undefined && arms === undefined) {
     fail("HT036", `<${contract.tag}> has a structural directive on its root, which Vue conversion does not support yet.`);
   }
 
@@ -442,8 +444,8 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     model: modelProp !== undefined,
   };
   // A root `$match` is a v-if chain of native roots, which Vue treats as a single root.
-  const rootMarkup = template.flow?.kind === "match"
-    ? (template.children as readonly ElementNode[]).map((arm, index) => {
+  const rootMarkup = arms !== undefined
+    ? arms.map((arm, index) => {
       const flow = arm.flow!;
       const directive = flow.kind === "when"
         ? `${index === 0 ? "v-if" : "v-else-if"}=${bound(lowering.condition(ast(flow.testPlan, flow.test), names.template))}`

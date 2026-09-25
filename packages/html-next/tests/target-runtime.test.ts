@@ -673,7 +673,8 @@ document.querySelector("main").append(
   createXAction({ as: "a", href: "/next", children: ["Next"] }),
   createXAction({ as: "a", href: "/next", disabled: true, children: ["Off"] }),
 );
-window.switchSave = () => updateComponentProps(save, { as: "a", href: "/save" });`,
+window.switchSave = () => updateComponentProps(save, { as: "a", href: "/save" });
+window.switchSaveBack = () => updateComponentProps(save, { as: "button" });`,
       vue: `import { createApp, h } from "vue";
 import XAction from "./vue/XAction";
 createApp({ render: () => [
@@ -744,12 +745,23 @@ createApp({ render: () => [
       const root = await page.evaluate(async () => {
         const settle = () => new Promise((resolve) => setTimeout(resolve));
         await settle();
-        (window as unknown as { switchSave(): void }).switchSave();
+        const read = () => {
+          const element = document.querySelector("main > *")!;
+          return { tag: element.localName, href: element.getAttribute("href"), type: element.getAttribute("type"), text: element.textContent };
+        };
+        const api = window as unknown as { switchSave(): void; switchSaveBack(): void };
+        api.switchSave();
         await settle();
-        const element = document.querySelector("main > *")!;
-        return { tag: element.localName, href: element.getAttribute("href"), type: element.getAttribute("type"), text: element.textContent };
+        const linked = read();
+        // The factory's element reference still reaches the component after its root switched.
+        api.switchSaveBack();
+        await settle();
+        return [linked, read()];
       });
-      assert.deepEqual(root, { tag: "a", href: "/save", type: null, text: "Save" });
+      assert.deepEqual(root, [
+        { tag: "a", href: "/save", type: null, text: "Save" },
+        { tag: "button", href: null, type: "button", text: "Save" },
+      ]);
     } finally {
       await browser.close();
     }

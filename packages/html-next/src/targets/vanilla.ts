@@ -7,6 +7,7 @@ import type {
   SlotNode,
   TemplateNode,
 } from "../template.js";
+import { rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
 import { getDomInterface } from "../platform.js";
 import { kebabCase } from "../names.js";
@@ -394,7 +395,7 @@ export function generateVanilla(
   const props = target.props.map(({ name, contract }) => [name, contract] as const);
   const hasRequired = props.some(([, prop]) => prop.required);
   // A root `$match` renders the arm the props choose; the runtime makes that choice, as it does in HTML.
-  const arms = template.flow?.kind === "match" ? template.children as readonly ElementNode[] : undefined;
+  const arms = rootArms(template);
   const direct = directReactivePlan(definition);
   const directProps = direct === undefined ? directPropPlan(definition) : undefined;
   const needsRuntime = direct === undefined && directProps === undefined && (

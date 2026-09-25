@@ -1821,7 +1821,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<defs><prop name="as" type="button | a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
             `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
             `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
-            `<button $else class="action" type="button" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
+            `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
           `</template>` +
           `<x-action id="action" class="consumer" style="color: rgb(255, 0, 0)" href="#next"><b id="label">Go</b></x-action>`,
         );
@@ -1840,6 +1840,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             href: element.getAttribute('href'),
             dataHref: element.getAttribute('data-href'),
             type: element.getAttribute('type'),
+            title: element.getAttribute('title'),
             count: element.querySelector('output').textContent,
             // The consumer's inline style carries over; the button arm's own does not.
             style: [element.style.color, element.style.cursor, element.style.marginTop, element.style.getPropertyValue('--tone')],
@@ -1863,10 +1864,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
 
         const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
         assert.deepEqual(result, {
-          before: { ...common, tag: "button", href: null, type: "button", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
-          linked: { ...common, tag: "a", href: "#next", type: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
-          back: { ...common, tag: "button", href: null, type: "button", count: "2", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          linked: { ...common, tag: "a", href: "#next", type: null, title: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
+          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "2", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
         });
         assert.deepEqual(pageErrors, []);
       } finally {
@@ -1891,19 +1892,170 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const settle = () => new Promise((resolve) => setTimeout(resolve));
           const body = document.querySelector('#body');
           window.HtmlRuntime.lowerDocument();
+          // Focus stays on the toggle, which the switch replaces with the new arm's toggle.
           const read = () => {
             const root = document.querySelector('#disclosure');
-            return [root.localName, root.querySelector('button').textContent, root.querySelector('#body') === body];
+            const button = root.querySelector('button');
+            return [root.localName, button.textContent, root.querySelector('#body') === body, document.activeElement === button];
           };
           const states = [read()];
           for (let index = 0; index < 2; index += 1) {
+            document.querySelector('#disclosure button').focus();
             document.querySelector('#disclosure button').click();
             await settle();
             states.push(read());
           }
           return states;
         })()`);
-        assert.deepEqual(result, [["div", "Open", true], ["section", "Close", true], ["div", "Open", true]]);
+        assert.deepEqual(result, [["div", "Open", true, false], ["section", "Close", true, true], ["div", "Open", true, true]]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps a parent's bindings and a consumer's overrides on a child whose root switches`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-choice" status="early" summary="Button or link.">` +
+            `<defs><prop name="as" type="button | a" default="button">Root.</prop></defs>` +
+            `<template $match><a $when="as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
+          `</template>` +
+          `<template component="x-host" status="early" summary="Parent.">` +
+            `<defs><state name="linked" :value="false"></state><state name="clicks" :value="0"></state>` +
+            `<handler name="flip"><set name="clicks" :value="clicks + 1"></set><set name="linked" :value="not linked"></set></handler></defs>` +
+            `<section><x-choice id="choice" type="submit" :as="{ true: 'a', false: 'button' }[format('%s', linked)]" on:click="flip">Go</x-choice>` +
+            `<output $value="clicks"></output></section>` +
+          `</template>` +
+          `<x-host></x-host>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.lowerDocument();
+          await settle();
+          const read = () => {
+            const choice = document.querySelector('#choice');
+            return [choice.localName, choice.getAttribute('type'), choice.getAttribute('data-as'), document.querySelector('output').textContent];
+          };
+          const states = [read()];
+          for (let index = 0; index < 3; index += 1) {
+            document.querySelector('#choice').addEventListener('click', (event) => event.preventDefault());
+            document.querySelector('#choice').click();
+            await settle();
+            states.push(read());
+          }
+          return states;
+        })()`);
+        // The parent's on:click follows the root, its :as binding reaches the current root's
+        // record, and the consumer's type="submit" outlasts the button arm's own type="button".
+        assert.deepEqual(result, [
+          ["button", "submit", "button", "0"],
+          ["a", "submit", "a", "1"],
+          ["button", "submit", "button", "2"],
+          ["a", "submit", "a", "3"],
+        ]);
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} stops everything the old arm owned when a root switches`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const arm = `<i $if="show" $value="n"></i>`;
+        await page.setContent(
+          `<template component="x-owned" status="early" summary="Ownership.">` +
+            `<defs><state name="linked" :value="false"></state><state name="show" :value="true"></state>` +
+            `<state name="n" :value="0"></state><state name="hits" :value="0"></state>` +
+            `<handler name="hit"><set name="hits" :value="hits + 1"></set></handler></defs>` +
+            `<template $match><a $when="linked" href="#x" on:connect="hit">${arm}</a><div $else on:connect="hit">${arm}</div></template>` +
+          `</template>` +
+          `<main><x-owned id="owned"></x-owned></main>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.observeDocument();
+          await settle();
+          const root = () => document.querySelector('#owned');
+          const { state } = window.HtmlRuntime.getComponentHost(root());
+          // A $if that re-renders after the first render creates effects the arm still owns.
+          state.show = false;
+          await settle();
+          state.show = true;
+          await settle();
+          const old = root().querySelector('i');
+          state.linked = true;
+          await settle();
+          state.n = 42;
+          await settle();
+          const values = [old.textContent, root().querySelector('i').textContent];
+          state.linked = false;
+          await settle();
+          const connected = state.hits;
+          const current = root();
+          current.remove();
+          await settle();
+          document.querySelector('main').append(current);
+          await settle();
+          return { values, connected, reconnected: state.hits };
+        })()`);
+        // The detached <i> stops updating, and only the current arm's on:connect runs on reconnect.
+        assert.deepEqual(result, { values: ["0", "42"], connected: 1, reconnected: 2 });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps a delegating parent's instance when its polymorphic root switches`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
+        await page.setContent(
+          `<template component="x-fold" status="early" summary="Polymorphic.">` +
+            `<defs><state name="open" :value="false"></state><handler name="toggle"><set name="open" :value="not open"></set></handler></defs>` +
+            `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
+          `</template>` +
+          `<template component="x-card" status="early" summary="Delegates.">` +
+            `<defs><prop name="tone" type="warm | cool" default="warm">Tone.</prop></defs>` +
+            `<x-fold><output $value="tone"></output></x-fold>` +
+          `</template>` +
+          `<x-card id="card" tone="warm"></x-card>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.lowerDocument();
+          await settle();
+          const before = document.querySelector('#card');
+          before.querySelector('button').click();
+          await settle();
+          const root = document.querySelector('#card');
+          window.HtmlRuntime.updateComponentProps(root, { tone: 'cool' });
+          await settle();
+          return {
+            tags: [before.localName, root.localName],
+            component: root.getAttribute('data-component'),
+            tone: [root.querySelector('output').textContent, root.getAttribute('data-tone')],
+            host: window.HtmlRuntime.getComponentHost(root) !== undefined,
+          };
+        })()`);
+        assert.deepEqual(result, {
+          tags: ["div", "section"],
+          component: "x-card x-fold",
+          tone: ["cool", "cool"],
+          host: true,
+        });
+        assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
       }
