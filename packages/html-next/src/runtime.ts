@@ -486,13 +486,27 @@ function rootDeclaredType(
   return undefined;
 }
 
+/** A path an expression reads that a declaration constrains, its type, and an expression reading it. */
+type ConstrainedReference = readonly [path: string, type: TypeNode, read: string];
+
 /** Paths an expression reads that a declaration constrains, resolved once per definition. */
-const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly (readonly [string, TypeNode])[]>>();
+const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly ConstrainedReference[]>>();
+
+/**
+ * An expression that reads a dependency path. Paths name an index as a segment (`items.0` for
+ * `items[0]`), which is not itself an expression, so each segment is written back as an access.
+ */
+function pathExpression(path: string): string {
+  const [root, ...keys] = path.split(".");
+  return root + keys.map((key) =>
+    /^\d+$/.test(key) ? `[${key}]` : /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `['${key.replace(/['\\]/g, "\\$&")}']`
+  ).join("");
+}
 
 function constrainedReferences(
   definition: ComponentDefinition,
   expression: string,
-): readonly (readonly [string, TypeNode])[] {
+): readonly ConstrainedReference[] {
   let cache = constrainedPaths.get(definition);
   if (cache === undefined) {
     cache = new Map();
@@ -500,11 +514,12 @@ function constrainedReferences(
   }
   const known = cache.get(expression);
   if (known !== undefined) return known;
-  let paths: readonly (readonly [string, TypeNode])[] = [];
+  let paths: readonly ConstrainedReference[] = [];
   try {
-    paths = compileExpression(expression).dependencies
-      .map((path) => [path, declaredTypeAt(definition, path)] as const)
-      .filter((entry): entry is readonly [string, TypeNode] => entry[1] !== undefined);
+    paths = compileExpression(expression).dependencies.flatMap((path) => {
+      const type = declaredTypeAt(definition, path);
+      return type === undefined ? [] : [[path, type, pathExpression(path)] as const];
+    });
   } catch { /* an unreadable expression fails where it is evaluated, not here */ }
   cache.set(expression, paths);
   return paths;
@@ -547,8 +562,8 @@ function evalConforming(
   definition: ComponentDefinition,
 ): Value | typeof NONCONFORMING {
   const source = typeof expression === "string" ? expression : expression.source;
-  for (const [path, type] of constrainedReferences(definition, source)) {
-    const value = evalValue(path, scope);
+  for (const [path, type, read] of constrainedReferences(definition, source)) {
+    const value = evalValue(read, scope);
     // Absence is not a violation: a value that is not there yet has nothing to conform to.
     if (value === ABSENT || value === undefined) continue;
     if (conformsAtReference(value, type)) continue;
