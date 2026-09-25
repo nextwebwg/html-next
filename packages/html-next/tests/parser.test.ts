@@ -5,6 +5,7 @@ import { describe, it } from "vitest";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
+import { normalizeType, parseTypedValue } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
@@ -438,6 +439,35 @@ describe("parseComponent", () => {
     for (const attributes of ['debounce="200ms"', 'poll="30s"', 'debounce="150"', 'type="object"']) {
       assert.doesNotThrow(() => parseComponent(source(attributes)));
     }
+  });
+
+
+  it("reads a quoted enum member that spells a built-in type name", () => {
+    // Bare `unknown` is the type that accepts any value, so a literal of that spelling is quoted.
+    // The default stays a plain attribute value: quoting belongs to the type expression.
+    const definition = parseComponent(
+      `<template component="x-state" status="early" summary="Reserved enum.">` +
+      `<defs><prop name="status" type="'unknown' | known" default="unknown">Status.</prop></defs>` +
+      `<output :data-status="status"></output></template>`,
+    );
+    const prop = definition.contract.props.status!;
+    assert.deepEqual(prop.type, { enum: ["unknown", "known"] });
+    const type = normalizeType(prop.type);
+    assert.deepEqual(
+      ["unknown", "known", "other", 42].map((value) => parseTypedValue(value, type).ok),
+      [true, true, false, false],
+    );
+
+    // Writing the member bare reads `unknown` as the type, which a prop cannot carry: it has no
+    // attribute text form. The mistake is a diagnostic rather than a union that accepts anything.
+    assert.throws(
+      () => parseComponent(
+        `<template component="x-wide" status="early" summary="Wide.">` +
+        `<defs><prop name="status" type="unknown | known" default="unknown">Status.</prop></defs>` +
+        `<output :data-status="status"></output></template>`,
+      ),
+      /HC017/,
+    );
   });
 
 });
