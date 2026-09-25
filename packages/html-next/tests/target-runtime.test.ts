@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
@@ -150,7 +150,6 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           const input = root.querySelector("input") as HTMLInputElement;
           const panel = document.querySelector('[data-component~="demo-panel"]') as HTMLElement;
           const before = output;
-          panel.setAttribute("data-align", "center");
           (root.querySelector("button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
@@ -189,7 +188,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           ownTitle: false,
           // HTML Next records explicit props as data-* for its rendered form; a converted Vue
           // component owns its props and writes no record.
-          panel: { ownAlign: false, dataAlign: "center", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
+          panel: { ownAlign: false, dataAlign: target === "vue" ? null : "end", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
         // Vue reports an error thrown by an event handler through console.error, not as uncaught.
@@ -438,9 +437,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     await mkdir(join(directory, "vanilla"), { recursive: true });
     await mkdir(join(directory, "styles"), { recursive: true });
     await writeFile(join(directory, "styles/demo-props.css"), "");
-    const entryPath = join(directory, "vanilla/DemoProps.js");
+    await writeFile(join(directory, "vanilla/DemoProps.js"), module);
+    const entryPath = join(directory, "entry.ts");
     bundlePath = join(directory, "bundle.js");
-    await writeFile(entryPath, module);
+    await writeFile(
+      entryPath,
+      `export { createDemoProps } from "./vanilla/DemoProps.js";\n` +
+      `export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";\n`,
+    );
     await build({
       entryPoints: [entryPath],
       outfile: bundlePath,
@@ -508,9 +512,12 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(async () => {
           (window as unknown as { observedTargets: string[] }).observedTargets = [];
-          const create = (window as unknown as {
-            DemoProps: { createDemoProps(options?: Record<string, unknown>): Element };
-          }).DemoProps.createDemoProps;
+          const { createDemoProps: create, updateGeneratedProps: update } = (window as unknown as {
+            DemoProps: {
+              createDemoProps(options?: Record<string, unknown>): Element;
+              updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
+            };
+          }).DemoProps;
           const root = create({ children: ["Projected"] });
           const second = create();
           document.querySelector("main")!.append(root, second);
@@ -528,9 +535,8 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             ownProperties: ["count", "label", "tone"].filter((key) => Object.hasOwn(root, key)),
           };
 
-          root.setAttribute("data-count", "2");
-          root.setAttribute("data-label", "First");
-          root.setAttribute("data-label", "Second");
+          update(root, { count: 2, label: "First" });
+          update(root, { label: "Second" });
           const synchronous = {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
@@ -542,13 +548,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-label"),
           };
 
+          // data-label records the configuration; writing it is not a prop update.
           root.setAttribute("data-label", "External");
           await tick();
           const external = { label: label.getAttribute("aria-label") };
 
           root.remove();
           await new Promise((resolve) => setTimeout(resolve, 0));
-          root.setAttribute("data-count", "3");
+          update(root, { count: 3 });
           await tick();
           const detached = {
             text: output.textContent,
@@ -561,10 +568,11 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-count"),
           };
 
-          // An invalid attribute value is rejected at the type boundary (reported as a page error).
-          root.setAttribute("data-tone", "unknown");
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          // An invalid value is rejected at the type boundary.
+          let invalid = "";
+          try { update(root, { tone: "unknown" }); } catch (error) { invalid = String(error); }
           return {
+            invalid,
             initial,
             synchronous,
             batched,
@@ -577,11 +585,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [] });
         assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
         assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
-        assert.deepEqual(result.external, { label: "External" });
-        assert.deepEqual(result.detached, { text: "2", reflected: "3" });
+        assert.deepEqual(result.external, { label: "Second" });
+        assert.deepEqual(result.detached, { text: "2", reflected: "2" });
         assert.deepEqual(result.reconnected, { text: "3", reflected: "3" });
-        await expect.poll(() => pageErrors.join("\n")).toMatch(/HR002/);
-        assert.deepEqual(result.observedTargets, ["#document", "SECTION", "SECTION", "SECTION"]);
+        assert.match(result.invalid, /HR002/);
+        assert.deepEqual(pageErrors, []);
+        // Only the shared document hub observes; no per-element attribute observers.
+        assert.deepEqual(result.observedTargets, ["#document"]);
       } finally {
         await browser.close();
       }

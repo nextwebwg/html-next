@@ -1673,13 +1673,9 @@ function installStateAttribute(instance: RuntimeInstance): void {
  * writes by the author are parsed back into the scope.
  */
 function installPropReflection(instance: RuntimeInstance): void {
-  const props = instance.definition.contract.props;
-  const attributeNames: Record<string, string> = {};
-  const reflected: Record<string, string | null> = {};
-
-  for (const [name, prop] of Object.entries(props)) {
+  // `data-<name>` records the configuration; it is output, never read back after lowering.
+  for (const [name, prop] of Object.entries(instance.definition.contract.props)) {
     const attributeName = `data-${kebabCase(name)}`;
-    attributeNames[attributeName] = name;
     instance.effects.push(createEffect(instance.scope.scheduler, () => {
       const root = instance.rootElement.get();
       if (root === undefined) return;
@@ -1695,44 +1691,11 @@ function installPropReflection(instance: RuntimeInstance): void {
       const serialized = value === undefined || value === ABSENT || value === null
         ? null
         : serializeTypedValue(value, prop.type);
-      reflected[attributeName] = serialized;
       if (serialized === null) root.removeAttribute(attributeName);
       else root.setAttribute(attributeName, serialized);
     }, 2));
   }
 
-  const Observer = instance.element?.ownerDocument.defaultView?.MutationObserver;
-  const attributeFilter = Object.keys(attributeNames);
-  if (Observer === undefined || attributeFilter.length === 0) return;
-  const observer = new Observer((records) => {
-    for (const record of records) {
-      const attributeName = record.attributeName;
-      if (attributeName === null) continue;
-      const name = attributeNames[attributeName];
-      if (name === undefined) continue;
-      if (record.target !== instance.element) continue;
-      const value = instance.element.getAttribute(attributeName);
-      if (attributeName in reflected && reflected[attributeName] === value) {
-        delete reflected[attributeName];
-        continue;
-      }
-      delete reflected[attributeName];
-      const prop = props[name]!;
-      if (value === null) instance.explicit.delete(name);
-      else instance.explicit.add(name);
-      instance.scope.set(
-        name,
-        value === null ? assignedPropValue(name, prop, undefined) : invocationValue(prop, value, true) as Value,
-      );
-    }
-  });
-  // Paused with the instance, so it observes only while connected, and always the current root.
-  instance.effects.push(createEffect(instance.scope.scheduler, () => {
-    const root = instance.rootElement.get();
-    if (root === undefined) return;
-    observer.observe(root, { attributes: true, attributeFilter });
-    return () => observer.disconnect();
-  }, 2));
 }
 
 function installPublicMethods(root: Element, instance: RuntimeInstance): void {

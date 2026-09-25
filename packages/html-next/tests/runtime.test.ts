@@ -1057,7 +1057,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           }], (_name, value) => { applied = value; });
           const values = [];
           for (const value of ["", "true", "false"]) {
-            generated.setAttribute("data-enabled", value);
+            window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: value });
             await new Promise(resolve => setTimeout(resolve, 0));
             values.push(applied);
           }
@@ -1760,11 +1760,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
           const reflectedInitially = filled.getAttribute('data-label');
           const reflectedDefault = empty.hasAttribute('data-label');
+          // data-label records the configuration; writing it is not a prop update.
           filled.setAttribute('data-label', 'External');
+          await Promise.resolve();
+          await Promise.resolve();
+          const written = filled.querySelector('.label').textContent;
+          window.HtmlRuntime.updateComponentProps(filled, { label: 'Updated' });
           await Promise.resolve();
           await Promise.resolve();
           return {
             initial,
+            written,
             updated: {
               label: filled.querySelector('.label').textContent,
               rows: Array.from(filled.querySelectorAll('li'), item => item.textContent),
@@ -1788,10 +1794,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
             rows: ["A", "b"],
             fallbacks: ["Untitled", "Empty"],
           },
+          written: "Initial",
           updated: {
-            label: "External",
+            label: "Updated",
             rows: ["A", "b"],
-            reflectedLabel: "External",
+            reflectedLabel: "Updated",
             reflectedInitially: "Initial",
             reflectedDefault: false,
             ownLabelProperty: false,
@@ -1891,9 +1898,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
             fallback: read(fallback),
             fallbackReflected: fallback.hasAttribute("data-tags"),
           };
+          // data-tags records the configuration; writing it is not a prop update.
           authored.setAttribute("data-tags", '["api"]');
           await new Promise((resolve) => setTimeout(resolve, 0));
-          return { initial, updated: read(authored) };
+          const written = read(authored);
+          window.HtmlRuntime.updateComponentProps(authored, { tags: ["api"] });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initial, written, updated: read(authored) };
         })()`);
         assert.deepEqual(result, {
           initial: {
@@ -1902,12 +1913,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
             fallback: ["none"],
             fallbackReflected: false,
           },
+          written: ["design", "docs"],
           updated: ["api"],
         });
-
-        await page.evaluate(`document.getElementById("authored").setAttribute("data-tags", '[1]')`);
-        await page.waitForTimeout(50);
-        assert.match(pageErrors.join("\n"), /HR002/);
+        assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
       }
@@ -2025,7 +2034,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             focused: document.activeElement === input,
             selection: [input.selectionStart, input.selectionEnd],
           };
-          root.setAttribute('data-label', 'Next');
+          window.HtmlRuntime.updateComponentProps(root, { label: 'Next' });
           await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, updated: { heading: root.querySelector('h2').textContent, value: input.value } };
         })()`);
