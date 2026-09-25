@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
@@ -265,7 +266,7 @@ describe("official target compilers", () => {
       stdin: {
         contents: `${script}\nexport { createSSRApp, h } from "vue";\nexport { renderToString } from "@vue/server-renderer";`,
         loader: "ts",
-        resolveDir: new URL("..", import.meta.url).pathname,
+        resolveDir: fileURLToPath(new URL("..", import.meta.url)),
       },
       bundle: true,
       format: "esm",
