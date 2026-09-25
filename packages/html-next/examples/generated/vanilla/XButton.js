@@ -3,7 +3,7 @@ import { manageGeneratedProps } from "@nextwebwg/html-next/generated-runtime";
 import "../styles/x-button.css";
 
 export function createXButton(options = {}) {
-  const { attributes = {}, children = [], slots = {}, as, ...componentProps } = options;
+  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;
   const projected = [];
   const prop0 = componentProps["size"] === undefined ? "md" : componentProps["size"];
   const prop1 = componentProps["variant"] === undefined ? "outline" : componentProps["variant"];

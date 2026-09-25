@@ -29,8 +29,6 @@ export interface TargetComponent {
   readonly methods: readonly TargetMethod[];
   readonly slots: readonly SlotContract[];
   readonly controller?: string;
-  readonly rootChoices: readonly string[];
-  readonly polymorphic: boolean;
 }
 
 function pascalCase(name: string): string {
@@ -53,9 +51,6 @@ export function declarationTypeSource(source: string): string {
 /** Shared public-surface model consumed by every target emitter. */
 export function targetComponent(definition: ComponentDefinition): TargetComponent {
   const declarations = definition.declarations ?? [];
-  const rootChoices = definition.root?.kind === "native"
-    ? definition.root.choices
-    : [definition.template.name];
   return Object.freeze({
     definition,
     props: Object.freeze(Object.entries(definition.contract.props).map(([name, contract], index) =>
@@ -73,7 +68,5 @@ export function targetComponent(definition: ComponentDefinition): TargetComponen
     ).map((method) => Object.freeze({ ...method, returnType: declarationTypeSource(method.returns) }))),
     slots: Object.freeze([...(definition.slots ?? [])]),
     ...(definition.controller === undefined ? {} : { controller: definition.controller }),
-    rootChoices: Object.freeze([...rootChoices]),
-    polymorphic: rootChoices.length > 1,
   });
 }

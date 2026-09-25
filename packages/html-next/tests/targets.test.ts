@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
-import { transform } from "esbuild";
+import { build, transform } from "esbuild";
 
 import { generateComponent, generateVueComponent } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -241,6 +241,54 @@ describe("official target compilers", () => {
     )).get("vue/DemoAnchor.vue")!;
     assert.match(vue, /anchor\?: 'start' \| 'end' \| null\n/);
     assert.doesNotMatch(vue, /null \| null/);
+  });
+
+  it("renders a polymorphic root as the native root its `$match` arm chooses", async () => {
+    const outputs = generated(`<template component="x-action" status="experimental" summary="Button or link.">
+  <defs>
+    <prop name="as" type="button | a" default="button">Native root.</prop>
+    <prop name="href" type="string">Link.</prop>
+    <prop name="disabled" type="boolean" default="false">Off.</prop>
+  </defs>
+  <template $match>
+    <a $when="as = 'a'" class="action" :href="{ true: null, false: href }[format('%s', disabled)]" $ref="control"><slot></slot></a>
+    <button $else class="action" type="button" :disabled="disabled" $ref="control"><slot></slot></button>
+  </template>
+  <style>:host { display: inline-flex; }</style>
+</template>`);
+    const vue = outputs.get("vue/XAction.vue")!;
+    assert.match(vue, /as\?: 'button' \| 'a'\n/);
+    assert.match(vue, /<a\n\s+v-if="as === 'a'"/);
+    assert.match(vue, /<button\n\s+v-else\n/);
+    const script = compileVue(vue, "XAction.vue");
+    const bundle = await build({
+      stdin: {
+        contents: `${script}\nexport { createSSRApp, h } from "vue";\nexport { renderToString } from "@vue/server-renderer";`,
+        loader: "ts",
+        resolveDir: new URL("..", import.meta.url).pathname,
+      },
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      write: false,
+      logLevel: "silent",
+    });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
+    const render = (props: Record<string, unknown>): Promise<string> =>
+      module.renderToString(module.createSSRApp({ render: () => module.h(module.default, props, { default: () => "Go" }) }))
+        .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
+    assert.equal(await render({}), '<button data-component="x-action" class="action" type="button">Go</button>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a data-component="x-action" class="action" href="/next">Go</a>');
+    // A null binding leaves the attribute off, so a disabled link has no href.
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a data-component="x-action" class="action">Go</a>');
+
+    const vanilla = outputs.get("vanilla/XAction.js")!;
+    await transform(vanilla, { loader: "js", format: "esm" });
+    assert.match(vanilla, /import \{ componentRootIndex, manageComponentLifecycle \}/);
+    assert.match(vanilla, /const root = componentRootIndex\(definition, componentProps\);\n  let element;\n  if \(root === 0\) \{\n    element = document\.createElement\("a"\);/);
+    assert.match(vanilla, /\} else \{\n    element = document\.createElement\("button"\);/);
+    assert.match(outputs.get("vanilla/XAction.d.ts")!, /interface XActionElement extends HTMLElement/);
+    assert.match(outputs.get("docs/x-action.md")!, /Native element: `<a>` or `<button>`/);
   });
 
   it("rejects constructs Vue conversion does not map yet instead of approximating them", () => {

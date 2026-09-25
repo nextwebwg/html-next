@@ -1722,12 +1722,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
+        // A root `$match` chooses the native root, and each arm declares the same slots.
+        const panelBody = `<header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
+          `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
+          `<ul><li $each="row of rows" $key="row.id"><slot :name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
-            `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop></defs>` +
-            `<section as="section | article"><header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
-            `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
-            `<ul><li $each="row of rows" $key="row.id"><slot :name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul></section>` +
+            `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
+            `<prop name="as" type="section | article" default="section">Root.</prop></defs>` +
+            `<template $match><article $when="as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
           `<x-panel id="empty"></x-panel>`,
@@ -1743,6 +1746,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const empty = document.querySelector('#empty');
           const initial = {
             root: filled.localName,
+            emptyRoot: empty.localName,
             label: filled.querySelector('.label').textContent,
             titleSame: filled.querySelector('#title-node') === title,
             bodySame: filled.querySelector('#body-node') === body,
@@ -1775,6 +1779,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         assert.deepEqual(result, {
           initial: {
             root: "article",
+            emptyRoot: "section",
             label: "Initial",
             titleSame: true,
             bodySame: true,
@@ -1792,6 +1797,69 @@ describe.skipIf(!enabled)("browser runtime", () => {
             ownLabelProperty: false,
           },
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} replaces a root \`$match\` arm's element when its props choose another`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        const body = `<slot></slot><output $value="count"></output>`;
+        await page.setContent(
+          `<template component="x-action" status="early" summary="Button or link.">` +
+            `<defs><prop name="as" type="button | a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
+            `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
+            `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
+            `<button $else class="action" type="button" on:click="bump" $ref="control">${body}</button></template>` +
+          `</template>` +
+          `<x-action id="action" class="consumer" href="#next"><b id="label">Go</b></x-action>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          const runtime = window.HtmlRuntime;
+          const label = document.querySelector('#label');
+          runtime.lowerDocument();
+          const describe = (element) => ({
+            tag: element.localName,
+            id: element.id,
+            className: element.className,
+            component: element.getAttribute('data-component'),
+            href: element.getAttribute('href'),
+            dataHref: element.getAttribute('data-href'),
+            type: element.getAttribute('type'),
+            count: element.querySelector('output').textContent,
+            label: element.querySelector('#label') === label,
+            host: runtime.getComponentHost(element)?.element === element,
+          });
+          const button = document.querySelector('#action');
+          button.click();
+          await settle();
+          const before = describe(button);
+          runtime.updateComponentProps(button, { as: 'a' });
+          await settle();
+          const link = document.querySelector('#action');
+          link.click();
+          await settle();
+          const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-as') };
+          runtime.updateComponentProps(link, { as: undefined });
+          await settle();
+          return { before, linked, back: describe(document.querySelector('#action')) };
+        })()`);
+
+        const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
+        assert.deepEqual(result, {
+          before: { ...common, tag: "button", href: null, type: "button", count: "1" },
+          // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
+          linked: { ...common, tag: "a", href: "#next", type: null, count: "2", replaced: true, dataAs: "a" },
+          back: { ...common, tag: "button", href: null, type: "button", count: "2" },
+        });
+        assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
       }

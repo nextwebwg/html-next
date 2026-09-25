@@ -627,3 +627,120 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     }
   });
 });
+
+const actionSource = `<template component="x-action" status="early" summary="Button or link.">
+  <defs>
+    <prop name="as" type="button | a" default="button">Native root.</prop>
+    <prop name="href" type="string">Link.</prop>
+    <prop name="disabled" type="boolean" default="false">Off.</prop>
+  </defs>
+  <template $match>
+    <a $when="as = 'a'" :href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
+    <button $else type="button" :disabled="disabled"><slot></slot></button>
+  </template>
+</template>`;
+
+describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
+  let directory = "";
+  const bundles = new Map<string, string>();
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-polymorphic-"));
+    for (const folder of ["docs", "styles", "vanilla", "vue"]) await mkdir(join(directory, folder), { recursive: true });
+    for (const artifact of generateComponent(parseComponent(actionSource, "x-action.html"))) {
+      await writeFile(join(directory, artifact.path), artifact.content);
+    }
+    const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
+    assert.deepEqual(parsed.errors, []);
+    await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);
+    const entries: Record<string, string> = {
+      vanilla: `import { updateComponentProps } from "@nextwebwg/html-next/runtime";
+import { createXAction } from "./vanilla/XAction.js";
+const save = createXAction({ children: ["Save"] });
+document.querySelector("main").append(
+  save,
+  createXAction({ as: "a", href: "/next", children: ["Next"] }),
+  createXAction({ as: "a", href: "/next", disabled: true, children: ["Off"] }),
+);
+window.switchSave = () => updateComponentProps(save, { as: "a", href: "/save" });`,
+      vue: `import { createApp, h } from "vue";
+import XAction from "./vue/XAction";
+createApp({ render: () => [
+  h(XAction, null, () => "Save"),
+  h(XAction, { as: "a", href: "/next" }, () => "Next"),
+  h(XAction, { as: "a", href: "/next", disabled: true }, () => "Off"),
+] }).mount(document.querySelector("main"));`,
+    };
+    for (const [target, entry] of Object.entries(entries)) {
+      const entryPath = join(directory, `${target}.ts`);
+      const outfile = join(directory, `${target}.js`);
+      await writeFile(entryPath, entry);
+      await build({
+        entryPoints: [entryPath],
+        outfile,
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: ["es2022"],
+        define: { "import.meta.url": JSON.stringify("https://example.test/generated/x-action.js") },
+        nodePaths: [nodeModulesPath],
+        loader: { ".css": "empty" },
+        alias: { "@nextwebwg/html-next/runtime": runtimePath },
+      });
+      bundles.set(target, outfile);
+    }
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  for (const target of ["vanilla", "vue"] as const) {
+    it(`${target} renders the native root its props choose`, async () => {
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundles.get(target)! });
+        const roots = await page.evaluate(async () => {
+          await new Promise((resolve) => setTimeout(resolve));
+          return Array.from(document.querySelectorAll("main > *"), (element) => ({
+            tag: element.localName,
+            component: element.getAttribute("data-component"),
+            href: element.getAttribute("href"),
+            type: element.getAttribute("type"),
+            disabled: element.hasAttribute("disabled"),
+            text: element.textContent,
+          }));
+        });
+        assert.deepEqual(roots, [
+          { tag: "button", component: "x-action", href: null, type: "button", disabled: false, text: "Save" },
+          { tag: "a", component: "x-action", href: "/next", type: null, disabled: false, text: "Next" },
+          { tag: "a", component: "x-action", href: null, type: null, disabled: false, text: "Off" },
+        ]);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
+  it("vanilla replaces a factory's root when its props choose another arm", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent("<main></main>");
+      await page.addScriptTag({ path: bundles.get("vanilla")! });
+      const root = await page.evaluate(async () => {
+        const settle = () => new Promise((resolve) => setTimeout(resolve));
+        await settle();
+        (window as unknown as { switchSave(): void }).switchSave();
+        await settle();
+        const element = document.querySelector("main > *")!;
+        return { tag: element.localName, href: element.getAttribute("href"), type: element.getAttribute("type"), text: element.textContent };
+      });
+      assert.deepEqual(root, { tag: "a", href: "/save", type: null, text: "Save" });
+    } finally {
+      await browser.close();
+    }
+  });
+});

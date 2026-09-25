@@ -378,7 +378,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   const computedValues = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const events = declarations.filter((declaration): declaration is EventDeclaration => declaration.kind === "event");
-  if (template.flow !== undefined) {
+  if (template.flow !== undefined && template.flow.kind !== "match") {
     fail("HT036", `<${contract.tag}> has a structural directive on its root, which Vue conversion does not support yet.`);
   }
 
@@ -441,7 +441,16 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     hostState: styles.stateNames.length > 0,
     model: modelProp !== undefined,
   };
-  const rootMarkup = renderElement(template, names, context, true);
+  // A root `$match` is a v-if chain of native roots, which Vue treats as a single root.
+  const rootMarkup = template.flow?.kind === "match"
+    ? (template.children as readonly ElementNode[]).map((arm, index) => {
+      const flow = arm.flow!;
+      const directive = flow.kind === "when"
+        ? `${index === 0 ? "v-if" : "v-else-if"}=${bound(lowering.condition(ast(flow.testPlan, flow.test), names.template))}`
+        : "v-else";
+      return renderElement(arm, names, context, true, [directive]);
+    }).join("\n")
+    : renderElement(template, names, context, true);
   const defaults = target.props.filter((prop) => "default" in prop.contract);
   // An optional prop is declared as Vue authors declare one, `name?: T`; absent is undefined.
   const propType = (prop: (typeof target.props)[number]): string => typeSource(prop.contract.type);
