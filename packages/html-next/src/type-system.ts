@@ -90,6 +90,9 @@ const TERMINALS = new Set<TerminalTypeName>([
   "trusted-html", "trusted-script", "function", "unknown",
 ]);
 
+/** Names the grammar reads as a type, so a keyword spelling one must be written quoted. */
+const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set([...TERMINALS, "list", "record", "object"]);
+
 export class TypeSyntaxError extends SyntaxError {
   constructor(
     message: string,
@@ -276,7 +279,9 @@ export function formatType(type: TypeInput): string {
   const node = isTypeNode(type) ? type : normalizeType(type);
   switch (node.kind) {
     case "terminal": return node.name;
-    case "keyword": return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(node.value)
+    // A keyword spelled like a type name has to stay quoted, or reading the result back would
+    // widen the literal `'unknown'` into the type that accepts anything.
+    case "keyword": return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(node.value) && !RESERVED_TYPE_NAMES.has(node.value)
       ? node.value
       : JSON.stringify(node.value);
     case "union": return node.members.map((member) => formatType(member)).join(" | ");

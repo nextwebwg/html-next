@@ -116,4 +116,26 @@ describe("HTML Next type system", () => {
     );
   });
 
+
+  it("keeps a keyword spelled like a type name quoted, so it survives a round trip", () => {
+    // A literal `'unknown'` is not the type that accepts anything, and printing it bare would have
+    // widened it on the way back in. Same for any other reserved spelling.
+    const literal = parseTypeExpression("'unknown' | 'known'");
+    assert.equal(formatType(literal), '"unknown" | known');
+    assert.deepEqual(parseTypeExpression(formatType(literal)), literal);
+    assert.equal(parseTypedValue("unknown", literal).ok, true);
+    assert.equal(parseTypedValue(42, literal).ok, false);
+
+    for (const reserved of ["string", "number", "integer", "boolean", "null", "absent", "list", "record", "object"]) {
+      const node = parseTypeExpression(`'${reserved}'`);
+      assert.deepEqual(parseTypeExpression(formatType(node)), node, `${reserved} round-trips as a keyword`);
+      assert.equal(parseTypedValue(reserved, node).ok, true);
+    }
+
+    // A union no longer collapses the literal into the terminal that shares its spelling.
+    const mixed = parseTypeExpression("unknown | 'unknown'");
+    assert.equal(mixed.kind, "union");
+    assert.deepEqual(parseTypeExpression(formatType(mixed)), mixed);
+  });
+
 });
