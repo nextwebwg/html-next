@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Feedback on a specification
+    url: https://github.com/nextwebwg/specs/issues/new/choose
+    about: Questions, problems, and suggestions about a draft's text go to nextwebwg/specs, labeled by chapter.
