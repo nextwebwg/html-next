@@ -1874,6 +1874,41 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} switches a root \`$match\` arm from state a handler sets`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
+        await page.setContent(
+          `<template component="x-disclosure" status="early" summary="Disclosure.">` +
+            `<defs><state name="open" :value="false"></state><handler name="toggle"><set name="open" :value="not open"></set></handler></defs>` +
+            `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
+          `</template>` +
+          `<x-disclosure id="disclosure"><p id="body">Body</p></x-disclosure>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          const body = document.querySelector('#body');
+          window.HtmlRuntime.lowerDocument();
+          const read = () => {
+            const root = document.querySelector('#disclosure');
+            return [root.localName, root.querySelector('button').textContent, root.querySelector('#body') === body];
+          };
+          const states = [read()];
+          for (let index = 0; index < 2; index += 1) {
+            document.querySelector('#disclosure button').click();
+            await settle();
+            states.push(read());
+          }
+          return states;
+        })()`);
+        assert.deepEqual(result, [["div", "Open", true], ["section", "Close", true], ["div", "Open", true]]);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} parses structured props from JSON attributes and reflects only explicit ones`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

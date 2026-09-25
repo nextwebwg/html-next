@@ -304,35 +304,13 @@ function propAttributeNames(
   return names[hydration ? 1 : 0];
 }
 
-function readInvocation(
-  invocation: Element,
+/** An instance's props, state, and computed values, as its expressions read them. */
+function componentScope(
   definition: ComponentDefinition,
-  hydration = false,
-): {
-  readonly scope: ReactiveScope;
-  readonly passThrough: readonly RootAttribute[];
-  readonly effects: ReactiveOwner[];
-  readonly explicit: Set<string>;
-} {
-  const contract = definition.contract;
-  const names = propAttributeNames(definition, hydration);
-  const values = Object.create(null) as Record<string, PropValue | undefined>;
-  const passThrough: Attr[] = [];
-  for (const attribute of Array.from(invocation.attributes)) {
-    const propName = names[attribute.name.toLowerCase()];
-    if (propName === undefined) {
-      if (!hydration) passThrough.push(attribute);
-      continue;
-    }
-    values[propName] = invocationValue(contract.props[propName]!, attribute.value, !hydration);
-  }
-
-  // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
-  // author's explicit attributes). They are never read from JavaScript properties.
-  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined));
-
+  values: Readonly<Record<string, PropValue | undefined>>,
+): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
-  for (const [name, prop] of Object.entries(contract.props)) {
+  for (const [name, prop] of Object.entries(definition.contract.props)) {
     if (prop.required && values[name] === undefined) {
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
@@ -370,6 +348,37 @@ function readInvocation(
       () => evalConforming(declaration.expression!, scope, definition) as Value,
     ));
   }
+  return { scope, effects };
+}
+
+function readInvocation(
+  invocation: Element,
+  definition: ComponentDefinition,
+  hydration = false,
+): {
+  readonly scope: ReactiveScope;
+  readonly passThrough: readonly RootAttribute[];
+  readonly effects: ReactiveOwner[];
+  readonly explicit: Set<string>;
+} {
+  const contract = definition.contract;
+  const names = propAttributeNames(definition, hydration);
+  const values = Object.create(null) as Record<string, PropValue | undefined>;
+  const passThrough: Attr[] = [];
+  for (const attribute of Array.from(invocation.attributes)) {
+    const propName = names[attribute.name.toLowerCase()];
+    if (propName === undefined) {
+      if (!hydration) passThrough.push(attribute);
+      continue;
+    }
+    values[propName] = invocationValue(contract.props[propName]!, attribute.value, !hydration);
+  }
+
+  // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
+  // author's explicit attributes). They are never read from JavaScript properties.
+  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined));
+  const { scope, effects } = componentScope(definition, values);
+  const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
     catch { return invocation.ownerDocument.baseURI; }
@@ -1160,16 +1169,25 @@ function componentRoot(definition: ComponentDefinition, scope: Scope): ElementNo
   ))!;
 }
 
-/** The index of the root `$match` arm a generated factory's props choose. */
+/**
+ * The index of the root `$match` arm a generated factory's props choose, read against the same
+ * props, state, and computed values the instance starts with.
+ */
 export function componentRootIndex(
   definition: ComponentDefinition,
   props: Readonly<Record<string, unknown>>,
 ): number {
-  const contract = definition.contract.props;
-  const scope: Scope = {
-    get: (name) => (props[name] ?? contract[name]?.default ?? ABSENT) as Value,
-  };
-  return definition.template.children.indexOf(componentRoot(definition, scope));
+  const values = Object.create(null) as Record<string, PropValue | undefined>;
+  // A framework's null leaves the prop to its default, as attachComponent does.
+  for (const name of Object.keys(definition.contract.props)) {
+    if (props[name] !== undefined && props[name] !== null) values[name] = props[name] as PropValue;
+  }
+  const { scope, effects } = componentScope(definition, values);
+  try {
+    return definition.template.children.indexOf(componentRoot(definition, scope));
+  } finally {
+    for (const effect of effects) effect.stop();
+  }
 }
 
 function renderMatch(

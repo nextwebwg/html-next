@@ -643,9 +643,10 @@ const actionSource = `<template component="x-action" status="early" summary="But
     <prop name="as" type="button | a" default="button">Native root.</prop>
     <prop name="href" type="string">Link.</prop>
     <prop name="disabled" type="boolean" default="false">Off.</prop>
+    <computed name="linked" from="as = 'a'"></computed>
   </defs>
   <template $match>
-    <a $when="as = 'a'" :href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
+    <a $when="linked" :href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
     <button $else type="button" :disabled="disabled"><slot></slot></button>
   </template>
 </template>`;

@@ -353,14 +353,16 @@ describe("parseComponent", () => {
     assert.deepEqual(polymorphic.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: false, required: true }]);
     // `as` does not retag an element.
     expectDiagnostic("HT021", componentSource(`<button as="button|a"></button>`));
-    // Exactly one native root is always chosen, from props alone.
+    // Exactly one native root is always chosen.
     expectDiagnostic("HT021", button(`<template $match><a $when="as = 'a'"></a><button $when="as = 'button'"></button></template>`));
     expectDiagnostic("HT021", button(`<template $match><template $when="as = 'a'"><a></a></template><button $else></button></template>`));
     expectDiagnostic("HT021", button(`<template $match="as"><a $when="as = 'a'"></a><button $else></button></template>`));
-    expectDiagnostic("HT021", button(
-      `<template $match><a $when="open"></a><button $else></button></template>`,
-      `<state name="open" :value="false"></state>`,
-    ));
+    // Arms read props, state, and computed values, like any expression.
+    assert.deepEqual(parseComponent(button(
+      `<template $match><details $when="open"></details><a $when="linked"></a><button $else></button></template>`,
+      `<prop name="as" type="button | a" default="button">Root.</prop><state name="open" :value="false"></state>` +
+        `<computed name="linked" from="as = 'a'"></computed>`,
+    )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
     // A slot is still declared once within an arm.
     expectDiagnostic("HT008", button(`<template $match><a $when="as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`));
 

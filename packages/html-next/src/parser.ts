@@ -1112,13 +1112,6 @@ export function parseComponentNodes(
     refs: new Set<string>(),
   };
   const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined);
-  // Generated factories choose the root from props before any state exists, so its arms test props alone.
-  if (template.children.some((arm) =>
-    arm.kind === "element" && arm.flow?.kind === "when" &&
-    (arm.flow.testPlan?.dependencies ?? []).some((name) => !(name in contract.props))
-  )) {
-    fail("HT021", "A root `$when` may read only props.", source);
-  }
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 
