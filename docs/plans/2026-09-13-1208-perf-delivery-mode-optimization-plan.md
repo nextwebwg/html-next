@@ -13,7 +13,7 @@ execution: code
 
 - **Objective:** Authors can choose live browser execution, an optimized native application or library build, or framework conversion without any mode being mistaken for another during design, measurement, or optimization.
 - **Means:** Define a shared delivery model and a separate normative specification, measurement contract, and tracked goal for each mode; then optimize the complete live browser distributable against native platform capabilities. (KTD1-KTD3)
-- **Authority:** The Product Contract below defines the delivery modes and optimization boundaries; `packages/html-next/docs/spec/` owns normative behavior; cross-target conformance tests own observable equivalence.
+- **Authority:** The Product Contract below defines the delivery modes and optimization boundaries; `nextwebwg/specs/ (was packages/html-next/docs/spec/` owns normative behavior; cross-target conformance tests own observable equivalence.
 - **Execution profile:** Land the mode specifications and tracker first, then use a measurement-first optimization loop on the live distributable. Each custom browser layer requires evidence of the platform gap and owner review when its necessity or semantics remain uncertain.
 - **Stop condition:** Stop for a proposed optimization that removes a supported live capability, depends on a closed application graph, exceeds the repository performance guardrail, or requires an unresolved product decision.
 
@@ -170,7 +170,7 @@ flowchart TB
 - `packages/html-next/scripts/measure-runtime-size.ts` reports the 33,199-byte gzip live baseline and isolated native-build capability fixtures.
 - `packages/html-next/docs/native-runtime-audit.md` records current native facilities, module attribution, and owner decisions.
 - `packages/html-next/docs/runtime-performance.md` owns the size-versus-speed guardrails.
-- `packages/html-next/docs/spec/targets-and-conformance.md` owns current cross-target equivalence.
+- `nextwebwg/specs/ (was packages/html-next/docs/spec/targets-and-conformance.md` owns current cross-target equivalence.
 - `packages/html-next/docs/plans/2026-09-12-1008-feat-full-reference-implementation-plan.md` establishes one normalized language, live execution, native targets, framework adapters, and shared conformance.
 
 ---
@@ -182,7 +182,7 @@ flowchart TB
 - **Goal:** Give each delivery mechanism a detailed normative contract and independent tracked goal.
 - **Requirements:** R1-R18; KTD1, KTD2, KTD5, KTD6.
 - **Dependencies:** None.
-- **Files:** `README.md`; `packages/html-next/README.md`; `packages/html-next/docs/spec/index.md`; `packages/html-next/docs/spec/delivery-modes.md`; `packages/html-next/docs/spec/live-browser-distributable.md`; `packages/html-next/docs/spec/native-application-build.md`; `packages/html-next/docs/spec/framework-conversion.md`; `packages/html-next/docs/delivery-goals.md`; `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/tests/spec.test.ts`.
+- **Files:** `README.md`; `packages/html-next/README.md`; `nextwebwg/specs/ (was packages/html-next/docs/spec/index.md`; `nextwebwg/specs/ (was packages/html-next/docs/spec/delivery-modes.md`; `nextwebwg/specs/ (was packages/html-next/docs/spec/live-browser-distributable.md`; `nextwebwg/specs/ (was packages/html-next/docs/spec/native-application-build.md`; `nextwebwg/specs/ (was packages/html-next/docs/spec/framework-conversion.md`; `packages/html-next/docs/delivery-goals.md`; `packages/html-next/docs/native-runtime-audit.md`; `packages/html-next/tests/spec.test.ts`.
 - **Approach:** Put shared semantic authority and routing in the overview. Give every mode its own inputs, graph openness, runtime model, output artifacts, lifecycle, security boundary, optimization rules, measurements, and conformance cases. Make the tracker the concise operational index for baselines and next evidence.
 - **Test scenarios:**
   - The spec-index test requires all four delivery documents and validates their internal links.

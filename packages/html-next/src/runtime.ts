@@ -88,7 +88,7 @@ interface RuntimeInstance {
   element?: Element;
   readonly definition: ComponentDefinition;
   readonly scope: ReactiveScope;
-  readonly refs: Record<string, Element>;
+  readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
   readonly connectCallbacks: Set<() => void>;
   readonly disconnectCallbacks: Set<() => void>;
@@ -593,6 +593,32 @@ function evalConforming(
     : evaluateCompiled(expression, scope);
 }
 
+/**
+ * The ref names a definition places inside an iteration. Multiplicity is a property of where the
+ * directive sits, not of how much data arrives: a name under `$each` is the list that iteration
+ * produced even when it produced one row or none, so a controller never branches on shape.
+ */
+const iteratedRefs = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
+
+function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<string> {
+  const cached = iteratedRefs.get(definition);
+  if (cached !== undefined) return cached;
+  const names = new Set<string>();
+  const walk = (node: TemplateNode, iterating: boolean): void => {
+    if (node.kind === "slot") {
+      for (const child of node.fallback ?? []) walk(child, iterating);
+      return;
+    }
+    if (node.kind !== "element") return;
+    const inside = iterating || node.flow?.kind === "each";
+    if (node.ref !== undefined && inside) names.add(node.ref);
+    for (const child of node.children) walk(child, inside);
+  };
+  walk(definition.template, false);
+  iteratedRefs.set(definition, names);
+  return names;
+}
+
 interface HydrationRange {
   readonly slot: string;
   readonly fallback: boolean;
@@ -618,7 +644,7 @@ function renderOwned(): RenderOwned {
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   owned: RenderOwned;
-  readonly refs: Record<string, Element>;
+  readonly refs: Record<string, Element | Element[]>;
   root?: Element;
   readonly projectedNodes: readonly Node[];
   readonly projectedSlotNames: WeakMap<Node, string>;
@@ -773,7 +799,8 @@ function runHandler(
       }
       dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
     } else {
-      const target = context.refs[step.target];
+      const recorded = context.refs[step.target];
+      const target = Array.isArray(recorded) ? recorded[0] : recorded;
       if (step.kind === "focus") (target as HTMLElement | undefined)?.focus();
       else (target as HTMLInputElement | undefined)?.reportValidity?.();
     }
@@ -1354,7 +1381,11 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
-  if (node.ref !== undefined) context.refs[node.ref] = element;
+  if (node.ref !== undefined) {
+    if (iteratedRefNames(context.definition).has(node.ref)) {
+      ((context.refs[node.ref] ??= []) as Element[]).push(element);
+    } else context.refs[node.ref] = element;
+  }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
   }
@@ -2592,7 +2623,7 @@ export interface ComponentHost {
   /** The component's root element. Its connection owns this controller's lifetime. */
   readonly root: Element;
   readonly state: Record<string, unknown>;
-  readonly refs: Readonly<Record<string, Element>>;
+  readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
   /**
    * The elements a consumer projected, by slot name, in document order; `default` reads the
    * unnamed slot. Empty while a slot shows its fallback. A component lowers into one tree with
@@ -2698,10 +2729,24 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     get: (_target, key) => typeof key === "string" ? projectedInto(key) : undefined,
     has: (_target, key) => typeof key === "string" && projectedInto(key).length > 0,
   }) as Record<string, readonly Element[]>;
+  const refs = new Proxy({}, {
+    get: (_target, key) => {
+      if (typeof key !== "string") return undefined;
+      const recorded = instance.refs[key];
+      if (!Array.isArray(recorded)) return recorded;
+      // Rows come and go, so the list is what the iteration still renders, in document order.
+      const live = recorded.filter((element) => element.isConnected);
+      if (live.length !== recorded.length) instance.refs[key] = live;
+      return [...live].sort((a, b) =>
+        (a.compareDocumentPosition(b) & 4 /* DOCUMENT_POSITION_FOLLOWING */) !== 0 ? -1 : 1
+      );
+    },
+    has: (_target, key) => typeof key === "string" && instance.refs[key] !== undefined,
+  }) as Readonly<Record<string, Element | readonly Element[]>>;
   const host: ComponentHost = {
     get root() { return instance.element!; },
     state,
-    refs: instance.refs,
+    refs,
     slots,
     signal(initialValue) {
       return createSignal(initialValue);

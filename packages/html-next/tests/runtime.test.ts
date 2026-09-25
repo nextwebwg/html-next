@@ -398,6 +398,48 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} gives one $ref inside an iteration the list that iteration renders`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="x-rows" status="early" summary="Rows.">' +
+          "<defs><state name=\"items\" :value=\"['a', 'b', 'c']\"></state>" +
+          "<handler name=\"drop\"><set name=\"items\" :value=\"['a', 'c']\"></set></handler></defs>" +
+          '<div class="panel" $ref="panel">' +
+          '<ul><li $each="n of items" $key="n" $ref="rows" $value="n"></li></ul>' +
+          '<button type="button" class="drop" on:click="drop"></button>' +
+          "</div></template>" +
+          "<x-rows></x-rows>",
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("div.panel li");
+        const read = () => page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
+            getComponentHost(element: Element): {
+              refs: Record<string, Element | readonly Element[]>;
+            } | undefined;
+          };
+          const refs = runtime.getComponentHost(document.querySelector("div.panel")!)!.refs;
+          const rows = refs.rows as readonly Element[];
+          return {
+            panelIsList: Array.isArray(refs.panel),
+            rowsIsList: Array.isArray(rows),
+            rows: rows.map((row) => row.textContent).join(","),
+          };
+        });
+        // Outside an iteration a name is one element; inside it, always a list.
+        assert.deepEqual(await read(), { panelIsList: false, rowsIsList: true, rows: "a,b,c" });
+        await page.click("button.drop");
+        await page.waitForTimeout(50);
+        // The list is what the iteration still renders, so a removed row leaves it.
+        assert.deepEqual(await read(), { panelIsList: false, rowsIsList: true, rows: "a,c" });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} keeps a lowered child component's bound props up to date`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

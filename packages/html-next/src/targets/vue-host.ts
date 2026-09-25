@@ -30,12 +30,17 @@ export interface ComponentHostOptions {
   readonly dispatch: (name: string, detail?: unknown) => boolean;
   /** The component's props, which a controller reads through \`host.state\`. */
   readonly props?: Readonly<Record<string, unknown>>;
-  /** Template refs, by the ref name the component declared. */
-  readonly refs?: Readonly<Record<string, Readable<HTMLElement | null>>>;
+  /** Template refs, by the ref name the component declared. Vue collects a \`v-for\` ref into an array. */
+  readonly refs?: Readonly<Record<string, Readable<HTMLElement | HTMLElement[] | null>>>;
   /** Declared state, which a controller reads and writes. */
   readonly state?: Readonly<Record<string, { value: any }>>;
   /** Declared computed values, which a controller reads. */
   readonly computed?: Readonly<Record<string, Readable<unknown>>>;
+}
+
+/** Vue does not promise a \`v-for\` ref array in source order, and the host does. */
+function inDocumentOrder(elements: readonly Element[]): Element[] {
+  return [...elements].sort((a, b) => (a.compareDocumentPosition(b) & 4) !== 0 ? -1 : 1);
 }
 
 /** Slot content flattened to the elements Vue mounted for it, descending through fragments. */
@@ -83,9 +88,12 @@ export function useComponentHost(
     refs: Object.defineProperties(
       {},
       Object.fromEntries(
-        Object.entries(refs).map(([name, ref]) => [name, { enumerable: true, get: () => ref.value as Element }]),
+        Object.entries(refs).map(([name, ref]) => [name, {
+          enumerable: true,
+          get: () => Array.isArray(ref.value) ? inDocumentOrder(ref.value) : (ref.value as Element),
+        }]),
       ),
-    ) as Readonly<Record<string, Element>>,
+    ) as Readonly<Record<string, Element | readonly Element[]>>,
     slots: new Proxy({} as Record<string, readonly Element[]>, {
       get: (_target, name) => {
         if (typeof name !== "string") return undefined;
