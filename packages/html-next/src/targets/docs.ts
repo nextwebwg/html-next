@@ -41,7 +41,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     ...(contract.status === undefined ? [] : [`> **Status: ${contract.status.toUpperCase()}.** HTML Next early-release component API.`, ""]),
     ...(contract.summary === undefined ? [] : [contract.summary, ""]),
     `- Invocation: \`<${contract.tag}>\``,
-    `- Native element: \`<${contract.nativeElement}>\``,
+    `- Native element: ${(definition.root?.kind === "native" ? definition.root.choices : [contract.nativeElement]).map((name) => `\`<${name}>\``).join(" or ")}`,
     `- Contract schema: \`${contract.version}\``,
     "",
     "## Props",

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
@@ -150,7 +150,6 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           const input = root.querySelector("input") as HTMLInputElement;
           const panel = document.querySelector('[data-component~="demo-panel"]') as HTMLElement;
           const before = output;
-          panel.setAttribute("data-align", "center");
           (root.querySelector("button") as HTMLButtonElement).click();
           await Promise.resolve();
           await Promise.resolve();
@@ -189,7 +188,7 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           ownTitle: false,
           // HTML Next records explicit props as data-* for its rendered form; a converted Vue
           // component owns its props and writes no record.
-          panel: { ownAlign: false, dataAlign: "center", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
+          panel: { ownAlign: false, dataAlign: target === "vue" ? null : "end", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
         // Vue reports an error thrown by an event handler through console.error, not as uncaught.
@@ -438,9 +437,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     await mkdir(join(directory, "vanilla"), { recursive: true });
     await mkdir(join(directory, "styles"), { recursive: true });
     await writeFile(join(directory, "styles/demo-props.css"), "");
-    const entryPath = join(directory, "vanilla/DemoProps.js");
+    await writeFile(join(directory, "vanilla/DemoProps.js"), module);
+    const entryPath = join(directory, "entry.ts");
     bundlePath = join(directory, "bundle.js");
-    await writeFile(entryPath, module);
+    await writeFile(
+      entryPath,
+      `export { createDemoProps } from "./vanilla/DemoProps.js";\n` +
+      `export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";\n`,
+    );
     await build({
       entryPoints: [entryPath],
       outfile: bundlePath,
@@ -508,9 +512,12 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(async () => {
           (window as unknown as { observedTargets: string[] }).observedTargets = [];
-          const create = (window as unknown as {
-            DemoProps: { createDemoProps(options?: Record<string, unknown>): Element };
-          }).DemoProps.createDemoProps;
+          const { createDemoProps: create, updateGeneratedProps: update } = (window as unknown as {
+            DemoProps: {
+              createDemoProps(options?: Record<string, unknown>): Element;
+              updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
+            };
+          }).DemoProps;
           const root = create({ children: ["Projected"] });
           const second = create();
           document.querySelector("main")!.append(root, second);
@@ -528,9 +535,8 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             ownProperties: ["count", "label", "tone"].filter((key) => Object.hasOwn(root, key)),
           };
 
-          root.setAttribute("data-count", "2");
-          root.setAttribute("data-label", "First");
-          root.setAttribute("data-label", "Second");
+          update(root, { count: 2, label: "First" });
+          update(root, { label: "Second" });
           const synchronous = {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
@@ -542,13 +548,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-label"),
           };
 
+          // data-label records the configuration; writing it is not a prop update.
           root.setAttribute("data-label", "External");
           await tick();
           const external = { label: label.getAttribute("aria-label") };
 
           root.remove();
           await new Promise((resolve) => setTimeout(resolve, 0));
-          root.setAttribute("data-count", "3");
+          update(root, { count: 3 });
           await tick();
           const detached = {
             text: output.textContent,
@@ -561,10 +568,11 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-count"),
           };
 
-          // An invalid attribute value is rejected at the type boundary (reported as a page error).
-          root.setAttribute("data-tone", "unknown");
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          // An invalid value is rejected at the type boundary.
+          let invalid = "";
+          try { update(root, { tone: "unknown" }); } catch (error) { invalid = String(error); }
           return {
+            invalid,
             initial,
             synchronous,
             batched,
@@ -577,11 +585,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [] });
         assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
         assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
-        assert.deepEqual(result.external, { label: "External" });
-        assert.deepEqual(result.detached, { text: "2", reflected: "3" });
+        assert.deepEqual(result.external, { label: "Second" });
+        assert.deepEqual(result.detached, { text: "2", reflected: "2" });
         assert.deepEqual(result.reconnected, { text: "3", reflected: "3" });
-        await expect.poll(() => pageErrors.join("\n")).toMatch(/HR002/);
-        assert.deepEqual(result.observedTargets, ["#document", "SECTION", "SECTION", "SECTION"]);
+        assert.match(result.invalid, /HR002/);
+        assert.deepEqual(pageErrors, []);
+        // Only the shared document hub observes; no per-element attribute observers.
+        assert.deepEqual(result.observedTargets, ["#document"]);
       } finally {
         await browser.close();
       }
@@ -622,6 +632,136 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         return (window as unknown as { documentObservations: number }).documentObservations;
       });
       assert.equal(count, 1);
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+const actionSource = `<template component="x-action" status="early" summary="Button or link.">
+  <defs>
+    <prop name="as" type="button | a" default="button">Native root.</prop>
+    <prop name="href" type="string">Link.</prop>
+    <prop name="disabled" type="boolean" default="false">Off.</prop>
+    <computed name="linked" from="as = 'a'"></computed>
+  </defs>
+  <template $match>
+    <a $when="linked" :href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
+    <button $else type="button" :disabled="disabled"><slot></slot></button>
+  </template>
+</template>`;
+
+describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
+  let directory = "";
+  const bundles = new Map<string, string>();
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-polymorphic-"));
+    for (const folder of ["docs", "styles", "vanilla", "vue"]) await mkdir(join(directory, folder), { recursive: true });
+    for (const artifact of generateComponent(parseComponent(actionSource, "x-action.html"))) {
+      await writeFile(join(directory, artifact.path), artifact.content);
+    }
+    const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
+    assert.deepEqual(parsed.errors, []);
+    await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);
+    const entries: Record<string, string> = {
+      vanilla: `import { updateComponentProps } from "@nextwebwg/html-next/runtime";
+import { createXAction } from "./vanilla/XAction.js";
+const save = createXAction({ children: ["Save"] });
+document.querySelector("main").append(
+  save,
+  createXAction({ as: "a", href: "/next", children: ["Next"] }),
+  createXAction({ as: "a", href: "/next", disabled: true, children: ["Off"] }),
+);
+window.switchSave = () => updateComponentProps(save, { as: "a", href: "/save" });
+window.switchSaveBack = () => updateComponentProps(save, { as: "button" });`,
+      vue: `import { createApp, h } from "vue";
+import XAction from "./vue/XAction";
+createApp({ render: () => [
+  h(XAction, null, () => "Save"),
+  h(XAction, { as: "a", href: "/next" }, () => "Next"),
+  h(XAction, { as: "a", href: "/next", disabled: true }, () => "Off"),
+] }).mount(document.querySelector("main"));`,
+    };
+    for (const [target, entry] of Object.entries(entries)) {
+      const entryPath = join(directory, `${target}.ts`);
+      const outfile = join(directory, `${target}.js`);
+      await writeFile(entryPath, entry);
+      await build({
+        entryPoints: [entryPath],
+        outfile,
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: ["es2022"],
+        define: { "import.meta.url": JSON.stringify("https://example.test/generated/x-action.js") },
+        nodePaths: [nodeModulesPath],
+        loader: { ".css": "empty" },
+        alias: { "@nextwebwg/html-next/runtime": runtimePath },
+      });
+      bundles.set(target, outfile);
+    }
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  for (const target of ["vanilla", "vue"] as const) {
+    it(`${target} renders the native root its props choose`, async () => {
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundles.get(target)! });
+        const roots = await page.evaluate(async () => {
+          await new Promise((resolve) => setTimeout(resolve));
+          return Array.from(document.querySelectorAll("main > *"), (element) => ({
+            tag: element.localName,
+            component: element.getAttribute("data-component"),
+            href: element.getAttribute("href"),
+            type: element.getAttribute("type"),
+            disabled: element.hasAttribute("disabled"),
+            text: element.textContent,
+          }));
+        });
+        assert.deepEqual(roots, [
+          { tag: "button", component: "x-action", href: null, type: "button", disabled: false, text: "Save" },
+          { tag: "a", component: "x-action", href: "/next", type: null, disabled: false, text: "Next" },
+          { tag: "a", component: "x-action", href: null, type: null, disabled: false, text: "Off" },
+        ]);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
+  it("vanilla replaces a factory's root when its props choose another arm", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent("<main></main>");
+      await page.addScriptTag({ path: bundles.get("vanilla")! });
+      const root = await page.evaluate(async () => {
+        const settle = () => new Promise((resolve) => setTimeout(resolve));
+        await settle();
+        const read = () => {
+          const element = document.querySelector("main > *")!;
+          return { tag: element.localName, href: element.getAttribute("href"), type: element.getAttribute("type"), text: element.textContent };
+        };
+        const api = window as unknown as { switchSave(): void; switchSaveBack(): void };
+        api.switchSave();
+        await settle();
+        const linked = read();
+        // The factory's element reference still reaches the component after its root switched.
+        api.switchSaveBack();
+        await settle();
+        return [linked, read()];
+      });
+      assert.deepEqual(root, [
+        { tag: "a", href: "/save", type: null, text: "Save" },
+        { tag: "button", href: null, type: "button", text: "Save" },
+      ]);
     } finally {
       await browser.close();
     }

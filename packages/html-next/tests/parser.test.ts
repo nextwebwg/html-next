@@ -340,10 +340,39 @@ describe("parseComponent", () => {
   });
 
   it("records polymorphic native roots and delegated component roots", () => {
-    const polymorphic = parseComponent(
-      componentSource(`<button as="button|a" :aria-label="label"></button>`, `<prop name="label" type="string">Label.</prop>`),
-    );
-    assert.deepEqual(polymorphic.root, { kind: "native", element: "button", choices: ["button", "a"] });
+    // The spec's polymorphic root: an ordinary `as` prop chooses between explicit native roots.
+    const button = (root: string, defs = `<prop name="as" type="button | a" default="button">Root.</prop>`) =>
+      `<template component="x-button" status="early" summary="Polymorphic."><defs>${defs}</defs>${root}</template>`;
+    const polymorphic = parseComponent(button(
+      `<template $match><a $when="as = 'a'" $ref="control"><slot name="icon"></slot><slot></slot></a>` +
+        `<button $else type="button" $ref="control"><slot name="icon"></slot><slot></slot></button></template>`,
+    ));
+    assert.deepEqual(polymorphic.root, { kind: "native", element: "button", choices: ["a", "button"] });
+    assert.equal(polymorphic.contract.nativeElement, "button");
+    // Each arm declares the same slots; the contract lists each once.
+    assert.deepEqual(polymorphic.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: false, required: true }]);
+    // `as` does not retag an element.
+    expectDiagnostic("HT021", componentSource(`<button as="button|a"></button>`));
+    // Exactly one native root is always chosen.
+    expectDiagnostic("HT021", button(`<template $match><a $when="as = 'a'"></a><button $when="as = 'button'"></button></template>`));
+    expectDiagnostic("HT021", button(`<template $match><template $when="as = 'a'"><a></a></template><button $else></button></template>`));
+    expectDiagnostic("HT021", button(`<template $match="as"><a $when="as = 'a'"></a><button $else></button></template>`));
+    // Arms read props, state, and computed values, like any expression.
+    assert.deepEqual(parseComponent(button(
+      `<template $match><details $when="open"></details><a $when="linked"></a><button $else></button></template>`,
+      `<prop name="as" type="button | a" default="button">Root.</prop><state name="open" :value="false"></state>` +
+        `<computed name="linked" from="as = 'a'"></computed>`,
+    )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
+    // A slot required by any arm is required; arms' dynamic slots merge by position.
+    const merged = parseComponent(button(
+      `<template $match><a $when="as = 'a'"><slot name="icon"></slot><slot :name="as"></slot></a>` +
+        `<button $else><slot name="icon">★</slot><slot :name="as">fallback</slot></button></template>`,
+    ));
+    assert.deepEqual(merged.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: true, required: true }]);
+    // A slot is not a native root.
+    expectDiagnostic("HT021", button(`<template $match><slot></slot><button $else></button></template>`));
+    // A slot is still declared once within an arm.
+    expectDiagnostic("HT008", button(`<template $match><a $when="as = 'a'"><slot></slot><slot></slot></a><button $else></button></template>`));
 
     const delegated = parseComponent(
       `<template component="x-primary" status="early" summary="Delegates.">` +

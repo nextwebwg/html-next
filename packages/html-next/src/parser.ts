@@ -845,6 +845,7 @@ function parseElement(
     refs: Set<string>;
   },
   platform: ComponentParserPlatform,
+  rootMatch = false,
 ): ElementNode {
   const tagName = sourceTag(element);
   if (isReservedElement(tagName)) {
@@ -860,7 +861,7 @@ function parseElement(
     if (FLOW_NAME_RE.test(attribute.name)) (flowValues ??= {})[attribute.name] = attribute.value;
     else if (attribute.name === "$ref") refName = attribute.value;
     else if (attribute.name.startsWith("on:")) (eventAttributes ??= []).push(attribute);
-    else if (attribute.name !== "as") bindingAttributes.push(attribute);
+    else bindingAttributes.push(attribute);
   }
   const flow = extractFlow(flowValues, scope, source);
   const nodeScope =
@@ -874,6 +875,13 @@ function parseElement(
   const ref = parseRef(refName, slotState.refs, source);
   const children: TemplateNode[] = [];
   const childNodes = sourceChildren(element);
+  // A root `$match` renders exactly one arm, so each arm may declare the same slots and refs.
+  const shared = rootMatch
+    ? { defaults: slotState.defaults, names: [...slotState.names], refs: [...slotState.refs] }
+    : undefined;
+  const merged = { defaults: slotState.defaults, names: new Set<string>(), refs: new Set<string>() };
+  // Dynamic slots have no name to match, so arms' dynamic slots merge by position.
+  const dynamicSlots: SlotContract[] = [];
   for (const child of childNodes) {
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
@@ -919,7 +927,12 @@ function parseElement(
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
-      slotState.contracts.push(slotContract);
+      // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
+      const existing = dynamic
+        ? -1
+        : slotState.contracts.findIndex((contract) => !contract.dynamic && contract.name === name);
+      if (existing === -1) slotState.contracts.push(slotContract);
+      else if (slotContract.required) slotState.contracts[existing] = { ...slotState.contracts[existing]!, required: true };
       if (name === undefined && nameExpression === undefined && fallback.length === 0) {
         children.push({ kind: "slot" });
       } else {
@@ -940,7 +953,32 @@ function parseElement(
       }
       continue;
     }
+    if (shared === undefined) {
+      children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
+      continue;
+    }
+    slotState.defaults = shared.defaults;
+    slotState.names.clear();
+    slotState.refs.clear();
+    for (const name of shared.names) slotState.names.add(name);
+    for (const ref of shared.refs) slotState.refs.add(ref);
+    const before = slotState.contracts.length;
     children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
+    const armDynamic = slotState.contracts.slice(before).filter((slot) => slot.dynamic);
+    slotState.contracts.splice(0, slotState.contracts.length, ...slotState.contracts.filter((slot) => !armDynamic.includes(slot)));
+    for (const [index, slot] of armDynamic.entries()) {
+      const known = dynamicSlots[index];
+      dynamicSlots[index] = known === undefined ? slot : { ...known, required: known.required || slot.required };
+    }
+    merged.defaults = Math.max(merged.defaults, slotState.defaults);
+    for (const name of slotState.names) merged.names.add(name);
+    for (const ref of slotState.refs) merged.refs.add(ref);
+  }
+  if (shared !== undefined) {
+    slotState.contracts.push(...dynamicSlots);
+    slotState.defaults = merged.defaults;
+    for (const name of merged.names) slotState.names.add(name);
+    for (const ref of merged.refs) slotState.refs.add(ref);
   }
 
   if (attributes.some((binding) => binding.kind === "directive") && children.length > 0) {
@@ -1042,25 +1080,30 @@ export function parseComponentNodes(
   if (root === undefined) {
     fail("HT001", "A component's markup must be exactly one element root.", source);
   }
-  const rootName = sourceTag(root);
-  const rootChoices = (attr(root, "as") ?? rootName).split("|");
-  for (let index = rootChoices.length - 1; index >= 0; index -= 1) {
-    rootChoices[index] = rootChoices[index]!.trim();
-    if (rootChoices[index] === "") rootChoices.splice(index, 1);
+  if (attr(root, "as") !== undefined) {
+    fail("HT021", "`as` does not retag a root; declare an `as` prop and choose native roots with `$match`.", source);
   }
+  // A polymorphic root is a `<template $match>` whose arms are the native roots it may render;
+  // the last arm is `$else`, so exactly one is chosen.
+  const rootArms = sourceTag(root) === "template" && attr(root, "$match") !== undefined
+    ? significant(sourceChildren(root))
+    : undefined;
+  if (rootArms !== undefined) {
+    const last = rootArms.at(-1);
+    if (
+      attr(root, "$match") !== "" ||
+      last === undefined ||
+      rootArms.some((arm) => !isElement(arm) || ["template", "slot"].includes(sourceTag(arm)) || !platform.isNativeElement(sourceTag(arm))) ||
+      attr(last as Element, "$else") === undefined
+    ) {
+      fail("HT021", "A root `$match` has no expression, and its arms are native elements ending in `$else`.", source);
+    }
+  }
+  const rootName = rootArms === undefined ? sourceTag(root) : sourceTag(rootArms.at(-1) as Element);
+  const rootChoices = rootArms === undefined
+    ? [rootName]
+    : [...new Set(rootArms.map((arm) => sourceTag(arm as Element)))];
   const delegatedRoot = !platform.isNativeElement(rootName);
-  if (delegatedRoot && attr(root, "as") !== undefined) {
-    fail("HT021", "A delegated component root cannot also declare native `as` choices.", source);
-  }
-  if (
-    !delegatedRoot &&
-    (rootChoices.length === 0 ||
-      !rootChoices.includes(rootName) ||
-      rootChoices.some((choice, index) => rootChoices.indexOf(choice) !== index) ||
-      rootChoices.some((choice) => !platform.isNativeElement(choice)))
-  ) {
-    fail("HT021", "A polymorphic root must list unique native choices including its markup root.", source);
-  }
 
   const targets = collectTargets(root, source, platform);
   const contract = readContract(
@@ -1080,7 +1123,7 @@ export function parseComponentNodes(
     contracts: [] as SlotContract[],
     refs: new Set<string>(),
   };
-  const template = parseElement(root, contract, scope, source, slotState, platform);
+  const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined);
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 
