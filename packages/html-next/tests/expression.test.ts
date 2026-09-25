@@ -76,6 +76,14 @@ describe("expression: reads and absent value", () => {
     assert.equal(evaluate("items[2]", s), null);
     assert.equal(evaluate("record.value", s), null);
   });
+
+  it("reads a list's or string's length as its count, as Vue conversion does", () => {
+    const s = scope({ validation: { issues: [] as Value[] }, cart: { items: [1, 2] }, name: "Ada", record: { length: 7 } });
+    assert.equal(evaluate("not validation.issues.length", s), true);
+    assert.equal(evaluate("cart.items.length", s), 2);
+    assert.equal(evaluate("name.length", s), 3);
+    assert.equal(evaluate("record.length", s), 7);
+  });
 });
 
 describe("expression: truthiness — the empty value of each type is false", () => {

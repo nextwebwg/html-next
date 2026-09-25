@@ -261,6 +261,8 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
     }
     case "member": {
       const object = evalNode(node.object, scope);
+      // A list's or string's `length` is its count, as `cart.items.length` reads in the proposal.
+      if (node.key === "length" && (Array.isArray(object) || typeof object === "string")) return object.length;
       if (isAbsent(object) || typeof object !== "object" || Array.isArray(object)) {
         return ABSENT;
       }
