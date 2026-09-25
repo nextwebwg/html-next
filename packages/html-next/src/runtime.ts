@@ -1910,23 +1910,36 @@ function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderCont
       stateAttribute(tag),
       ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`),
     ]);
+    // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
+    // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
     const ownClasses = new Set<string>();
+    const ownStyle = (previous.ownerDocument.createElement("div")).style;
     for (const attribute of instance.rootNode.attributes) {
       if (attribute.kind === "literal" && attribute.name === "class") {
         for (const token of attribute.value.split(/\s+/)) ownClasses.add(token);
       } else if (attribute.kind === "attribute" && attribute.target === "class") {
         ownClasses.add(attribute.name);
+      } else if (attribute.kind === "literal" && attribute.name === "style") {
+        ownStyle.cssText += `;${attribute.value}`;
+      } else if (attribute.kind === "attribute" && attribute.target === "style") {
+        ownStyle.setProperty(attribute.name, "initial");
       } else if (attribute.kind === "literal" || attribute.kind === "attribute") {
-        written.add(attribute.kind === "attribute" && attribute.target === "style" ? "style" : attribute.name);
+        written.add(attribute.name);
       }
     }
+    const ownStyles = new Set(Array.from(ownStyle));
     const carried: RootAttribute[] = [];
     for (const attribute of Array.from(previous.attributes)) {
       if (attribute.name === "class") {
         const value = attribute.value.split(/\s+/).filter((token) => token !== "" && !ownClasses.has(token)).join(" ");
         if (value !== "") carried.push({ name: "class", value });
+      } else if (attribute.name === "style") {
+        const style = (previous as HTMLElement).style;
+        const value = Array.from(style).filter((property) => !ownStyles.has(property)).map((property) =>
+          `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
+        ).join("; ");
+        if (value !== "") carried.push({ name: "style", value });
       } else if (!written.has(attribute.name)) {
-        // ponytail: a consumer's inline style is dropped when the old arm also writes style.
         carried.push({ name: attribute.name, value: attribute.value });
       }
     }

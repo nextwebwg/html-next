@@ -1814,9 +1814,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<defs><prop name="as" type="button | a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
             `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
             `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
-            `<button $else class="action" type="button" on:click="bump" $ref="control">${body}</button></template>` +
+            `<button $else class="action" type="button" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
           `</template>` +
-          `<x-action id="action" class="consumer" href="#next"><b id="label">Go</b></x-action>`,
+          `<x-action id="action" class="consumer" style="color: rgb(255, 0, 0)" href="#next"><b id="label">Go</b></x-action>`,
         );
         await page.addScriptTag({ path: bundlePath });
 
@@ -1834,6 +1834,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
             dataHref: element.getAttribute('data-href'),
             type: element.getAttribute('type'),
             count: element.querySelector('output').textContent,
+            // The consumer's inline style carries over; the button arm's own does not.
+            style: [element.style.color, element.style.cursor, element.style.marginTop, element.style.getPropertyValue('--tone')],
             label: element.querySelector('#label') === label,
             host: runtime.getComponentHost(element)?.element === element,
           });
@@ -1854,10 +1856,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
 
         const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
         assert.deepEqual(result, {
-          before: { ...common, tag: "button", href: null, type: "button", count: "1" },
+          before: { ...common, tag: "button", href: null, type: "button", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
-          linked: { ...common, tag: "a", href: "#next", type: null, count: "2", replaced: true, dataAs: "a" },
-          back: { ...common, tag: "button", href: null, type: "button", count: "2" },
+          linked: { ...common, tag: "a", href: "#next", type: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
+          back: { ...common, tag: "button", href: null, type: "button", count: "2", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
         });
         assert.deepEqual(pageErrors, []);
       } finally {
