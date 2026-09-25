@@ -335,12 +335,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
             const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
-              getComponentHost(element: Element): { element: Element; state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { root: Element; state: Record<string, unknown> } | undefined;
             };
             const host = runtime.getComponentHost(document.querySelector("section.frame")!);
             return host === undefined
               ? "no host"
-              : `${host.element.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+              : `${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
           })(),
         }));
         assert.deepEqual(result, {
@@ -349,6 +349,49 @@ describe.skipIf(!enabled)("browser runtime", () => {
           feed: "from the endpoint",
           lineage: "x-outer x-frame",
           hostState: "section:count=2:label=reflected",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} gives a controller its root and the elements a consumer projected`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // One tree, no shadow boundary: the component's own <li> and the consumer's <b>/<i> are
+        // siblings under the same root, so only the slot can tell them apart.
+        await page.setContent(
+          '<template component="x-listbox" status="early" summary="Listbox.">' +
+          '<ul class="list"><li class="own">own</li><slot></slot><slot name="footer"></slot></ul>' +
+          "</template>" +
+          '<x-listbox><b class="a">A</b><i class="b">B</i><em slot="footer">F</em></x-listbox>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("ul.list");
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
+            getComponentHost(element: Element): {
+              root: Element;
+              slots: Record<string, readonly Element[]>;
+            } | undefined;
+          };
+          const host = runtime.getComponentHost(document.querySelector("ul.list")!)!;
+          const named = (elements: readonly Element[]): string =>
+            elements.map((element) => element.className || element.localName).join(",");
+          return {
+            root: host.root.localName,
+            byDefault: named(host.slots.default!),
+            footer: named(host.slots.footer!),
+            absent: named(host.slots.nothing!),
+          };
+        });
+        assert.deepEqual(result, {
+          root: "ul",
+          byDefault: "a,b",
+          footer: "em",
+          absent: "",
         });
       } finally {
         await browser.close();
@@ -1884,7 +1927,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             // The consumer's inline style carries over; the button arm's own does not.
             style: [element.style.color, element.style.cursor, element.style.marginTop, element.style.getPropertyValue('--tone')],
             label: element.querySelector('#label') === label,
-            host: runtime.getComponentHost(element)?.element === element,
+            host: runtime.getComponentHost(element)?.root === element,
           });
           const button = document.querySelector('#action');
           button.click();

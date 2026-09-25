@@ -2589,10 +2589,17 @@ function applyComponentProps(
  * so controllers may destructure only the capabilities they use in their parameter list.
  */
 export interface ComponentHost {
-  readonly element: Element;
+  /** The component's root element. Its connection owns this controller's lifetime. */
+  readonly root: Element;
   readonly state: Record<string, unknown>;
   readonly refs: Readonly<Record<string, Element>>;
-  readonly elements: Record<string, Element | RadioNodeList | undefined>;
+  /**
+   * The elements a consumer projected, by slot name, in document order; `default` reads the
+   * unnamed slot. Empty while a slot shows its fallback. A component lowers into one tree with
+   * no shadow boundary, so a query rooted at `root` cannot tell projected content from the
+   * component's own output: this is the only way to enumerate it.
+   */
+  readonly slots: Readonly<Record<string, readonly Element[]>>;
   /**
    * Creates controller-local writable state. Equal writes use `Object.is` and do not notify
    * consumers. The value is private to controller code unless an effect copies it into a declared
@@ -2675,19 +2682,27 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
     has: (_target, key) => typeof key === "string" && instance.scope.has(key),
   });
-  const elements = new Proxy({}, {
-    get: (_target, key) => {
-      if (typeof key !== "string") return undefined;
-      const element = instance.element!;
-      const form = element instanceof HTMLFormElement ? element : element.querySelector("form");
-      return form?.elements.namedItem(key) ?? element.querySelector(`[name="${CSS.escape(key)}"]`) ?? undefined;
-    },
-  }) as Record<string, Element | RadioNodeList | undefined>;
+  const projectedInto = (key: string): readonly Element[] => {
+    const projection = instance.projection;
+    if (projection === undefined) return [];
+    // The rendered form names the unnamed slot `""`; `default` is the authoring spelling.
+    const slot = key === "default" ? "" : key;
+    // Hydration records each node's slot; a client-rendered instance carries the author's own
+    // `slot` attribute instead, and an unmarked node belongs to the unnamed slot either way.
+    return projection.nodes.filter((node): node is Element =>
+      node.nodeType === 1 &&
+      (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === slot
+    );
+  };
+  const slots = new Proxy({}, {
+    get: (_target, key) => typeof key === "string" ? projectedInto(key) : undefined,
+    has: (_target, key) => typeof key === "string" && projectedInto(key).length > 0,
+  }) as Record<string, readonly Element[]>;
   const host: ComponentHost = {
-    get element() { return instance.element!; },
+    get root() { return instance.element!; },
     state,
     refs: instance.refs,
-    elements,
+    slots,
     signal(initialValue) {
       return createSignal(initialValue);
     },

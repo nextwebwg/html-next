@@ -106,7 +106,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             `export default (host) => {` +
             ` const add = () => { host.state.count += 1; };` +
             ` host.refs.button.addEventListener("click", add);` +
-            ` const stop = host.effect(() => { host.element.dataset.count = host.state.count; });` +
+            ` const stop = host.effect(() => { host.root.dataset.count = host.state.count; });` +
             ` return () => { stop(); host.refs.button.removeEventListener("click", add); };` +
             `}; export const focusInput = (host) => { host.refs.button.dataset.focused = "yes"; };`,
         });
@@ -244,7 +244,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       } else if (url.endsWith("/same.js")) {
         await route.fulfill({
           contentType: "text/javascript",
-          body: `export default (host) => { host.element.dataset.controller = "ran"; };`,
+          body: `export default (host) => { host.root.dataset.controller = "ran"; };`,
         });
       } else {
         await route.fulfill({

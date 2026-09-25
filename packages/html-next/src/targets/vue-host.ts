@@ -16,7 +16,7 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, onBeforeUnmount, onMounted, shallowRef, watchEffect } from "vue";
+import { computed, Fragment, onBeforeUnmount, onMounted, shallowRef, useSlots, watchEffect } from "vue";
 
 /** A reactive value the host reads: Vue's ref, shallowRef, computed, and useTemplateRef all match. */
 export interface Readable<T> {
@@ -38,6 +38,16 @@ export interface ComponentHostOptions {
   readonly computed?: Readonly<Record<string, Readable<unknown>>>;
 }
 
+/** Slot content flattened to the elements Vue mounted for it, descending through fragments. */
+function slottedElements(nodes: readonly any[]): Element[] {
+  const elements: Element[] = [];
+  for (const node of nodes) {
+    if (node.type === Fragment && Array.isArray(node.children)) elements.push(...slottedElements(node.children));
+    else if (node.el instanceof Element) elements.push(node.el);
+  }
+  return elements;
+}
+
 /**
  * The controller host, built from Vue refs, effects, and lifecycle. Reads and writes reach the
  * component's own refs, so a controller's change renders as any other Vue change does, and the
@@ -48,6 +58,7 @@ export function useComponentHost(
   options: ComponentHostOptions,
 ) {
   const { root, dispatch, props, refs = {}, state = {}, computed: computedValues = {} } = options;
+  const vueSlots = useSlots();
   const stops: Array<() => void> = [];
   const read = (name: string): unknown =>
     Object.hasOwn(state, name)
@@ -56,7 +67,7 @@ export function useComponentHost(
       ? computedValues[name]!.value
       : props?.[name];
   const host = {
-    get element(): Element {
+    get root(): Element {
       return root.value as Element;
     },
     state: new Proxy({} as Record<string, unknown>, {
@@ -75,12 +86,13 @@ export function useComponentHost(
         Object.entries(refs).map(([name, ref]) => [name, { enumerable: true, get: () => ref.value as Element }]),
       ),
     ) as Readonly<Record<string, Element>>,
-    elements: new Proxy({} as Record<string, Element | RadioNodeList | undefined>, {
+    slots: new Proxy({} as Record<string, readonly Element[]>, {
       get: (_target, name) => {
-        if (typeof name !== "string" || root.value === null) return undefined;
-        const form = root.value instanceof HTMLFormElement ? root.value : root.value.querySelector("form");
-        return form?.elements.namedItem(name) ?? root.value.querySelector(\`[name="\${CSS.escape(name)}"]\`) ?? undefined;
+        if (typeof name !== "string") return undefined;
+        const render = vueSlots[name];
+        return render === undefined ? [] : slottedElements(render());
       },
+      has: (_target, name) => typeof name === "string" && vueSlots[name] !== undefined,
     }),
     signal<T>(initialValue: T) {
       // shallowRef holds the controller's own value and notifies only when it changes.
