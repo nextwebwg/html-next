@@ -25,6 +25,7 @@ export type ComponentRoot =
 
 export type ComponentDeclaration =
   | ReactiveDeclaration
+  | ContextDeclaration
   | EventDeclaration
   | MethodDeclaration
   | HandlerDeclaration
@@ -33,10 +34,21 @@ export type ComponentDeclaration =
 export interface ReactiveDeclaration {
   readonly kind: "state" | "computed";
   readonly name: string;
+  /** A state exposed to descendant components through a matching <context>. */
+  readonly context?: boolean;
   /** A state's declared type, in the type-expression syntax props use. */
   readonly type?: string;
   readonly value?: string;
   readonly expression?: CompiledExpression;
+}
+
+export interface ContextDeclaration {
+  readonly kind: "context";
+  /** The published state cell's name on the provider. */
+  readonly name: string;
+  readonly from: string;
+  /** The name introduced into this component's expression scope. */
+  readonly as?: string;
 }
 
 export interface DataDeclaration {

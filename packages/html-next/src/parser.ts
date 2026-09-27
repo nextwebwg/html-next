@@ -429,7 +429,7 @@ function readDeclarations(
     const element = node;
     elements.push(element);
     const kind = sourceTag(element);
-    if (!/^(?:prop|state|computed|data|handler|event|method)$/.test(kind)) {
+    if (!/^(?:prop|state|computed|data|context|handler|event|method)$/.test(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
     const name = attr(element, "name") ?? "";
@@ -439,11 +439,15 @@ function readDeclarations(
       eventNames.add(name);
       continue;
     }
-    if (names.has(name)) {
-      fail("HC020", `Declaration \`${name}\` collides in the flat component scope.`, source);
+    const localName = kind === "context" ? attr(element, "as") ?? name : name;
+    if (kind === "context" && !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(localName)) {
+      fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
     }
-    names.add(name);
-    roots.add(name);
+    if (names.has(localName)) {
+      fail("HC020", `Declaration \`${localName}\` collides in the flat component scope.`, source);
+    }
+    names.add(localName);
+    roots.add(localName);
     if (kind === "state") writableRoots.add(name);
     else if (kind === "handler") handlers.add(name);
   }
@@ -453,6 +457,16 @@ function readDeclarations(
     const kind = sourceTag(element);
     if (kind === "prop") continue;
     const name = attr(element, "name")!;
+
+    if (kind === "context") {
+      const from = attr(element, "from");
+      if (from === undefined || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(from)) {
+        fail("HC013", `<context name="${name}"> requires a component tag in \`from\`.`, source);
+      }
+      const as = attr(element, "as");
+      declarations.push({ kind, name, from, ...(as === undefined ? {} : { as }) });
+      continue;
+    }
 
     if (kind === "state") {
       const expressionSource = attr(element, ":value");
@@ -468,12 +482,14 @@ function readDeclarations(
         kind: "state";
         name: string;
         type?: string;
+        context?: boolean;
         value?: string;
         expression?: CompiledExpression;
       } = {
         kind,
         name,
       };
+      if (attr(element, "context") !== undefined) declaration.context = true;
       // A declared type states what the state holds, as a prop's does.
       const stateType = attr(element, "type");
       if (stateType !== undefined) {

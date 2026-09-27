@@ -2,7 +2,7 @@ import { fail } from "./diagnostics.js";
 import { hasExecutableUrl, isUrlAttribute } from "./sanitize.js";
 import type { ComponentContract } from "./types.js";
 
-const RESERVED_ELEMENT_RE = /^(?:if|else-if|else|for|with|value|state|computed|data)$/;
+const RESERVED_ELEMENT_RE = /^(?:if|else-if|else|for|with|value|state|computed|data|context)$/;
 const UNSUPPORTED_LITERAL_ATTRIBUTE_RE = /^(?:@|v-|#|on:|use:|transition:|animate:)/;
 const UNSAFE_DOM_PROPERTY_RE = /^(?:innerhtml|outerhtml|srcdoc)$/;
 const UNSAFE_DEFINITION_ELEMENT_RE = /^(?:base|embed|link|meta|object|script|style)$/;

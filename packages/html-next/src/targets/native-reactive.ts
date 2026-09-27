@@ -157,6 +157,7 @@ export function nativeReactivePlan(
   const declarations = definition.declarations ?? [];
   if (declarations.length === 0) return undefined;
   if (declarations.some((declaration) =>
+    (declaration.kind === "state" && declaration.context === true) ||
     declaration.kind !== "state" && declaration.kind !== "computed" &&
     declaration.kind !== "event" && declaration.kind !== "handler"
   )) return undefined;

@@ -36,6 +36,7 @@ export type ExpressionNode =
   | { kind: "index"; object: ExpressionNode; index: ExpressionNode }
   | { kind: "unary"; op: "not" | "-"; operand: ExpressionNode }
   | { kind: "binary"; op: string; left: ExpressionNode; right: ExpressionNode }
+  | { kind: "conditional"; test: ExpressionNode; consequent: ExpressionNode; alternate: ExpressionNode }
   | { kind: "call"; fn: string; args: ExpressionNode[] }
   | { kind: "object"; pairs: { key: string; value: ExpressionNode }[] }
   | { kind: "array"; items: ExpressionNode[] };
@@ -54,7 +55,7 @@ export type WritablePath = readonly WritablePathSegment[];
 
 type TokenKind = 0 | 1 | 2 | 3 | 4;
 
-const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.:{}[\]-])|$)/y;
+const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.?:{}[\]-])|$)/y;
 const ESCAPE = /\\([\s\S])/g;
 const FORMAT_TOKEN = /%s/g;
 
@@ -136,6 +137,14 @@ function parse(source: string): ExpressionNode {
     return left;
   }
 
+  function conditional(): ExpressionNode {
+    const test = binary(1);
+    if (!eat("?")) return test;
+    const consequent = conditional();
+    expect(":");
+    return { kind: "conditional", test, consequent, alternate: conditional() };
+  }
+
   function unary(): ExpressionNode {
     if (kind === 3 && token === "not") {
       next();
@@ -153,7 +162,7 @@ function parse(source: string): ExpressionNode {
         next();
         object = { kind: "member", object, key };
       } else if (eat("[")) {
-        const index = binary(1);
+        const index = conditional();
         expect("]");
         object = { kind: "index", object, index };
       } else {
@@ -172,7 +181,7 @@ function parse(source: string): ExpressionNode {
     }
     if (currentKind === 4 && currentToken === "(") {
       next();
-      const node = binary(1);
+      const node = conditional();
       expect(")");
       return node;
     }
@@ -188,7 +197,7 @@ function parse(source: string): ExpressionNode {
           const key = token as string;
           next();
           expect(":");
-          pairs.push({ key, value: binary(1) });
+          pairs.push({ key, value: conditional() });
         } while (eat(","));
         expect("}");
       }
@@ -200,7 +209,7 @@ function parse(source: string): ExpressionNode {
       if (!eat("]")) {
         do {
           if (token === "]") break;
-          items.push(binary(1));
+          items.push(conditional());
         } while (eat(","));
         expect("]");
       }
@@ -216,7 +225,7 @@ function parse(source: string): ExpressionNode {
         next();
         const args: ExpressionNode[] = [];
         if (!eat(")")) {
-          do args.push(binary(1)); while (eat(","));
+          do args.push(conditional()); while (eat(","));
           expect(")");
         }
         return { kind: "call", fn: name, args };
@@ -227,7 +236,7 @@ function parse(source: string): ExpressionNode {
   }
 
   next();
-  const node = binary(1);
+  const node = conditional();
   if (kind !== 0) throw new SyntaxError("Unexpected trailing input in expression.");
   return node;
 }
@@ -290,6 +299,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
       return number === ABSENT ? ABSENT : -number;
     }
     case "binary": return evalBinary(node, scope);
+    case "conditional": return evalNode(truthy(evalNode(node.test, scope)) ? node.consequent : node.alternate, scope);
     case "call": return evalCall(node, scope);
     case "object": {
       const value: Record<string, Value> = {};
@@ -401,6 +411,11 @@ function collectDependencies(node: ExpressionNode, dependencies: string[]): void
     case "binary":
       collectDependencies(node.left, dependencies);
       collectDependencies(node.right, dependencies);
+      return;
+    case "conditional":
+      collectDependencies(node.test, dependencies);
+      collectDependencies(node.consequent, dependencies);
+      collectDependencies(node.alternate, dependencies);
       return;
     case "call":
       for (const argument of node.args) collectDependencies(argument, dependencies);
