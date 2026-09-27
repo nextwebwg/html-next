@@ -57,19 +57,14 @@ export async function loadBrowserComponents(
   return Object.freeze({ graph, registry });
 }
 
+const componentLinkSelector = 'link[rel="component"][href]';
+
 /** Reads the application's direct live roots from link[rel=component]. */
 export function documentComponentRoots(root: Document = document): readonly string[] {
   return Object.freeze(Array.from(
-    root.querySelectorAll('link[rel="component"][href]'),
+    root.querySelectorAll(componentLinkSelector),
     (link) => link.getAttribute("href")!,
   ).filter((href) => href.trim() !== ""));
-}
-
-export function loadDocumentComponents(
-  root: Document = document,
-  options: Omit<BrowserLoaderOptions, "document"> = {},
-): Promise<{ readonly graph: ComponentGraph; readonly registry: ComponentRegistry }> {
-  return loadBrowserComponents(documentComponentRoots(root), { ...options, document: root });
 }
 
 export interface StartedBrowserComponents {
@@ -81,7 +76,8 @@ export interface StartedBrowserComponents {
 /**
  * Starts the live polyfill path: load the application-selected graph, lower instances, and
  * lazily import a definition's controller on its first connection. Controller failure is
- * reported after declarative output is connected and never removes that output.
+ * reported after declarative output is connected and never removes that output. A component
+ * link added later loads its graph into the running page.
  */
 export async function startBrowserComponents(
   root: Document = document,
@@ -90,11 +86,34 @@ export async function startBrowserComponents(
   // The live delivery discovers definitions authored in the page, so teach the runtime to read
   // them. A build-time graph imports the runtime directly and never carries the parser.
   installInlineDefinitionParser(parseBrowserComponent);
-  const loaded = await loadDocumentComponents(root, options);
+  const requested = new Set(documentComponentRoots(root));
+  const loaded = await loadBrowserComponents([...requested], { ...options, document: root });
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));
-  const stop = observeDocument(root, {
+  let stopped = false;
+  // A later root may share dependencies with the installed graph; only its new definitions are
+  // added. Installing them renders the instances already waiting in the document.
+  const addRoot = (href: string | null): void => {
+    if (href === null || href.trim() === "" || requested.has(href)) return;
+    requested.add(href);
+    void loadBrowserComponents([href], { ...options, document: root })
+      .then(({ graph }) => {
+        if (stopped) return;
+        const nodes = new Map(Array.from(graph.nodes).filter(
+          ([, node]) => loaded.registry.get(node.definition.contract.tag) === undefined,
+        ));
+        const added = { ...graph, nodes };
+        loaded.registry.addGraph(added, (node) => loadController(node, options.importer));
+        installComponentGraph(added, root);
+      })
+      .catch(report);
+  };
+  const stopObserving = observeDocument(root, {
     onError: report,
+    onAdded(element) {
+      if (element.matches(componentLinkSelector)) addRoot(element.getAttribute("href"));
+      for (const link of element.querySelectorAll(componentLinkSelector)) addRoot(link.getAttribute("href"));
+    },
     onConnect(element, definition) {
       const node = loaded.registry.get(definition.contract.tag)?.node;
       if (node?.controller === undefined) return;
@@ -119,5 +138,11 @@ export async function startBrowserComponents(
       };
     },
   });
+  // Links added while the initial graph loaded, before observation began.
+  for (const href of documentComponentRoots(root)) addRoot(href);
+  const stop = (): void => {
+    stopped = true;
+    stopObserving();
+  };
   return Object.freeze({ ...loaded, stop });
 }

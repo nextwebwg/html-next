@@ -29,7 +29,6 @@ const expectedExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
   "./node-loader",
 ];

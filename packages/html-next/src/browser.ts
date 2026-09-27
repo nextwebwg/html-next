@@ -1,11 +1,6 @@
-import {
-  documentComponentRoots,
-  loadBrowserComponents,
-  loadDocumentComponents,
-  startBrowserComponents,
-  type BrowserLoaderOptions,
-  type StartedBrowserComponents,
-} from "./browser-loader.js";
+// The live browser entry. Importing it is the whole setup: it starts once per realm, loads the
+// components the document links, and keeps rendering instances as they are added or removed.
+import { startBrowserComponents, type StartedBrowserComponents } from "./browser-loader.js";
 
 const browserRuntimeKey = Symbol.for("@nextwebwg/html-next/browser");
 
@@ -15,13 +10,7 @@ interface BrowserRuntimeState {
 
 type BrowserGlobal = typeof globalThis & {
   [browserRuntimeKey]?: BrowserRuntimeState;
-  HTMLNext?: Readonly<{
-    ready: Promise<StartedBrowserComponents>;
-    documentComponentRoots: typeof documentComponentRoots;
-    loadBrowserComponents: typeof loadBrowserComponents;
-    loadDocumentComponents: typeof loadDocumentComponents;
-    startBrowserComponents: typeof startBrowserComponents;
-  }>;
+  HTMLNext?: Readonly<{ ready: Promise<StartedBrowserComponents> }>;
 };
 
 const browserGlobal = globalThis as BrowserGlobal;
@@ -30,20 +19,8 @@ const state = browserGlobal[browserRuntimeKey] ?? Object.freeze({
 });
 browserGlobal[browserRuntimeKey] = state;
 
+/** Resolves once the components the document links have loaded. */
 export const ready = state.ready;
+export type { StartedBrowserComponents };
 
-export {
-  documentComponentRoots,
-  loadBrowserComponents,
-  loadDocumentComponents,
-  startBrowserComponents,
-};
-export type { BrowserLoaderOptions, StartedBrowserComponents };
-
-browserGlobal.HTMLNext ??= Object.freeze({
-  ready,
-  documentComponentRoots,
-  loadBrowserComponents,
-  loadDocumentComponents,
-  startBrowserComponents,
-});
+browserGlobal.HTMLNext ??= Object.freeze({ ready });

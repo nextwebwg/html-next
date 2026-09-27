@@ -163,6 +163,8 @@ interface DocumentState {
   release?: (element: Element) => void;
   /** Keeps a connected root connected when its element is replaced. */
   move?: (from: Element, to: Element) => void;
+  /** Lowers and connects every waiting instance; set while the document is observed. */
+  rescan?: () => void;
 }
 
 type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
@@ -270,6 +272,8 @@ export function installComponentGraph(
     });
     installed += 1;
   }
+  // Definitions installed into an observed document apply to the instances already waiting in it.
+  if (installed > 0) documentState(root).rescan?.();
   return installed;
 }
 
@@ -2852,6 +2856,8 @@ export interface DocumentObservationOptions {
   ) => boolean;
   /** Runtime lifecycle integration; the returned disposer runs on removal or stop. */
   readonly onConnect?: (element: Element, definition: ComponentDefinition) => void | (() => void);
+  /** Called with each element added to the document after observation starts. */
+  readonly onAdded?: (element: Element) => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -2906,6 +2912,9 @@ export function observeDocument(
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;
           scopes.push(node as QueryRoot);
+          if (options.onAdded !== undefined) {
+            try { options.onAdded(node as Element); } catch (error) { report(error); }
+          }
         }
       }
       for (const element of removed) if (!root.contains(element)) disconnect(element);
@@ -2927,6 +2936,7 @@ export function observeDocument(
     connected.set(to, connected.get(from));
     connected.delete(from);
   };
+  state.rescan = () => synchronize();
   const stopObservation = subscribeDocumentMutations(root, synchronize);
   const stop = (): void => {
     if (stopped) return;
@@ -2935,6 +2945,7 @@ export function observeDocument(
     delete state.observer;
     delete state.release;
     delete state.move;
+    delete state.rescan;
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
     }

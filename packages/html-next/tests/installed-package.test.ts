@@ -21,7 +21,6 @@ const publicExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
   "./node-loader",
 ] as const;
@@ -31,7 +30,6 @@ const browserExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
 ] as const;
 
