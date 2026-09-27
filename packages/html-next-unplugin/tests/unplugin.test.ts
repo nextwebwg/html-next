@@ -40,6 +40,14 @@ class TestElement {
   }
 }
 
+// A build is compiled for its entries. Only the live browser runtime watches the document for
+// component links and later definitions, so none of that machinery may reach a build.
+function assertClosedOverEntries(output: string): void {
+  assert.doesNotMatch(output, /link\[rel="component"\]/);
+  assert.doesNotMatch(output, /function (?:observeDocument|startBrowserComponents|loadBrowserComponents)\b/);
+  assert.doesNotMatch(output, /\.rescan\b|\bonAdded\b/);
+}
+
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -99,6 +107,7 @@ describe("HTML Next unplugin", () => {
       components: Array<{ tag: string }>;
     };
     assert.doesNotMatch(output, /parse5|source-parser|browser-source/);
+    assertClosedOverEntries(output);
     assert.equal((output.match(/function createXCounter/g) ?? []).length, 1);
     assert.equal((output.match(/function createXLabel/g) ?? []).length, 1);
     assert.equal(manifest.mode, "native-application-or-library-build");
@@ -628,6 +637,7 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /registerRenderedComponents\(element\.ownerDocument\)/);
     assert.match(output, /"tag":\s*"x-child"/);
     assert.doesNotMatch(output, /createXChild\(\)/);
+    assertClosedOverEntries(output);
     // The registered copy carries no styles, so the child's stylesheet has to reach the build.
     assert.match(output, /"css":\s*""/);
     const css = await readFile(join(root, "dist/components.css"), "utf8");

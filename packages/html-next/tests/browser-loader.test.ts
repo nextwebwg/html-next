@@ -15,6 +15,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
   let browser: Browser;
   let bundlePath = "";
   let bundleInputs: readonly string[] = [];
+  let distributablePath = "";
   let temporaryDirectory = "";
 
   beforeAll(async () => {
@@ -31,6 +32,15 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       target: ["es2022"],
     });
     bundleInputs = Object.keys(result.metafile.inputs);
+    distributablePath = join(temporaryDirectory, "browser.js");
+    await build({
+      entryPoints: [browserDistributableUrl.pathname],
+      bundle: true,
+      format: "esm",
+      outfile: distributablePath,
+      platform: "browser",
+      target: ["es2022"],
+    });
     browser = await chromium.launch({ headless: true });
   });
 
@@ -46,15 +56,6 @@ describe.skipIf(!enabled)("browser graph loader", () => {
 
   it("starts the linkable browser distributable when the module executes", async () => {
     const page = await browser.newPage();
-    const distributablePath = join(temporaryDirectory, "browser.js");
-    await build({
-      entryPoints: [browserDistributableUrl.pathname],
-      bundle: true,
-      format: "esm",
-      outfile: distributablePath,
-      platform: "browser",
-      target: ["es2022"],
-    });
     await page.route("https://distribution.example/**", async (route) => {
       const url = route.request().url();
       if (url.endsWith("/x-ready.html")) {
@@ -76,12 +77,75 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       await ready;
       return {
         exposed: ready instanceof Promise,
+        api: Object.keys((window as unknown as { HTMLNext: object }).HTMLNext),
         tag: document.querySelector("#ready")?.localName,
         text: document.querySelector("#ready")?.textContent,
       };
     });
     await page.close();
-    assert.deepEqual(result, { exposed: true, tag: "output", text: "ready" });
+    // Loading the entry is the whole setup; there is nothing to start by hand.
+    assert.deepEqual(result, { exposed: true, api: ["ready"], tag: "output", text: "ready" });
+  });
+
+  it("loads component links added after start and renders the instances waiting for them", async () => {
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("pageerror", (error) => errors.push(error.message));
+    const components: Record<string, string> = {
+      "/first.html":
+        '<link rel="component" href="./shared.html">' +
+        '<template component="x-first" status="early" summary="First."><output>first <x-shared></x-shared></output></template>',
+      "/late.html":
+        '<link rel="component" href="./shared.html">' +
+        '<template component="x-late" status="early" summary="Late."><output>late <x-shared></x-shared></output></template>',
+      "/shared.html": '<template component="x-shared" status="early" summary="Shared."><b>shared</b></template>',
+    };
+    await page.route("https://late.example/**", async (route) => {
+      const body = components[new URL(route.request().url()).pathname];
+      await route.fulfill({
+        contentType: "text/html",
+        body: body ?? '<link rel="component" href="/first.html"><x-first id="first"></x-first><x-late id="waiting"></x-late>',
+      });
+    });
+    await page.goto("https://late.example/");
+    await page.addScriptTag({ path: distributablePath, type: "module" });
+    const rendered = (id: string) => page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      return element === null ? null : { tag: element.localName, text: element.textContent };
+    }, `#${id}`);
+
+    await page.waitForFunction(() => document.querySelector("#first")?.localName === "output");
+    const beforeLink = await rendered("waiting");
+    await page.evaluate(() => {
+      const link = document.createElement("link");
+      link.rel = "component";
+      link.setAttribute("href", "/late.html");
+      document.head.append(link);
+    });
+    await page.waitForFunction(() => document.querySelector("#waiting")?.localName === "output");
+    await page.evaluate(() => {
+      const fresh = document.createElement("x-late");
+      fresh.id = "fresh";
+      document.body.append(fresh);
+    });
+    await page.waitForFunction(() => document.querySelector("#fresh")?.localName === "output");
+    const result = {
+      first: await rendered("first"),
+      beforeLink,
+      waiting: await rendered("waiting"),
+      fresh: await rendered("fresh"),
+      errors,
+    };
+    await page.close();
+    assert.deepEqual(result, {
+      first: { tag: "output", text: "first shared" },
+      beforeLink: { tag: "x-late", text: "" },
+      // x-late shares x-shared with the first root; only its new definition is added.
+      waiting: { tag: "output", text: "late shared" },
+      fresh: { tag: "output", text: "late shared" },
+      errors: [],
+    });
   });
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {

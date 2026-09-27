@@ -86,6 +86,8 @@ interface SlotInsertion {
 
 interface RuntimeInstance {
   element?: Element;
+  /** Stable component ownership, captured when invoked rather than inferred from later DOM position. */
+  readonly parent?: RuntimeInstance;
   readonly definition: ComponentDefinition;
   readonly scope: ReactiveScope;
   readonly refs: Record<string, Element | Element[]>;
@@ -161,6 +163,8 @@ interface DocumentState {
   release?: (element: Element) => void;
   /** Keeps a connected root connected when its element is replaced. */
   move?: (from: Element, to: Element) => void;
+  /** Lowers and connects every waiting instance; set while the document is observed. */
+  rescan?: () => void;
 }
 
 type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
@@ -268,6 +272,8 @@ export function installComponentGraph(
     });
     installed += 1;
   }
+  // Definitions installed into an observed document apply to the instances already waiting in it.
+  if (installed > 0) documentState(root).rescan?.();
   return installed;
 }
 
@@ -313,6 +319,7 @@ function propAttributeNames(
 function componentScope(
   definition: ComponentDefinition,
   values: Readonly<Record<string, PropValue | undefined>>,
+  parent?: RuntimeInstance,
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(definition.contract.props)) {
@@ -347,6 +354,20 @@ function componentScope(
   }
   const effects: ReactiveOwner[] = [];
   for (const declaration of declarations) {
+    if (declaration.kind === "context") {
+      let provider = parent;
+      while (provider !== undefined && (
+        provider.definition.contract.tag !== declaration.from ||
+        !provider.definition.declarations?.some((candidate) =>
+          candidate.kind === "state" && candidate.context === true && candidate.name === declaration.name)
+      )) provider = provider.parent;
+      if (provider === undefined) {
+        fail("HR009", `<${definition.contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`);
+      }
+      const source = provider.scope;
+      effects.push(scope.defineComputed(declaration.as ?? declaration.name, () => source.get(declaration.name)!));
+      continue;
+    }
     if (declaration.kind !== "computed" || declaration.expression === undefined) continue;
     effects.push(scope.defineComputed(
       declaration.name,
@@ -360,6 +381,7 @@ function readInvocation(
   invocation: Element,
   definition: ComponentDefinition,
   hydration = false,
+  parent?: RuntimeInstance,
 ): {
   readonly scope: ReactiveScope;
   readonly passThrough: readonly RootAttribute[];
@@ -382,7 +404,7 @@ function readInvocation(
   // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
   // author's explicit attributes). They are never read from JavaScript properties.
   const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined));
-  const { scope, effects } = componentScope(definition, values);
+  const { scope, effects } = componentScope(definition, values, parent);
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
@@ -1822,6 +1844,7 @@ function prepareRuntimeInvocation(
   projectedNodes?: readonly Node[],
   projectedSlotNames = new WeakMap<Node, string>(),
   frameworkOwned = false,
+  parent?: RuntimeInstance,
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -1829,7 +1852,7 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration);
+  const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration, parent);
   const rootNode = componentRoot(definition, scope);
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
@@ -1860,6 +1883,7 @@ function prepareRuntimeInvocation(
   const children = hydration ? hydratedNodes! : Array.from(invocation.childNodes);
   const instance: RuntimeInstance = {
     definition,
+    ...(parent === undefined ? {} : { parent }),
     scope,
     refs: {},
     effects,
@@ -1920,6 +1944,17 @@ function prepareRuntimeInvocation(
     instance,
     replace: !hydration,
   };
+}
+
+/** Capture the closest component owner while an invocation still sits in its authored tree. */
+function invocationParent(element: Element, pending: WeakMap<Element, RuntimeInstance>): RuntimeInstance | undefined {
+  for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+    const prepared = pending.get(ancestor);
+    if (prepared !== undefined) return prepared;
+    const existing = runtimeInstance(ancestor);
+    if (existing !== undefined) return existing;
+  }
+  return undefined;
 }
 
 /** An attribute a root receives from outside its template: the invocation, a factory, or page code. */
@@ -2136,6 +2171,7 @@ function lowerRenderedComponents(
       collectWithin(invocation.host ?? invocation.nativeRoot, selector, nested);
     }
     const prepared: PreparedInvocation[] = [];
+    const pendingOwners = new WeakMap<Element, RuntimeInstance>();
     for (const element of nested) {
       const live = registry.definitions.get(element.localName);
       if (live === undefined) continue;
@@ -2147,7 +2183,9 @@ function lowerRenderedComponents(
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
         shouldLower?.(element, definition, false) === false
       ) continue;
-      prepared.push(prepareRuntimeInvocation(element, definition, false));
+      const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners));
+      prepared.push(invocation);
+      pendingOwners.set(element, invocation.instance);
     }
     if (prepared.length === 0) return lowered;
     commitRuntimeInvocations(registry, prepared);
@@ -2250,6 +2288,7 @@ function lowerScopes(
   const roots = new Set<Element>();
   const lowered: Element[] = [];
   const prepared: PreparedInvocation[] = [];
+  const pendingOwners = new WeakMap<Element, RuntimeInstance>();
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
@@ -2261,7 +2300,9 @@ function lowerScopes(
       root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
       shouldLower?.(element, definition, hydration) === false
     ) return false;
-    prepared.push(prepareRuntimeInvocation(element, definition, hydration));
+    const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
+    prepared.push(invocation);
+    pendingOwners.set(element, invocation.instance);
     return true;
   };
   const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
@@ -2541,7 +2582,7 @@ export function attachComponent(
       if (value !== undefined && value !== null) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
     }
     const attaching = [
-      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true),
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true, invocationParent(element, new WeakMap())),
     ];
     commitRuntimeInvocations(registry, attaching);
     // Generated output attaches its own root, so nothing else will lower the components this
@@ -2815,6 +2856,8 @@ export interface DocumentObservationOptions {
   ) => boolean;
   /** Runtime lifecycle integration; the returned disposer runs on removal or stop. */
   readonly onConnect?: (element: Element, definition: ComponentDefinition) => void | (() => void);
+  /** Called with each element added to the document after observation starts. */
+  readonly onAdded?: (element: Element) => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -2869,6 +2912,9 @@ export function observeDocument(
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;
           scopes.push(node as QueryRoot);
+          if (options.onAdded !== undefined) {
+            try { options.onAdded(node as Element); } catch (error) { report(error); }
+          }
         }
       }
       for (const element of removed) if (!root.contains(element)) disconnect(element);
@@ -2890,6 +2936,7 @@ export function observeDocument(
     connected.set(to, connected.get(from));
     connected.delete(from);
   };
+  state.rescan = () => synchronize();
   const stopObservation = subscribeDocumentMutations(root, synchronize);
   const stop = (): void => {
     if (stopped) return;
@@ -2898,6 +2945,7 @@ export function observeDocument(
     delete state.observer;
     delete state.release;
     delete state.move;
+    delete state.rescan;
     for (const dispose of connected.values()) {
       try { dispose?.(); } catch (error) { report(error); }
     }

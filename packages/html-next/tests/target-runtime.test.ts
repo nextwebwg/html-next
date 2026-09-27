@@ -345,6 +345,15 @@ const formatSource = `<template component="format-counter" status="experimental"
   </defs>
   <section :aria-label="label"><button type="button" on:click="increment">Increment</button><input .value="label"><output $value="label"></output></section>
 </template>`;
+const stepsSource = `<template component="x-steps"><defs>
+  <state name="current" :value="1" context></state>
+  <handler name="next"><set name="current" :value="current + 1"></set></handler>
+  </defs><section><button type="button" on:click="next">Next</button><ol><slot></slot></ol></section></template>`;
+
+const stepSource = `<template component="x-step"><defs>
+  <prop name="number" type="number" required>Step number.</prop>
+  <context name="current" from="x-steps" as="activeStep"></context>
+  </defs><li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`;
 
 describe.skipIf(!enabled)("generated target runtime parity", () => {
   let directory = "";
@@ -355,6 +364,8 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
     const artifacts = new Map([
       ...generateComponent(parseComponent(source, "demo-counter.html")),
       ...generateComponent(parseComponent(panelSource, "demo-panel.html")),
+      ...generateComponent(parseComponent(stepsSource, "x-steps.html")),
+      ...generateComponent(parseComponent(stepSource, "x-step.html")),
       vueHostArtifact(),
     ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
@@ -381,21 +392,33 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       id: "demo-panel",
       inlineTemplate: true,
     }).content);
+    for (const name of ["XSteps", "XStep"]) {
+      const parsed = parseVue(artifacts.get(`vue/${name}.vue`)!, { filename: `${name}.vue` });
+      assert.deepEqual(parsed.errors, []);
+      await writeFile(join(directory, `vue/${name}.ts`), compileScript(parsed.descriptor, {
+        id: name.toLowerCase(),
+        inlineTemplate: true,
+      }).content);
+    }
 
     const entries: Record<string, string> = {
       vanilla: `import { createDemoCounter } from "./vanilla/DemoCounter.js";
 import { createDemoPanel } from "./vanilla/DemoPanel.js";
+import { createXSteps } from "./vanilla/XSteps.js";
+import { createXStep } from "./vanilla/XStep.js";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
 const title = document.createElement("h1"); title.slot = "title"; title.textContent = "Title";
 const component = createDemoCounter({ children: ["Projected"], slots: { title: [title] } });
 component.addEventListener("count-change", event => events.push(event.detail));
 component.addEventListener("invalid-change", event => window.invalidTargetEvents.push(event.detail));
-document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready", attributes: { class: "consumer", role: "region" } }));`,
+document.querySelector("main").append(component, createDemoPanel({ align: "end", label: "Ready", attributes: { class: "consumer", role: "region" } }), createXSteps({ children: [createXStep({ number: 1, children: ["One"] }), createXStep({ number: 2, children: ["Two"] })] }));`,
       vue: `import { createApp, h } from "vue";
 import DemoCounter from "./vue/DemoCounter";
 import DemoPanel from "./vue/DemoPanel";
+import XSteps from "./vue/XSteps";
+import XStep from "./vue/XStep";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -486,6 +509,15 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           panel: { ownAlign: false, dataAlign: target === "vue" ? null : "end", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
+        const context = await page.evaluate(async () => {
+          const read = () => Array.from(document.querySelectorAll('[data-component="x-step"]'), (step) => step.getAttribute("aria-current"));
+          const before = read();
+          (document.querySelector('[data-component="x-steps"] button') as HTMLButtonElement).click();
+          await Promise.resolve();
+          await Promise.resolve();
+          return { before, after: read() };
+        });
+        assert.deepEqual(context, { before: ["step", null], after: [null, "step"] });
         // Vue reports an error thrown by an event handler through console.error, not as uncaught.
         const invalidError = new Promise<string>((resolve) => {
           page.on("pageerror", (error) => resolve(error.message));

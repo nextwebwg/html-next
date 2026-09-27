@@ -28,7 +28,7 @@ import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { category, Lowering, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
-const VUE_APIS = ["computed", "ref", "useTemplateRef"] as const;
+const VUE_APIS = ["computed", "inject", "provide", "ref", "useTemplateRef"] as const;
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
@@ -377,6 +377,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
   }
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computedValues = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
+  const contexts = declarations.filter((declaration) => declaration.kind === "context");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const events = declarations.filter((declaration): declaration is EventDeclaration => declaration.kind === "event");
   const arms = rootArms(template);
@@ -426,6 +427,11 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     const name = identifiers.take(value.name, "Computed");
     stateNames.set(value, name);
     define(value.name, name, `${name}.value`, value.expression === undefined ? UNKNOWN : typeOf(value.expression.ast, script));
+  }
+  const contextNames = new Map(contexts.map((declaration) => [declaration, identifiers.take(declaration.as ?? declaration.name, "Context")]));
+  for (const declaration of contexts) {
+    const name = contextNames.get(declaration)!;
+    define(declaration.as ?? declaration.name, name, `${name}.value`, UNKNOWN);
   }
   const handlerNames = new Map(handlers.map((handler) => [handler.name, identifiers.take(handler.name, "Handler")]));
 
@@ -535,6 +541,15 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     ...[...context.refs].map(([ref, name]) => `const ${name} = useTemplateRef<HTMLElement>(${quote(ref)});`),
     ...states.map(stateSource),
     ...computedValues.map(stateSource),
+    ...states.filter((state) => state.context === true).map((state) =>
+      `provide(${quote(`html-next:${contract.tag}:${state.name}`)}, ${stateNames.get(state)!});`),
+    ...contexts.flatMap((declaration) => {
+      const name = contextNames.get(declaration)!;
+      return [
+        `const ${name} = inject<any>(${quote(`html-next:${declaration.from}:${declaration.name}`)});`,
+        `if (${name} === undefined) throw new TypeError(${quote(`<${contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`)});`,
+      ];
+    }),
     ...(styles.stateNames.length === 0 ? [] : [
       "",
       "/** The values the styles' :host-state() rules test. */",
@@ -554,7 +569,7 @@ export function generateVue(definition: ComponentDefinition, version: string): s
     ...lowering.fallbacks().flatMap((source) => ["", source]),
   );
   // `props` is named only when the script reads it; the template reads props by name.
-  if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = "))) {
+  if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = ")) && !/\bprops\b/.test(rootMarkup)) {
     const index = body.findIndex((line) => line.startsWith("const props = "));
     if (index !== -1) body[index] = body[index]!.replace("const props = ", "");
   }

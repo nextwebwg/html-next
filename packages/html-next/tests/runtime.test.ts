@@ -195,6 +195,59 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} lets slotted descendants react to their logical provider's state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-steps"><defs>` +
+          `<state name="current" :value="1" context></state>` +
+          `<handler name="next"><set name="current" :value="current + 1"></set></handler>` +
+          `</defs><section><button type="button" on:click="next">Next</button><ol><slot></slot></ol></section></template>` +
+          `<template component="x-step"><defs>` +
+          `<prop name="number" type="number" required>Step number.</prop>` +
+          `<context name="current" from="x-steps" as="activeStep"></context>` +
+          `</defs><li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>` +
+          `<x-steps><x-step number="1">Account</x-step><x-step number="2">Payment</x-step></x-steps>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          const read = () => Array.from(document.querySelectorAll("ol > li"), (step) => step.getAttribute("aria-current"));
+          const before = read();
+          (document.querySelector("section > button") as HTMLButtonElement).click();
+          await Promise.resolve();
+          await Promise.resolve();
+          return { before, after: read(), roots: document.querySelectorAll("[data-component]").length };
+        });
+        assert.deepEqual(result, { before: ["step", null], after: [null, "step"], roots: 3 });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} rejects a context reader without a published provider`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-reader"><defs>` +
+          `<context name="current" from="x-steps"></context></defs>` +
+          `<span $value="current"></span></template><x-reader></x-reader>`);
+        await page.addScriptTag({ path: bundlePath });
+        const message = await page.evaluate(() => {
+          try {
+            (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+            return "no error";
+          } catch (error) {
+            return String(error);
+          }
+        });
+        assert.match(message, /HR009.*requires context `current` from <x-steps>/);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} reports a clear diagnostic when a document definition needs the live parser`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

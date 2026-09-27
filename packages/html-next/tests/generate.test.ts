@@ -115,6 +115,24 @@ describe("generateComponent", () => {
     assert.match(vanilla, /@nextwebwg\/html-next\/runtime/);
   });
 
+  it("publishes and reads context in generated targets and lowers conditional values", () => {
+    const provider = parseComponent(`<template component="x-steps"><defs>` +
+      `<state name="current" :value="1" context></state></defs><ol><slot></slot></ol></template>`);
+    const reader = parseComponent(`<template component="x-step"><defs>` +
+      `<prop name="number" type="number" required>Step number.</prop>` +
+      `<context name="current" from="x-steps" as="activeStep"></context></defs>` +
+      `<li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`);
+    const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
+    const providerOutput = artifacts(provider);
+    const readerOutput = artifacts(reader);
+    assert.match(providerOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.match(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === props\.number \? 'step' : null/);
+  });
+
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
       `<button title="A &amp; &quot;quote&quot;" .formAction="destination" :disabled="disabled" :data-selected="selected">Text &amp; {literal}<slot></slot></button>`,

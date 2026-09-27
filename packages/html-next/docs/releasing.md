@@ -19,8 +19,9 @@ and declaration target, imports the Node-safe entries, type-checks all entries, 
 browser entries. Packing invokes `prepack`, which always performs a clean package build first.
 
 `release:dry-run` runs npm's JSON dry-run pack report. Review its package name, version, filename,
-file list, unpacked size, and integrity before publishing. The prerelease is configured for the
-`next` dist-tag so it cannot become `latest` accidentally.
+file list, unpacked size, and integrity before publishing. Until a stable version exists, each
+prerelease publishes to `latest`, so a plain `npm install` gets the current one. Once a stable line
+exists, prereleases move to `next` so they cannot replace it.
 
 ## Final policy gate
 
@@ -43,7 +44,7 @@ npm publish .release/nextwebwg-html-next-1.0.0-alpha.1.tgz
 ## Trusted publishing
 
 Merging to `main` publishes: `.github/workflows/release.yml` publishes each listed package whose
-version is not yet on npm, on the `next` dist-tag, through npm trusted publishing (OIDC, with
+version is not yet on npm, on the `latest` dist-tag, through npm trusted publishing (OIDC, with
 automatic provenance). Release by bumping a package's version in a pull request.
 
 A new package's first version is published manually, because npm configures a trusted publisher

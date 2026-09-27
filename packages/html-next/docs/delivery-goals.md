@@ -13,7 +13,7 @@ and removing universally redundant runtime machinery.
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
 - Current result: 76,223 minified raw bytes and 25,854 gzip bytes
 - Primary metrics: reactive-matrix execution time and production-minified bytes for the public
-  browser-loader entry; gzip remains a reported transport metric
+  browser entry; gzip remains a reported transport metric
 - Required evidence: complete-capability assertion, module attribution, cross-browser conformance,
   and representative runtime measurements
 - Current audit: [native runtime audit](native-runtime-audit.md)

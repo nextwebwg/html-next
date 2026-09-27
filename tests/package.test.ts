@@ -18,7 +18,6 @@ const publicExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
   "./node-loader",
 ] as const;
@@ -28,7 +27,6 @@ const browserExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
 ] as const;
 
@@ -89,7 +87,7 @@ describe("workspace package contracts", () => {
       repository?: { type: string; url: string; directory: string };
       publishConfig?: { access: string; tag: string; registry: string };
     };
-    expect(manifest.version).toBe("1.0.0-alpha.7");
+    expect(manifest.version).toBe("1.0.0-alpha.8");
     expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
@@ -99,7 +97,7 @@ describe("workspace package contracts", () => {
     });
     expect(manifest.publishConfig).toEqual({
       access: "public",
-      tag: "next",
+      tag: "latest",
       registry: "https://registry.npmjs.org/",
     });
     expect(readFileSync(join(installedRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
@@ -153,7 +151,7 @@ describe("workspace package contracts", () => {
     );
   });
 
-  it("publishes every workspace package publicly on the next tag under MIT", () => {
+  it("publishes every workspace package publicly on the latest tag under MIT", () => {
     for (const packageDirectory of [
       "html-next",
       "html-next-converter",
@@ -164,7 +162,7 @@ describe("workspace package contracts", () => {
         readFileSync(join(packageRoot, "package.json"), "utf8"),
       ) as { private?: boolean; license?: string; publishConfig?: { access: string; tag: string } };
       expect(manifest.private, packageDirectory).toBeUndefined();
-      expect(manifest.publishConfig, packageDirectory).toMatchObject({ access: "public", tag: "next" });
+      expect(manifest.publishConfig, packageDirectory).toMatchObject({ access: "public", tag: "latest" });
       expect(manifest.license, packageDirectory).toBe("MIT");
       expect(readFileSync(join(packageRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
     }

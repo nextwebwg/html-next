@@ -49,7 +49,7 @@ jobs:
               continue
             fi
             if pnpm --filter "$name" pack --pack-destination .release &&
-              npm publish ".release/$(echo "${name#@}" | tr / -)-$version.tgz" --tag next --access public; then
+              npm publish ".release/$(echo "${name#@}" | tr / -)-$version.tgz" --tag latest --access public; then
               echo "| \`$name@$version\` | published |" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "::error::$name@$version was not published. If this is a new package name, publish it once manually, then configure its trusted publisher."

@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.7",
+  "version": "1.0.0-alpha.8",
   "description": "Reference runtime and tools for HTML Next: Declarative HTML Components, validity on any element, and HTML Forms request construction.",
   "license": "MIT",
   "keywords": [
@@ -47,10 +47,6 @@
       "types": "./dist/validation.d.ts",
       "import": "./dist/validation.js"
     },
-    "./browser-loader": {
-      "types": "./dist/browser-loader.d.ts",
-      "import": "./dist/browser-loader.bundle.js"
-    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
@@ -65,7 +61,7 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "next",
+    "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {

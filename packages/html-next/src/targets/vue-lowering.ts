@@ -102,6 +102,23 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       return node.op === "not" ? terminal("boolean") : { ...terminal("number"), nullable: true };
     case "binary":
       return ["+", "-", "*", "/", "%"].includes(node.op) ? { ...terminal("number"), nullable: true } : terminal("boolean");
+    case "conditional": {
+      const consequent = typeOf(node.consequent, scope);
+      const alternate = typeOf(node.alternate, scope);
+      if (node.consequent.kind === "literal" && node.consequent.value === null) {
+        return { ...alternate, nullable: true, null: true };
+      }
+      if (node.alternate.kind === "literal" && node.alternate.value === null) {
+        return { ...consequent, nullable: true, null: true };
+      }
+      return {
+        type: JSON.stringify(consequent.type) === JSON.stringify(alternate.type)
+          ? consequent.type
+          : { kind: "union", members: [consequent.type, alternate.type] },
+        nullable: consequent.nullable || alternate.nullable,
+        null: consequent.null === true || alternate.null === true,
+      };
+    }
     case "call":
       return node.fn === "format" ? terminal("string") : { ...terminal("number"), nullable: true };
     case "object":
@@ -240,6 +257,8 @@ export class Lowering {
       }
       case "binary":
         return this.#binary(node, scope);
+      case "conditional":
+        return `${this.condition(node.test, scope)} ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}`;
       case "call":
         return this.#call(node, scope);
       case "object":
@@ -395,6 +414,6 @@ export class Lowering {
   }
 
   #wrap(node: ExpressionNode, code: string): string {
-    return node.kind === "binary" || (node.kind === "unary" && node.op === "-") || /[?:] /.test(code) ? `(${code})` : code;
+    return node.kind === "binary" || node.kind === "conditional" || (node.kind === "unary" && node.op === "-") || /[?:] /.test(code) ? `(${code})` : code;
   }
 }

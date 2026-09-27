@@ -21,7 +21,6 @@ const publicExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
   "./node-loader",
 ] as const;
@@ -31,7 +30,6 @@ const browserExports = [
   "./generated-runtime",
   "./forms",
   "./validation",
-  "./browser-loader",
   "./browser",
 ] as const;
 
@@ -79,7 +77,7 @@ describe.skipIf(!enabled)("installed package consumer", () => {
   });
 
   it("ships JavaScript and declarations for every public export", async () => {
-    assert.equal(manifest.version, "1.0.0-alpha.7");
+    assert.equal(manifest.version, "1.0.0-alpha.8");
     assert.deepEqual(Object.keys(manifest.exports), publicExports);
     for (const path of publicExports) {
       const entry = manifest.exports[path]!;

@@ -8,7 +8,7 @@
 /** Declared public methods are module exports, so each instance registers its operations here. */
 const instances = new WeakMap();
 
-export default function controller({ effect, element, on, refs, state }) {
+export default function controller({ effect, root, on, refs, state }) {
   let pantry = [];
 
   const search = () => String(state.query ?? "").trim().toLowerCase();
@@ -81,18 +81,18 @@ export default function controller({ effect, element, on, refs, state }) {
   };
   form.addEventListener("submit", submit);
 
-  instances.set(element, {
+  instances.set(root, {
     restockAll: () => apply((row) =>
       [row.quantity <= row.threshold ? { ...row, quantity: row.threshold + 1 } : row]),
   });
 
   return () => {
-    instances.delete(element);
+    instances.delete(root);
     form.removeEventListener("submit", submit);
   };
 }
 
 /** Declared public method: refill every low row to one above its threshold. */
-export function restockAll({ element }) {
-  instances.get(element)?.restockAll();
+export function restockAll({ root }) {
+  instances.get(root)?.restockAll();
 }

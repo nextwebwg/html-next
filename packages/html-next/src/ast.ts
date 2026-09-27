@@ -8,6 +8,7 @@ export type {
   ComponentDeclaration,
   ComponentDefinition,
   ComponentRoot,
+  ContextDeclaration,
   DataDeclaration,
   DataParameter,
   DirectiveAttribute,
