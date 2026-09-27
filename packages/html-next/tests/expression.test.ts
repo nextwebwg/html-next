@@ -128,6 +128,36 @@ describe("expression: typed equality and no coercion", () => {
   });
 });
 
+describe("expression: conditional selection", () => {
+  it("has lower precedence than or and associates to the right", () => {
+    const s = scope({ a: false, b: true, c: false });
+    assert.equal(evaluate("a or b ? 'yes' : 'no'", s), "yes");
+    assert.equal(evaluate("a ? 1 : c ? 2 : 3", s), 3);
+    assert.equal(evaluate("a ? b ? 1 : 2 : 3", s), 3);
+  });
+
+  it("evaluates only the selected branch and preserves its value", () => {
+    assert.equal(evaluate("true ? 0 : missing", scope({})), 0);
+    assert.equal(evaluate("false ? missing : null", scope({})), null);
+    assert.equal(evaluate("[] ? 1 : 'empty'", scope({})), "empty");
+    assert.deepEqual(evaluate("true ? [1, 2] : []", scope({})), [1, 2]);
+  });
+
+  it("works in nested expression positions and tracks every dependency", () => {
+    const s = scope({ flag: true, value: 4, fallback: 9 });
+    assert.deepEqual(evaluate("{ selected: flag ? value : fallback }", s), { selected: 4 });
+    assert.equal(evaluate("[10, 20][flag ? 0 : 1]", s), 10);
+    assert.equal(evaluate("max(flag ? value : fallback, 2)", s), 4);
+    assert.deepEqual(compileExpression("flag ? value : fallback").dependencies, ["fallback", "flag", "value"]);
+    assert.equal(getWritablePath("flag ? value : fallback", new Set(["value"])), undefined);
+  });
+
+  it("rejects incomplete conditionals", () => {
+    assert.throws(() => checkExpression("flag ? value"), /Expected `:`/);
+    assert.throws(() => checkExpression("flag ? value :"), /Unexpected end of expression/);
+  });
+});
+
 describe("expression: operators, comparison, functions", () => {
   const s = scope({ p: { name: "widget-pro" } });
   it("CSS attribute-selector string operators", () => {

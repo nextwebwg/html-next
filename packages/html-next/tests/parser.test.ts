@@ -93,6 +93,35 @@ describe("parseComponent", () => {
     );
   });
 
+  it("parses published state and aliased read-only context", () => {
+    const provider = parseComponent(
+      `<template component="x-steps"><defs><state name="current" :value="1" context></state></defs>` +
+        `<ol><slot></slot></ol></template>`,
+    );
+    const reader = parseComponent(
+      `<template component="x-step"><defs><context name="current" from="x-steps" as="activeStep"></context></defs>` +
+        `<li :aria-current="activeStep = 1 ? 'step' : null"></li></template>`,
+    );
+    assert.equal(provider.declarations?.[0]?.kind, "state");
+    assert.equal(provider.declarations?.[0]?.name, "current");
+    assert.equal(provider.declarations?.[0]?.kind === "state" && provider.declarations[0].context, true);
+    assert.deepEqual(reader.declarations?.[0], {
+      kind: "context",
+      name: "current",
+      from: "x-steps",
+      as: "activeStep",
+    });
+    assert.deepEqual(reader.template.attributes[0]?.kind, "attribute");
+  });
+
+  it("requires a context source and keeps context reads out of writable paths", () => {
+    expectDiagnostic("HC013", `<template component="x-step"><defs><context name="current"></context></defs><li></li></template>`);
+    expectDiagnostic("HC020", `<template component="x-step"><defs><state name="active"></state>` +
+      `<context name="current" from="x-steps" as="active"></context></defs><li></li></template>`);
+    expectDiagnostic("HT005", `<template component="x-step"><defs>` +
+      `<context name="current" from="x-steps"></context></defs><li><input bind:value="current"></li></template>`);
+  });
+
   it("keeps external event names separate from value bindings", () => {
     const definition = parseComponent(
       `<template component="demo-example" status="early" summary="Event namespace.">` +
