@@ -1,52 +1,45 @@
 ---
 title: Run in the browser
 order: 1
-blurb: live loader · trust · entry points
+blurb: one script · trust · browser support
 eyebrow: HTML Next · Tools
 ---
 
 # Run in the browser
 
-The live runtime loads, parses, and runs any component graph in the page, with no build step.
+Add one script to the page, and every component it links loads, renders, and updates, with no build step.
 
-## Load a component graph
+## Add it to the page
 
-The application names the root component and maps where its components live. Each definition declares its own component and controller dependencies, and the loader follows them.
+One script in the `<head>` is the whole setup. It starts on its own, loads the components the page links, and renders every instance, including ones added later.
 
 ```html
-<script type="importmap">
-{
-  "imports": {
-    "@example/components/": "https://cdn.example/components/"
-  }
-}
-</script>
-<link rel="component" href="@example/components/app.html">
-<x-app></x-app>
-
-<script type="module">
-  import { startBrowserComponents } from "@nextwebwg/html-next/browser-loader";
-  await startBrowserComponents();
-</script>
+<head>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@nextwebwg/html-next/dist/browser.js"></script>
+  <link rel="component" href="/components/app.html">
+</head>
+<body>
+  <x-app></x-app>
+</body>
 ```
 
-`startBrowserComponents()` observes the document: definitions and instances added later are registered and rendered, and cleanup runs when they disconnect.
+With a bundler, import the same entry once:
+
+```js
+import "@nextwebwg/html-next/browser";
+```
+
+Each definition declares its own component and controller dependencies, and the runtime follows them. Instances are cleaned up when they leave the document. `HTMLNext.ready` resolves once the page's linked components have loaded.
 
 ## Trust
 
-The application's import map is the trust decision. Relative component and controller paths must stay inside the component root it maps. Definitions are parsed as inert HTML and cannot add import maps, scripts, base URLs, or policy metadata.
+The page's own links and import map decide which components load. A same-origin `href` needs nothing else; a component root on another origin needs an import-map entry. Relative component and controller paths must stay inside their root, and definitions are parsed as inert HTML that cannot add import maps, scripts, base URLs, or policy metadata.
 
 Controllers are trusted JavaScript in the page's realm. ES modules, CORS, and CSP govern how they load, but a module is not a sandbox.
 
-## Entry points
+## Build-time graphs
 
-| Import | Contains |
-| --- | --- |
-| `@nextwebwg/html-next/browser-loader` | `startBrowserComponents()`: the loader, parser, and runtime together. |
-| `@nextwebwg/html-next/live` | The runtime plus the parser, for calling `lowerDocument()` or `observeDocument()` yourself. |
-| `@nextwebwg/html-next/runtime` | The renderer without a parser, for definitions already parsed at build time. |
-
-Reading a definition from the document without the parser reports the `HR007` diagnostic instead of doing nothing.
+A compiled build imports `@nextwebwg/html-next/runtime`, the renderer without the component parser; see [Compile a graph](/tools/build).
 
 ## Browser support
 

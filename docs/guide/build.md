@@ -27,7 +27,7 @@ html-next build components/app.html --out-dir generated --target vue --target st
 `@nextwebwg/html-next-unplugin` compiles the graph during a Vite build.
 
 ```bash
-npm install --save-dev @nextwebwg/html-next-unplugin@next
+npm install --save-dev @nextwebwg/html-next-unplugin
 ```
 
 ```ts title="vite.config.ts"

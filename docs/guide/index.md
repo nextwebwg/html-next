@@ -3,7 +3,7 @@ title: Tools
 order: -1
 blurb: packages · delivery modes · install
 eyebrow: HTML Next · Tools
-status: 1.0.0-alpha on npm under the `next` tag · Stage 0 proposals
+status: 1.0.0-alpha on npm · Stage 0 proposals
 ---
 
 # HTML Next tools
@@ -13,10 +13,10 @@ JavaScript tools for the HTML Next proposals. Author a component once as HTML, t
 ## Install
 
 ```bash
-npm install @nextwebwg/html-next@next
+npm install @nextwebwg/html-next
 ```
 
-The packages publish `1.0.0-alpha` prereleases under the `next` tag. The proposals they implement are at Stage 0, so the syntax and the generated output may still change.
+The packages publish `1.0.0-alpha` prereleases. The proposals they implement are at Stage 0, so the syntax and the generated output may still change.
 
 ## Packages
 
@@ -32,7 +32,7 @@ The same component definition works in all three modes, with the same observable
 
 | Mode | Use it when | Guide |
 | --- | --- | --- |
-| Live runtime | Pages load components at runtime, with no build step. | [Run in the browser](/tools/runtime) |
+| Live runtime | A page loads components itself, with one script and no build step. | [Run in the browser](/tools/runtime) |
 | Compiled build | An application or library has a known component graph and wants tree-shaken native DOM. | [Compile a graph](/tools/build) |
 | Vue conversion | A Vue project wants plain Vue components with no HTML Next left in them. | [Convert to Vue](/tools/convert) |
 

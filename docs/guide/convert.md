@@ -12,7 +12,7 @@ Convert a component graph into Vue 3.5 single-file components that import only V
 ## Convert a graph
 
 ```bash
-npm install --save-dev @nextwebwg/html-next-converter@next
+npm install --save-dev @nextwebwg/html-next-converter
 html-next-convert vue components/button.html components/card.html --mode library --out-dir generated
 ```
 
