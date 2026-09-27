@@ -1,0 +1,31 @@
+name: Publish guide
+
+# The site renders docs/guide at nextwebwg.org/tools from main. After a change lands, start the
+# site's deploy. SITE_DEPLOY_TOKEN is a fine-grained token limited to nextwebwg/site with Actions:
+# read and write. Until it exists here, the job only reports that the deploy must be started by hand.
+on:
+  push:
+    branches: [main]
+    paths: ["docs/guide/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-guide
+  cancel-in-progress: true
+
+jobs:
+  deploy-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start the site deploy
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::SITE_DEPLOY_TOKEN is not set; run the nextwebwg/site deploy workflow by hand."
+            exit 0
+          fi
+          gh workflow run deploy.yml --repo nextwebwg/site --ref main

@@ -240,6 +240,7 @@ only application resolution and trust differ.
 ## Repository map
 
 - [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
+- [Tools guide](https://nextwebwg.org/tools/), published from [`docs/guide`](./docs/guide)
 - [Converter requirements](./packages/html-next-converter/docs/requirements.md)
 - [Conformance corpus](./packages/html-next/tests/conformance/README.md)
 - [Style-scoping note](./packages/html-next/docs/style-scoping.md)
