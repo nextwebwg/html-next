@@ -122,39 +122,34 @@ validation. See the [proposal](https://nextwebwg.org/html-next/) for the complet
 
 ## Run a live component graph
 
-The application chooses the trusted root entry. Each definition declares its relative
-component and controller dependencies, and the public browser loader follows that graph:
+One script in the `<head>` is the whole setup. The browser entry starts itself, loads every
+component the page links, and follows each definition's declared component and controller
+dependencies:
 
 ```html
-<script type="importmap">
-{
-  "imports": {
-    "@example/components/": "https://cdn.example/components/"
-  }
-}
-</script>
-<link rel="component" href="@example/components/app.html">
-<x-app></x-app>
-
-<script type="module">
-  import { startBrowserComponents } from "@nextwebwg/html-next/browser-loader";
-  await startBrowserComponents();
-</script>
+<head>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@nextwebwg/html-next/dist/browser.js"></script>
+  <link rel="component" href="/components/app.html">
+</head>
+<body>
+  <x-app></x-app>
+</body>
 ```
 
-For a live URL, the application's direct mapping is the trust decision. Relative HTML
-and controller edges must stay inside its canonical component root. Definitions are
+The runtime keeps one `MutationObserver` on the document. A `<link rel="component">` added
+later loads its graph into the running page, and instances of any registered tag are rendered
+as they are added, including ones that were waiting for their definition. `HTMLNext.ready`
+resolves once the initially linked components have loaded. A compiled build does none of this:
+it is closed over the components it was built from.
+
+A same-origin `href` needs nothing else. A bare `href` such as `@acme/ui/app.html` is a package
+specifier that the page's import map resolves, and a component root on another origin needs an
+import-map entry. Relative HTML and controller edges must stay inside their root. Definitions are
 parsed as inert data and cannot add import maps, scripts, base URLs, or policy metadata.
-Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern
-their module graph, but ESM is not a sandbox.
+Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern their
+module graph, but ESM is not a sandbox.
 
-`startBrowserComponents()` observes the document. Definitions and component instances
-added later are registered and lowered, and reconnect/disconnect cleanup is balanced.
-Applications can call the lower-level loader and runtime APIs when they need explicit
-lifecycle control.
-
-The runnable [live graph example](./packages/html-next/examples/poc/README.md)
-uses this public API.
+The runnable [live graph example](./packages/html-next/examples/poc/README.md) uses this entry.
 
 ## Browser compatibility layer
 

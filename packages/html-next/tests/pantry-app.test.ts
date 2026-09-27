@@ -177,9 +177,9 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     browser = await chromium.launch({ headless: true });
     directory = await mkdtemp(join(tmpdir(), "html-next-pantry-"));
 
-    // Live delivery: the public browser loader, built from this checkout.
+    // Live delivery: the browser entry, built from this checkout.
     const built = await esbuild({
-      entryPoints: [join(packageRoot, "src/browser-loader.ts")],
+      entryPoints: [join(packageRoot, "src/browser.ts")],
       bundle: true, format: "esm", platform: "browser", target: ["es2022"], write: false,
     });
     loaderBundle = built.outputFiles[0]!.text;
@@ -224,8 +224,8 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
       const served = await endpoints(url);
       if (served !== undefined) return served;
       if (url.pathname === "/") return readFile(new URL("index.html", example), "utf8");
-      if (url.pathname === "/dist/browser-loader.bundle.js") return loaderBundle;
-      if (url.pathname.startsWith("/components/") || url.pathname === "/live.js") {
+      if (url.pathname === "/dist/browser.js") return loaderBundle;
+      if (url.pathname.startsWith("/components/")) {
         return readFile(new URL(`.${url.pathname}`, example), "utf8").catch(() => undefined);
       }
       return undefined;

@@ -68,7 +68,7 @@ re-runs the read with an empty `q`, because the request is a function of state.
 The example ships a dev server so the declared reads have a real JSON endpoint:
 
 ```sh
-pnpm --filter @nextwebwg/html-next build   # live mode loads dist/browser-loader.bundle.js
+pnpm --filter @nextwebwg/html-next build   # live mode loads dist/browser.js
 node server.mjs                            # http://localhost:8799/
 # pre-compiled: npx vite build --config compiled/vite.config.mjs, then serve compiled/dist
 ```

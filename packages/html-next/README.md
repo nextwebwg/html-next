@@ -21,7 +21,7 @@ lowers instances, and runs reactivity. It carries no component parser, so a buil
 nothing for one (about 6 KB gzip on a representative app).
 
 `@nextwebwg/html-next/live` is the same runtime plus the parser that reads `<template component>`
-definitions authored in a document. `startBrowserComponents()` already installs it; import `live`
+definitions authored in a document. The browser entry (`@nextwebwg/html-next/browser`) already installs it; import `live`
 directly when calling `lowerDocument()` or `observeDocument()` against a page that authors
 definitions in HTML. Reading a definition from a document without that parser is a stable `HR007`
 diagnostic rather than a silent no-op.

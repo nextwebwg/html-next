@@ -48,7 +48,7 @@ cost.
 ## Current size gates
 
 `pnpm measure:runtime` reports two named delivery products. `live_distributable` bundles the
-public browser-loader entry for an open graph, records its raw and gzip size, attributes its module
+public browser entry for an open graph, records its raw and gzip size, attributes its module
 inputs, and asserts that every implemented live capability remains reachable. It also rejects
 server-side parser and generated DOM-inventory modules. Every contributing module must also belong
 to an audited live responsibility; a new unclassified dependency fails the same gate.

@@ -12,12 +12,6 @@ export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
-export {
-  loadBrowserComponents,
-  loadDocumentComponents,
-  documentComponentRoots,
-  startBrowserComponents,
-} from "./browser-loader.js";
 export { loadNodeComponents } from "./node-loader.js";
 export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
