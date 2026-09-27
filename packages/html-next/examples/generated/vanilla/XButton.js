@@ -16,6 +16,7 @@ export function createXButton(options = {}) {
   if (children.length > 0) {
     for (const child of children) {
       const node = typeof child === "string" ? document.createTextNode(child) : child;
+      if (node.nodeType === 1) node.setAttribute("data-slotted", "");
       projected.push([node, ""]);
       element.append(node);
     }

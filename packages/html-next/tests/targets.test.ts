@@ -340,6 +340,706 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
+  it("prunes directly compiled numeric updates by their static dependencies", async () => {
+    const module = generated(`<template component="demo-split" status="experimental" summary="Split state.">
+      <defs>
+        <state name="left" :value="1"></state>
+        <state name="right" :value="10"></state>
+        <computed name="left1" from="left + 1"></computed>
+        <computed name="left2" from="left1 + 1"></computed>
+        <computed name="left3" from="left2 + 1"></computed>
+        <computed name="total" from="left3 + right"></computed>
+        <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+      </defs>
+      <section><button on:click="increaseLeft"><output $value="left3"></output></button><button on:click="increaseRight"><output $value="total"></output></button></section>
+    </template>`).get("vanilla/DemoSplit.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /let dirty = 0/);
+    assert.match(module, /if \(changed & 1\)/);
+    assert.match(module, /changed \|= 4/);
+    assert.match(module, /if \(changed & 16\) element1\.textContent = String\(computed4\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("removes unused direct numeric branches from generated output", async () => {
+    const module = generated(`<template component="demo-live" status="experimental" summary="Live direct branch.">
+      <defs>
+        <state name="left" :value="1"></state>
+        <state name="right" :value="10"></state>
+        <computed name="visible" from="right + 1"></computed>
+        <computed name="unused1" from="left + 1"></computed>
+        <computed name="unused2" from="unused1 + 1"></computed>
+        <computed name="unused3" from="unused2 + 1"></computed>
+        <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+      </defs>
+      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="visible"></output></button></section>
+    </template>`).get("vanilla/DemoLive.js")!;
+
+    assert.match(module, /computed2/);
+    assert.doesNotMatch(module, /computed3|computed4|computed5/);
+    assert.doesNotMatch(module, /state0|handler0/);
+    assert.match(module, /state1|handler1/);
+    assert.doesNotMatch(module, /let dirty = 0/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("suppresses repeated direct rounded DOM output", async () => {
+    const module = generated(`<template component="demo-round" status="experimental" summary="Rounded direct value.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="bucket"></output></button>
+    </template>`).get("vanilla/DemoRound.js")!;
+
+    assert.match(module, /let rendered0 = computed1/);
+    assert.match(module, /!Object\.is\(rendered0, computed1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("gates only stabilizing direct bindings in a mixed output", async () => {
+    const module = generated(`<template component="demo-mixed" status="experimental" summary="Mixed direct value.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
+    </template>`).get("vanilla/DemoMixed.js")!;
+
+    assert.doesNotMatch(module, /rendered0/);
+    assert.match(module, /let rendered1;/);
+    assert.match(module, /!Object\.is\(rendered1, computed1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles numeric data attributes with the direct native emitter", async () => {
+    const module = generated(`<template component="demo-data" status="experimental" summary="Direct data binding.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" :data-bucket="bucket"><output $value="position"></output></button>
+    </template>`).get("vanilla/DemoData.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("data-bucket", String\(computed1\)\)/);
+    assert.match(module, /!Object\.is\(rendered0, computed1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles numeric ARIA attributes with the direct native emitter", async () => {
+    const module = generated(`<template component="demo-aria" status="experimental" summary="Direct ARIA binding.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" role="progressbar" :aria-valuenow="position" :aria-valuetext="bucket"><output $value="position"></output></button>
+    </template>`).get("vanilla/DemoAria.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("aria-valuenow", String\(state0\)\)/);
+    assert.match(module, /setAttribute\("aria-valuetext", String\(computed1\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles numeric ordinary HTML attributes with the direct native emitter", async () => {
+    const module = generated(`<template component="demo-title" status="experimental" summary="Direct HTML attribute binding.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" :title="bucket"><output $value="position"></output></button>
+    </template>`).get("vanilla/DemoTitle.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("title", String\(computed1\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles numeric native HTML properties with the direct emitter", async () => {
+    const module = generated(`<template component="demo-value" status="experimental" summary="Direct HTML property binding.">
+      <defs>
+        <state name="position" :value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><input type="number" .value="bucket"><output $value="position"></output></button>
+    </template>`).get("vanilla/DemoValue.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /element0\["value"\] = computed1/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles primitive boolean state, attributes, and properties with the direct emitter", async () => {
+    const module = generated(`<template component="demo-toggle" status="experimental" summary="Direct primitive toggle.">
+      <defs>
+        <state name="open" :value="false"></state>
+        <computed name="closed" from="not open"></computed>
+        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+      </defs>
+      <button on:click="toggle" :aria-expanded="open" :hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+    </template>`).get("vanilla/DemoToggle.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /!Boolean\(state0\)/);
+    assert.match(module, /setAttribute\("aria-expanded", String\(state0\)\)/);
+    assert.match(module, /computed1 \? element\.setAttribute\("hidden", ""\) : element\.removeAttribute\("hidden"\)/);
+    assert.match(module, /element0\["checked"\] = state0/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles primitive class tokens with the direct emitter", async () => {
+    const module = generated(`<template component="demo-class-toggle" status="experimental" summary="Direct primitive class toggle.">
+      <defs>
+        <state name="open" :value="false"></state>
+        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+      </defs>
+      <button on:click="toggle" class:open="open"><output $value="open"></output></button>
+    </template>`).get("vanilla/DemoClassToggle.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /classList\.toggle\("open", Boolean\(state0\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles primitive HTML style values with the direct emitter", async () => {
+    const module = generated(`<template component="demo-style-counter" status="experimental" summary="Direct primitive style counter.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment" style:--count="count"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoStyleCounter.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /style\.setProperty\("--count", String\(state0\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles primitive SVG style values with the direct emitter", async () => {
+    const module = generated(`<template component="demo-svg-style-counter" status="experimental" summary="Direct primitive SVG style counter.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoSvgStyleCounter.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /style\.setProperty\("--count", String\(state0\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles direct text input bindings with the native dirty-value guard", async () => {
+    const module = generated(`<template component="demo-bound-text" status="experimental" summary="Direct native text binding.">
+      <defs><state name="draft" :value="'Ready'"></state></defs>
+      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
+    </template>`).get("vanilla/DemoBoundText.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /if \(element1\.value !== state0\) element1\.value = state0/);
+    assert.match(module, /element1\.addEventListener\("input", binding0\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps numeric two-way controls on the live runtime", () => {
+    const module = generated(`<template component="demo-bound-number" status="experimental" summary="Numeric binding fallback.">
+      <defs><state name="count" :value="0"></state></defs>
+      <section><input type="number" bind:value="count"><output $value="count"></output></section>
+    </template>`).get("vanilla/DemoBoundNumber.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("compiles direct checkbox bindings with native checked synchronization", async () => {
+    const module = generated(`<template component="demo-bound-check" status="experimental" summary="Direct native checkbox binding.">
+      <defs><state name="done" :value="false"></state></defs>
+      <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
+    </template>`).get("vanilla/DemoBoundCheck.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /if \(element0\.checked !== state0\) element0\.checked = state0/);
+    assert.match(module, /element0\.addEventListener\("change", binding0\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps radio two-way controls on the live runtime", () => {
+    const module = generated(`<template component="demo-bound-radio" status="experimental" summary="Radio binding fallback.">
+      <defs><state name="selected" :value="false"></state></defs>
+      <section><input type="radio" bind:checked="selected"><output $value="selected"></output></section>
+    </template>`).get("vanilla/DemoBoundRadio.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("compiles direct textarea and single-select bindings", async () => {
+    const module = generated(`<template component="demo-bound-choice" status="experimental" summary="Direct native choice bindings.">
+      <defs><state name="choice" :value="'one'"></state></defs>
+      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+    </template>`).get("vanilla/DemoBoundChoice.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /element0\.addEventListener\("input", binding0\)/);
+    assert.match(module, /element1\.addEventListener\("change", binding1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps multi-select bindings on the live runtime", () => {
+    const module = generated(`<template component="demo-bound-many" status="experimental" summary="Multi-select binding fallback.">
+      <defs><state name="choice" :value="'one'"></state></defs>
+      <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+    </template>`).get("vanilla/DemoBoundMany.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("compiles direct range bindings with native numeric synchronization", async () => {
+    const module = generated(`<template component="demo-bound-range" status="experimental" summary="Direct native range binding.">
+      <defs><state name="position" :value="0"></state></defs>
+      <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
+    </template>`).get("vanilla/DemoBoundRange.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /if \(element0\.value !== String\(state0\)\) element0\.value = String\(state0\)/);
+    assert.match(module, /const next = element0\.valueAsNumber/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static prevent and stop handlers with native event calls", async () => {
+    const module = generated(`<template component="demo-event-modifier" status="experimental" summary="Direct native event modifiers.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section><button on:click.prevent.stop="increment"><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoEventModifier.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /event\.preventDefault\(\)/);
+    assert.match(module, /event\.stopPropagation\(\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static self handlers with a native target identity guard", async () => {
+    const module = generated(`<template component="demo-event-self" status="experimental" summary="Direct native self modifier.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section><button on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoEventSelf.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /if \(event\.target !== element0\) return/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static filtered handlers with native event guards", async () => {
+    const module = generated(`<template component="demo-event-filter" status="experimental" summary="Direct native event filter.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoEventFilter.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /event instanceof KeyboardEvent && event\.key !== "Enter"/);
+    assert.match(module, /if \(!event\.ctrlKey\) return/);
+    assert.match(module, /if \(event\.shiftKey\) return/);
+    assert.match(module, /if \(event\.target !== element0\) return/);
+    assert.match(module, /event\.preventDefault\(\)/);
+    assert.match(module, /event\.stopPropagation\(\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static capture and passive listeners with native options", async () => {
+    const module = generated(`<template component="demo-event-options" status="experimental" summary="Direct native event options.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoEventOptions.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /addEventListener\("click", event0, \{ capture: true, passive: true \}\)/);
+    assert.match(module, /event\.stopPropagation\(\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static once listeners through the generated lifecycle coordinator", async () => {
+    const module = generated(`<template component="demo-event-once" status="experimental" summary="Native once fallback.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoEventOnce.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /manageGeneratedLifecycle/);
+    assert.match(module, /addEventListener\("keydown", event0, \{ once: true \}\)/);
+    assert.match(module, /removeEventListener\("keydown", event0\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles unmodified static connect handlers through the generated lifecycle coordinator", async () => {
+    const module = generated(`<template component="demo-event-connect" status="experimental" summary="Direct native connect.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <button on:connect="increment"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoEventConnect.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /manageGeneratedLifecycle/);
+    assert.match(module, /handler0\(\);/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles unmodified static disconnect handlers through the generated lifecycle coordinator", async () => {
+    const module = generated(`<template component="demo-event-disconnect" status="experimental" summary="Direct native disconnect.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <button on:disconnect="increment"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoEventDisconnect.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /manageGeneratedLifecycle/);
+    assert.match(module, /handler0Disconnect\(\);/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static lifecycle modifiers from their synthetic Event semantics", async () => {
+    const module = generated(`<template component="demo-event-lifecycle-modifiers" status="experimental" summary="Direct lifecycle modifiers.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <handler name="never"><set name="count" :value="count + 10"></set></handler>
+      </defs>
+      <button on:connect.once.exact.prevent.capture.enter.left="increment" on:disconnect.passive.stop="increment" on:connect.self="never"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoEventLifecycleModifiers.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /manageGeneratedLifecycle/);
+    assert.match(module, /handler0\(\);/);
+    assert.doesNotMatch(module, /handler1/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static state-derived primitive event dispatch through generated runtime validation", async () => {
+    const module = generated(`<template component="demo-event-dispatch" status="experimental" summary="Direct declared event dispatch.">
+      <defs>
+        <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+        <state name="count" :value="0"></state>
+        <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="count"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save</button>
+    </template>`).get("vanilla/DemoEventDispatch.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /dispatchGeneratedEvent/);
+    assert.match(module, /name: "saved", type: "number", detail: state0, bubbles: false, composed: false, cancelable: true/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles state-only boolean handler guards while preserving subsequent steps", async () => {
+    const module = generated(`<template component="demo-guarded-handler" status="experimental" summary="Direct guarded handler.">
+      <defs>
+        <event name="saved" type="number"></event>
+        <state name="enabled" :value="true"></state>
+        <state name="count" :value="0"></state>
+        <handler name="advance"><set name="count" :value="count + 1" $if="enabled"></set><dispatch event="saved" :value="count" $if="enabled"></dispatch><set name="enabled" :value="not enabled"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoGuardedHandler.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /if \(state0\) \{/);
+    assert.match(module, /const next0 = state1 \+ 1/);
+    assert.match(module, /detail: state1/);
+    assert.match(module, /const next2 = !Boolean\(state0\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("pulls static primitive computed handler guards before each guarded step", async () => {
+    const module = generated(`<template component="demo-computed-guard" status="experimental" summary="Computed guard direct path.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <state name="hits" :value="0"></state>
+        <computed name="even" from="count % 2 = 0"></computed>
+        <handler name="advance"><set name="count" :value="count + 1"></set><set name="hits" :value="hits + 1" $if="even"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="count"></output><output $value="hits"></output></button>
+    </template>`).get("vanilla/DemoComputedGuard.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /computed2 = \(\(state0 % 2\) === 0\);[^]*if \(computed2\) \{/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static refs with native validation and focus handler steps", async () => {
+    const module = generated(`<template component="demo-ref-action" status="experimental" summary="Direct static ref action.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="count"></output></section>
+    </template>`).get("vanilla/DemoRefAction.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /element0\.reportValidity\?\.\(\);/);
+    assert.match(module, /element1\.focus\(\);/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles dependency-free primitive `$value` beside dynamic direct output", async () => {
+    const module = generated(`<template component="demo-literal-text" status="experimental" summary="Direct literal text.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoLiteralText.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /element0\.textContent = String\("Ready"\);/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles dependency-free primitive native bindings beside dynamic direct output", async () => {
+    const module = generated(`<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
+      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <section :data-status="'ready'" :aria-hidden="false" :hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
+    </template>`).get("vanilla/DemoLiteralNative.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("data-status", String\("ready"\)\)/);
+    assert.match(module, /setAttribute\("aria-hidden", String\(false\)\)/);
+    assert.match(module, /true \? element\.setAttribute\("hidden", ""\) : element\.removeAttribute\("hidden"\)/);
+    assert.match(module, /classList\.toggle\("fixed", Boolean\(true\)\)/);
+    assert.match(module, /style\.setProperty\("--gap", String\(4\)\)/);
+    assert.match(module, /\["value"\] = "Fixed"/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("initializes transitively constant direct computeds during construction", async () => {
+    const module = generated(`<template component="demo-static-computed" status="experimental" summary="Static computed direct construction.">
+      <defs>
+        <event name="saved" type="string"></event>
+        <state name="count" :value="0"></state>
+        <computed name="prefix" from="'Ready'"></computed>
+        <computed name="label" from="format('%s!', prefix)"></computed>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <handler name="save"><dispatch event="saved" :value="label"></dispatch></handler>
+      </defs>
+      <section :data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
+    </template>`).get("vanilla/DemoStaticComputed.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /\bcomputed[12]\b/);
+    assert.match(module, /setAttribute\("data-status", String\("Ready!"\)\)/);
+    assert.match(module, /classList\.toggle\("ready", Boolean\(\("Ready!" === "Ready!"\)\)\)/);
+    assert.match(module, /style\.setProperty\("--label", String\("Ready"\)\)/);
+    assert.match(module, /\["value"\] = "Ready!"/);
+    assert.match(module, /element1\.textContent = String\("Ready!"\);/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("pulls static primitive computed event detail through the generated dispatch boundary", async () => {
+    const module = generated(`<template component="demo-computed-event-dispatch" status="experimental" summary="Direct computed declared event dispatch.">
+      <defs>
+        <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+        <state name="count" :value="0"></state>
+        <computed name="savedValue" from="count * 2"></computed>
+        <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="savedValue"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save <output $value="savedValue"></output></button>
+    </template>`).get("vanilla/DemoComputedEventDispatch.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /refreshComputedForDispatch/);
+    assert.match(module, /state0 = next0;[^]*computed1 = \(state0 \* 2\);[^]*dispatchGeneratedEvent/);
+    assert.match(module, /name: "saved", type: "number", detail: computed1, bubbles: false, composed: false, cancelable: true/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles a static primitive `$value` expression without the live runtime", async () => {
+    const module = generated(`<template component="demo-inline-expression" status="experimental" summary="Direct inline text expression.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="count + 1"></output></button>
+    </template>`).get("vanilla/DemoInlineExpression.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /textContent = String\(\(state0 \+ 1\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles static primitive attribute, property, class, and style expressions directly", async () => {
+    const module = generated(`<template component="demo-inline-attributes" status="experimental" summary="Direct inline native expressions.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <section :data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+    </template>`).get("vanilla/DemoInlineAttributes.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("data-count", String\(\(state0 \+ 1\)\)\)/);
+    assert.match(module, /classList\.toggle\("zero", Boolean\(\(state0 === 0\)\)\)/);
+    assert.match(module, /style\.setProperty\("--count", String\(\(state0 \+ 1\)\)\)/);
+    assert.match(module, /\["value"\] = \(state0 \+ 1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("compiles dependency-free primitive `$value` expressions as direct text", async () => {
+    const module = generated(`<template component="demo-static-directive" status="experimental" summary="Static directive text.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="'fixed'"></output></button>
+    </template>`).get("vanilla/DemoStaticDirective.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /textContent = String\("fixed"\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps a type-incompatible direct primitive state on the conforming runtime", () => {
+    const module = generated(`<template component="demo-inert" status="experimental" summary="Typed direct primitive fallback.">
+      <defs>
+        <state name="open" type="string" :value="false"></state>
+        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+      </defs>
+      <button on:click="toggle" :aria-expanded="open"><output $value="open"></output></button>
+    </template>`).get("vanilla/DemoInert.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("keeps mutable typed numeric state on the conforming runtime", () => {
+    const module = generated(`<template component="demo-typed-number" status="experimental" summary="Typed numeric state.">
+      <defs><state name="count" type="number" :value="1"></state><handler name="divide"><set name="count" :value="count / 0"></set></handler></defs>
+      <button on:click="divide"><output $value="count"></output></button>
+    </template>`).get("vanilla/DemoTypedNumber.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("includes set value dependencies even when they are not rendered", async () => {
+    const module = generated(`<template component="demo-set-input" status="experimental" summary="Set input dependency.">
+      <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><handler name="save"><set name="snapshot" :value="count + 1"></set></handler></defs>
+      <button on:click="save"><output $value="snapshot"></output></button>
+    </template>`).get("vanilla/DemoSetInput.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /let state0 = 0/);
+    assert.match(module, /const next0 = \(state0 \+ 1\)/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("refreshes a computed before a later set reads it", async () => {
+    const module = generated(`<template component="demo-sequential-sets" status="experimental" summary="Sequential sets.">
+      <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" :value="count + 1"></set><set name="snapshot" :value="double"></set></handler></defs>
+      <button on:click="advance"><output $value="snapshot"></output></button>
+    </template>`).get("vanilla/DemoSequentialSets.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /state0 = next0;[^]*computed2 = \(state0 \* 2\);[^]*const next1 = computed2/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps a state initializer that reads a computed declaration on the live runtime", () => {
+    const module = generated(`<template component="demo-initial-order" status="experimental" summary="State initialization order fallback.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <computed name="derived" from="count + 1"></computed>
+        <state name="snapshot" :value="derived"></state>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="snapshot"></output></button>
+    </template>`).get("vanilla/DemoInitialOrder.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("compiles static string modes to direct native text, attributes, and properties", async () => {
+    const module = generated(`<template component="demo-tabs" status="experimental" summary="Direct string tabs.">
+      <defs>
+        <state name="tab" :value="'one'"></state>
+        <handler name="showOne"><set name="tab" :value="'one'"></set></handler>
+        <handler name="showTwo"><set name="tab" :value="'two'"></set></handler>
+      </defs>
+      <section :data-tab="tab" :title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+    </template>`).get("vanilla/DemoTabs.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /let state0 = "one"/);
+    assert.match(module, /setAttribute\("data-tab", String\(state0\)\)/);
+    assert.match(module, /element2\["value"\] = state0/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps string URL attributes on the sanitizing live runtime", () => {
+    const module = generated(`<template component="demo-link" status="experimental" summary="String URL fallback.">
+      <defs>
+        <state name="destination" :value="'/start'"></state>
+        <handler name="change"><set name="destination" :value="'javascript:alert(1)'"></set></handler>
+      </defs>
+      <a on:click="change" :href="destination"><output $value="destination"></output></a>
+    </template>`).get("vanilla/DemoLink.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("compiles literal primitive format expressions to direct string concatenation", async () => {
+    const module = generated(`<template component="demo-label" status="experimental" summary="Direct formatted label.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <computed name="label" from="format('Step %s', count)"></computed>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment" :aria-label="label"><input .value="label"><output $value="label"></output></button>
+    </template>`).get("vanilla/DemoLabel.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /"Step " \+ String\(state0\) \+ ""/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("preserves missing format placeholders in the direct primitive subset", () => {
+    const module = generated(`<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
+      <defs>
+        <state name="count" :value="0"></state>
+        <computed name="label" from="format('%s/%s', count)"></computed>
+        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="label"></output></button>
+    </template>`).get("vanilla/DemoMissingFormat.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /String\(state0\) \+ "\/" \+ "%s"/);
+  });
+
+  it("retains the live runtime for ordinary SVG attributes that need name adjustment", () => {
+    const module = generated(`<template component="demo-svg-bound" status="experimental" summary="Bound SVG attribute.">
+      <defs>
+        <state name="size" :value="24"></state>
+        <handler name="grow"><set name="size" :value="size + 1"></set></handler>
+      </defs>
+      <button on:click="grow"><svg :viewBox="size"><path d="M0 0"></path></svg></button>
+    </template>`).get("vanilla/DemoSvgBound.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+  });
+
+  it("keeps numeric SVG data attributes on the direct native emitter", async () => {
+    const module = generated(`<template component="demo-svg-data" status="experimental" summary="Direct SVG data binding.">
+      <defs>
+        <state name="size" :value="24"></state>
+        <handler name="grow"><set name="size" :value="size + 1"></set></handler>
+      </defs>
+      <button on:click="grow"><svg :data-size="size"><path d="M0 0"></path></svg></button>
+    </template>`).get("vanilla/DemoSvgData.js")!;
+
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /setAttribute\("data-size", String\(state0\)\)/);
+    await transform(module, { loader: "js" });
+  });
+
   it("compiles scalar prop reflection without the live interpreter", async () => {
     const module = generated(componentSource(
       "demo-label",
@@ -349,8 +1049,31 @@ describe("official target compilers", () => {
 
     assert.match(module, /html-next\/generated-runtime/);
     assert.doesNotMatch(module, /html-next\/runtime/);
-    assert.match(module, /manageGeneratedProps/);
+    assert.match(module, /manageGeneratedProp/);
     await transform(module, { loader: "js" });
+  });
+
+  it("compiles a scalar native property prop with the compact generated boundary", async () => {
+    const module = generated(componentSource(
+      "demo-prop-value",
+      `<prop name="value" type="number" default="1">Value.</prop>`,
+      `<input type="number" .value="value">`,
+    )).get("vanilla/DemoPropValue.js")!;
+
+    assert.match(module, /manageGeneratedProp\(/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /element\["value"\] = value;/);
+    await transform(module, { loader: "js" });
+  });
+
+  it("keeps multi-prop native property bindings on the full runtime path", () => {
+    const module = generated(componentSource(
+      "demo-prop-values",
+      `<prop name="value" type="number" default="1">Value.</prop><prop name="label" type="string" default="Ready">Label.</prop>`,
+      `<section><input type="number" .value="value" :data-label="label"></section>`,
+    )).get("vanilla/DemoPropValues.js")!;
+
+    assert.match(module, /@nextwebwg\/html-next\/runtime/);
   });
 
   it("creates vanilla SVG subtrees in the SVG namespace", async () => {
@@ -380,14 +1103,16 @@ describe("official target compilers", () => {
     assert.doesNotMatch(module, /html-next\/generated-runtime/);
   });
 
-  it("keeps the complete runtime for reactive shapes outside the direct subset", () => {
+  it("compiles a read-only primitive reactive leaf without the full runtime", async () => {
     const module = generated(`<template component="demo-derived" status="experimental" summary="Derived output.">
       <defs><state name="count" :value="0"></state></defs>
       <output $value="count + 1"></output>
     </template>`).get("vanilla/DemoDerived.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /manageComponentLifecycle/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /\bstate0\b/);
+    assert.match(module, /element\.textContent = String\(\(0 \+ 1\)\);/);
+    await transform(module, { loader: "js" });
   });
 
   it("scopes styles to the region with root-only markers, :host, :host-state(), and :slotted()", () => {

@@ -4,7 +4,7 @@
 //
 // The shipped `@nextwebwg/html-next-unplugin` compiles components all the way to
 // native DOM factories, which is smaller still, but it cannot yet express this app: compiled
-// invocations carry no attributes or projected children (HN009), and a component using the
+// invocations carry no dynamic inputs or dynamic projected slot content (HN009), and a component using the
 // general runtime cannot contain them at all (HN003). Until that lands, a build integration
 // pre-parses the graph and keeps the general runtime renderer, which is what this file does.
 import { readFile } from "node:fs/promises";
