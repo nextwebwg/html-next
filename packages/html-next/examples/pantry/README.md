@@ -88,8 +88,8 @@ same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands
 
 - `@nextwebwg/html-next-unplugin` compiles components to native DOM factories, which is smaller
   again. A component the general runtime renders may now invoke others (the build registers their
-  definitions), but a *factory-compiled* invocation still cannot carry inputs, projected children,
-  events, refs, or flow (`HN009`, `HN014`), so a graph of purely presentational components does not
+  definitions), but a *factory-compiled* invocation still cannot carry dynamic inputs or dynamic
+  projected content, events, refs, or flow (`HN009`, `HN014`), so a graph of purely presentational components does not
   yet compile all the way down.
 - A write-side `<data>` (`method` plus `send="change"`, the proposal's synchronization half) is not
   implemented yet, so this example only reads.
