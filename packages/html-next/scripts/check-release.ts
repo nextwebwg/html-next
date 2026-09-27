@@ -47,7 +47,7 @@ for (const [path, conditions] of Object.entries(manifest.exports)) {
 }
 assert.deepEqual(manifest.publishConfig, {
   access: "public",
-  tag: "next",
+  tag: "latest",
   registry: "https://registry.npmjs.org/",
 });
 
