@@ -8,7 +8,7 @@ import { vueHostArtifact } from "../src/generate.js";
 /** The shared Vue host as a consumer receives it, with Vue itself stubbed: dispatch uses none of it. */
 async function loadHost() {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const computed=()=>{},onBeforeUnmount=()=>{},onMounted=()=>{},shallowRef=()=>{},useSlots=()=>({}),watchEffect=()=>{},Fragment={}';");
+  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watchEffect=()=>{},Fragment={}';");
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     createDispatch: (
       root: { value: null },
@@ -29,7 +29,7 @@ describe("the shared Vue host", () => {
     dispatch("change", { checked: true, value: "b", trigger: "pointer" });
 
     assert.deepEqual(emitted.filter(([name]) => name === "update:value"), [["update:value", "b"]]);
-    assert.deepEqual(emitted.map(([name]) => name), ["select", "update:value", "change"]);
+    assert.deepEqual(emitted.map(([name]) => name), ["update:value"]);
   });
 
   it("still updates for each distinct value, and for the same value in a later change", async () => {

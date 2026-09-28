@@ -8,7 +8,7 @@ import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-import { generateComponent, vueHostArtifact } from "../src/generate.js";
+import { generateComponent, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
@@ -73,6 +73,8 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       ...generateComponent(parseComponent(stepsSource, "x-steps.html")),
       ...generateComponent(parseComponent(stepSource, "x-step.html")),
       vueHostArtifact(),
+      vueControlArtifact(),
+      vuePropsArtifact(),
     ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -124,7 +126,7 @@ import DemoPanel from "./vue/DemoPanel";
 import XSteps from "./vue/XSteps";
 import XStep from "./vue/XStep";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => events.push(event.detail), onInvalidChange: event => window.invalidTargetEvents.push(event.detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -210,9 +212,8 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           invalid: true,
           optionalTitle: "",
           ownTitle: false,
-          // HTML Next records explicit props as data-* for its rendered form; a converted Vue
-          // component owns its props and writes no record.
-          panel: { ownAlign: false, dataAlign: target === "vue" ? null : "end", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
+          // Both targets record explicit props as data-* for the rendered form.
+          panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
         const context = await page.evaluate(async () => {
@@ -253,7 +254,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       computedFixtureUrl.href,
     );
     const artifacts = new Map(
-      [...generateComponent(definition), vueHostArtifact()].map((artifact) => [artifact.path, artifact.content]),
+      [...generateComponent(definition), vueHostArtifact(), vuePropsArtifact()].map((artifact) => [artifact.path, artifact.content]),
     );
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -694,6 +695,10 @@ describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
     for (const artifact of generateComponent(parseComponent(actionSource, "x-action.html"))) {
       await writeFile(join(directory, artifact.path), artifact.content);
     }
+    const host = vueHostArtifact();
+    await writeFile(join(directory, host.path), host.content);
+    const props = vuePropsArtifact();
+    await writeFile(join(directory, props.path), props.content);
     const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
     assert.deepEqual(parsed.errors, []);
     await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);

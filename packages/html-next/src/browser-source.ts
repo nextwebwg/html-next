@@ -1,6 +1,6 @@
 import { fail } from "./diagnostics.js";
 import type { ParsedComponentResource } from "./graph.js";
-import { parseComponentNodes } from "./parser.js";
+import { parseComponentNodes, parseProjectedSlotContent } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
 const platforms = new WeakMap<Document, ReturnType<typeof browserPlatform>>();
@@ -60,6 +60,20 @@ export function parseBrowserComponent(
     platforms.set(document, platform);
   }
   return parseComponentNodes([carrier], source, platform);
+}
+
+export function parseBrowserProjectedSlot(
+  template: HTMLTemplateElement,
+  definition: ComponentDefinition,
+  names: readonly string[],
+): readonly import("./template.js").TemplateNode[] {
+  const document = template.ownerDocument;
+  let platform = platforms.get(document);
+  if (platform === undefined) {
+    platform = browserPlatform(document);
+    platforms.set(document, platform);
+  }
+  return parseProjectedSlotContent(template, definition, names, document.URL, platform);
 }
 
 /** Parses a fetched component resource with the browser's inert HTML fragment parser. */

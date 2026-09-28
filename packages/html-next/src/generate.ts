@@ -1,7 +1,10 @@
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
-import { generateVue } from "./targets/vue.js";
+import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
+import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
+import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
+import { VUE_PROPS_PATH, vuePropsModule } from "./targets/vue-props.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
@@ -38,7 +41,25 @@ export function vueHostArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_HOST_PATH, content: vueHostModule(GENERATOR_VERSION) });
 }
 
+/** Feature-specific safe-markup helper for Vue components that author `$html`. */
+export function vueHtmlArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_HTML_PATH, content: vueHtmlModule(GENERATOR_VERSION) });
+}
+
+/** Feature-specific native-control binding and hydration preservation for Vue. */
+export function vueControlArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_CONTROL_PATH, content: vueControlModule(GENERATOR_VERSION) });
+}
+
+/** Feature-specific typed-prop boundary for Vue components that declare props. */
+export function vuePropsArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_PROPS_PATH, content: vuePropsModule(GENERATOR_VERSION) });
+}
+
 export { importsVueHost } from "./targets/vue-host.js";
+export { importsVueHtml } from "./targets/vue-html.js";
+export { importsVueControl } from "./targets/vue-control.js";
+export { importsVueProps } from "./targets/vue-props.js";
 
 export type { ComponentDefinition } from "./template.js";
 
@@ -56,6 +77,6 @@ function convertedToVue(definition: ComponentDefinition): string | undefined {
 }
 
 /** Converts one definition to a Vue single-file component, failing with a diagnostic if it cannot. */
-export function generateVueComponent(definition: ComponentDefinition): string {
-  return generateVue(definition, GENERATOR_VERSION);
+export function generateVueComponent(definition: ComponentDefinition, options?: VueConversionOptions): string {
+  return generateVue(definition, GENERATOR_VERSION, options);
 }

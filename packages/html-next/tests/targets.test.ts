@@ -6,7 +6,7 @@ import { describe, it } from "vitest";
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { build, transform } from "esbuild";
 
-import { generateComponent, generateVueComponent } from "../src/generate.js";
+import { generateComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -90,7 +90,17 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
-  it("gives a native form-control root Vue's v-model", () => {
+  it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
+    const vue = generated(`<template component="x-root-ref" controller="./root.js" status="early" summary="Root reference.">
+      <button $ref="control" type="button">Go</button>
+    </template>`).get("vue/XRootRef.vue")!;
+    compileVue(vue, "XRootRef.vue");
+    assert.match(vue, /const root = controlElement\b/);
+    assert.match(vue, /<button[^>]*ref="control"/);
+    assert.doesNotMatch(vue, /ref="root"/);
+  });
+
+  it("keeps Vue's modelValue API while binding a native root through its DOM events", () => {
     const outputs = generated(componentSource(
       "x-field",
       '<prop name="value" type="string">Value.</prop>',
@@ -98,13 +108,54 @@ describe("official target compilers", () => {
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
-    assert.match(vue, /modelValue\?: string \| null\n/);
+    assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null> \}/);
     assert.match(vue, /'update:modelValue': \[value: string\]\n/);
-    assert.match(vue, /<input data-component="x-field" v-bind="\$attrs" v-model="model">/);
-    assert.match(vue, /const model = computed\(\{\n  get: \(\) => props\.modelValue \?\? props\.value \?\? undefined,/);
-    // A select takes v-model too, so Vue selects the model's option once the slotted options exist.
+    assert.match(vue, /<input\s+data-component="x-field"/);
+    assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, defaultValue: '' \}"/);
+    assert.match(vue, /@input="model = readBoundControl\(/);
+    assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
+    // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
     const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select :value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
-    assert.match(select, /<select data-component="x-choice" v-bind="\$attrs" v-model="model">/);
+    assert.match(select, /<select\s+data-component="x-choice"/);
+    assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, defaultValue: '' \}"/);
+    assert.match(select, /@change="model = readBoundControl\(/);
+    assert.match(select, /<SelectedOptions\s+:value="model"\s+:multiple="false"\s+:native-property="false"/);
+    assert.doesNotMatch(select, /v-model=/);
+  });
+
+  it("maps native property and attribute bindings to different Vue primitives", () => {
+    const vue = generated(componentSource(
+      "x-native-control-primitives",
+      '<prop name="value" type="string">Value.</prop><prop name="selected" type="boolean">Selected.</prop>',
+      '<div><input class="property" .value="value" value="authored"><input class="attribute" :value="value"><input type="checkbox" :checked="selected"></div>',
+    )).get("vue/XNativeControlPrimitives.vue")!;
+    compileVue(vue, "XNativeControlPrimitives.vue");
+    assert.match(vue, /<input\s+class="property"\s+v-bind-control="\{[\s\S]*?value: checkedProps\.value,[\s\S]*?nativeProperty: true,[\s\S]*?defaultValue: 'authored',[\s\S]*?\}"/);
+    assert.doesNotMatch(vue, /<input\s+class="property"[^>]*:value=/);
+    assert.match(vue, /<input class="attribute" :value\.attr=/);
+    assert.match(vue, /<input type="checkbox" :checked\.attr=/);
+    assert.doesNotMatch(vue, /v-preserve-hydrated-control=/);
+  });
+
+  it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
+    const vue = generated(`<template component="x-row-list"><defs>` +
+      '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
+      '<ul><slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index"><li $value="row.name"></li></slot></ul></template>')
+      .get("vue/XRowList.vue")!;
+    compileVue(vue, "XRowList.vue");
+    assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
+    assert.match(vue, /<slot :name="scopedSlotName\('row'\)" :item="row" :index="loop\.index">/);
+    assert.match(vue, /<li>\s*\{\{ row\.name \}\}\s*<\/li>/);
+  });
+
+  it("converts a consumer's scoped-slot template with its lexical state", () => {
+    const vue = generated(`<template component="x-consumer"><defs><state name="heading" value="People"></state></defs>` +
+      `<section><x-row-list><template slot="row"><b $value="item.name"></b><i $value="heading"></i></template></x-row-list></section></template>`)
+      .get("vue/XConsumer.vue")!;
+    compileVue(vue, "XConsumer.vue");
+    assert.match(vue, /<template #row="\{ item \}">/);
+    assert.match(vue, /\{\{ text\(item\?\.name\) \}\}/);
+    assert.match(vue, /\{\{ heading \}\}/);
   });
 
   it("keeps logical operators readable in Vue attribute values", () => {
@@ -114,8 +165,8 @@ describe("official target compilers", () => {
       '<button :hidden="a and b" :title="a" :data-b="b"></button>',
     )).get("vue/XBoth.vue")!;
     compileVue(vue, "XBoth.vue");
-    assert.match(vue, /:hidden="a && b"/);
-    assert.match(vue, /:title="a \? '' : undefined"/);
+    assert.match(vue, /:hidden="checkedProps\.a && checkedProps\.b"/);
+    assert.match(vue, /:title="checkedProps\.a \? '' : undefined"/);
   });
 
   it("serializes booleans on enumerated attributes as true and false", () => {
@@ -127,8 +178,8 @@ describe("official target compilers", () => {
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
     // Vue writes a boolean on an ARIA attribute as "true" or "false", and removes a false boolean attribute.
-    assert.match(vue, /:aria-expanded="open"/);
-    assert.match(vue, /:hidden="gone"/);
+    assert.match(vue, /:aria-expanded="checkedProps\.open"/);
+    assert.match(vue, /:hidden="checkedProps\.gone"/);
     const vanilla = outputs.get("vanilla/XAria.js")!;
     assert.match(vanilla, /setAttribute\("aria-expanded", String\(value\d+\)\)/);
     assert.match(vanilla, /setAttribute\("hidden", ""\)/);
@@ -142,7 +193,8 @@ describe("official target compilers", () => {
   it("converts to a Vue SFC that imports only Vue and the component's own modules", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
     compileVue(vue, "XFeature.vue");
-    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./host", "./x-feature.js", "vue"]);
+    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./control", "./host", "./props", "vue", "vue"]);
+    assert.match(vue, /\(\) => import\('\.\/x-feature\.js'\)/);
     assert.doesNotMatch(vue, /@nextwebwg|html-next|attachComponent|manageGeneratedProps/);
   });
 
@@ -151,34 +203,38 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /\bhn\b/);
     assert.match(vue, /const open = ref\(false\)\n/);
     assert.match(vue, /const query = ref\(''\)\n/);
-    assert.match(vue, /const count = computed\(\(\) => props\.items\?\.length\)\n/);
+    assert.match(vue, /const count = cycleCheckedComputed\(\(\) => checkedProps\.value\.items\?\.length\)\n/);
     assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('search'\)\n/);
-    assert.match(vue, /const hostState = computed\(\(\) =>\n  \[\n    open\.value && 'open',\n    props\.size && `size size=\$\{props\.size\}`,\n  \]\.filter\(Boolean\)\.join\(' '\)\n\)/);
+    assert.match(vue, /const hostState = computed\(\(\) =>\n  \[\n    open\.value && 'open',\n    checkedProps\.value\.size && `size size=\$\{checkedProps\.value\.size\}`,\n  \]\.filter\(Boolean\)\.join\(' '\)\n\)/);
     assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value\n/);
     assert.match(vue, /<ul v-if="open">/);
-    assert.match(vue, /v-for="\(item, index\) in sortBy\(\(items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)"/);
+    assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
+    assert.match(vue, /sortBy\(\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)/);
+    assert.match(vue, /\(item, index, loop\) => item\.id/);
     assert.match(vue, /:key="item\.id"/);
     assert.match(vue, /<span>\{\{ item\.name \}\}<\/span>/);
-    assert.match(vue, /<input v-model="query" ref="search">/);
+    assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: query, defaultValue: '' \}"/);
+    assert.match(vue, /@input="query = readBoundControl\(/);
     assert.match(vue, /@click="flip"/);
-    assert.match(vue, /:class="\{ compact: size === 'sm' \}"/);
-    assert.match(vue, /:style="\{ '--gap': size \}"/);
-    assert.match(vue, /<XBadge :tone="size"><slot name="badge">none<\/slot><\/XBadge>/);
-    assert.match(vue, /<small v-if="size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
+    assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
+    assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
+    assert.match(vue, /<XBadge :tone="checkedProps\.size"><slot name="badge">none<\/slot><\/XBadge>/);
+    assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
-    assert.match(vue, /const \{ host, ready \} = useComponentHost\(controllerModule\.default, \{\n  root,\n  dispatch,\n  props,\n/);
+    assert.match(vue, /const \{ host, ready \} = useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,\n  controllerSource:/);
+    assert.match(vue, /props: checkedProps,/);
   });
 
-  it("reads a typed state list's items as plainly as a typed prop's", () => {
+  it("reads a typed state list's items plainly while checking its keys", () => {
     const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
       `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" :value="[]"></state></defs>` +
       `<div><button $each="tab of tabs" $key="tab.id" :id="tab.id" :aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
-    assert.match(vue, /v-for="tab in tabs"/);
+    assert.match(vue, /v-for="tab in uniqueKeys\(tabs, \(tab, index, loop\) => tab\.id\)"/);
     assert.match(vue, /:id="tab\.id"\n\s+:aria-selected="tab\.active"\n\s+:class="\{ active: tab\.active \}"\n\s+>\n?\s*\{\{ tab\.label \}\}/);
-    assert.doesNotMatch(vue, /function (truthy|text|attribute)\(/);
+    assert.doesNotMatch(vue, /function (truthy|attribute)\(/);
   });
 
   it("types optional fields, open objects, and nullable records in state", () => {
@@ -189,7 +245,8 @@ describe("official target compilers", () => {
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
-    assert.match(vue, /<span v-if="hovered" :title="hovered\?\.label"/);
+    assert.match(vue, /if \(!\(hovered\.value\?\.\['label'\] == null \|\| typeof hovered\.value\?\.\['label'\] === 'string'\)\)/);
+    assert.match(vue, /<span v-if="hovered" :title="guarded"/);
     assert.match(vue, /<p v-if="!issues\.length">Valid<\/p>/);
     assert.doesNotMatch(vue, /function truthy\(/);
   });
@@ -219,8 +276,8 @@ describe("official target compilers", () => {
         `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
       ).get("vue/XRow.vue")!;
       compileVue(vue, "XRow.vue");
-      assert.match(vue, /<h2>\{\{ label \}\}<\/h2>/, `${controller}: element text`);
-      assert.match(vue, /<slot name="label">\{\{ label \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
+      assert.match(vue, /<h2>\{\{ checkedProps\.label \}\}<\/h2>/, `${controller}: element text`);
+      assert.match(vue, /<slot name="label">\{\{ checkedProps\.label \}\}<\/slot>/, `${controller}: wrapper-less fallback`);
     }
   });
 
@@ -240,7 +297,7 @@ describe("official target compilers", () => {
       `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor\?: 'start' \| 'end' \| null\n/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null> \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
@@ -258,8 +315,8 @@ describe("official target compilers", () => {
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as\?: 'button' \| 'a'\n/);
-    assert.match(vue, /<a\n\s+v-if="as === 'a'"/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a'>, default: 'button' \}/);
+    assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");
     const bundle = await build({
@@ -273,15 +330,22 @@ describe("official target compilers", () => {
       platform: "node",
       write: false,
       logLevel: "silent",
+      plugins: [{ name: "generated-vue-helpers", setup(bundler) {
+        bundler.onResolve({ filter: /^\.\/host$/ }, () => ({ path: "host", namespace: "generated-vue-host" }));
+        bundler.onLoad({ filter: /^host$/, namespace: "generated-vue-host" }, () => ({ contents: vueHostArtifact().content, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
+        bundler.onResolve({ filter: /^\.\/props$/ }, () => ({ path: "props", namespace: "generated-vue-props" }));
+        bundler.onLoad({ filter: /^props$/, namespace: "generated-vue-props" }, () => ({ contents: vuePropsArtifact().content, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
+      } }],
     });
     const module = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
     const render = (props: Record<string, unknown>): Promise<string> =>
       module.renderToString(module.createSSRApp({ render: () => module.h(module.default, props, { default: () => "Go" }) }))
         .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
     assert.equal(await render({}), '<button data-component="x-action" class="action" type="button">Go</button>');
-    assert.equal(await render({ as: "a", href: "/next" }), '<a data-component="x-action" class="action" href="/next">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next" }), '<a data-component="x-action" class="action" href="/next" data-as="a" data-href="/next">Go</a>');
     // A null binding leaves the attribute off, so a disabled link has no href.
-    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a data-component="x-action" class="action">Go</a>');
+    assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a data-component="x-action" class="action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
+    assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
     await transform(vanilla, { loader: "js", format: "esm" });
@@ -292,20 +356,49 @@ describe("official target compilers", () => {
     assert.match(outputs.get("docs/x-action.md")!, /Native element: `<a>` or `<button>`/);
   });
 
-  it("rejects constructs Vue conversion does not map yet instead of approximating them", () => {
-    const source = `<template component="demo-html" status="experimental" summary="Html.">
-      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`;
-    assert.throws(() => generateVueComponent(parseComponent(source)), /HT032/);
-    // Only a root <template $match> chooses between roots; $match on a real root element is not one.
-    assert.throws(() => generateVueComponent(parseComponent(componentSource(
+  it("converts a real-element root match and rejects a non-element root guard", () => {
+    // A real-element $match keeps that element as the root and switches only its chosen child.
+    const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
       '<prop name="as" type="a | b" default="a">Kind.</prop>',
       `<section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
-    ))), /HT036/);
-    // HTML Next's own outputs still build; only the Vue artifact is left out.
+    )));
+    assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);
+    assert.throws(() => generateVueComponent(parseComponent(componentSource(
+      "x-guarded",
+      '<prop name="show" type="boolean" default="true">Show.</prop>',
+      `<section $if="show" :data-show="show">Visible</section>`,
+    ))), /HT021/);
+    // $html is supported through a generated, feature-specific sanitizer helper.
+    const source = `<template component="demo-html" status="experimental" summary="Html.">
+      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`;
     const artifacts = generated(source);
-    assert.equal(artifacts.has("vue/DemoHtml.vue"), false);
+    assert.match(artifacts.get("vue/DemoHtml.vue")!, /from '\.\/html'/);
     assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
+  });
+
+  it("server-renders sanitized $html through Vue nodes with scoped styling markers", async () => {
+    const helper = vueHtmlArtifact().content;
+    const bundle = await build({
+      stdin: {
+        contents: `${helper}\nexport { createSSRApp, h } from "vue";\nexport { renderToString } from "@vue/server-renderer";`,
+        loader: "ts",
+        resolveDir: fileURLToPath(new URL("..", import.meta.url)),
+      },
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      write: false,
+      logLevel: "silent",
+    });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
+    const Parent = { __scopeId: "data-v-safe", render: () => module.h("article", [
+      module.h(module.SanitizedHtml, { value: "<b title='safe'>One</b><img src=x onerror=alert(1)>" }),
+    ]) };
+    const output = await module.renderToString(module.createSSRApp(Parent));
+    assert.match(output, /<b[^>]*title="safe"[^>]*>One<\/b>/);
+    assert.match(output, /<b[^>]*data-v-safe/);
+    assert.doesNotMatch(output, /<img|onerror|<script/);
   });
 
   it("emits a standalone Vanilla module when the component has no runtime behavior", () => {
@@ -413,8 +506,9 @@ describe("official target compilers", () => {
     assert.equal([...vanilla.matchAll(/setAttribute\("data-component"/g)].length, 1, "only the vanilla root is marked");
   });
 
-  it("rejects :scope and undeclared :host-state() names", () => {
+  it("rejects :scope and undeclared or structured :host-state() names", () => {
     assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
     assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host-state([missing]) { color: red; }</style>`)), /HY001/);
+    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" :value="[]"></state></defs><div></div><style>:host-state([items]) { color: red; }</style>`)), /HY002/);
   });
 });

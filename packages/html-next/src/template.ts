@@ -112,9 +112,21 @@ export interface SlotContract {
   readonly name?: string;
   readonly dynamic: boolean;
   readonly required: boolean;
+  readonly props?: readonly string[];
 }
 
 export type TemplateNode = ElementNode | TextNode | SlotNode;
+
+/** Whether lowering this definition can expose another component invocation. */
+export function definitionMayInvokeComponents(definition: ComponentDefinition): boolean {
+  if (definition.root?.kind === "component") return true;
+  const visit = (node: TemplateNode): boolean => {
+    if (node.kind === "text") return false;
+    if (node.kind === "slot") return (node.fallback ?? []).some(visit);
+    return node.name.includes("-") || node.children.some(visit);
+  };
+  return visit(definition.template);
+}
 
 export interface ElementNode {
   readonly kind: "element";
@@ -173,6 +185,12 @@ export interface SlotNode {
   readonly kind: "slot";
   readonly name?: string;
   readonly nameExpression?: CompiledExpression;
+  readonly flow?: Extract<Flow, { kind: "each" }>;
+  readonly props?: readonly {
+    readonly name: string;
+    readonly expression: string;
+    readonly expressionPlan: CompiledExpression;
+  }[];
   readonly fallback?: readonly TemplateNode[];
 }
 
@@ -219,4 +237,14 @@ export function rootArms(template: ElementNode): readonly ElementNode[] | undefi
   return template.name === "template" && template.flow?.kind === "match"
     ? template.children as readonly ElementNode[]
     : undefined;
+}
+
+/** A real `$match` element is the stable wrapper; only its chosen child is structural. */
+export function elementMatchRoot(node: ElementNode): ElementNode {
+  if (node.name === "template" || node.flow?.kind !== "match") return node;
+  const { flow, children, ...wrapper } = node;
+  return {
+    ...wrapper,
+    children: [{ kind: "element", name: "template", attributes: [], children, flow }],
+  };
 }

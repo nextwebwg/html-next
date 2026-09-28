@@ -16,11 +16,149 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, Fragment, onBeforeUnmount, onMounted, shallowRef, useSlots, watchEffect } from "vue";
+import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watchEffect } from "vue";
+
+interface DataReadOptions {
+  readonly source: string;
+  readonly definition: string;
+  readonly type?: string;
+  readonly debounce?: number;
+  readonly poll?: number;
+  readonly parameters: () => Readonly<Record<string, unknown>>;
+}
+
+function dataURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
+  const used = new Set<string>();
+  const expanded = source.replace(/\\{([A-Za-z_$][A-Za-z0-9_$-]*)\\}/g, (_match, name: string) => {
+    used.add(name);
+    const value = parameters[name];
+    return value == null ? "" : encodeURIComponent(String(value));
+  });
+  const url = new URL(expanded, baseURL);
+  for (const [name, value] of Object.entries(parameters)) {
+    if (used.has(name) || value == null) continue;
+    if (Array.isArray(value)) for (const item of value) url.searchParams.append(name, String(item));
+    else url.searchParams.set(name, String(value));
+  }
+  return url.href;
+}
+
+/** A Vue-owned declared read; no request is made during SSR. */
+export function useDataRead(state: { value: any }, options: DataReadOptions): void {
+  let value: unknown = null;
+  let parameters: Readonly<Record<string, unknown>> = {};
+  let abort: AbortController | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let generation = 0;
+  let connected = false;
+  let stop: (() => void) | undefined;
+  const cancel = (): void => {
+    abort?.abort();
+    abort = undefined;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  const stale = (current: number): boolean => !connected || current !== generation;
+  const request = async (current: number): Promise<void> => {
+    if (stale(current)) return;
+    const controller = new AbortController();
+    abort = controller;
+    state.value = { pending: true, value, error: null, ok: false };
+    try {
+      const definition = (() => {
+        try { return new URL(options.definition, document.baseURI).href; }
+        catch { return document.baseURI; }
+      })();
+      const response = await fetch(dataURL(options.source, definition, parameters), { signal: controller.signal });
+      if (!response.ok) throw new TypeError(\`Request failed with \${response.status}.\`);
+      const next = options.type === "text" || options.type === "string" ? await response.text() : await response.json();
+      if (stale(current)) return;
+      value = next;
+      state.value = { pending: false, value, error: null, ok: true };
+    } catch (error) {
+      if (controller.signal.aborted || stale(current)) return;
+      state.value = { pending: false, value, error, ok: false };
+    } finally {
+      if (abort === controller) abort = undefined;
+      if (!stale(current) && (options.poll ?? 0) > 0) {
+        timer = setTimeout(() => { void request(current); }, options.poll);
+      }
+    }
+  };
+  const update = (next: Readonly<Record<string, unknown>>): void => {
+    parameters = { ...next };
+    connected = true;
+    cancel();
+    const current = ++generation;
+    if ((options.debounce ?? 0) > 0) timer = setTimeout(() => { void request(current); }, options.debounce);
+    else void request(current);
+  };
+  onMounted(() => { stop = watchEffect(() => update(options.parameters())); });
+  onBeforeUnmount(() => {
+    stop?.();
+    connected = false;
+    generation += 1;
+    cancel();
+  });
+}
 
 /** A reactive value the host reads: Vue's ref, shallowRef, computed, and useTemplateRef all match. */
 export interface Readable<T> {
   readonly value: T;
+}
+
+interface ConnectionHub {
+  readonly observer: MutationObserver;
+  readonly checks: Set<() => void>;
+}
+
+const connectionHubs = new WeakMap<Document, ConnectionHub>();
+
+/** One native observer per document tracks externally detached controller roots. */
+function observeConnection(element: Element, check: () => void): () => void {
+  const document = element.ownerDocument;
+  let hub = connectionHubs.get(document);
+  if (hub === undefined) {
+    const Observer = document.defaultView?.MutationObserver;
+    if (Observer === undefined) throw new TypeError("Controller connection tracking requires MutationObserver.");
+    const checks = new Set<() => void>();
+    const observer = new Observer(() => { for (const current of checks) current(); });
+    observer.observe(document, { childList: true, subtree: true });
+    hub = { observer, checks };
+    connectionHubs.set(document, hub);
+  }
+  hub.checks.add(check);
+  return () => {
+    hub.checks.delete(check);
+    if (hub.checks.size === 0) {
+      hub.observer.disconnect();
+      connectionHubs.delete(document);
+    }
+  };
+}
+
+/** Keep native focus on the corresponding control when a root-level $match replaces its element. */
+export function preserveRootFocus(root: Readable<Element | null>): void {
+  const focusable = "a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]";
+  let previous: Element | null = null;
+  let active: Element | null = null;
+  let focusIndex = -1;
+  onBeforeUpdate(() => {
+    previous = root.value;
+    active = previous?.ownerDocument.activeElement ?? null;
+    focusIndex = previous !== null && active !== null && active !== previous && previous.contains(active)
+      ? Array.from(previous.querySelectorAll(focusable)).indexOf(active)
+      : -1;
+  });
+  onUpdated(() => {
+    const next = root.value;
+    if (previous === null || next === null || previous === next) return;
+    const target = active === previous ? next
+      : active?.isConnected === true && next.contains(active) ? active
+      : focusIndex >= 0 ? next.querySelectorAll(focusable)[focusIndex]
+      : undefined;
+    (target as HTMLElement | undefined)?.focus?.({ preventScroll: true });
+  });
 }
 
 export interface ComponentHostOptions {
@@ -28,8 +166,10 @@ export interface ComponentHostOptions {
   readonly root: Readable<HTMLElement | null>;
   /** Dispatches a declared component event. */
   readonly dispatch: (name: string, detail?: unknown) => boolean;
+  /** The authored controller edge, retained for the live loader's module diagnostic. */
+  readonly controllerSource?: { readonly specifier: string; readonly definition: string };
   /** The component's props, which a controller reads through \`host.state\`. */
-  readonly props?: Readonly<Record<string, unknown>>;
+  readonly props?: Readable<Readonly<Record<string, unknown>>>;
   /** Template refs, by the ref name the component declared. Vue collects a \`v-for\` ref into an array. */
   readonly refs?: Readonly<Record<string, Readable<HTMLElement | HTMLElement[] | null>>>;
   /** Declared state, which a controller reads and writes. */
@@ -55,22 +195,54 @@ function slottedElements(nodes: readonly any[]): Element[] {
 
 /**
  * The controller host, built from Vue refs, effects, and lifecycle. Reads and writes reach the
- * component's own refs, so a controller's change renders as any other Vue change does, and the
- * effects and listeners it opens close when the component unmounts.
+ * component's own refs, so a controller's change renders as any other Vue change does. Vue
+ * hooks cover mount/unmount; a shared native observer also detects external root detachment
+ * and reinsertion without treating an in-tree move as a new connection.
  */
 export function useComponentHost(
-  controller: ((host: never) => unknown) | undefined,
+  controllerLoader: () => Promise<unknown>,
   options: ComponentHostOptions,
 ) {
   const { root, dispatch, props, refs = {}, state = {}, computed: computedValues = {} } = options;
   const vueSlots = useSlots();
+  const component = getCurrentInstance();
+  const report = (error: unknown): void => {
+    const handler = component?.appContext.config.errorHandler;
+    if (handler === undefined) queueMicrotask(() => { throw error; });
+    else handler(error, component.proxy, "HTML Next controller");
+  };
+  const controllerDiagnostic = (code: "HJ001" | "HJ002", reason?: unknown): Error => {
+    const edge = options.controllerSource;
+    const source = edge?.definition ? new URL(edge.definition, document.baseURI).href : undefined;
+    const url = new URL(edge?.specifier ?? "", source ?? document.baseURI).href;
+    const tick = String.fromCharCode(96);
+    const message = code === "HJ002"
+      ? "Controller module " + tick + url + tick + " must default-export a function."
+      : "Controller module " + tick + url + tick + " failed to load: " + (reason instanceof Error ? reason.message : String(reason)) + ".";
+    return Object.assign(new Error((source === undefined ? "" : source + ": ") + code + ": " + message), {
+      name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code, message, ...(source === undefined ? {} : { source }) }),
+    });
+  };
+  type ControllerModule = Record<string, unknown> & { readonly default: (host: unknown) => unknown };
+  let controllerModule: Promise<ControllerModule> | undefined;
+  const loadControllerModule = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve()
+    .then(controllerLoader)
+    .then((candidate) => {
+      const loaded = candidate as { readonly default?: unknown } | null;
+      if (typeof loaded?.default !== "function") throw controllerDiagnostic("HJ002");
+      return candidate as ControllerModule;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof Error && "diagnostic" in error) throw error;
+      throw controllerDiagnostic("HJ001", error);
+    });
   const stops: Array<() => void> = [];
   const read = (name: string): unknown =>
     Object.hasOwn(state, name)
       ? state[name]!.value
       : Object.hasOwn(computedValues, name)
       ? computedValues[name]!.value
-      : props?.[name];
+      : props?.value[name];
   const host = {
     get root(): Element {
       return root.value as Element;
@@ -127,26 +299,55 @@ export function useComponentHost(
       stops.push(stop);
       return stop;
     },
-    on(event: string, listener: EventListener): () => void {
-      const element = root.value;
-      element?.addEventListener(event, listener);
-      const off = (): void => element?.removeEventListener(event, listener);
-      stops.push(off);
-      return off;
-    },
     dispatch,
   };
 
   let cleanup: void | (() => void);
-  let started: Promise<void> | undefined;
-  onMounted(() => {
-    started = Promise.resolve(controller?.(host as never)).then((result) => {
-      if (typeof result === "function") cleanup = result as () => void;
-    });
-  });
-  onBeforeUnmount(() => {
+  let started: Promise<ControllerModule> | undefined;
+  let stopObserving: (() => void) | undefined;
+  let connection = 0;
+  let connected = false;
+  let unmounted = false;
+  const disconnect = (): void => {
+    if (!connected) return;
+    connected = false;
+    connection += 1;
     for (const stop of stops.splice(0)) stop();
-    if (typeof cleanup === "function") cleanup();
+    cleanup?.();
+    cleanup = undefined;
+  };
+  const synchronize = (): void => {
+    if (unmounted) return;
+    if (root.value?.isConnected !== true) {
+      disconnect();
+      return;
+    }
+    if (connected) return;
+    connected = true;
+    const current = ++connection;
+    started = loadControllerModule().then(async (loaded) => {
+      if (!connected || current !== connection) return loaded;
+      const result = await loaded.default(host as never);
+      if (typeof result === "function") {
+        if (!connected || current !== connection) result();
+        else cleanup = result as () => void;
+      }
+      return loaded;
+    });
+    void started.catch(report);
+  };
+  onMounted(() => {
+    if (root.value === null) return;
+    stopObserving = observeConnection(root.value, () => {
+      try { synchronize(); } catch (error) { report(error); }
+    });
+    synchronize();
+  });
+  onUpdated(synchronize);
+  onBeforeUnmount(() => {
+    unmounted = true;
+    stopObserving?.();
+    disconnect();
   });
   /** \`ready\` settles once the controller has started; a method exposed by the component awaits it. */
   return { host, ready: (): Promise<void> | undefined => started };
@@ -161,7 +362,45 @@ export interface DispatchOptions {
   readonly modeled?: readonly string[];
 }
 
-/** Dispatches a component event to Vue listeners and, for controllers and page code, on the root. */
+class HtmlDiagnosticError extends Error {
+  readonly diagnostic: Readonly<{ code: string; message: string }>;
+
+  constructor(code: string, message: string) {
+    super(code + ": " + message);
+    this.name = "HtmlDiagnosticError";
+    this.diagnostic = Object.freeze({ code, message });
+  }
+}
+
+/** Apply HTML Next's event filters before propagation/cancellation actions on the original DOM event. */
+export function runFilteredEvent(event: Event, modifiers: readonly string[], handler: () => void): void {
+  if (modifiers.includes("self") && event.target !== event.currentTarget) return;
+  if (event instanceof MouseEvent) {
+    const buttons: Record<string, number> = { left: 0, middle: 1, right: 2 };
+    const filters = modifiers.filter((modifier) => modifier in buttons);
+    if (filters.length > 0 && !filters.some((filter) => event.button === buttons[filter])) return;
+  }
+  const systemKeys = ["ctrl", "shift", "alt", "meta"] as const;
+  for (const key of systemKeys) {
+    if (modifiers.includes(key) && !(event as unknown as Record<string, boolean>)[key + "Key"]) return;
+  }
+  if (modifiers.includes("exact") && systemKeys.some((key) =>
+    !modifiers.includes(key) && (event as unknown as Record<string, boolean>)[key + "Key"],
+  )) return;
+  if (event instanceof KeyboardEvent) {
+    const names: Record<string, string> = {
+      enter: "Enter", escape: "Escape", space: " ", tab: "Tab",
+      up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
+    };
+    const filters = modifiers.filter((modifier) => modifier in names);
+    if (filters.length > 0 && !filters.some((filter) => event.key === names[filter])) return;
+  }
+  if (modifiers.includes("prevent")) event.preventDefault();
+  if (modifiers.includes("stop")) event.stopPropagation();
+  handler();
+}
+
+/** Dispatches the component's native CustomEvent; only v-model updates use Vue emits. */
 export function createDispatch(
   root: Readable<HTMLElement | null>,
   emit?: (name: string, detail: unknown) => void,
@@ -175,9 +414,8 @@ export function createDispatch(
   return (name, detail) => {
     const check = checks[name];
     if (detail !== undefined && check !== undefined && !check(detail)) {
-      throw new TypeError(\`HR002: Event \\\`\${name}\\\` detail does not satisfy its declared type.\`);
+      throw new HtmlDiagnosticError("HR002", \`Event \\\`\${name}\\\` detail does not satisfy its declared type.\`);
     }
-    emit?.(name, detail);
     if (detail !== null && typeof detail === "object") {
       for (const prop of modeled) {
         if (!(prop in detail)) continue;

@@ -1,6 +1,6 @@
 /** Copies a component's controller module and its relative imports into generated output. */
-import { readFile } from "node:fs/promises";
-import { dirname, relative, sep } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import ts from "typescript-compiler";
@@ -8,13 +8,49 @@ import ts from "typescript-compiler";
 import type { GeneratedArtifact } from "./generate.js";
 
 /** The controller module and its static relative imports, by file URL. */
-async function readControllerGraph(sourceURL: string, files: Map<string, string>): Promise<void> {
+function within(root: string, path: string): boolean {
+  const fromRoot = relative(root, path);
+  return fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+}
+
+function assertStaticDynamicImports(sourceURL: string, content: string): void {
+  const source = ts.createSourceFile(fileURLToPath(sourceURL), content, ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        (node.arguments.length === 0 || !ts.isStringLiteralLike(node.arguments[0]!))) {
+      throw new Error(`Controller module \`${sourceURL}\` has a dynamic import without a static string specifier; its dependency cannot be relocated.`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+}
+
+async function readControllerGraph(
+  sourceURL: string,
+  trustRoot: string,
+  canonicalRoot: string,
+  files: Map<string, string>,
+): Promise<void> {
   if (files.has(sourceURL)) return;
-  const content = await readFile(fileURLToPath(sourceURL), "utf8");
+  const path = fileURLToPath(sourceURL);
+  if (!within(trustRoot, path)) {
+    throw new Error(`Controller module \`${sourceURL}\` is outside the component's approved root.`);
+  }
+  let canonicalPath: string;
+  try {
+    canonicalPath = await realpath(path);
+  } catch (error) {
+    throw new Error(`Controller module \`${sourceURL}\` failed to load: ${error instanceof Error ? error.message : String(error)}.`, { cause: error });
+  }
+  if (!within(canonicalRoot, canonicalPath)) {
+    throw new Error(`Controller module \`${sourceURL}\` is outside the component's approved root.`);
+  }
+  const content = await readFile(canonicalPath, "utf8");
+  assertStaticDynamicImports(sourceURL, content);
   files.set(sourceURL, content);
   for (const item of ts.preProcessFile(content, true, true).importedFiles) {
     if (!item.fileName.startsWith(".") && !item.fileName.startsWith("/")) continue;
-    await readControllerGraph(new URL(item.fileName, sourceURL).href, files);
+    await readControllerGraph(new URL(item.fileName, sourceURL).href, trustRoot, canonicalRoot, files);
   }
 }
 
@@ -39,8 +75,9 @@ export async function addControllerGraph(
   artifacts: Map<string, GeneratedArtifact>,
 ): Promise<string> {
   const files = new Map<string, string>();
-  await readControllerGraph(sourceURL, files);
   const root = fileURLToPath(trustRoot);
+  const canonicalRoot = await realpath(root);
+  await readControllerGraph(sourceURL, root, canonicalRoot, files);
   const paths = [...files.keys()].map((url) => fileURLToPath(url));
   for (const path of paths) {
     const withinRoot = relative(root, path);
@@ -58,4 +95,3 @@ export async function addControllerGraph(
   }
   return target(fileURLToPath(sourceURL));
 }
-

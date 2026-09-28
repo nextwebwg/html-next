@@ -10,6 +10,7 @@ import {
   getWritablePath,
   toAttribute,
   toText,
+  typeCheckedDependencies,
   truthy,
   type Scope,
   type Value,
@@ -29,6 +30,14 @@ describe("expression: compilation", () => {
       "selected.name",
     ]);
     assert.deepEqual(JSON.parse(JSON.stringify(compiled.ast)), compiled.ast);
+  });
+
+  it("lets format stringify direct arguments without erasing reactive dependencies", () => {
+    const compiled = compileExpression("format('%s/%s', result.value.label, result.value.note)");
+    assert.deepEqual(compiled.dependencies, ["result.value.label", "result.value.note"]);
+    assert.deepEqual(typeCheckedDependencies(compiled), []);
+    assert.deepEqual(typeCheckedDependencies("format('%s', result.value.label + 1)"), ["result.value.label"]);
+    assert.deepEqual(typeCheckedDependencies("result.value.label"), ["result.value.label"]);
   });
 
   it("accepts only state-rooted access paths as writable bindings", () => {
@@ -98,6 +107,9 @@ describe("expression: truthiness — the empty value of each type is false", () 
   it("ignores inherited properties when deciding whether a record is empty", () => {
     const inherited = Object.create({ inherited: true }) as Record<string, never>;
     assert.equal(truthy(inherited), false);
+  });
+  it("treats a present native error as a failure, even though its message is non-enumerable", () => {
+    assert.equal(truthy(new TypeError("offline") as unknown as Value), true);
   });
   it("non-empty values are truthy", () => {
     for (const src of ["true", '"x"', "1", "[1]", "{ a: 1 }"]) {

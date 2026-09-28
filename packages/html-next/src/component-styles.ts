@@ -12,6 +12,7 @@
  */
 import { fail } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
+import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 
 /** Names a component on its root, and only its root. Delegated roots list every owner. */
@@ -160,15 +161,18 @@ function stylableType(type: unknown): boolean {
 
 /** Rejects `:host-state()` tests on names that are not declared props or state of a stylable type. */
 export function validateStateNames(definition: ComponentDefinition, names: ReadonlySet<string>, source?: string): void {
-  const states = new Set((definition.declarations ?? [])
-    .filter((declaration) => declaration.kind === "state")
-    .map((declaration) => declaration.name));
+  const states = new Map<string, string | undefined>();
+  for (const declaration of definition.declarations ?? []) {
+    if (declaration.kind === "state") states.set(declaration.name, declaration.type);
+  }
   for (const name of names) {
     const prop = definition.contract.props[name];
     if (prop === undefined && !states.has(name)) {
       fail("HY001", `\`:host-state()\` tests \`${name}\`, which is not a declared prop or state.`, source);
     }
-    if (prop !== undefined && !stylableType(prop.type)) {
+    const stateType = states.get(name);
+    if ((prop !== undefined && !stylableType(prop.type)) ||
+      (stateType !== undefined && !stylableType(parseTypeExpression(stateType)))) {
       fail("HY002", `\`:host-state()\` cannot test \`${name}\`, whose type is structured.`, source);
     }
   }

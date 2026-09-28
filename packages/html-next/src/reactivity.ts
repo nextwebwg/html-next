@@ -542,6 +542,15 @@ export class ReactiveScope implements Scope {
     trigger(cell);
   }
 
+  /** Write an existing lexical binding without shadowing it in a child scope. */
+  setExisting(name: string, value: Value): void {
+    if (this.#local(name) === undefined && this.parent !== undefined) {
+      this.parent.setExisting(name, value);
+      return;
+    }
+    this.set(name, value);
+  }
+
   /** Defines a named derived scope value without evaluating it until a consumer reads it. */
   defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
     let cell = this.#local(name);

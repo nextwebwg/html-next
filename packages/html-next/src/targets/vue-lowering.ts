@@ -173,6 +173,7 @@ export function typeScript(value: Static): string {
 const FALLBACKS: Readonly<Record<string, string>> = {
   truthy: `function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
+  if (value instanceof Error) return true;
   if (value !== null && typeof value === "object") return Object.keys(value).length > 0;
   return Boolean(value);
 }`,
@@ -195,7 +196,9 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   return typeof pattern === "string" ? pattern.replace(/%s/g, () => index < values.length ? text(values[index++]) : "%s") : undefined;
 }`,
   sortBy: `function sortBy(items: any[], keys: readonly string[]): any[] {
-  const field = (item: any, path: string): unknown => path.split(".").reduce((value, key) => value?.[key], item);
+  const field = (item: any, path: string): unknown => item !== null && typeof item === "object" && !Array.isArray(item)
+    ? path.split(".").reduce((value, key) => value?.[key], item)
+    : item;
   return items.slice().sort((a, b) => {
     for (const key of keys) {
       const descending = key.startsWith("-");
@@ -207,9 +210,26 @@ const FALLBACKS: Readonly<Record<string, string>> = {
     return 0;
   });
 }`,
+  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number; loop: { index: number; first: boolean; last: boolean; count: number } }[] {
+  return items.map((item, index) => ({ item, index, loop: { index, first: index === 0, last: index === items.length - 1, count: items.length } }));
+}`,
+  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number, loop: { index: number; first: boolean; last: boolean; count: number }) => unknown): readonly T[] {
+  const seen = new Set<unknown>();
+  for (let index = 0; index < items.length; index += 1) {
+    const key = keyOf(items[index]!, index, { index, first: index === 0, last: index === items.length - 1, count: items.length });
+    if (seen.has(key)) {
+      const message = \`A keyed list produced duplicate key \\\`\${text(key)}\\\`.\`;
+      throw Object.assign(new Error(\`HR004: \${message}\`), {
+        name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR004", message }),
+      });
+    }
+    seen.add(key);
+  }
+  return items;
+}`,
 };
 
-const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], format: ["text"], sortBy: ["text"] };
+const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], format: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
 /** Vue's boolean attributes: it removes them for false and writes them empty for true. */
 const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,checked,controls,default,defer,disabled,"
@@ -337,6 +357,15 @@ export class Lowering {
     if (options.sort.length > 0) code = `${this.#use("sortBy")}(${code}, ${JSON.stringify(options.sort)})`;
     if (options.limit !== undefined) code = `${code}.slice(0, ${this.value(options.limit, scope)})`;
     return code;
+  }
+
+  /** Bind an already-shaped list and its loop metadata once for Vue's iteration. */
+  eachRows(code: string): string {
+    return `${this.#use("eachRows")}(${code})`;
+  }
+
+  uniqueKeys(items: string, keyOf: string): string {
+    return `${this.#use("uniqueKeys")}(${items}, ${keyOf})`;
   }
 
   #not(node: ExpressionNode, scope: Scope): string {
