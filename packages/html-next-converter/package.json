@@ -34,8 +34,11 @@
     "@types/node": "catalog:",
     "@vue/compiler-sfc": "catalog:",
     "esbuild": "catalog:",
+    "parse5": "catalog:",
+    "playwright": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vue": "catalog:"
   },
   "publishConfig": {
     "access": "public",

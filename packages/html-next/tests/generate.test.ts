@@ -63,11 +63,10 @@ describe("generateComponent", () => {
     const vue = byPath.get("vue/XButton.vue")!;
     assert.match(vue, /<script setup lang="ts">/);
     assert.match(vue, /defineOptions\(\{ inheritAttrs: false \}\)/);
-    assert.ok(vue.lastIndexOf('v-bind="$attrs"') < vue.lastIndexOf("data-x-button"));
+    assert.ok(vue.lastIndexOf('v-bind="nativeAttrs($attrs)"') < vue.lastIndexOf("data-x-button"));
 
-    for (const content of [vanilla, vue]) {
-      assert.doesNotMatch(content, /<x-button\b|createElement\("x-button"\)/);
-    }
+    assert.doesNotMatch(vanilla, /<x-button\b|createElement\("x-button"\)/);
+    assert.doesNotMatch(vue.slice(vue.indexOf("<template>")), /<x-button\b/);
   });
 
   it("publishes prominently early-release documentation without a detached contract artifact", async () => {
@@ -130,7 +129,7 @@ describe("generateComponent", () => {
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
-    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === props\.number \? 'step' : null/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === checkedProps\.number \? 'step' : null/);
   });
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
@@ -142,10 +141,10 @@ describe("generateComponent", () => {
     assert.match(byPath.get("vanilla/DemoAction.js")!, /=== undefined \? false/);
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
     const vue = byPath.get("vue/DemoAction.vue")!;
-    assert.match(vue, /:formAction\.prop="destination as any"/);
-    assert.match(vue, /:disabled="disabled"/);
-    // A boolean on an ordinary attribute is present and empty when true, and absent when false.
-    assert.match(vue, /:data-selected="selected \? '' : undefined"/);
+    assert.match(vue, /:formAction\.prop="checkedProps\.destination as any"/);
+    assert.match(vue, /:disabled="checkedProps\.disabled"/);
+    // The root's reflected prop is the final writer for a bound data-* attribute.
+    assert.match(vue, /:data-selected="reflectedProp\('selected', 'selected', checkedProps\.selected, undefined, true\)"/);
     assert.match(vue, /title="A & &quot;quote&quot;"/);
     assert.match(vue, /Text &amp; &#123;literal&#125;/);
   });
@@ -157,6 +156,6 @@ describe("generateComponent", () => {
 
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /interface DemoPlayerElement extends HTMLAudioElement/);
     assert.match(byPath.get("vanilla/DemoPlayer.d.ts")!, /\): DemoPlayerElement;/);
-    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio data-component="demo-player" controls="" v-bind="\$attrs"/);
+    assert.match(byPath.get("vue/DemoPlayer.vue")!, /<audio data-component="demo-player" controls="" v-bind="nativeAttrs\(\$attrs\)"/);
   });
 });

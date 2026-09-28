@@ -8,7 +8,7 @@ import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
-import { generateComponent, vueHostArtifact } from "../src/generate.js";
+import { generateComponent, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
@@ -210,23 +210,6 @@ const onceSource = `<template component="event-once" status="experimental" summa
   <section><button type="button" on:keydown.enter.once="increment"><output $value="count"></output></button></section>
 </template>`;
 
-const connectSource = `<template component="event-connect" status="experimental" summary="Direct native connect fixture.">
-  <defs>
-    <state name="count" :value="0"></state>
-    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-  </defs>
-  <section><button type="button" on:connect="increment"><output $value="count"></output></button></section>
-</template>`;
-
-const disconnectSource = `<template component="event-disconnect" status="experimental" summary="Direct native disconnect fixture.">
-  <defs>
-    <state name="count" :value="0"></state>
-    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-    <handler name="never"><set name="count" :value="count + 10"></set></handler>
-  </defs>
-  <section><button type="button" on:disconnect.once.exact.passive.stop.capture.enter.left="increment" on:connect.self="never"><output $value="count"></output></button></section>
-</template>`;
-
 const dispatchSource = `<template component="event-dispatch" status="experimental" summary="Direct declared event dispatch fixture.">
   <defs>
     <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
@@ -367,6 +350,8 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       ...generateComponent(parseComponent(stepsSource, "x-steps.html")),
       ...generateComponent(parseComponent(stepSource, "x-step.html")),
       vueHostArtifact(),
+      vueControlArtifact(),
+      vuePropsArtifact(),
     ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -418,7 +403,7 @@ import DemoPanel from "./vue/DemoPanel";
 import XSteps from "./vue/XSteps";
 import XStep from "./vue/XStep";
 const events = []; window.targetEvents = events; window.invalidTargetEvents = [];
-createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => events.push(detail), onInvalidChange: detail => window.invalidTargetEvents.push(detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
+createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: event => events.push(event.detail), onInvalidChange: event => window.invalidTargetEvents.push(event.detail) }, { default: () => "Projected", title: () => h("h1", { slot: "title" }, "Title") }), h(DemoPanel, { align: "end", label: "Ready", class: "consumer", role: "region" }), h(XSteps, null, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })]) }).mount(document.querySelector("main"));`,
     };
 
     for (const [target, entry] of Object.entries(entries)) {
@@ -504,9 +489,8 @@ createApp({ render: () => h("div", [h(DemoCounter, { onCountChange: detail => ev
           invalid: true,
           optionalTitle: "",
           ownTitle: false,
-          // HTML Next records explicit props as data-* for its rendered form; a converted Vue
-          // component owns its props and writes no record.
-          panel: { ownAlign: false, dataAlign: target === "vue" ? null : "end", dataLabel: target === "vue" ? null : "Ready", className: "base consumer", role: "region" },
+          // Both targets record explicit props as data-* for the rendered form.
+          panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base consumer", role: "region" },
           provenance: "demo-counter",
         });
         const context = await page.evaluate(async () => {
@@ -547,7 +531,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       computedFixtureUrl.href,
     );
     const artifacts = new Map(
-      [...generateComponent(definition), vueHostArtifact()].map((artifact) => [artifact.path, artifact.content]),
+      [...generateComponent(definition), vueHostArtifact(), vuePropsArtifact()].map((artifact) => [artifact.path, artifact.content]),
     );
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -639,8 +623,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
   let filteredEventBundlePath = "";
   let eventOptionsBundlePath = "";
   let onceBundlePath = "";
-  let connectBundlePath = "";
-  let disconnectBundlePath = "";
   let dispatchBundlePath = "";
   let computedDispatchBundlePath = "";
   let inlineExpressionBundlePath = "";
@@ -1075,49 +1057,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       bundle: true,
       format: "iife",
       globalName: "EventOnce",
-      platform: "browser",
-      target: ["es2022"],
-      loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
-    });
-
-    const connectModule = generateComponent(parseComponent(connectSource, "event-connect.html"))
-      .find((artifact) => artifact.path === "vanilla/EventConnect.js")?.content;
-    assert.ok(connectModule);
-    assert.doesNotMatch(connectModule, /@nextwebwg\/html-next\/runtime/);
-    assert.match(connectModule, /manageGeneratedLifecycle/);
-    await writeFile(join(directory, "styles/event-connect.css"), "");
-    const connectEntryPath = join(directory, "vanilla/EventConnect.js");
-    connectBundlePath = join(directory, "event-connect-bundle.js");
-    await writeFile(connectEntryPath, connectModule);
-    await build({
-      entryPoints: [connectEntryPath],
-      outfile: connectBundlePath,
-      bundle: true,
-      format: "iife",
-      globalName: "EventConnect",
-      platform: "browser",
-      target: ["es2022"],
-      loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
-    });
-
-    const disconnectModule = generateComponent(parseComponent(disconnectSource, "event-disconnect.html"))
-      .find((artifact) => artifact.path === "vanilla/EventDisconnect.js")?.content;
-    assert.ok(disconnectModule);
-    assert.doesNotMatch(disconnectModule, /@nextwebwg\/html-next\/runtime/);
-    assert.match(disconnectModule, /manageGeneratedLifecycle/);
-    assert.match(disconnectModule, /handler0Disconnect\(\)/);
-    await writeFile(join(directory, "styles/event-disconnect.css"), "");
-    const disconnectEntryPath = join(directory, "vanilla/EventDisconnect.js");
-    disconnectBundlePath = join(directory, "event-disconnect-bundle.js");
-    await writeFile(disconnectEntryPath, disconnectModule);
-    await build({
-      entryPoints: [disconnectEntryPath],
-      outfile: disconnectBundlePath,
-      bundle: true,
-      format: "iife",
-      globalName: "EventDisconnect",
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
@@ -2190,82 +2129,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       }
     });
 
-    it(`${name} runs a direct connect handler for each connected period`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent("<main></main>");
-        await page.addScriptTag({ path: connectBundlePath });
-        const result = await page.evaluate(async () => {
-          const api = (window as unknown as {
-            EventConnect: { createEventConnect(): HTMLElement };
-          }).EventConnect;
-          const component = api.createEventConnect();
-          const main = document.querySelector("main")!;
-          const output = component.querySelector("output")!;
-          const detached = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const connected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removed = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          return { detached, connected, removed, reconnected: output.textContent };
-        });
-        assert.deepEqual(result, { detached: "0", connected: "1", removed: "1", reconnected: "2" });
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} defers a direct disconnect update until the next connected period`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent("<main></main>");
-        await page.addScriptTag({ path: disconnectBundlePath });
-        const result = await page.evaluate(async () => {
-          const api = (window as unknown as {
-            EventDisconnect: { createEventDisconnect(): HTMLElement };
-          }).EventDisconnect;
-          const component = api.createEventDisconnect();
-          const main = document.querySelector("main")!;
-          const output = component.querySelector("output")!;
-          const detached = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const connected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removed = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const reconnected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removedAgain = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          return { detached, connected, removed, reconnected, removedAgain, final: output.textContent };
-        });
-        assert.deepEqual(result, {
-          detached: "0", connected: "0", removed: "0", reconnected: "1", removedAgain: "1", final: "2",
-        });
-      } finally {
-        await browser.close();
-      }
-    });
-
     it(`${name} dispatches declared primitive events directly while connected`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -3155,6 +3018,10 @@ describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
     for (const artifact of generateComponent(parseComponent(actionSource, "x-action.html"))) {
       await writeFile(join(directory, artifact.path), artifact.content);
     }
+    const host = vueHostArtifact();
+    await writeFile(join(directory, host.path), host.content);
+    const props = vuePropsArtifact();
+    await writeFile(join(directory, props.path), props.content);
     const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
     assert.deepEqual(parsed.errors, []);
     await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);

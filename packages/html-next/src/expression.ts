@@ -252,6 +252,9 @@ export function truthy(value: Value): boolean {
   if (typeof value === "string") return value.length > 0;
   if (typeof value === "number") return value !== 0 && value === value;
   if (Array.isArray(value)) return value.length > 0;
+  // A native Error is a present failure even when its message is non-enumerable. The empty-record
+  // rule applies to declarative object values, not to platform error objects in <data>.error.
+  if (value instanceof Error) return true;
   for (const key in value) if (Object.hasOwn(value, key)) return true;
   return false;
 }
@@ -393,7 +396,17 @@ function path(node: ExpressionNode): string | undefined {
   return undefined;
 }
 
-function collectDependencies(node: ExpressionNode, dependencies: string[]): void {
+function collectDependencies(node: ExpressionNode, dependencies: string[], forTypeChecks = false): void {
+  if (forTypeChecks && node.kind === "call" && node.fn === "format") {
+    const [pattern, ...values] = node.args;
+    if (pattern !== undefined) collectDependencies(pattern, dependencies, true);
+    for (const value of values) {
+      // format's %s conversion accepts a direct value regardless of its declared input type.
+      // A compound argument still evaluates its own operators before format can stringify it.
+      if (path(value) === undefined) collectDependencies(value, dependencies, true);
+    }
+    return;
+  }
   const name = path(node);
   if (name !== undefined) {
     if (!dependencies.includes(name)) dependencies.push(name);
@@ -402,30 +415,38 @@ function collectDependencies(node: ExpressionNode, dependencies: string[]): void
   switch (node.kind) {
     case "literal": return;
     case "id": return;
-    case "member": collectDependencies(node.object, dependencies); return;
+    case "member": collectDependencies(node.object, dependencies, forTypeChecks); return;
     case "index":
-      collectDependencies(node.object, dependencies);
-      collectDependencies(node.index, dependencies);
+      collectDependencies(node.object, dependencies, forTypeChecks);
+      collectDependencies(node.index, dependencies, forTypeChecks);
       return;
-    case "unary": collectDependencies(node.operand, dependencies); return;
+    case "unary": collectDependencies(node.operand, dependencies, forTypeChecks); return;
     case "binary":
-      collectDependencies(node.left, dependencies);
-      collectDependencies(node.right, dependencies);
+      collectDependencies(node.left, dependencies, forTypeChecks);
+      collectDependencies(node.right, dependencies, forTypeChecks);
       return;
     case "conditional":
-      collectDependencies(node.test, dependencies);
-      collectDependencies(node.consequent, dependencies);
-      collectDependencies(node.alternate, dependencies);
+      collectDependencies(node.test, dependencies, forTypeChecks);
+      collectDependencies(node.consequent, dependencies, forTypeChecks);
+      collectDependencies(node.alternate, dependencies, forTypeChecks);
       return;
     case "call":
-      for (const argument of node.args) collectDependencies(argument, dependencies);
+      for (const argument of node.args) collectDependencies(argument, dependencies, forTypeChecks);
       return;
     case "object":
-      for (const pair of node.pairs) collectDependencies(pair.value, dependencies);
+      for (const pair of node.pairs) collectDependencies(pair.value, dependencies, forTypeChecks);
       return;
     case "array":
-      for (const item of node.items) collectDependencies(item, dependencies);
+      for (const item of node.items) collectDependencies(item, dependencies, forTypeChecks);
   }
+}
+
+/** References checked against declared types before evaluating an expression. */
+export function typeCheckedDependencies(expression: string | CompiledExpression): readonly string[] {
+  const ast = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
+  const dependencies: string[] = [];
+  collectDependencies(ast, dependencies, true);
+  return dependencies.sort();
 }
 
 function appendWritable(node: ExpressionNode, result: WritablePathSegment[]): boolean {

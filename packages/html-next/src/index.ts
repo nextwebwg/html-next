@@ -4,6 +4,14 @@ export {
   generateComponent,
   generateVueComponent,
   GENERATOR_VERSION,
+  importsVueHost,
+  importsVueHtml,
+  importsVueControl,
+  importsVueProps,
+  vueHostArtifact,
+  vueHtmlArtifact,
+  vueControlArtifact,
+  vuePropsArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
 export { addControllerGraph } from "./controller-files.js";

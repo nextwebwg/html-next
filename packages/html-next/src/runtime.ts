@@ -7,12 +7,12 @@ import {
   ABSENT,
   NONCONFORMING,
   UndeclaredName,
-  compileExpression,
   evaluate,
   type CompiledExpression,
   evaluateCompiled,
   toAttribute,
   toText,
+  typeCheckedDependencies,
   truthy,
   type Scope,
   type Value,
@@ -44,6 +44,7 @@ import {
   type TypeNode,
 } from "./type-system.js";
 import type {
+  AttributeBinding,
   ComponentDefinition,
   DataDeclaration,
   DirectiveAttribute,
@@ -52,10 +53,11 @@ import type {
   Flow,
   HandlerDeclaration,
   LiteralAttribute,
+  PropertyBinding,
   SlotNode,
   TemplateNode,
 } from "./template.js";
-import { rootArms } from "./template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { PropContract, PropValue } from "./types.js";
 
@@ -92,8 +94,6 @@ interface RuntimeInstance {
   readonly scope: ReactiveScope;
   readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
-  readonly connectCallbacks: Set<() => void>;
-  readonly disconnectCallbacks: Set<() => void>;
   connected: boolean;
   controllerModule?: Promise<ControllerModule>;
   host?: ComponentHost;
@@ -125,6 +125,7 @@ interface DocumentRegistry {
 }
 
 const contentOnly = new WeakSet<Element>();
+const selectValueBindings = new WeakMap<HTMLSelectElement, () => void>();
 /**
  * An invocation element is replaced by the component's own root when it lowers. A parent renders
  * against the invocation, so its bound props and event listeners resolve through this to reach the
@@ -216,12 +217,23 @@ function discoverySelector(registry: DocumentRegistry): string {
  * needs a parser, so the live entry points install one and a build-time graph never carries it.
  */
 export type InlineDefinitionParser = (carrier: Element, source: string) => ComponentDefinition;
+export type ProjectedSlotParser = (
+  carrier: HTMLTemplateElement,
+  definition: ComponentDefinition,
+  names: readonly string[],
+) => readonly TemplateNode[];
 
 let inlineDefinitionParser: InlineDefinitionParser | undefined;
+let projectedSlotParser: ProjectedSlotParser | undefined;
 
 /** Lets the live delivery teach this runtime to read definitions authored in the document. */
 export function installInlineDefinitionParser(parse: InlineDefinitionParser): void {
   inlineDefinitionParser = parse;
+}
+
+/** The live delivery installs this; generated definitions never import the parser. */
+export function installProjectedSlotParser(parse: ProjectedSlotParser): void {
+  projectedSlotParser = parse;
 }
 
 function parseDefinition(wrapper: HTMLTemplateElement, index: number): LiveDefinition {
@@ -548,7 +560,7 @@ function constrainedReferences(
   if (known !== undefined) return known;
   let paths: readonly ConstrainedReference[] = [];
   try {
-    paths = compileExpression(expression).dependencies.flatMap((path) => {
+    paths = typeCheckedDependencies(expression).flatMap((path) => {
       const type = declaredTypeAt(definition, path);
       return type === undefined ? [] : [[path, type] as const];
     });
@@ -651,16 +663,14 @@ interface HydrationRange {
 
 /**
  * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
- * add, and its `on:connect`/`on:disconnect` handlers. A root switch stops it all and starts afresh.
+ * add. A root switch stops them all and starts afresh.
  */
 interface RenderOwned {
   readonly effects: ReactiveOwner[];
-  readonly connectCallbacks: Set<() => void>;
-  readonly disconnectCallbacks: Set<() => void>;
 }
 
 function renderOwned(): RenderOwned {
-  return { effects: [], connectCallbacks: new Set(), disconnectCallbacks: new Set() };
+  return { effects: [] };
 }
 
 interface RuntimeRenderContext {
@@ -671,6 +681,7 @@ interface RuntimeRenderContext {
   readonly projectedNodes: readonly Node[];
   readonly projectedSlotNames: WeakMap<Node, string>;
   readonly slotInsertions: SlotInsertion[];
+  readonly selectBindings: Array<() => void>;
   /** The definition's root element, or the root `$match` arm this instance chose. */
   rootNode: ElementNode;
   readonly frameworkOwned: boolean;
@@ -680,6 +691,14 @@ interface RuntimeRenderContext {
   /** SVG while rendering inside an `<svg>` subtree (outside `<foreignObject>`); otherwise HTML. */
   readonly namespace?: typeof SVG_NAMESPACE;
 }
+
+interface ProjectedTemplate {
+  readonly children: readonly TemplateNode[];
+  readonly scope: ReactiveScope;
+  readonly context: RuntimeRenderContext;
+}
+
+const projectedTemplates = new WeakMap<HTMLTemplateElement, ProjectedTemplate>();
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
@@ -730,7 +749,7 @@ function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value)
   const [root, ...segments] = path;
   if (typeof root !== "string") return;
   if (segments.length === 0) {
-    scope.set(root, value);
+    scope.setExisting(root, value);
     return;
   }
   let target = scope.get(root) as Record<PropertyKey, unknown> | undefined;
@@ -815,10 +834,6 @@ function runHandler(
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
       const detail = step.value === undefined ? undefined : evaluateCompiled(step.value, scope);
-      if (declaration !== undefined && detail !== undefined) {
-        const parsed = parseTypedValue(detail, parseTypeExpression(declaration.type));
-        if (!parsed.ok) fail("HR002", `Event \`${step.event}\` detail does not satisfy its declared type.`);
-      }
       dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
     } else {
       const recorded = context.refs[step.target];
@@ -842,6 +857,10 @@ function dispatchComponentEvent(
   detail: unknown,
   declaration: EventDeclaration | undefined,
 ): boolean {
+  if (declaration !== undefined && detail !== undefined) {
+    const parsed = parseTypedValue(detail, parseTypeExpression(declaration.type));
+    if (!parsed.ok) fail("HR002", `Event \`${event}\` detail does not satisfy its declared type.`);
+  }
   return target.dispatchEvent(new CustomEvent(event, {
     detail,
     bubbles: declaration?.bubbles ?? true,
@@ -898,13 +917,6 @@ function bindEvents(
       if (binding.modifiers.includes("stop")) event.stopPropagation();
       runHandler(declaration, target, scope, context);
     };
-    if (binding.name === "connect" || binding.name === "disconnect") {
-      const callbacks = binding.name === "connect"
-        ? context.owned.connectCallbacks
-        : context.owned.disconnectCallbacks;
-      callbacks.add(() => listener(new Event(binding.name)));
-      continue;
-    }
     const capture = binding.modifiers.includes("capture");
     let attached = false;
     const attach = (): void => {
@@ -952,19 +964,6 @@ function applyContent(
   if (value === NONCONFORMING) return;
   if (directive.name === "value") element.textContent = toText(value);
   else element.replaceChildren(sanitizeFragment(toText(value), document, (node) => contentOnly.add(node)));
-}
-
-/** A `<template $value>`/`<template $html>` produces inline nodes with no wrapper element. */
-function inlineDirective(
-  directive: DirectiveAttribute,
-  scope: ReactiveScope,
-  document: Document,
-  definition: ComponentDefinition,
-): Node {
-  const value = evalConforming(directive.expression, scope, definition);
-  if (value === NONCONFORMING) return document.createTextNode("");
-  if (directive.name === "value") return document.createTextNode(toText(value));
-  return sanitizeFragment(toText(value), document, (node) => contentOnly.add(node));
 }
 
 function compareValues(a: Value, b: Value): number {
@@ -1024,25 +1023,58 @@ function clearRange(start: Comment, end: Comment): void {
   }
 }
 
+function existingDynamicRange(candidate: Node | undefined): readonly [Comment, Comment] | undefined {
+  if (!(candidate instanceof Comment) || candidate.data !== "html-next:start") return undefined;
+  let depth = 1;
+  for (let node = candidate.nextSibling; node !== null; node = node.nextSibling) {
+    if (node instanceof Comment && node.data === "html-next:start") depth += 1;
+    else if (node instanceof Comment && node.data === "html-next:end" && --depth === 0) return [candidate, node];
+  }
+  return undefined;
+}
+
+function rangeNodes(start: Comment, end: Comment): Node[] {
+  const nodes: Node[] = [start];
+  for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
+    nodes.push(node);
+    if (node === end) break;
+  }
+  return nodes;
+}
+
+/** Option regions can change without the select's bound value changing. */
+function syncContainingSelect(after: Comment): void {
+  const parent = after.parentElement;
+  if (parent?.localName !== "select" && parent?.localName !== "optgroup") return;
+  const select = parent.closest("select");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const applySelection = selectValueBindings.get(select);
+  if (applySelection !== undefined) queueMicrotask(applySelection);
+}
+
 function renderDynamicNode(
   node: ElementNode,
   scope: ReactiveScope,
   document: Document,
   passThrough: readonly RootAttribute[],
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   if (node.flow?.kind === "each") {
     return renderEachRegion(node, scope, document, passThrough, context);
   }
-  const start = document.createComment("html-next:start");
-  const end = document.createComment("html-next:end");
-  const fragment = document.createDocumentFragment();
-  fragment.append(start, end);
+  const existing = context.committed ? existingDynamicRange(candidate) : undefined;
+  const start = existing?.[0] ?? document.createComment("html-next:start");
+  const end = existing?.[1] ?? document.createComment("html-next:end");
+  const fragment = existing === undefined ? document.createDocumentFragment() : undefined;
+  fragment?.append(start, end);
   let childEffects: ReactiveOwner[] = [];
+  let adopting = existing !== undefined;
   ownEffect(context, scope, () => {
     for (const effect of childEffects) effect.stop();
     childEffects = [];
-    clearRange(start, end);
+    const previous = adopting ? rangeNodes(start, end).slice(1, -1) : [];
+    if (!adopting) clearRange(start, end);
     const effectsStart = context.owned.effects.length;
     let rendered: Node[] = [];
     if (node.flow?.kind === "if") {
@@ -1050,21 +1082,27 @@ function renderDynamicNode(
       if (test === NONCONFORMING) return;
       if (truthy(test)) {
         const { flow: _flow, ...body } = node;
-        rendered = renderInstance(body, scope, document, passThrough, context);
+        rendered = renderInstance(body, scope, document, passThrough, context, previous[0]);
       }
     } else if (node.flow?.kind === "with") {
       const aliased = evalConforming(node.flow.expr, scope, context.definition);
       if (aliased === NONCONFORMING) return;
       const local = scope.fork([[node.flow.alias, aliased]]);
       const { flow: _flow, ...body } = node;
-      rendered = renderInstance(body, local, document, passThrough, context);
+      rendered = renderInstance(body, local, document, passThrough, context, previous[0]);
     } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(node, scope, document, context);
+      rendered = renderMatch(node, scope, document, context, previous[0]);
     }
     childEffects = context.owned.effects.slice(effectsStart);
-    end.before(...materialize(rendered, document));
+    const output = materialize(rendered, document);
+    if (adopting) {
+      for (const stale of previous) if (!output.includes(stale)) stale.parentNode?.removeChild(stale);
+      adopting = false;
+    }
+    end.before(...output);
+    syncContainingSelect(end);
   });
-  return [fragment];
+  return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
 
 interface EachBlock {
@@ -1142,7 +1180,7 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
 }
 
 function renderEachRegion(
-  node: ElementNode,
+  node: ElementNode | SlotNode,
   scope: ReactiveScope,
   document: Document,
   passThrough: readonly RootAttribute[],
@@ -1187,10 +1225,9 @@ function renderEachRegion(
       if (block === undefined) {
         local ??= scope.fork(Object.entries(locals));
         const effectsStart = context.owned.effects.length;
-        const rendered = materialize(
-          renderInstance(body, local, document, passThrough, context),
-          document,
-        );
+        const rendered = materialize(node.kind === "slot"
+          ? renderSlot(body as SlotNode, local, document, context)
+          : renderInstance(body as ElementNode, local, document, passThrough, context), document);
         const blockStart = document.createComment("html-next:item-start");
         const blockEnd = document.createComment("html-next:item-end");
         end.before(blockStart, ...rendered, blockEnd);
@@ -1222,6 +1259,7 @@ function renderEachRegion(
       }
     }
     blocks = next;
+    syncContainingSelect(end);
   });
   return [fragment];
 }
@@ -1234,6 +1272,10 @@ function renderNode(
   context: RuntimeRenderContext,
   candidate?: Node,
 ): Node[] {
+  if (node.flow?.kind === "match" && node.name !== "template") {
+    if (context.committed && context.frameworkOwned && candidate !== undefined) return [candidate];
+    return renderInstance(elementMatchRoot(node), scope, document, passThrough, context, candidate);
+  }
   if (
     node.flow?.kind === "if" ||
     node.flow?.kind === "each" ||
@@ -1245,7 +1287,7 @@ function renderNode(
     // node; installing a second reactive branch would invalidate its next
     // update target and can move projected content into the wrong region.
     if (context.committed && context.frameworkOwned && candidate !== undefined) return [candidate];
-    return renderDynamicNode(node, scope, document, passThrough, context);
+    return renderDynamicNode(node, scope, document, passThrough, context, candidate);
   }
   // Only `$when`/`$else` arms remain; outside a `$match` their marker is ignored.
   return renderInstance(node, scope, document, passThrough, context, candidate);
@@ -1288,6 +1330,7 @@ function renderMatch(
   scope: ReactiveScope,
   document: Document,
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "match" }>;
   const matchScope =
@@ -1309,16 +1352,7 @@ function renderMatch(
 
   // Render the winning arm, ignoring its own $when/$else marker.
   const { flow: _armFlow, ...armNode } = chosen;
-  const rendered = renderInstance(armNode, matchScope, document, [], context);
-  if (node.name === "template") return rendered;
-
-  // $match on a real element wraps the winning arm in that element.
-  const wrapper = createTemplateElement(document, node.name, context);
-  for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") wrapper.setAttribute(attribute.name, attribute.value);
-  }
-  wrapper.append(...rendered);
-  return [wrapper];
+  return renderInstance(armNode, matchScope, document, [], context, candidate);
 }
 
 /** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */
@@ -1336,16 +1370,36 @@ function renderInstance(
 
   // A <template> is a fragment carrier: it contributes no wrapper element to the output.
   if (node.name === "template") {
+    const slot = node.attributes.find((attribute): attribute is LiteralAttribute =>
+      attribute.kind === "literal" && attribute.name === "slot");
+    if (slot !== undefined) {
+      // A consumer's slot template stays inert until the receiving outlet supplies its props.
+      const carrier = candidate instanceof HTMLTemplateElement && candidate.getAttribute("slot") === slot.value
+        ? candidate : document.createElement("template");
+      carrier.setAttribute("slot", slot.value);
+      projectedTemplates.set(carrier, { children: node.children, scope, context });
+      return [carrier];
+    }
     if (contentDirective !== undefined) {
-      const text = document.createTextNode("");
+      if (contentDirective.name === "value") {
+        const text = document.createTextNode("");
+        ownEffect(context, scope, () => {
+          const value = evalConforming(contentDirective.expression, scope, context.definition);
+          if (value !== NONCONFORMING) text.data = toText(value);
+        });
+        return [text];
+      }
+      const start = document.createComment("html-next:html-start");
+      const end = document.createComment("html-next:html-end");
+      const fragment = document.createDocumentFragment();
+      fragment.append(start, end);
       ownEffect(context, scope, () => {
         const value = evalConforming(contentDirective.expression, scope, context.definition);
         if (value === NONCONFORMING) return;
-        if (contentDirective.name === "value") text.data = toText(value);
+        clearRange(start, end);
+        end.before(sanitizeFragment(toText(value), document, (element) => contentOnly.add(element)));
       });
-      return contentDirective.name === "value"
-        ? [text]
-        : [inlineDirective(contentDirective, scope, document, context.definition)];
+      return [fragment];
     }
     return renderChildren(node.children, scope, document, context);
   }
@@ -1364,7 +1418,7 @@ function renderInstance(
     return [candidate];
   }
   if (
-    context.hydrationRanges !== undefined &&
+    context.committed &&
     !context.frameworkOwned &&
     candidate instanceof Element &&
     candidate.localName !== elementName &&
@@ -1377,14 +1431,22 @@ function renderInstance(
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
       : "";
+    const scopedTemplate = (child: TemplateNode): child is ElementNode => child.kind === "element" && child.name === "template" &&
+      child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot");
     const rendered = nested?.ranges.filter((range) => !range.fallback) ?? [];
     const walk = (children: readonly TemplateNode[], existing: readonly Node[]): void => {
       let cursor = 0;
       for (const child of children) cursor += renderTemplateNode(child, scope, document, context, existing[cursor]).length;
     };
-    for (const range of rendered) walk(node.children.filter((child) => slotOf(child) === range.slot), range.content);
+    for (const child of node.children) {
+      if (!scopedTemplate(child)) continue;
+      const carrier = nested?.carried.find((candidate): candidate is HTMLTemplateElement =>
+        candidate instanceof HTMLTemplateElement && candidate.getAttribute("slot") === slotOf(child));
+      if (carrier !== undefined) renderTemplateNode(child, scope, document, context, carrier);
+    }
+    for (const range of rendered) walk(node.children.filter((child) => !scopedTemplate(child) && slotOf(child) === range.slot), range.content);
     const renderedSlots = new Set(rendered.map((range) => range.slot));
-    walk(node.children.filter((child) => !renderedSlots.has(slotOf(child))), nested?.carried ?? []);
+    walk(node.children.filter((child) => !scopedTemplate(child) && !renderedSlots.has(slotOf(child))), nested?.carried ?? []);
     return [candidate];
   }
   const adopted = candidate instanceof Element && candidate.localName === elementName;
@@ -1410,6 +1472,24 @@ function renderInstance(
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+  }
+  // Serialized live control values use HTML's default-value attributes until hydration. Once
+  // adopted, the authored template regains ownership of reset defaults; the captured live value
+  // below is restored separately so pre-hydration edits survive.
+  if (adopted && context.committed && !context.frameworkOwned) {
+    if (element instanceof HTMLInputElement) {
+      if (!node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "value") &&
+          node.attributes.some((attribute) => attribute.kind !== "literal" && attribute.name === "value")) {
+        element.removeAttribute("value");
+      }
+      if (!node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "checked") &&
+          node.attributes.some((attribute) => attribute.kind !== "literal" && attribute.name === "checked")) {
+        element.removeAttribute("checked");
+      }
+    } else if (element instanceof HTMLOptionElement &&
+        !node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "selected")) {
+      element.removeAttribute("selected");
+    }
   }
   // The invocation's attributes win over the template's literals; class and style combine. Bound
   // attributes, applied next, are the component's own output.
@@ -1519,6 +1599,28 @@ function renderInstance(
   } else if (!adopted) {
     element.append(...renderedChildren);
   }
+  // A select's bound value cannot select options until its authored or projected children exist.
+  // The binding effect above handles later state changes; this repeats only its initial write.
+  // Hydrated controls restore their pre-existing value below, preserving user edits.
+  if (element instanceof HTMLSelectElement) {
+    const selectBindings = node.attributes.filter((attribute): attribute is AttributeBinding | PropertyBinding =>
+      (attribute.kind === "attribute" && attribute.twoWay === true && attribute.name === "value") ||
+      (attribute.kind === "property" && attribute.name === "value"));
+    if (selectBindings.length > 0) {
+      const applySelection = (): void => {
+        for (const attribute of selectBindings) {
+          const value = evalConforming(attribute.expression, scope, context.definition);
+          if (value === NONCONFORMING) continue;
+          if (attribute.kind === "property") element.value = value as string;
+          else applyBoundControlValue(element, "value", value);
+        }
+      };
+      applySelection();
+      selectValueBindings.set(element, applySelection);
+      // Projection is moved from the invocation only when its slot anchor is committed.
+      if (!context.committed) context.selectBindings.push(applySelection);
+    }
+  }
   if (controlState !== undefined) {
     (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
     if (element instanceof HTMLInputElement && "checked" in controlState) {
@@ -1564,6 +1666,39 @@ function renderSlot(
     ? node.name ?? ""
     : toText(evaluateCompiled(node.nameExpression, scope));
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
+  const renderScoped = (existing?: readonly Node[]): Node[] => {
+    const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
+    if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
+    const authored = projectedTemplates.get(carrier);
+    if (authored === undefined && projectedSlotParser === undefined) {
+      fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
+    }
+    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, node.props!.map((prop) => prop.name));
+    const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
+    const projectionContext = authored === undefined ? context : {
+      ...context,
+      definition: authored.context.definition,
+      refs: authored.context.refs,
+    };
+    for (const prop of node.props!) {
+      ownEffect(context, scope, () => {
+        const value = evalConforming(prop.expression, scope, context.definition);
+        if (value !== NONCONFORMING) projectedScope.set(prop.name, value);
+      });
+    }
+    const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
+      const adopted: Node[] = [];
+      let cursor = 0;
+      for (const child of content) {
+        const nodes = materialize(renderTemplateNode(child, projectedScope, document, projectionContext, existing[cursor]), document);
+        adopted.push(...nodes);
+        cursor += nodes.length;
+      }
+      return adopted;
+    })();
+    for (const child of rendered) markProjectedRoot(child);
+    return rendered;
+  };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
   // delimited, so server output can rebuild the same instance.
   const hydrating = context.hydrationRanges?.shift();
@@ -1577,6 +1712,10 @@ function renderSlot(
         adopted.push(...out);
         cursor += out.length;
       }
+      return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
+    }
+    if ((node.props?.length ?? 0) > 0) {
+      const adopted = renderScoped(hydrating.content);
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
     for (const candidate of hydrating.content) markProjectedRoot(candidate);
@@ -1596,6 +1735,9 @@ function renderSlot(
   };
   if (assigned.length === 0) {
     return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
+  }
+  if ((node.props?.length ?? 0) > 0) {
+    return ranged(renderScoped(), false);
   }
   if (context.committed) {
     for (const candidate of assigned) markProjectedRoot(candidate);
@@ -1713,11 +1855,85 @@ function serverRanges(root: Element, consume = true): { ranges: HydrationRange[]
  * the live DOM does not hold: each component root's projected nodes that no slot currently renders,
  * in an inert trailing <template>.
  */
+const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";
+
+interface SerializedFormDefaults {
+  readonly value?: string;
+  readonly valuePresent?: boolean;
+  readonly checked?: boolean;
+  readonly selected?: boolean;
+}
+
+function restoreSerializedFormDefaults(root: Element): void {
+  const controls = [root, ...Array.from(root.querySelectorAll(`[${FORM_DEFAULTS_ATTRIBUTE}]`))];
+  for (const element of controls) {
+    const serialized = element.getAttribute(FORM_DEFAULTS_ATTRIBUTE);
+    if (serialized === null) continue;
+    element.removeAttribute(FORM_DEFAULTS_ATTRIBUTE);
+    let defaults: SerializedFormDefaults;
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      defaults = parsed as SerializedFormDefaults;
+    }
+    catch { continue; }
+    if (element instanceof HTMLInputElement) {
+      const value = element.value;
+      const checked = element.checked;
+      if (typeof defaults.value === "string") {
+        element.defaultValue = defaults.value;
+        if (defaults.valuePresent === false) element.removeAttribute("value");
+      }
+      if (typeof defaults.checked === "boolean") element.defaultChecked = defaults.checked;
+      element.value = value;
+      element.checked = checked;
+    } else if (element instanceof HTMLTextAreaElement && typeof defaults.value === "string") {
+      const value = element.value;
+      element.defaultValue = defaults.value;
+      element.value = value;
+    } else if (element instanceof HTMLOptionElement && typeof defaults.selected === "boolean") {
+      const selected = element.selected;
+      element.defaultSelected = defaults.selected;
+      element.selected = selected;
+    }
+  }
+}
+
 export function serializeRenderedForm(container: Element): string {
   const clone = container.cloneNode(true) as Element;
   const originals = [container, ...Array.from(container.querySelectorAll("*"))];
   const copies = [clone, ...Array.from(clone.querySelectorAll("*"))];
   originals.forEach((original, index) => {
+    const copy = copies[index]!;
+    if (original instanceof HTMLInputElement && copy instanceof HTMLInputElement) {
+      const defaults: { value?: string; valuePresent?: boolean; checked?: boolean } = {};
+      if (original.type !== "file" && original.value !== original.defaultValue) {
+        defaults.value = original.defaultValue;
+        defaults.valuePresent = original.hasAttribute("value");
+        copy.setAttribute("value", original.value);
+      }
+      if (original.checked !== original.defaultChecked) {
+        defaults.checked = original.defaultChecked;
+        if (original.checked) copy.setAttribute("checked", "");
+        else copy.removeAttribute("checked");
+      }
+      if (Object.keys(defaults).length > 0) copy.setAttribute(FORM_DEFAULTS_ATTRIBUTE, JSON.stringify(defaults));
+    } else if (original instanceof HTMLTextAreaElement && copy instanceof HTMLTextAreaElement) {
+      if (original.value !== original.defaultValue) {
+        copy.textContent = original.value;
+        copy.setAttribute(FORM_DEFAULTS_ATTRIBUTE, JSON.stringify({ value: original.defaultValue }));
+      }
+    } else if (original instanceof HTMLSelectElement && copy instanceof HTMLSelectElement) {
+      for (let optionIndex = 0; optionIndex < original.options.length; optionIndex += 1) {
+        const option = original.options[optionIndex]!;
+        const copiedOption = copy.options[optionIndex]!;
+        if (option.selected !== option.defaultSelected) {
+          copiedOption.setAttribute(FORM_DEFAULTS_ATTRIBUTE, JSON.stringify({ selected: option.defaultSelected }));
+        }
+        if (option.selected) copiedOption.setAttribute("selected", "");
+        else copiedOption.removeAttribute("selected");
+      }
+    }
     const projection = runtimeInstance(original)?.projection;
     if (projection === undefined) return;
     const unrendered = projection.nodes.filter((node) => !original.contains(node));
@@ -1760,7 +1976,9 @@ function renderTemplateNode(
     text.data = node.value;
     return [text];
   }
-  if (node.kind === "slot") return renderSlot(node, scope, document, context);
+  if (node.kind === "slot") return node.flow === undefined
+    ? renderSlot(node, scope, document, context)
+    : renderEachRegion(node, scope, document, [], context);
   return renderNode(node, scope, document, [], context, candidate);
 }
 
@@ -1853,7 +2071,18 @@ function prepareRuntimeInvocation(
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
   const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration, parent);
-  const rootNode = componentRoot(definition, scope);
+  const rootNode = elementMatchRoot(componentRoot(definition, scope));
+  const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
+  const renderScope = rootWith === undefined ? scope : scope.fork();
+  const instanceEffects = [...effects];
+  if (rootWith !== undefined) {
+    let previous: Value = null;
+    instanceEffects.push(renderScope.defineComputed(rootWith.alias, () => {
+      const next = evalConforming(rootWith.expr, scope, definition);
+      if (next !== NONCONFORMING) previous = next;
+      return previous;
+    }));
+  }
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
   if (hydration && hydratedNodes === undefined) {
@@ -1886,9 +2115,7 @@ function prepareRuntimeInvocation(
     ...(parent === undefined ? {} : { parent }),
     scope,
     refs: {},
-    effects,
-    connectCallbacks: new Set(),
-    disconnectCallbacks: new Set(),
+    effects: instanceEffects,
     connected: false,
     explicit,
     frameworkOwned,
@@ -1906,14 +2133,18 @@ function prepareRuntimeInvocation(
     projectedNodes: children,
     projectedSlotNames,
     slotInsertions: [],
+    selectBindings: [],
     rootNode,
     frameworkOwned,
     committed: hydration,
     hydrationRanges,
   };
+  const renderRootNode: ElementNode = rootWith === undefined
+    ? rootNode
+    : (({ flow: _flow, ...body }) => body)(rootNode);
   const rendered = renderNode(
-    rootNode,
-    scope,
+    renderRootNode,
+    renderScope,
     invocation.ownerDocument,
     passThrough,
     context,
@@ -2106,6 +2337,8 @@ function commitRuntimeInvocations(
       for (const child of insertion.nodes) markProjectedRoot(child);
       insertion.anchor.replaceWith(...insertion.nodes);
     }
+    for (const applySelection of invocation.context.selectBindings) applySelection();
+    invocation.context.selectBindings.length = 0;
     const host = hostRootFor(invocation);
     invocation.host = host;
     if (invocation.replace) {
@@ -2204,20 +2437,7 @@ const componentInvokers = new WeakMap<ComponentDefinition, boolean>();
 function mayInvokeComponents(definition: ComponentDefinition): boolean {
   let known = componentInvokers.get(definition);
   if (known !== undefined) return known;
-  known = definition.root?.kind === "component";
-  const visit = (node: TemplateNode): void => {
-    if (known === true || node.kind === "text") return;
-    if (node.kind === "slot") {
-      for (const child of node.fallback ?? []) visit(child);
-      return;
-    }
-    if (node.name.includes("-")) {
-      known = true;
-      return;
-    }
-    for (const child of node.children) visit(child);
-  };
-  visit(definition.template);
+  known = definitionMayInvokeComponents(definition);
   componentInvokers.set(definition, known);
   return known;
 }
@@ -2300,6 +2520,7 @@ function lowerScopes(
       root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
       shouldLower?.(element, definition, hydration) === false
     ) return false;
+    if (hydration) restoreSerializedFormDefaults(element);
     const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
@@ -2690,7 +2911,6 @@ export interface ComponentHost {
    * runs before the next execution and when the component disconnects.
    */
   effect(run: () => void | (() => void)): () => void;
-  on(event: string, listener: EventListener): () => void;
   dispatch(event: string, detail?: unknown): boolean;
 }
 
@@ -2711,18 +2931,12 @@ function connectRuntimeInstance(instance: RuntimeInstance): void {
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
   for (const effect of instance.owned.effects) effect.resume();
-  for (const callback of instance.owned.connectCallbacks) callback();
-  for (const callback of instance.connectCallbacks) callback();
   // A delegated component shares this root and is not separately discoverable.
   for (const delegate of instance.delegates) connectRuntimeInstance(delegate);
-  instance.element?.dispatchEvent(new Event("connect"));
 }
 
 function disconnectRuntimeInstance(instance: RuntimeInstance): void {
   if (!instance.connected) return;
-  instance.element?.dispatchEvent(new Event("disconnect"));
-  for (const callback of instance.owned.disconnectCallbacks) callback();
-  for (const callback of instance.disconnectCallbacks) callback();
   instance.connected = false;
   for (const effect of instance.effects) effect.pause();
   for (const effect of instance.owned.effects) effect.pause();
@@ -2785,7 +2999,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     has: (_target, key) => typeof key === "string" && instance.refs[key] !== undefined,
   }) as Readonly<Record<string, Element | readonly Element[]>>;
   const host: ComponentHost = {
-    get root() { return instance.element!; },
+    get root() { return instance.rootElement.get()!; },
     state,
     refs,
     slots,
@@ -2804,26 +3018,6 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     effect(run) {
       const effect = createEffect(instance.scope.scheduler, run, 2, instance.connected);
       instance.effects.push(effect);
-      return () => effect.stop();
-    },
-    on(event, listener) {
-      if (event === "connect") {
-        const callback = listener as () => void;
-        instance.connectCallbacks.add(callback);
-        if (instance.connected) (listener as () => void)();
-        return () => instance.connectCallbacks.delete(callback);
-      }
-      if (event === "disconnect") {
-        const callback = listener as () => void;
-        instance.disconnectCallbacks.add(callback);
-        return () => instance.disconnectCallbacks.delete(callback);
-      }
-      // Listens on whichever element is the root, including one that replaces it.
-      const effect = createEffect(instance.scope.scheduler, () => {
-        const root = instance.rootElement.get();
-        root?.addEventListener(event, listener);
-        return () => root?.removeEventListener(event, listener);
-      });
       return () => effect.stop();
     },
     dispatch(event, detail) {

@@ -60,6 +60,187 @@ describe.skipIf(!enabled)("browser runtime", () => {
     });
   });
 
+  for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} ignores malformed serialized form-default records during hydration`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-form-record"><input value="authored"></template>
+          <input id="primitive" data-component="x-form-record" value="server" data-html-next-form-defaults="null">
+          <input id="syntax" data-component="x-form-record" value="server" data-html-next-form-defaults="not-json">`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+          return Array.from(document.querySelectorAll<HTMLInputElement>("#primitive, #syntax"), (control) => ({
+            value: control.value,
+            defaultValue: control.defaultValue,
+            marker: control.hasAttribute("data-html-next-form-defaults"),
+          }));
+        });
+        assert.deepEqual(result, [
+          { value: "server", defaultValue: "authored", marker: false },
+          { value: "server", defaultValue: "authored", marker: false },
+        ]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} repeats scoped projection with reactive slot props`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-list"><defs>
+          <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          </defs><section><button type="button" on:click="add">Add</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index">
+          <li class="fallback" $value="row.name"></li></slot></ul></section></template>
+          <x-scoped-list id="filled"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-list>
+          <x-scoped-list id="empty"></x-scoped-list>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        const read = () => page.evaluate(() => ({
+          filled: Array.from(document.querySelectorAll("#filled li"), (row) => row.textContent),
+          fallback: Array.from(document.querySelectorAll("#empty li"), (row) => row.textContent),
+        }));
+        assert.deepEqual(await read(), { filled: ["Ada0"], fallback: ["Ada"] });
+        await page.locator("#filled button").click();
+        await page.locator("#empty button").click();
+        await page.waitForFunction(() => document.querySelectorAll("#filled li").length === 2);
+        assert.deepEqual(await read(), { filled: ["Ada0", "Bea1"], fallback: ["Ada", "Bea"] });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} hydrates scoped projection in place and reconnects its row bindings`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-hydrate"><defs>
+          <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          <handler name="rename"><set name="rows[0].name" value="Ann"></set></handler>
+          </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index"></slot>
+          </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-hydrate></main>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const R = window.HtmlRuntime;
+          R.lowerDocument();
+          const source = document.querySelector('#source');
+          const server = document.createElement('main');
+          server.setHTMLUnsafe(R.serializeRenderedForm(source.parentElement));
+          const hydrated = server.querySelector('#source');
+          hydrated.id = 'hydrated';
+          const originalRow = hydrated.querySelector('li');
+          document.body.append(server);
+          R.lowerDocument();
+          const initial = { rootKept: document.querySelector('#hydrated') === hydrated,
+            rowKept: hydrated.querySelector('li') === originalRow,
+            source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+          source.querySelector('.rename').click();
+          hydrated.querySelector('.rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const renamed = { source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+          source.querySelector('.add').click();
+          hydrated.querySelector('.add').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          return { initial,
+            renamed,
+            source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+        })()`);
+        assert.deepEqual(result, {
+          initial: { rootKept: true, rowKept: true, source: ["Ada0"], hydrated: ["Ada0"] },
+          renamed: { source: ["Ann0"], hydrated: ["Ann0"] },
+          source: ["Ada0", "Bea1"], hydrated: ["Ada0", "Bea1"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} retains the consumer's lexical scope in a nested scoped slot`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-rows"><defs>
+          <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" :item="row"></slot></ul></section></template>
+          <template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
+          <handler name="rename"><set name="heading" :value="'Team'"></set></handler></defs>
+          <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
+          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          </x-scoped-rows></main></template><x-scoped-consumer id="parent"></x-scoped-consumer>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        const rows = () => page.locator("#parent li").allTextContents();
+        assert.deepEqual(await rows(), ["AdaPeople"]);
+        await page.locator("#parent .rename").click();
+        await page.waitForFunction(() => document.querySelector("#parent li")?.textContent === "AdaTeam");
+        await page.locator("#parent .add").click();
+        await page.waitForFunction(() => document.querySelectorAll("#parent li").length === 2);
+        assert.deepEqual(await rows(), ["AdaTeam", "BeaTeam"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} restores nested scoped-slot ownership after hydration`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-hydrated-rows"><defs>
+          <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="renameRow"><set name="rows[0].name" value="Ann"></set></handler>
+          </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" :item="row"></slot></ul></section></template>
+          <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
+          <handler name="rename"><set name="heading" value="Team"></set></handler></defs>
+          <main><button class="rename" type="button" on:click="rename">Rename</button><x-hydrated-rows>
+          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          </x-hydrated-rows></main></template><div><x-hydrated-consumer id="source"></x-hydrated-consumer></div>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const R = window.HtmlRuntime;
+          R.lowerDocument();
+          const source = document.querySelector('#source');
+          const server = document.createElement('div');
+          server.setHTMLUnsafe(R.serializeRenderedForm(source.parentElement));
+          const hydrated = server.querySelector('#source');
+          hydrated.id = 'hydrated';
+          const originalChild = hydrated.querySelector('section');
+          const originalRow = hydrated.querySelector('li');
+          document.body.append(server);
+          R.lowerDocument();
+          const read = () => [source.querySelector('li')?.textContent, hydrated.querySelector('li')?.textContent];
+          const initial = { rows: read(), childKept: hydrated.querySelector('section') === originalChild,
+            rowKept: hydrated.querySelector('li') === originalRow };
+          source.querySelector('.rename').click();
+          hydrated.querySelector('.rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const heading = read();
+          source.querySelector('.row-rename').click();
+          hydrated.querySelector('.row-rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          return { initial, heading, row: read() };
+        })()`);
+        assert.deepEqual(result, {
+          initial: { rows: ["AdaPeople", "AdaPeople"], childKept: true, rowKept: true },
+          heading: ["AdaTeam", "AdaTeam"], row: ["AnnTeam", "AnnTeam"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
   afterAll(async () => {
     if (temporaryDirectory !== "") {
       await rm(temporaryDirectory, { recursive: true, force: true });
@@ -740,8 +921,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = window.HtmlRuntime.getComponentHost(first);
           const privateState = first[Symbol.for("@nextwebwg/html-next.runtime.v1")] === undefined;
           const frozenHost = Object.isFrozen(host);
-          host.on("connect", () => events.push("connect"));
-          host.on("disconnect", () => events.push("disconnect"));
+          const nativeOnlyEvents = !("on" in host);
+          first.addEventListener("connect", () => events.push("connect"));
+          first.addEventListener("disconnect", () => events.push("disconnect"));
           first.remove();
           await tick();
           document.querySelector("main").append(first);
@@ -749,14 +931,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           stopDocument();
           stopFirst();
           stopSecond();
-          return { documentObservers, connected, events, privateState, frozenHost };
+          return { documentObservers, connected, events, privateState, frozenHost, nativeOnlyEvents };
         })()`);
         assert.deepEqual(result, {
           documentObservers: 1,
           connected: true,
-          events: ["connect", "disconnect", "connect", "disconnect"],
+          events: [],
           privateState: true,
           frozenHost: true,
+          nativeOnlyEvents: true,
         });
       } finally {
         await browser.close();
@@ -849,40 +1032,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} runs declarative lifecycle handlers again after reconnect`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent(
-          `<template component="x-life" status="early" summary="Lifecycle.">` +
-            `<defs><state name="count" :value="0"></state>` +
-            `<handler name="connected"><set name="count" :value="count + 1"></set></handler>` +
-            `<handler name="disconnected"><set name="count" :value="count + 10"></set></handler></defs>` +
-            `<section on:connect="connected" on:disconnect="disconnected"><output $value="count"></output></section>` +
-            `</template><x-life id="life"></x-life><aside></aside>`,
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(async () => {
-          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-          const stop = window.HtmlRuntime.observeDocument();
-          await tick();
-          const root = document.querySelector('#life');
-          const initial = root.textContent;
-          root.remove();
-          await tick();
-          document.querySelector('aside').append(root);
-          await tick();
-          await Promise.resolve();
-          const reconnected = root.textContent;
-          stop();
-          return { initial, reconnected };
-        })()`);
-        assert.deepEqual(result, { initial: "1", reconnected: "12" });
-      } finally {
-        await browser.close();
-      }
-    });
-
     it(`${name} retains duplicate rules and custom-element precedence after discovery`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -946,15 +1095,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
           document.body.append(content);
           await tick();
           const contentOnly = document.querySelector("#content-only");
-          document.body.append(contentOnly);
+          if (contentOnly !== null) document.body.append(contentOnly);
           await tick();
           stop();
           return { errors, executed: window.executed ?? false,
             definitions: document.querySelectorAll("template[component]").length,
-            contentName: contentOnly.localName };
+            contentName: contentOnly?.localName ?? null,
+            sanitizedContent: document.querySelector("article")?.innerHTML };
         })()`);
         assert.deepEqual(result, {
-          errors: ["HT009", "HL001"], executed: false, definitions: 0, contentName: "demo-safe",
+          errors: ["HT009", "HL001"], executed: false, definitions: 0,
+          contentName: null, sanitizedContent: "",
         });
       } finally {
         await browser.close();
@@ -1069,7 +1220,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<prop name="label" type="string" default="Note">Label.</prop></defs>` +
             `<article><h3 $value="label"></h3><div class="body" $html="body"></div></article>` +
             `</template>` +
-            `<x-note id="n" label="Hi" body="<b>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
+            `<x-note id="n" label="Hi" body="<b class='unsafe-class' id='unsafe-id' title='safe'>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3' target='_blank'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(() => {
@@ -1079,6 +1230,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return {
             heading: note.querySelector("h3").textContent,
             hasBold: body.querySelector("b") !== null,
+            markup: body.innerHTML,
             scriptCount: body.querySelectorAll("script").length,
             onerror: body.querySelector("img")?.hasAttribute("onerror") ?? null,
             dangerousHref: body.querySelector("a")?.hasAttribute("href") ?? null,
@@ -1089,12 +1241,42 @@ describe.skipIf(!enabled)("browser runtime", () => {
         assert.deepEqual(result, {
           heading: "Hi",
           hasBold: true,
+          markup: '<b title="safe">ok</b><a>bad</a>',
           scriptCount: 0,
-          onerror: false,
+          onerror: null,
           dangerousHref: false,
           iframeCount: 0,
           xflag: "unset",
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} updates inline template $html when state changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-inline-html" status="early" summary="Inline HTML.">` +
+            `<defs><state name="body" :value="'<b>One</b>'"></state>` +
+            `<handler name="update"><set name="body" :value="'<i>Two</i>'"></set></handler></defs>` +
+            `<p>Before <template $html="body"></template> after <button on:click="update">Update</button></p>` +
+            `</template><x-inline-html id="inline"></x-inline-html>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate<{ before: string; after: string }>(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#inline");
+          const before = root.innerHTML;
+          root.querySelector("button").click();
+          await Promise.resolve();
+          const after = root.innerHTML;
+          return { before, after };
+        })()`);
+        assert.match(result.before, /<b>One<\/b>/);
+        assert.doesNotMatch(result.after, /<b>One<\/b>/);
+        assert.match(result.after, /<i>Two<\/i>/);
       } finally {
         await browser.close();
       }
@@ -1229,7 +1411,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<button on:click="inc" $value="count"></button>` +
             `<output bind:value="count"></output>` +
             `<i $value="feed.pending"></i>` +
-            `<span on:connect="ready"></span>` +
+            `<span on:mouseover="ready"></span>` +
             `</div></template>` +
             `<x-counter id="c" start="5"></x-counter>`,
         );
@@ -1251,7 +1433,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             after: snapshot(),
             buttonHasOnClick: root.querySelector("button").hasAttribute("on:click"),
             pending: root.querySelector("i").textContent,
-            spanHasOnConnect: root.querySelector("span").hasAttribute("on:connect"),
+            spanHasOnMouseover: root.querySelector("span").hasAttribute("on:mouseover"),
           };
         })()`);
         assert.deepEqual(result, {
@@ -1259,7 +1441,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           after: { count: "6", doubled: "12", buttonText: "6", boundValue: "6" },
           buttonHasOnClick: false, // on: consumed, never emitted
           pending: "true", // data seeded in its pending shape
-          spanHasOnConnect: false, // lifecycle consumed
+          spanHasOnMouseover: false, // event binding consumed
         });
       } finally {
         await browser.close();
@@ -1279,17 +1461,18 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector('#controller-reactivity');
-          const { computed, dispatch, effect, on, signal } = window.HtmlRuntime.getComponentHost(root);
+          const { computed, dispatch, effect, signal } = window.HtmlRuntime.getComponentHost(root);
           const source = signal(0);
           let computedRuns = 0;
           let effectRuns = 0;
           let observed = '';
           let eventTotal = 0;
-          const stopListening = on('controller-value', (event) => {
+          const onControllerValue = (event) => {
             eventTotal += event.detail.value;
-          });
+          };
+          root.addEventListener('controller-value', onControllerValue);
           const dispatched = dispatch('controller-value', { value: 2 });
-          stopListening();
+          root.removeEventListener('controller-value', onControllerValue);
           dispatch('controller-value', { value: 10 });
           let parentSawLocal = false;
           document.querySelector('#controller-parent').addEventListener('local-change', () => { parentSawLocal = true; });
@@ -1728,8 +1911,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // ...while the sibling reference, and the request itself, carried on.
           note: "second",
           ok: "true",
-          // A computed that reads the offending reference does not recompute either.
-          shouted: "first!",
+          // format() explicitly stringifies its argument, so the numeric value is usable here.
+          shouted: "42!",
         });
       } finally {
         await browser.close();
@@ -1986,6 +2169,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} keeps a real-element root \`$match\` wrapper while switching its child`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-root-choice" status="early" summary="Root choice."><defs>
+          <state name="kind" value="a"></state>
+          <handler name="toggle"><set name="kind" :value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
+          <section $match="kind as choice" class="choice" :data-kind="kind" on:click="toggle">
+            <p $when="choice = 'a'">First</p><p $else>Second</p>
+          </section></template><main><x-root-choice id="case"></x-root-choice></main>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#case');
+          const before = [root.localName, root.getAttribute('data-kind'), root.querySelector('p')?.textContent];
+          const server = document.createElement('main');
+          server.setHTMLUnsafe(window.HtmlRuntime.serializeRenderedForm(root.parentElement));
+          document.body.append(server);
+          const adoptedRoot = server.querySelector('#case');
+          const adoptedChild = adoptedRoot.querySelector('p');
+          window.HtmlRuntime.lowerDocument();
+          const hydration = { rootKept: server.querySelector('#case') === adoptedRoot,
+            childKept: adoptedRoot.querySelector('p') === adoptedChild,
+            child: adoptedRoot.querySelector('p')?.textContent };
+          root.click();
+          adoptedRoot.click();
+          await new Promise((resolve) => setTimeout(resolve));
+          const after = [root.localName, root.getAttribute('data-kind'), root.querySelector('p')?.textContent];
+          return { before, after, kept: document.querySelector('#case') === root,
+            host: window.HtmlRuntime.getComponentHost(root)?.root === root, hydration,
+            hydratedAfter: adoptedRoot.querySelector('p')?.textContent };
+        })()`);
+        assert.deepEqual(result, {
+          before: ["section", "a", "First"], after: ["section", "b", "Second"], kept: true, host: true,
+          hydration: { rootKept: true, childKept: true, child: "First" }, hydratedAfter: "Second",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} replaces a root \`$match\` arm's element when its props choose another`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -2025,6 +2249,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
             host: runtime.getComponentHost(element)?.root === element,
           });
           const button = document.querySelector('#action');
+          const stopObservation = runtime.observeDocument();
+          const host = runtime.getComponentHost(button);
+          let nativeClicks = 0;
+          const stopListening = host.effect(() => {
+            const root = host.root;
+            const onClick = () => { nativeClicks += 1; };
+            root.addEventListener('click', onClick);
+            return () => root.removeEventListener('click', onClick);
+          });
+          await settle();
           button.click();
           await settle();
           const before = describe(button);
@@ -2036,7 +2270,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-as') };
           runtime.updateComponentProps(link, { as: undefined });
           await settle();
-          return { before, linked, back: describe(document.querySelector('#action')) };
+          const back = document.querySelector('#action');
+          back.click();
+          await settle();
+          const final = describe(back);
+          stopListening();
+          stopObservation();
+          return { before, linked, back: final, nativeClicks };
         })()`);
 
         const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
@@ -2044,7 +2284,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
           linked: { ...common, tag: "a", href: "#next", type: null, title: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
-          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "2", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          nativeClicks: 3,
         });
         assert.deepEqual(pageErrors, []);
       } finally {
@@ -2149,9 +2390,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-owned" status="early" summary="Ownership.">` +
             `<defs><state name="linked" :value="false"></state><state name="show" :value="true"></state>` +
-            `<state name="n" :value="0"></state><state name="hits" :value="0"></state>` +
-            `<handler name="hit"><set name="hits" :value="hits + 1"></set></handler></defs>` +
-            `<template $match><a $when="linked" href="#x" on:connect="hit">${arm}</a><div $else on:connect="hit">${arm}</div></template>` +
+            `<state name="n" :value="0"></state></defs>` +
+            `<template $match><a $when="linked" href="#x">${arm}</a><div $else>${arm}</div></template>` +
           `</template>` +
           `<main><x-owned id="owned"></x-owned></main>`,
         );
@@ -2175,16 +2415,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const values = [old.textContent, root().querySelector('i').textContent];
           state.linked = false;
           await settle();
-          const connected = state.hits;
-          const current = root();
-          current.remove();
-          await settle();
-          document.querySelector('main').append(current);
-          await settle();
-          return { values, connected, reconnected: state.hits };
+          return { values, root: root().localName };
         })()`);
-        // The detached <i> stops updating, and only the current arm's on:connect runs on reconnect.
-        assert.deepEqual(result, { values: ["0", "42"], connected: 1, reconnected: 2 });
+        // The detached <i> stops updating while the newly selected arm takes ownership.
+        assert.deepEqual(result, { values: ["0", "42"], root: "div" });
       } finally {
         await browser.close();
       }

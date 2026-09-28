@@ -9,7 +9,7 @@ import {
   type ComponentResourceResolver,
   type ResolvedResource,
 } from "./resolve.js";
-import { fail } from "./diagnostics.js";
+import { fail, HtmlDiagnosticError } from "./diagnostics.js";
 
 export interface InspectedModule {
   readonly url: string;
@@ -62,17 +62,31 @@ class NodeResourceResolver implements ComponentResourceResolver {
     private readonly resolvePackage: (specifier: string, parentURL: string) => ResolvedResource,
   ) {}
 
+  private resolveBare(specifier: string, parentURL: string): ResolvedResource {
+    try {
+      return this.resolvePackage(specifier, parentURL);
+    } catch (error) {
+      if (error instanceof HtmlDiagnosticError) throw error;
+      const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code === "ERR_MODULE_NOT_FOUND" || code === "ERR_PACKAGE_PATH_NOT_EXPORTED" ||
+        code === "ERR_PACKAGE_IMPORT_NOT_DEFINED" || code === "ERR_INVALID_PACKAGE_TARGET") {
+        fail("HL002", `Bare resource specifier \`${specifier}\` cannot be resolved by the consuming project: ${error instanceof Error ? error.message : String(error)}.`, parentURL);
+      }
+      throw error;
+    }
+  }
+
   resolveRoot(specifier: string): ResolvedResource {
     if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier)) {
       const url = new URL(specifier, this.baseURL).href;
       return { url, trustRoot: packageRoot(url) };
     }
-    return this.resolvePackage(specifier, this.baseURL);
+    return this.resolveBare(specifier, this.baseURL);
   }
 
   resolveDependency(specifier: string, parentURL: string, parentTrustRoot: string): ResolvedResource {
     if (!/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier)) {
-      return this.resolvePackage(specifier, parentURL);
+      return this.resolveBare(specifier, parentURL);
     }
     const url = new URL(specifier, parentURL).href;
     if (!isWithinTrustRoot(url, parentTrustRoot)) {

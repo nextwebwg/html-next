@@ -3,7 +3,7 @@ import { dirname, posix, relative, resolve, sep } from "node:path";
 
 import ts from "typescript-compiler";
 
-import { generateComponent, GENERATOR_VERSION, importsVueHost, vueHostArtifact } from "./generate.js";
+import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueHtml, importsVueControl, importsVueProps, vueHostArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { parseComponentResource } from "./source-graph.js";
@@ -189,6 +189,21 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const host = vueHostArtifact();
     if (files.has(host.path)) throw new Error(`Package artifact collision at ${host.path}.`);
     files.set(host.path, host.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueHtml(content))) {
+    const html = vueHtmlArtifact();
+    if (files.has(html.path)) throw new Error(`Package artifact collision at ${html.path}.`);
+    files.set(html.path, html.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueControl(content))) {
+    const control = vueControlArtifact();
+    if (files.has(control.path)) throw new Error(`Package artifact collision at ${control.path}.`);
+    files.set(control.path, control.content);
+  }
+  if ([...files.values()].some((content) => typeof content === "string" && importsVueProps(content))) {
+    const props = vuePropsArtifact();
+    if (files.has(props.path)) throw new Error(`Package artifact collision at ${props.path}.`);
+    files.set(props.path, props.content);
   }
   for (const [target, content] of Object.entries(targetIndexes(definitions))) {
     if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);

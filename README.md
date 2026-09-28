@@ -162,7 +162,7 @@ definitions it loads:
 | Component parsing | The browser's HTML parser creates the inert DOM; the library reads declarations, validates the proposal grammar, and reports component diagnostics. |
 | Reactive declarations | Native events and microtasks drive a small dependency layer for live state, computed values, bindings, and effects. |
 | Declared types | Component-authored prop and event types are parsed and enforced at their public boundaries; external data may use an application adapter. |
-| Dynamic `$html` | A 696-byte minified DOM sanitizer preserves the proposal's cross-browser content policy. It is retained until native `setHTML()` is available in every target engine with equivalent policy control. |
+| Dynamic `$html` | The HTML fragment parser plus the Sanitizer API's safe-default allowlist produces deterministic output across browsers and SSR. Native `setHTML()` is deliberately not used: Firefox currently parses malformed table content differently, which would break hydration parity. |
 | Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, and projected content. |
 | Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
 | Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |

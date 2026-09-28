@@ -1,6 +1,5 @@
-import { parseFragment, type ParserError } from "parse5";
+import { parseFragment } from "parse5";
 
-import { fail } from "./diagnostics.js";
 import { parseComponentNodes } from "./parser.js";
 import { getDomInterface, resolveDomProperty } from "./platform.js";
 import type { ComponentDefinition } from "./template.js";
@@ -29,14 +28,9 @@ export function parseComponent(
   sourceText: string,
   source = "<source>",
 ): ComponentDefinition {
-  const parserErrors: ParserError[] = [];
   const fragment = parseFragment(sourceText.replace(SELECT_TAG, `<$1${SELECT_PLACEHOLDER}`), {
     sourceCodeLocationInfo: true,
-    onParseError: (error) => parserErrors.push(error),
   });
-  if (parserErrors.length > 0) {
-    fail("HS005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
-  }
   restoreSelect(fragment as unknown as ParsedNode);
   return parseComponentNodes(fragment.childNodes, source, {
     isNativeElement: (name) => getDomInterface(name) !== undefined,

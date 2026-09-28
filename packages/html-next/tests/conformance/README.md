@@ -19,7 +19,7 @@ runtime (`src/runtime.ts`, entry point `lowerDocument(root = document)`).
 ## Coverage
 
 Components/props/slots, `:attr` and `bind:` bindings and attribute serialization, consumed inert
-`on:`/`on:connect`/`on:disconnect`, `$value`/`$html` output (including `$html` sanitization),
+`on:` bindings, `$value`/`$html` output (including `$html` sanitization),
 value semantics (typed equality, numeric-only arithmetic, boolean `and`/`or`, truthiness, absent
 fault tolerance), control flow (`$if`, `$each` with `$where`/`$sort`/`$limit`/`loop`,
 `$match`/`$when`/`$else`, `$with`, structural `<template>`), live reactive declarations

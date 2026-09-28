@@ -8,7 +8,7 @@
 /** Declared public methods are module exports, so each instance registers its operations here. */
 const instances = new WeakMap();
 
-export default function controller({ effect, root, on, refs, state }) {
+export default function controller({ effect, root, refs, state }) {
   let pantry = [];
 
   const search = () => String(state.query ?? "").trim().toLowerCase();
@@ -43,23 +43,26 @@ export default function controller({ effect, root, on, refs, state }) {
     publish();
   };
 
-  on("adjust", (event) => {
+  const adjust = (event) => {
     const { id, delta } = event.detail;
     apply((row) => (row.id === id ? [{ ...row, quantity: Math.max(0, row.quantity + delta) }] : [row]));
-  });
+  };
+  root.addEventListener("adjust", adjust);
 
-  on("remove", (event) => {
+  const remove = (event) => {
     apply((row) => (row.id === event.detail ? [] : [row]));
-  });
+  };
+  root.addEventListener("remove", remove);
 
   // A catalog hit carries what the endpoint returned; stock and threshold are local decisions.
-  on("add", (event) => {
+  const add = (event) => {
     const { id, label, unit } = event.detail;
     if (pantry.some((row) => row.id === id)) return;
     pantry = [...pantry, { id, label, quantity: 1, unit, threshold: 1 }];
     publish();
     state.catalogQuery = "";
-  });
+  };
+  root.addEventListener("add", add);
 
   // The add form is a native <form>: required, minlength, and min/max are the browser's job.
   const form = refs.addForm;
@@ -88,6 +91,9 @@ export default function controller({ effect, root, on, refs, state }) {
 
   return () => {
     instances.delete(root);
+    root.removeEventListener("adjust", adjust);
+    root.removeEventListener("remove", remove);
+    root.removeEventListener("add", add);
     form.removeEventListener("submit", submit);
   };
 }

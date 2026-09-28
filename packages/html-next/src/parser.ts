@@ -37,6 +37,33 @@ export interface ComponentParserPlatform {
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
 }
 
+/** Parse the inert contents of a consumer's scoped-slot template against its exposed names. */
+export function parseProjectedSlotContent(
+  template: Element,
+  definition: ComponentDefinition,
+  names: readonly string[],
+  source: string,
+  platform: ComponentParserPlatform,
+): readonly TemplateNode[] {
+  const scope: ParseScope = {
+    roots: new Set(names),
+    writableRoots: new Set(),
+    handlers: new Set(),
+  };
+  const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[], refs: new Set<string>() };
+  const nodes: TemplateNode[] = [];
+  for (const child of sourceChildren(template)) {
+    if (child.nodeName === "#comment") continue;
+    if (isText(child)) {
+      const value = sourceText(child);
+      if (value.trim() !== "") nodes.push({ kind: "text", value });
+    } else if (isElement(child)) {
+      nodes.push(parseElement(child, definition.contract, scope, source, slotState, platform));
+    }
+  }
+  return nodes;
+}
+
 function isElement(node: ChildNode): node is Element {
   return "tagName" in node;
 }
@@ -127,6 +154,7 @@ interface ParseScope {
   readonly roots: ReadonlySet<string>;
   readonly writableRoots: ReadonlySet<string>;
   readonly handlers: ReadonlySet<string>;
+  readonly allowUndeclared?: boolean;
 }
 
 function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseScope {
@@ -138,6 +166,7 @@ function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseSc
     roots: expanded,
     writableRoots: scope.writableRoots,
     handlers: scope.handlers,
+    ...(scope.allowUndeclared === undefined ? {} : { allowUndeclared: scope.allowUndeclared }),
   };
 }
 
@@ -158,7 +187,7 @@ function validateCompiledExpression(
 ): void {
   for (const dependency of expression.dependencies) {
     const root = dependency.split(".", 1)[0]!;
-    if (!scope.roots.has(root)) {
+    if (!scope.roots.has(root) && scope.allowUndeclared !== true) {
       fail("HT003", `Expression root \`${root}\` is not declared in this scope.`, source);
     }
   }
@@ -708,6 +737,9 @@ function parseEvents(
     if (!EVENT_PART_RE.test(name) || modifiers.some((modifier) => !EVENT_PART_RE.test(modifier))) {
       fail("HT010", `\`${attribute.name}\` is not a valid declarative event binding.`, source);
     }
+    if (name === "connect" || name === "disconnect") {
+      fail("HT010", `\`${attribute.name}\` is not supported as a declarative lifecycle binding; use a controller for imperative lifecycle work.`, source);
+    }
     for (let index = 0; index < modifiers.length; index += 1) {
       const modifier = modifiers[index]!;
       if (modifiers.indexOf(modifier) !== index) {
@@ -886,6 +918,11 @@ function parseElement(
       : flow?.kind === "with" || (flow?.kind === "match" && flow.alias !== undefined)
         ? withRoots(scope, flow.alias)
         : scope;
+  // The receiving component declares these names, so a standalone consumer definition cannot
+  // validate them yet. Keep the expression plans; the graph/runtime can bind the slot props later.
+  const childScope = tagName === "template" && attr(element, "slot") !== undefined
+    ? { ...nodeScope, allowUndeclared: true }
+    : nodeScope;
   const attributes = parseAttributes(bindingAttributes, tagName, contract, nodeScope, source, platform);
   const events = parseEvents(eventAttributes, nodeScope, source);
   const ref = parseRef(refName, slotState.refs, source);
@@ -912,11 +949,31 @@ function parseElement(
       if (name !== undefined && nameExpression !== undefined) {
         fail("HT008", "A slot cannot declare both `name` and `:name`.", source);
       }
+      const flowValues: Record<string, string> = {};
+      const rawProps: Array<{ name: string; expression: string }> = [];
       for (const attribute of sourceAttributes(child)) {
-        if (attribute.name !== "name" && attribute.name !== ":name") {
+        if (FLOW_NAME_RE.test(attribute.name)) {
+          flowValues[attribute.name] = attribute.value;
+        } else if (attribute.name.startsWith(":") && attribute.name !== ":name") {
+          const prop = attribute.name.slice(1);
+          if (!/^[A-Za-z_$][\w$]*$/.test(prop)) {
+            fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
+          }
+          rawProps.push({ name: prop, expression: attribute.value });
+        } else if (attribute.name !== "name" && attribute.name !== ":name") {
           fail("HT008", "A slot has an unsupported attribute.", source);
         }
       }
+      const parsedFlow = extractFlow(flowValues, childScope, source);
+      if (parsedFlow !== undefined && parsedFlow.kind !== "each") {
+        fail("HT008", "A slot only supports `$each` structural flow.", source);
+      }
+      const flow = parsedFlow?.kind === "each" ? parsedFlow : undefined;
+      const slotScope = flow === undefined ? childScope : withRoots(childScope, flow.item, flow.index, "loop");
+      const props = rawProps.map((prop) => ({
+        ...prop,
+        expressionPlan: compileScopedExpression(prop.expression, slotScope, source),
+      }));
       if (name === undefined && nameExpression === undefined) {
         slotState.defaults += 1;
         if (slotState.defaults > 1) fail("HT008", "A component may declare one default slot.", source);
@@ -934,28 +991,39 @@ function parseElement(
           const value = sourceText(fallbackNode);
           if (value.trim() !== "") fallback.push({ kind: "text", value });
         } else if (isElement(fallbackNode)) {
-          fallback.push(parseElement(fallbackNode, contract, nodeScope, source, slotState, platform));
+          fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
         }
       }
       const dynamic = nameExpression !== undefined;
-      const slotContract: { name?: string; dynamic: boolean; required: boolean } = {
+      const slotContract: { name?: string; dynamic: boolean; required: boolean; props?: readonly string[] } = {
         dynamic,
         required: fallback.length === 0,
       };
       if (name !== undefined) slotContract.name = name;
+      if (props.length > 0) slotContract.props = props.map((prop) => prop.name);
       // Root arms repeat their slots; the contract lists each once, required if any arm requires it.
       const existing = dynamic
         ? -1
         : slotState.contracts.findIndex((contract) => !contract.dynamic && contract.name === name);
       if (existing === -1) slotState.contracts.push(slotContract);
-      else if (slotContract.required) slotState.contracts[existing] = { ...slotState.contracts[existing]!, required: true };
-      if (name === undefined && nameExpression === undefined && fallback.length === 0) {
+      else {
+        const previous = slotState.contracts[existing]!;
+        const names = [...new Set([...(previous.props ?? []), ...(slotContract.props ?? [])])];
+        slotState.contracts[existing] = {
+          ...previous,
+          required: previous.required || slotContract.required,
+          ...(names.length === 0 ? {} : { props: names }),
+        };
+      }
+      if (name === undefined && nameExpression === undefined && fallback.length === 0 && flow === undefined && props.length === 0) {
         children.push({ kind: "slot" });
       } else {
         const slot: {
           kind: "slot";
           name?: string;
           nameExpression?: CompiledExpression;
+          flow?: Extract<Flow, { kind: "each" }>;
+          props?: readonly { name: string; expression: string; expressionPlan: CompiledExpression }[];
           fallback: TemplateNode[];
         } = {
           kind: "slot",
@@ -963,14 +1031,16 @@ function parseElement(
         };
         if (name !== undefined) slot.name = name;
         if (nameExpression !== undefined) {
-          slot.nameExpression = compileScopedExpression(nameExpression, nodeScope, source);
+          slot.nameExpression = compileScopedExpression(nameExpression, slotScope, source);
         }
+        if (flow !== undefined) slot.flow = flow;
+        if (props.length > 0) slot.props = props;
         children.push(slot);
       }
       continue;
     }
     if (shared === undefined) {
-      children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
+      children.push(parseElement(child, contract, childScope, source, slotState, platform));
       continue;
     }
     slotState.defaults = shared.defaults;
@@ -979,7 +1049,7 @@ function parseElement(
     for (const name of shared.names) slotState.names.add(name);
     for (const ref of shared.refs) slotState.refs.add(ref);
     const before = slotState.contracts.length;
-    children.push(parseElement(child, contract, nodeScope, source, slotState, platform));
+    children.push(parseElement(child, contract, childScope, source, slotState, platform));
     const armDynamic = slotState.contracts.slice(before).filter((slot) => slot.dynamic);
     slotState.contracts.splice(0, slotState.contracts.length, ...slotState.contracts.filter((slot) => !armDynamic.includes(slot)));
     for (const [index, slot] of armDynamic.entries()) {
@@ -1096,6 +1166,10 @@ export function parseComponentNodes(
   if (root === undefined) {
     fail("HT001", "A component's markup must be exactly one element root.", source);
   }
+  const rootTag = sourceTag(root);
+  if ((rootTag === "template" && attr(root, "$match") === undefined) || rootTag === "slot") {
+    fail("HT021", "A component root must always select exactly one native or delegated element.", source);
+  }
   if (attr(root, "as") !== undefined) {
     fail("HT021", "`as` does not retag a root; declare an `as` prop and choose native roots with `$match`.", source);
   }
@@ -1140,6 +1214,9 @@ export function parseComponentNodes(
     refs: new Set<string>(),
   };
   const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined);
+  if (template.flow !== undefined && template.flow.kind !== "with" && template.flow.kind !== "match") {
+    fail("HT021", "A component root must always select exactly one native or delegated element.", source);
+  }
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);
 

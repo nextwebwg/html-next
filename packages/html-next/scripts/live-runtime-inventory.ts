@@ -32,6 +32,7 @@ export const liveRuntimeSubsystemModules = {
   styleAndContentPolicy: [
     "packages/html-next/src/component-styles.ts",
     "packages/html-next/src/sanitize.ts",
+    "packages/html-next/src/sanitizer-default.ts",
   ],
   componentResources: [
     "packages/html-next/src/graph.ts",
