@@ -44,3 +44,37 @@ export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Bu
 
   assert.equal(difference.changed, 0, `${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; first=${JSON.stringify(difference.first)}`);
 }
+
+/** Record whether a mismatch survives another paint and whether page input state differs. */
+export async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page, actual: Buffer, expected: Buffer, selector: string): Promise<unknown> {
+  const state = async (page: Page) => page.evaluate((rootSelector) => {
+    const root = document.querySelector(rootSelector)!;
+    const button = root.querySelector("button");
+    const style = button === null ? null : getComputedStyle(button);
+    return {
+      activeElement: document.activeElement?.localName,
+      documentFocused: document.hasFocus(),
+      hovered: Array.from(document.querySelectorAll(":hover"), (element) => element.localName),
+      active: Array.from(document.querySelectorAll(":active"), (element) => element.localName),
+      focusVisible: Array.from(document.querySelectorAll(":focus-visible"), (element) => element.localName),
+      buttonBackground: style?.backgroundColor,
+      buttonBorder: style?.borderColor,
+    };
+  }, selector);
+  const [actualState, expectedState] = await Promise.all([state(actualPage), state(expectedPage)]);
+  const recapture = async (page: Page) => {
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    return page.locator(selector).screenshot({ animations: "disabled" });
+  };
+  const [nextActual, nextExpected] = await Promise.all([recapture(actualPage), recapture(expectedPage)]);
+  const difference = async (page: Page, left: Buffer, right: Buffer) => {
+    try { await assertPixelsEqual(page, left, right, "recapture"); return "equal"; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+  };
+  return {
+    actualState, expectedState,
+    actualChanged: await difference(actualPage, nextActual, actual),
+    expectedChanged: await difference(expectedPage, nextExpected, expected),
+    recapturedParity: await difference(actualPage, nextActual, nextExpected),
+  };
+}

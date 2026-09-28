@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, diagnosePixelMismatch } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -235,7 +235,12 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
           assert.deepEqual(eventVue.behavior, eventLive.behavior);
           await assertPixelsEqual(vue, eventVue.pixels, eventLive.pixels, "graph event pixels differ");
           assert.deepEqual(eventHydrated.behavior, eventLive.behavior);
-          await assertPixelsEqual(hydrated, eventHydrated.pixels, eventLive.pixels, "hydrated graph event pixels differ");
+          try {
+            await assertPixelsEqual(hydrated, eventHydrated.pixels, eventLive.pixels, "hydrated graph event pixels differ");
+          } catch (error) {
+            const diagnostics = await diagnosePixelMismatch(hydrated, live, eventHydrated.pixels, eventLive.pixels, "#case");
+            throw new Error(`${String(error)}; diagnostics=${JSON.stringify(diagnostics)}`, { cause: error });
+          }
           assert.equal(eventLive.behavior.savedHits, "1:0");
           assert.equal(eventLive.behavior.rightHits, "0");
           assert.equal(eventLive.behavior.documentSaved, 0);
