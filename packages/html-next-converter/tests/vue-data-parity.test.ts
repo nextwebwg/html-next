@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } 
 
 import { convertComponents } from "../src/index.js";
 
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -195,7 +195,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
       it(`${engine} ${mode} begins declared reads on hydration, not SSR`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         const [live, hydrated] = await Promise.all([browser.newPage(), browser.newPage()]);
         const requested = { live: [] as string[], hydrated: [] as string[] };
         const errors: string[] = [];
@@ -242,7 +242,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
       });
 
       it(`${engine} ${mode} keeps failures, polling, cancellation, and disposal after hydration`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         const [live, hydrated] = await Promise.all([browser.newPage(), browser.newPage()]);
         const pages = [live, hydrated];
         const requested = { live: [] as string[], hydrated: [] as string[] };
@@ -338,7 +338,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
     }
 
     it(`${engine} matches polling, failed reads, stale retention, cancellation, and disposal`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
       const requests = { live: [] as string[], vue: [] as string[] };
       const canceled = { live: 0, vue: 0 };
@@ -444,7 +444,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
     });
 
     it(`${engine} preserves component-relative and root-relative requests`, async () => {
-      const browser: Browser = await browserType.launch({ headless: true });
+      const browser: Browser = await launchParityBrowser(browserType);
       const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
       const requested = { live: [] as string[], vue: [] as string[] };
       const errors: string[] = [];

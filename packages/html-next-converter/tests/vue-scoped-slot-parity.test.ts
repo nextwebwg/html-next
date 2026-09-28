@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -140,7 +140,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XScope
   for (const mode of ["application", "library"] as const) {
     for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
       it(`${engine} ${mode} keeps lexical state and shadowed slot props`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
         const errors: string[] = [];
         try {
@@ -164,7 +164,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XScope
       });
 
       it(`${engine} ${mode} hydrates public scoped slots with reactive ownership intact`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         const [serverPage, live, vue] = await Promise.all([browser.newPage(), browser.newPage(), browser.newPage()]);
         const errors: string[] = [];
         try {

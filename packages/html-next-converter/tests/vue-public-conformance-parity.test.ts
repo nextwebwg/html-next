@@ -12,7 +12,7 @@ import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } 
 
 import { cases } from "../../html-next/tests/conformance/cases.js";
 import { convertComponents, type ConversionGraph } from "../src/index.js";
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -167,7 +167,7 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
     for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
       describe(`${engine} ${mode}`, () => {
         let browser: Browser;
-        beforeAll(async () => { browser = await browserType.launch({ headless: true }); });
+        beforeAll(async () => { browser = await launchParityBrowser(browserType); });
         afterAll(async () => { await browser?.close(); });
 
         for (const [index, testCase] of successful.entries()) {

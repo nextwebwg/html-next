@@ -13,7 +13,7 @@ import { generateVueComponent, vueHostArtifact, vueHtmlArtifact, vueControlArtif
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 import { cases as conformanceCases } from "./conformance/cases.js";
-import { assertPixelsEqual } from "./pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "./pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
@@ -705,7 +705,7 @@ async function observe(page: Page, testCase: ParityCase): Promise<{ behavior: un
 
 for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
   it.skipIf(!enabled)(`${engine} compares decoded screenshot pixels across PNG encodings`, async () => {
-    const browser = await browserType.launch({ headless: true });
+    const browser = await launchParityBrowser(browserType);
     const page = await browser.newPage();
     try {
       await page.setContent('<div id="case" style="width:10px;height:10px;background:rgb(20 30 40)"></div>');
@@ -880,7 +880,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
   for (const [engineName, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     describe(engineName, () => {
       let browser: Browser;
-      beforeAll(async () => { browser = await browserType.launch({ headless: true }); });
+      beforeAll(async () => { browser = await launchParityBrowser(browserType); });
       afterAll(async () => { await browser?.close(); });
 
       it("hydrates sanitized $html without replacing server nodes", async () => {
@@ -1041,7 +1041,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
     for (const [engineName, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
       describe(engineName, () => {
         let browser: Browser;
-        beforeAll(async () => { browser = await browserType.launch({ headless: true }); });
+        beforeAll(async () => { browser = await launchParityBrowser(browserType); });
         afterAll(async () => { await browser?.close(); });
 
         for (const testCase of conformanceCases) {

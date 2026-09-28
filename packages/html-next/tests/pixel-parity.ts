@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import type { Page } from "playwright";
+import type { Browser, BrowserType, Page } from "playwright";
+
+/** Use one text raster path for both pages in Chromium's cross-page pixel comparisons. */
+export function launchParityBrowser(browserType: BrowserType): Promise<Browser> {
+  return browserType.launch({ headless: true, ...(browserType.name() === "chromium" ? { args: ["--disable-lcd-text"] } : {}) });
+}
 
 interface PixelDifference {
   readonly size: string;

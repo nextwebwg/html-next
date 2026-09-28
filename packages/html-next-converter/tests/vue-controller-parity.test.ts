@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents } from "../src/index.js";
 
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -167,7 +167,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
   for (const [name, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
     it(`${name} ${mode} starts the controller once on hydration and cleans it up on unmount`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       const [live, hydrated] = await Promise.all([browser.newPage(), browser.newPage()]);
       const errors: string[] = [];
       const warnings: string[] = [];
@@ -221,7 +221,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
     }
 
     it(`${name} matches state, effects, methods, and disconnect cleanup`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
       const errors: string[] = [];
       try {
@@ -357,7 +357,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
     });
 
     it(`${name} cleans up a controller that finishes setup after unmount`, async () => {
-      const browser = await browserType.launch({ headless: true });
+      const browser = await launchParityBrowser(browserType);
       const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
       try {
         for (const page of [live, vue]) {

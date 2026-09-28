@@ -11,7 +11,7 @@ import { HtmlDiagnosticError } from "@nextwebwg/html-next";
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
-import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -208,7 +208,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XEvent
   for (const mode of ["application", "library"] as const) {
     for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
       it(`${engine} ${mode} matches every supported modifier after mount and hydration`, async () => {
-        const browser = await browserType.launch({ headless: true });
+        const browser = await launchParityBrowser(browserType);
         const [live, vue, hydrated] = await Promise.all([browser.newPage(), browser.newPage(), browser.newPage()]);
         const pages = [live, vue, hydrated];
         const errors: string[] = [];
