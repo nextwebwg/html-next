@@ -51,6 +51,300 @@ const panelSource = `<template component="demo-panel" status="early" summary="Di
   <div class="base" role="group"><span :data-align="align" :data-label="label"></span></div>
 </template>`;
 
+const selectiveSource = `<template component="split-counter" status="experimental" summary="Static dependency fixture.">
+  <defs>
+    <state name="left" :value="1"></state>
+    <state name="right" :value="10"></state>
+    <computed name="left1" from="left + 1"></computed>
+    <computed name="left2" from="left1 + 1"></computed>
+    <computed name="left3" from="left2 + 1"></computed>
+    <computed name="total" from="left3 + right"></computed>
+    <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
+    <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:click="increaseLeft"><output $value="left3"></output></button><button type="button" on:click="increaseRight"><output $value="total"></output></button></section>
+</template>`;
+
+const liveBranchSource = `<template component="live-branch" status="experimental" summary="Static live-branch fixture.">
+  <defs>
+    <state name="left" :value="1"></state>
+    <state name="right" :value="10"></state>
+    <computed name="visible" from="right + 1"></computed>
+    <computed name="unused1" from="left + 1"></computed>
+    <computed name="unused2" from="unused1 + 1"></computed>
+    <computed name="unused3" from="unused2 + 1"></computed>
+    <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
+    <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:click="increaseLeft"></button><button type="button" on:click="increaseRight"><output $value="visible"></output></button></section>
+</template>`;
+
+const roundedSource = `<template component="rounded-counter" status="experimental" summary="Rounded direct fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <button type="button" on:click="advance"><output $value="bucket"></output></button>
+</template>`;
+
+const mixedSource = `<template component="mixed-counter" status="experimental" summary="Mixed rounded direct fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <button type="button" on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
+</template>`;
+
+const dataAttributeSource = `<template component="data-counter" status="experimental" summary="Direct data attribute fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <button type="button" on:click="advance" :data-bucket="bucket"><output $value="position"></output></button>
+</template>`;
+
+const ariaAttributeSource = `<template component="aria-counter" status="experimental" summary="Direct ARIA attribute fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <button type="button" on:click="advance" role="progressbar" :aria-valuenow="position" :aria-valuetext="bucket"><output $value="position"></output></button>
+</template>`;
+
+const htmlAttributeSource = `<template component="title-counter" status="experimental" summary="Direct HTML attribute fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <button type="button" on:click="advance" :title="bucket"><output $value="position"></output></button>
+</template>`;
+
+const propertySource = `<template component="value-counter" status="experimental" summary="Direct HTML property fixture.">
+  <defs>
+    <state name="position" :value="0"></state>
+    <computed name="bucket" from="round(position)"></computed>
+    <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+  </defs>
+  <section><button type="button" on:click="advance">Advance</button><input type="number" .value="bucket"><output $value="position"></output></section>
+</template>`;
+
+const booleanSource = `<template component="boolean-toggle" status="experimental" summary="Direct primitive boolean fixture.">
+  <defs>
+    <state name="open" :value="false"></state>
+    <computed name="closed" from="not open"></computed>
+    <handler name="toggle"><set name="open" :value="not open"></set></handler>
+  </defs>
+  <button type="button" on:click="toggle" class:open="open" :aria-expanded="open" :hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+</template>`;
+
+const styleSource = `<template component="style-counter" status="experimental" summary="Direct primitive style fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <button type="button" on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
+</template>`;
+
+const boundTextSource = `<template component="bound-text" status="experimental" summary="Direct native text binding fixture.">
+  <defs><state name="draft" :value="'Ready'"></state></defs>
+  <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
+</template>`;
+
+const boundCheckSource = `<template component="bound-check" status="experimental" summary="Direct native checkbox binding fixture.">
+  <defs><state name="done" :value="false"></state></defs>
+  <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
+</template>`;
+
+const boundChoiceSource = `<template component="bound-choice" status="experimental" summary="Direct native choice binding fixture.">
+  <defs><state name="choice" :value="'one'"></state></defs>
+  <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+</template>`;
+
+const boundRangeSource = `<template component="bound-range" status="experimental" summary="Direct native range binding fixture.">
+  <defs><state name="position" :value="0"></state></defs>
+  <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
+</template>`;
+
+const modifierSource = `<template component="event-modifier" status="experimental" summary="Direct native event modifier fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:click.prevent.stop="increment"><output $value="count"></output></button></section>
+</template>`;
+
+const selfSource = `<template component="event-self" status="experimental" summary="Direct native self modifier fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
+</template>`;
+
+const filteredEventSource = `<template component="event-filter" status="experimental" summary="Direct native event filter fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button class="keys" type="button" on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button><button class="mouse" type="button" on:click.left="increment">Mouse</button></section>
+</template>`;
+
+const eventOptionsSource = `<template component="event-options" status="experimental" summary="Direct native event options fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+</template>`;
+
+const onceSource = `<template component="event-once" status="experimental" summary="Direct native once fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:keydown.enter.once="increment"><output $value="count"></output></button></section>
+</template>`;
+
+const connectSource = `<template component="event-connect" status="experimental" summary="Direct native connect fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><button type="button" on:connect="increment"><output $value="count"></output></button></section>
+</template>`;
+
+const disconnectSource = `<template component="event-disconnect" status="experimental" summary="Direct native disconnect fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+    <handler name="never"><set name="count" :value="count + 10"></set></handler>
+  </defs>
+  <section><button type="button" on:disconnect.once.exact.passive.stop.capture.enter.left="increment" on:connect.self="never"><output $value="count"></output></button></section>
+</template>`;
+
+const dispatchSource = `<template component="event-dispatch" status="experimental" summary="Direct declared event dispatch fixture.">
+  <defs>
+    <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+    <state name="count" :value="0"></state>
+    <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="count"></dispatch></handler>
+  </defs>
+  <button type="button" on:click="save">Save <output $value="count"></output></button>
+</template>`;
+
+const computedDispatchSource = `<template component="computed-event-dispatch" status="experimental" summary="Direct computed declared event dispatch fixture.">
+  <defs>
+    <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+    <state name="count" :value="0"></state>
+    <computed name="savedValue" from="count * 2"></computed>
+    <computed name="queuedValue" from="count + 3"></computed>
+    <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="savedValue"></dispatch><set name="count" :value="count + 1"></set><dispatch event="saved" :value="savedValue"></dispatch></handler>
+  </defs>
+  <button type="button" on:click="save">Save <output $value="queuedValue"></output></button>
+</template>`;
+
+const inlineExpressionSource = `<template component="inline-expression" status="experimental" summary="Direct inline text expression fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <button type="button" on:click="increment">Advance <output $value="count + 1"></output></button>
+</template>`;
+
+const inlineAttributesSource = `<template component="inline-attributes" status="experimental" summary="Direct inline native expression fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section :data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button type="button" on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+</template>`;
+
+const guardedHandlerSource = `<template component="guarded-handler" status="experimental" summary="Direct state-only guarded handler fixture.">
+  <defs>
+    <event name="saved" type="number"></event>
+    <state name="enabled" :value="true"></state>
+    <state name="count" :value="0"></state>
+    <handler name="advance"><set name="count" :value="count + 1" $if="enabled"></set><dispatch event="saved" :value="count" $if="enabled"></dispatch><set name="enabled" :value="not enabled"></set></handler>
+  </defs>
+  <button type="button" on:click="advance">Advance <output $value="count"></output></button>
+</template>`;
+
+const computedGuardSource = `<template component="computed-guard" status="experimental" summary="Direct computed guarded handler fixture.">
+  <defs>
+    <event name="saved" type="number"></event>
+    <state name="count" :value="0"></state>
+    <state name="hits" :value="0"></state>
+    <computed name="even" from="count % 2 = 0"></computed>
+    <handler name="advance"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="count" $if="even"></dispatch><set name="hits" :value="hits + 1" $if="even"></set></handler>
+  </defs>
+  <button type="button" on:click="advance">Advance <output $value="count"></output><output $value="hits"></output></button>
+</template>`;
+
+const refActionSource = `<template component="ref-action" status="experimental" summary="Direct static ref action fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><form $ref="form"><input required $ref="field"></form><button type="button" on:click="submit">Submit</button><output $value="count"></output></section>
+</template>`;
+
+const literalTextSource = `<template component="literal-text" status="experimental" summary="Direct literal text fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section><output class="status" $value="'Ready'"></output><button type="button" on:click="increment"><output $value="count"></output></button></section>
+</template>`;
+
+const literalNativeSource = `<template component="literal-native" status="experimental" summary="Direct literal native bindings fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section :data-status="'ready'" :aria-hidden="false" :hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button type="button" on:click="increment"><output $value="count"></output></button></section>
+</template>`;
+
+const staticComputedSource = `<template component="static-computed" status="experimental" summary="Static computed direct construction fixture.">
+  <defs>
+    <event name="saved" type="string"></event>
+    <state name="count" :value="0"></state>
+    <computed name="prefix" from="'Ready'"></computed>
+    <computed name="label" from="format('%s!', prefix)"></computed>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+    <handler name="save"><dispatch event="saved" :value="label"></dispatch></handler>
+  </defs>
+  <section :data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button type="button" on:click="increment"><output $value="count"></output></button><button type="button" on:click="save">Save</button></section>
+</template>`;
+
+const readOnlySource = `<template component="read-only-label" status="experimental" summary="Read-only direct leaf fixture.">
+  <defs>
+    <state name="count" :value="1"></state>
+    <computed name="label" from="format('Ready %s', count)"></computed>
+  </defs>
+  <section :data-label="label" class:ready="count = 1"><input .value="label"><output $value="label"></output><x-read-only-child class="child" aria-label="Ready child"><span class="projected">Projected<x-read-only-grandchild title="Ready grandchild"></x-read-only-grandchild></span></x-read-only-child></section>
+</template>`;
+
+const stringSource = `<template component="string-tabs" status="experimental" summary="Direct primitive string fixture.">
+  <defs>
+    <state name="tab" :value="'one'"></state>
+    <handler name="showOne"><set name="tab" :value="'one'"></set></handler>
+    <handler name="showTwo"><set name="tab" :value="'two'"></set></handler>
+  </defs>
+  <section :data-tab="tab" :title="tab"><button type="button" on:click="showOne">One</button><button type="button" on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+</template>`;
+
+const formatSource = `<template component="format-counter" status="experimental" summary="Direct primitive format fixture.">
+  <defs>
+    <state name="count" :value="0"></state>
+    <computed name="label" from="format('Step %s', count)"></computed>
+    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+  </defs>
+  <section :aria-label="label"><button type="button" on:click="increment">Increment</button><input .value="label"><output $value="label"></output></section>
+</template>`;
 const stepsSource = `<template component="x-steps"><defs>
   <state name="current" :value="1" context></state>
   <handler name="next"><set name="current" :value="current + 1"></set></handler>
@@ -327,6 +621,40 @@ createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("ma
 describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
   let bundlePath = "";
   let computedBundlePath = "";
+  let selectiveBundlePath = "";
+  let liveBranchBundlePath = "";
+  let roundedBundlePath = "";
+  let mixedBundlePath = "";
+  let dataAttributeBundlePath = "";
+  let ariaAttributeBundlePath = "";
+  let htmlAttributeBundlePath = "";
+  let propertyBundlePath = "";
+  let booleanBundlePath = "";
+  let styleBundlePath = "";
+  let boundTextBundlePath = "";
+  let boundCheckBundlePath = "";
+  let boundChoiceBundlePath = "";
+  let boundRangeBundlePath = "";
+  let modifierBundlePath = "";
+  let selfBundlePath = "";
+  let filteredEventBundlePath = "";
+  let eventOptionsBundlePath = "";
+  let onceBundlePath = "";
+  let connectBundlePath = "";
+  let disconnectBundlePath = "";
+  let dispatchBundlePath = "";
+  let computedDispatchBundlePath = "";
+  let inlineExpressionBundlePath = "";
+  let inlineAttributesBundlePath = "";
+  let guardedHandlerBundlePath = "";
+  let computedGuardBundlePath = "";
+  let refActionBundlePath = "";
+  let literalTextBundlePath = "";
+  let literalNativeBundlePath = "";
+  let staticComputedBundlePath = "";
+  let readOnlyBundlePath = "";
+  let stringBundlePath = "";
+  let formatBundlePath = "";
   let directory = "";
 
   beforeAll(async () => {
@@ -372,6 +700,696 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       bundle: true,
       format: "iife",
       globalName: "ComputedCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const selectiveModule = generateComponent(parseComponent(selectiveSource, "split-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/SplitCounter.js")?.content;
+    assert.ok(selectiveModule);
+    assert.doesNotMatch(selectiveModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/split-counter.css"), "");
+    const selectiveEntryPath = join(directory, "vanilla/SplitCounter.js");
+    selectiveBundlePath = join(directory, "selective-bundle.js");
+    await writeFile(selectiveEntryPath, selectiveModule);
+    await build({
+      entryPoints: [selectiveEntryPath],
+      outfile: selectiveBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "SplitCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const liveBranchModule = generateComponent(parseComponent(liveBranchSource, "live-branch.html"))
+      .find((artifact) => artifact.path === "vanilla/LiveBranch.js")?.content;
+    assert.ok(liveBranchModule);
+    assert.doesNotMatch(liveBranchModule, /computed3|computed4|computed5/);
+    await writeFile(join(directory, "styles/live-branch.css"), "");
+    const liveBranchEntryPath = join(directory, "vanilla/LiveBranch.js");
+    liveBranchBundlePath = join(directory, "live-branch-bundle.js");
+    await writeFile(liveBranchEntryPath, liveBranchModule);
+    await build({
+      entryPoints: [liveBranchEntryPath],
+      outfile: liveBranchBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "LiveBranch",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const roundedModule = generateComponent(parseComponent(roundedSource, "rounded-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/RoundedCounter.js")?.content;
+    assert.ok(roundedModule);
+    assert.match(roundedModule, /!Object\.is\(rendered0, computed1\)/);
+    await writeFile(join(directory, "styles/rounded-counter.css"), "");
+    const roundedEntryPath = join(directory, "vanilla/RoundedCounter.js");
+    roundedBundlePath = join(directory, "rounded-bundle.js");
+    await writeFile(roundedEntryPath, roundedModule);
+    await build({
+      entryPoints: [roundedEntryPath],
+      outfile: roundedBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "RoundedCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const mixedModule = generateComponent(parseComponent(mixedSource, "mixed-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/MixedCounter.js")?.content;
+    assert.ok(mixedModule);
+    assert.match(mixedModule, /!Object\.is\(rendered1, computed1\)/);
+    await writeFile(join(directory, "styles/mixed-counter.css"), "");
+    const mixedEntryPath = join(directory, "vanilla/MixedCounter.js");
+    mixedBundlePath = join(directory, "mixed-bundle.js");
+    await writeFile(mixedEntryPath, mixedModule);
+    await build({
+      entryPoints: [mixedEntryPath],
+      outfile: mixedBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "MixedCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const dataAttributeModule = generateComponent(parseComponent(dataAttributeSource, "data-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/DataCounter.js")?.content;
+    assert.ok(dataAttributeModule);
+    assert.doesNotMatch(dataAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(dataAttributeModule, /setAttribute\("data-bucket", String\(computed1\)\)/);
+    await writeFile(join(directory, "styles/data-counter.css"), "");
+    const dataAttributeEntryPath = join(directory, "vanilla/DataCounter.js");
+    dataAttributeBundlePath = join(directory, "data-attribute-bundle.js");
+    await writeFile(dataAttributeEntryPath, dataAttributeModule);
+    await build({
+      entryPoints: [dataAttributeEntryPath],
+      outfile: dataAttributeBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "DataCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const ariaAttributeModule = generateComponent(parseComponent(ariaAttributeSource, "aria-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/AriaCounter.js")?.content;
+    assert.ok(ariaAttributeModule);
+    assert.doesNotMatch(ariaAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(ariaAttributeModule, /setAttribute\("aria-valuenow", String\(state0\)\)/);
+    await writeFile(join(directory, "styles/aria-counter.css"), "");
+    const ariaAttributeEntryPath = join(directory, "vanilla/AriaCounter.js");
+    ariaAttributeBundlePath = join(directory, "aria-attribute-bundle.js");
+    await writeFile(ariaAttributeEntryPath, ariaAttributeModule);
+    await build({
+      entryPoints: [ariaAttributeEntryPath],
+      outfile: ariaAttributeBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "AriaCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const htmlAttributeModule = generateComponent(parseComponent(htmlAttributeSource, "title-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/TitleCounter.js")?.content;
+    assert.ok(htmlAttributeModule);
+    assert.doesNotMatch(htmlAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(htmlAttributeModule, /setAttribute\("title", String\(computed1\)\)/);
+    await writeFile(join(directory, "styles/title-counter.css"), "");
+    const htmlAttributeEntryPath = join(directory, "vanilla/TitleCounter.js");
+    htmlAttributeBundlePath = join(directory, "html-attribute-bundle.js");
+    await writeFile(htmlAttributeEntryPath, htmlAttributeModule);
+    await build({
+      entryPoints: [htmlAttributeEntryPath],
+      outfile: htmlAttributeBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "TitleCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const propertyModule = generateComponent(parseComponent(propertySource, "value-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/ValueCounter.js")?.content;
+    assert.ok(propertyModule);
+    assert.doesNotMatch(propertyModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(propertyModule, /\["value"\] = computed1/);
+    await writeFile(join(directory, "styles/value-counter.css"), "");
+    const propertyEntryPath = join(directory, "vanilla/ValueCounter.js");
+    propertyBundlePath = join(directory, "property-bundle.js");
+    await writeFile(propertyEntryPath, propertyModule);
+    await build({
+      entryPoints: [propertyEntryPath],
+      outfile: propertyBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ValueCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const booleanModule = generateComponent(parseComponent(booleanSource, "boolean-toggle.html"))
+      .find((artifact) => artifact.path === "vanilla/BooleanToggle.js")?.content;
+    assert.ok(booleanModule);
+    assert.doesNotMatch(booleanModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/boolean-toggle.css"), "");
+    const booleanEntryPath = join(directory, "vanilla/BooleanToggle.js");
+    booleanBundlePath = join(directory, "boolean-bundle.js");
+    await writeFile(booleanEntryPath, booleanModule);
+    await build({
+      entryPoints: [booleanEntryPath],
+      outfile: booleanBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "BooleanToggle",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const styleModule = generateComponent(parseComponent(styleSource, "style-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/StyleCounter.js")?.content;
+    assert.ok(styleModule);
+    assert.doesNotMatch(styleModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(styleModule, /style\.setProperty\("--count", String\(state0\)\)/);
+    await writeFile(join(directory, "styles/style-counter.css"), "");
+    const styleEntryPath = join(directory, "vanilla/StyleCounter.js");
+    styleBundlePath = join(directory, "style-bundle.js");
+    await writeFile(styleEntryPath, styleModule);
+    await build({
+      entryPoints: [styleEntryPath],
+      outfile: styleBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "StyleCounter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const boundTextModule = generateComponent(parseComponent(boundTextSource, "bound-text.html"))
+      .find((artifact) => artifact.path === "vanilla/BoundText.js")?.content;
+    assert.ok(boundTextModule);
+    assert.doesNotMatch(boundTextModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(boundTextModule, /if \(element1\.value !== state0\) element1\.value = state0/);
+    await writeFile(join(directory, "styles/bound-text.css"), "");
+    const boundTextEntryPath = join(directory, "vanilla/BoundText.js");
+    boundTextBundlePath = join(directory, "bound-text-bundle.js");
+    await writeFile(boundTextEntryPath, boundTextModule);
+    await build({
+      entryPoints: [boundTextEntryPath],
+      outfile: boundTextBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "BoundText",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const boundCheckModule = generateComponent(parseComponent(boundCheckSource, "bound-check.html"))
+      .find((artifact) => artifact.path === "vanilla/BoundCheck.js")?.content;
+    assert.ok(boundCheckModule);
+    assert.doesNotMatch(boundCheckModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(boundCheckModule, /if \(element0\.checked !== state0\) element0\.checked = state0/);
+    await writeFile(join(directory, "styles/bound-check.css"), "");
+    const boundCheckEntryPath = join(directory, "vanilla/BoundCheck.js");
+    boundCheckBundlePath = join(directory, "bound-check-bundle.js");
+    await writeFile(boundCheckEntryPath, boundCheckModule);
+    await build({
+      entryPoints: [boundCheckEntryPath],
+      outfile: boundCheckBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "BoundCheck",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const boundChoiceModule = generateComponent(parseComponent(boundChoiceSource, "bound-choice.html"))
+      .find((artifact) => artifact.path === "vanilla/BoundChoice.js")?.content;
+    assert.ok(boundChoiceModule);
+    assert.doesNotMatch(boundChoiceModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/bound-choice.css"), "");
+    const boundChoiceEntryPath = join(directory, "vanilla/BoundChoice.js");
+    boundChoiceBundlePath = join(directory, "bound-choice-bundle.js");
+    await writeFile(boundChoiceEntryPath, boundChoiceModule);
+    await build({
+      entryPoints: [boundChoiceEntryPath],
+      outfile: boundChoiceBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "BoundChoice",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const boundRangeModule = generateComponent(parseComponent(boundRangeSource, "bound-range.html"))
+      .find((artifact) => artifact.path === "vanilla/BoundRange.js")?.content;
+    assert.ok(boundRangeModule);
+    assert.doesNotMatch(boundRangeModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(boundRangeModule, /const next = element0\.valueAsNumber/);
+    await writeFile(join(directory, "styles/bound-range.css"), "");
+    const boundRangeEntryPath = join(directory, "vanilla/BoundRange.js");
+    boundRangeBundlePath = join(directory, "bound-range-bundle.js");
+    await writeFile(boundRangeEntryPath, boundRangeModule);
+    await build({
+      entryPoints: [boundRangeEntryPath],
+      outfile: boundRangeBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "BoundRange",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const modifierModule = generateComponent(parseComponent(modifierSource, "event-modifier.html"))
+      .find((artifact) => artifact.path === "vanilla/EventModifier.js")?.content;
+    assert.ok(modifierModule);
+    assert.doesNotMatch(modifierModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(modifierModule, /event\.preventDefault\(\)/);
+    await writeFile(join(directory, "styles/event-modifier.css"), "");
+    const modifierEntryPath = join(directory, "vanilla/EventModifier.js");
+    modifierBundlePath = join(directory, "event-modifier-bundle.js");
+    await writeFile(modifierEntryPath, modifierModule);
+    await build({
+      entryPoints: [modifierEntryPath],
+      outfile: modifierBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventModifier",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const selfModule = generateComponent(parseComponent(selfSource, "event-self.html"))
+      .find((artifact) => artifact.path === "vanilla/EventSelf.js")?.content;
+    assert.ok(selfModule);
+    assert.doesNotMatch(selfModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(selfModule, /if \(event\.target !== element0\) return/);
+    await writeFile(join(directory, "styles/event-self.css"), "");
+    const selfEntryPath = join(directory, "vanilla/EventSelf.js");
+    selfBundlePath = join(directory, "event-self-bundle.js");
+    await writeFile(selfEntryPath, selfModule);
+    await build({
+      entryPoints: [selfEntryPath],
+      outfile: selfBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventSelf",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const filteredEventModule = generateComponent(parseComponent(filteredEventSource, "event-filter.html"))
+      .find((artifact) => artifact.path === "vanilla/EventFilter.js")?.content;
+    assert.ok(filteredEventModule);
+    assert.doesNotMatch(filteredEventModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(filteredEventModule, /event instanceof KeyboardEvent && event\.key !== "Enter"/);
+    assert.match(filteredEventModule, /event instanceof MouseEvent && event\.button !== 0/);
+    await writeFile(join(directory, "styles/event-filter.css"), "");
+    const filteredEventEntryPath = join(directory, "vanilla/EventFilter.js");
+    filteredEventBundlePath = join(directory, "event-filter-bundle.js");
+    await writeFile(filteredEventEntryPath, filteredEventModule);
+    await build({
+      entryPoints: [filteredEventEntryPath],
+      outfile: filteredEventBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventFilter",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const eventOptionsModule = generateComponent(parseComponent(eventOptionsSource, "event-options.html"))
+      .find((artifact) => artifact.path === "vanilla/EventOptions.js")?.content;
+    assert.ok(eventOptionsModule);
+    assert.doesNotMatch(eventOptionsModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(eventOptionsModule, /addEventListener\("click", event0, \{ capture: true, passive: true \}\)/);
+    await writeFile(join(directory, "styles/event-options.css"), "");
+    const eventOptionsEntryPath = join(directory, "vanilla/EventOptions.js");
+    eventOptionsBundlePath = join(directory, "event-options-bundle.js");
+    await writeFile(eventOptionsEntryPath, eventOptionsModule);
+    await build({
+      entryPoints: [eventOptionsEntryPath],
+      outfile: eventOptionsBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventOptions",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const onceModule = generateComponent(parseComponent(onceSource, "event-once.html"))
+      .find((artifact) => artifact.path === "vanilla/EventOnce.js")?.content;
+    assert.ok(onceModule);
+    assert.doesNotMatch(onceModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(onceModule, /manageGeneratedLifecycle/);
+    assert.match(onceModule, /addEventListener\("keydown", event0, \{ once: true \}\)/);
+    await writeFile(join(directory, "styles/event-once.css"), "");
+    const onceEntryPath = join(directory, "vanilla/EventOnce.js");
+    onceBundlePath = join(directory, "event-once-bundle.js");
+    await writeFile(onceEntryPath, onceModule);
+    await build({
+      entryPoints: [onceEntryPath],
+      outfile: onceBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventOnce",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const connectModule = generateComponent(parseComponent(connectSource, "event-connect.html"))
+      .find((artifact) => artifact.path === "vanilla/EventConnect.js")?.content;
+    assert.ok(connectModule);
+    assert.doesNotMatch(connectModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(connectModule, /manageGeneratedLifecycle/);
+    await writeFile(join(directory, "styles/event-connect.css"), "");
+    const connectEntryPath = join(directory, "vanilla/EventConnect.js");
+    connectBundlePath = join(directory, "event-connect-bundle.js");
+    await writeFile(connectEntryPath, connectModule);
+    await build({
+      entryPoints: [connectEntryPath],
+      outfile: connectBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventConnect",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const disconnectModule = generateComponent(parseComponent(disconnectSource, "event-disconnect.html"))
+      .find((artifact) => artifact.path === "vanilla/EventDisconnect.js")?.content;
+    assert.ok(disconnectModule);
+    assert.doesNotMatch(disconnectModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(disconnectModule, /manageGeneratedLifecycle/);
+    assert.match(disconnectModule, /handler0Disconnect\(\)/);
+    await writeFile(join(directory, "styles/event-disconnect.css"), "");
+    const disconnectEntryPath = join(directory, "vanilla/EventDisconnect.js");
+    disconnectBundlePath = join(directory, "event-disconnect-bundle.js");
+    await writeFile(disconnectEntryPath, disconnectModule);
+    await build({
+      entryPoints: [disconnectEntryPath],
+      outfile: disconnectBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventDisconnect",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const dispatchModule = generateComponent(parseComponent(dispatchSource, "event-dispatch.html"))
+      .find((artifact) => artifact.path === "vanilla/EventDispatch.js")?.content;
+    assert.ok(dispatchModule);
+    assert.doesNotMatch(dispatchModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(dispatchModule, /dispatchGeneratedEvent/);
+    await writeFile(join(directory, "styles/event-dispatch.css"), "");
+    const dispatchEntryPath = join(directory, "vanilla/EventDispatch.js");
+    dispatchBundlePath = join(directory, "event-dispatch-bundle.js");
+    await writeFile(dispatchEntryPath, dispatchModule);
+    await build({
+      entryPoints: [dispatchEntryPath],
+      outfile: dispatchBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "EventDispatch",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const computedDispatchModule = generateComponent(parseComponent(computedDispatchSource, "computed-event-dispatch.html"))
+      .find((artifact) => artifact.path === "vanilla/ComputedEventDispatch.js")?.content;
+    assert.ok(computedDispatchModule);
+    assert.doesNotMatch(computedDispatchModule, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(computedDispatchModule, /refreshComputedForDispatch/);
+    assert.match(computedDispatchModule, /computed1 = \(state0 \* 2\)/);
+    await writeFile(join(directory, "styles/computed-event-dispatch.css"), "");
+    const computedDispatchEntryPath = join(directory, "vanilla/ComputedEventDispatch.js");
+    computedDispatchBundlePath = join(directory, "computed-event-dispatch-bundle.js");
+    await writeFile(computedDispatchEntryPath, computedDispatchModule);
+    await build({
+      entryPoints: [computedDispatchEntryPath],
+      outfile: computedDispatchBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ComputedEventDispatch",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const inlineExpressionModule = generateComponent(parseComponent(inlineExpressionSource, "inline-expression.html"))
+      .find((artifact) => artifact.path === "vanilla/InlineExpression.js")?.content;
+    assert.ok(inlineExpressionModule);
+    assert.doesNotMatch(inlineExpressionModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(inlineExpressionModule, /textContent = String\(\(state0 \+ 1\)\)/);
+    await writeFile(join(directory, "styles/inline-expression.css"), "");
+    const inlineExpressionEntryPath = join(directory, "vanilla/InlineExpression.js");
+    inlineExpressionBundlePath = join(directory, "inline-expression-bundle.js");
+    await writeFile(inlineExpressionEntryPath, inlineExpressionModule);
+    await build({
+      entryPoints: [inlineExpressionEntryPath],
+      outfile: inlineExpressionBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "InlineExpression",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const inlineAttributesModule = generateComponent(parseComponent(inlineAttributesSource, "inline-attributes.html"))
+      .find((artifact) => artifact.path === "vanilla/InlineAttributes.js")?.content;
+    assert.ok(inlineAttributesModule);
+    assert.doesNotMatch(inlineAttributesModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(inlineAttributesModule, /setAttribute\("data-count", String\(\(state0 \+ 1\)\)\)/);
+    await writeFile(join(directory, "styles/inline-attributes.css"), "");
+    const inlineAttributesEntryPath = join(directory, "vanilla/InlineAttributes.js");
+    inlineAttributesBundlePath = join(directory, "inline-attributes-bundle.js");
+    await writeFile(inlineAttributesEntryPath, inlineAttributesModule);
+    await build({
+      entryPoints: [inlineAttributesEntryPath],
+      outfile: inlineAttributesBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "InlineAttributes",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const guardedHandlerModule = generateComponent(parseComponent(guardedHandlerSource, "guarded-handler.html"))
+      .find((artifact) => artifact.path === "vanilla/GuardedHandler.js")?.content;
+    assert.ok(guardedHandlerModule);
+    assert.doesNotMatch(guardedHandlerModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(guardedHandlerModule, /if \(state0\) \{/);
+    await writeFile(join(directory, "styles/guarded-handler.css"), "");
+    const guardedHandlerEntryPath = join(directory, "vanilla/GuardedHandler.js");
+    guardedHandlerBundlePath = join(directory, "guarded-handler-bundle.js");
+    await writeFile(guardedHandlerEntryPath, guardedHandlerModule);
+    await build({
+      entryPoints: [guardedHandlerEntryPath],
+      outfile: guardedHandlerBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "GuardedHandler",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const computedGuardModule = generateComponent(parseComponent(computedGuardSource, "computed-guard.html"))
+      .find((artifact) => artifact.path === "vanilla/ComputedGuard.js")?.content;
+    assert.ok(computedGuardModule);
+    assert.doesNotMatch(computedGuardModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(computedGuardModule, /computed2 = \(\(state0 % 2\) === 0\);/);
+    await writeFile(join(directory, "styles/computed-guard.css"), "");
+    const computedGuardEntryPath = join(directory, "vanilla/ComputedGuard.js");
+    computedGuardBundlePath = join(directory, "computed-guard-bundle.js");
+    await writeFile(computedGuardEntryPath, computedGuardModule);
+    await build({
+      entryPoints: [computedGuardEntryPath],
+      outfile: computedGuardBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ComputedGuard",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const refActionModule = generateComponent(parseComponent(refActionSource, "ref-action.html"))
+      .find((artifact) => artifact.path === "vanilla/RefAction.js")?.content;
+    assert.ok(refActionModule);
+    assert.doesNotMatch(refActionModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(refActionModule, /reportValidity\?\.\(\);/);
+    assert.match(refActionModule, /focus\(\);/);
+    await writeFile(join(directory, "styles/ref-action.css"), "");
+    const refActionEntryPath = join(directory, "vanilla/RefAction.js");
+    refActionBundlePath = join(directory, "ref-action-bundle.js");
+    await writeFile(refActionEntryPath, refActionModule);
+    await build({
+      entryPoints: [refActionEntryPath],
+      outfile: refActionBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "RefAction",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const literalTextModule = generateComponent(parseComponent(literalTextSource, "literal-text.html"))
+      .find((artifact) => artifact.path === "vanilla/LiteralText.js")?.content;
+    assert.ok(literalTextModule);
+    assert.doesNotMatch(literalTextModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(literalTextModule, /textContent = String\("Ready"\);/);
+    await writeFile(join(directory, "styles/literal-text.css"), "");
+    const literalTextEntryPath = join(directory, "vanilla/LiteralText.js");
+    literalTextBundlePath = join(directory, "literal-text-bundle.js");
+    await writeFile(literalTextEntryPath, literalTextModule);
+    await build({
+      entryPoints: [literalTextEntryPath],
+      outfile: literalTextBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "LiteralText",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const literalNativeModule = generateComponent(parseComponent(literalNativeSource, "literal-native.html"))
+      .find((artifact) => artifact.path === "vanilla/LiteralNative.js")?.content;
+    assert.ok(literalNativeModule);
+    assert.doesNotMatch(literalNativeModule, /@nextwebwg\/html-next\/runtime/);
+    assert.match(literalNativeModule, /setAttribute\("data-status", String\("ready"\)\)/);
+    await writeFile(join(directory, "styles/literal-native.css"), "");
+    const literalNativeEntryPath = join(directory, "vanilla/LiteralNative.js");
+    literalNativeBundlePath = join(directory, "literal-native-bundle.js");
+    await writeFile(literalNativeEntryPath, literalNativeModule);
+    await build({
+      entryPoints: [literalNativeEntryPath],
+      outfile: literalNativeBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "LiteralNative",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const staticComputedModule = generateComponent(parseComponent(staticComputedSource, "static-computed.html"))
+      .find((artifact) => artifact.path === "vanilla/StaticComputed.js")?.content;
+    assert.ok(staticComputedModule);
+    assert.doesNotMatch(staticComputedModule, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(staticComputedModule, /\bcomputed[12]\b/);
+    assert.match(staticComputedModule, /detail: "Ready!"/);
+    await writeFile(join(directory, "styles/static-computed.css"), "");
+    const staticComputedEntryPath = join(directory, "vanilla/StaticComputed.js");
+    staticComputedBundlePath = join(directory, "static-computed-bundle.js");
+    await writeFile(staticComputedEntryPath, staticComputedModule);
+    await build({
+      entryPoints: [staticComputedEntryPath],
+      outfile: staticComputedBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "StaticComputed",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
+
+    const readOnlyModule = generateComponent(parseComponent(readOnlySource, "read-only-label.html"))
+      .find((artifact) => artifact.path === "vanilla/ReadOnlyLabel.js")?.content;
+    assert.ok(readOnlyModule);
+    assert.doesNotMatch(readOnlyModule, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(readOnlyModule, /\b(?:state0|computed1|update|schedule)\b/);
+    assert.match(readOnlyModule, /textContent = String\("Ready 1"\);/);
+    await writeFile(join(directory, "styles/read-only-label.css"), "");
+    const readOnlyEntryPath = join(directory, "vanilla/ReadOnlyLabel.js");
+    readOnlyBundlePath = join(directory, "read-only-bundle.js");
+    await writeFile(readOnlyEntryPath, readOnlyModule);
+    await build({
+      entryPoints: [readOnlyEntryPath],
+      outfile: readOnlyBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "ReadOnlyLabel",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const stringModule = generateComponent(parseComponent(stringSource, "string-tabs.html"))
+      .find((artifact) => artifact.path === "vanilla/StringTabs.js")?.content;
+    assert.ok(stringModule);
+    assert.doesNotMatch(stringModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/string-tabs.css"), "");
+    const stringEntryPath = join(directory, "vanilla/StringTabs.js");
+    stringBundlePath = join(directory, "string-bundle.js");
+    await writeFile(stringEntryPath, stringModule);
+    await build({
+      entryPoints: [stringEntryPath],
+      outfile: stringBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "StringTabs",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+
+    const formatModule = generateComponent(parseComponent(formatSource, "format-counter.html"))
+      .find((artifact) => artifact.path === "vanilla/FormatCounter.js")?.content;
+    assert.ok(formatModule);
+    assert.doesNotMatch(formatModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/format-counter.css"), "");
+    const formatEntryPath = join(directory, "vanilla/FormatCounter.js");
+    formatBundlePath = join(directory, "format-bundle.js");
+    await writeFile(formatEntryPath, formatModule);
+    await build({
+      entryPoints: [formatEntryPath],
+      outfile: formatBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "FormatCounter",
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
@@ -444,12 +1462,1380 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
         await browser.close();
       }
     });
+
+    it(`${name} only updates affected directly compiled numeric branches`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: selectiveBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            SplitCounter: { createSplitCounter(): Element };
+          }).SplitCounter;
+          const component = api.createSplitCounter();
+          document.querySelector("main")!.append(component);
+          const buttons = Array.from(component.querySelectorAll("button"));
+          const outputs = Array.from(component.querySelectorAll("output"));
+          const values = () => outputs.map((output) => output.textContent);
+          const initial = values();
+          buttons[1]!.click();
+          await Promise.resolve();
+          const afterRight = values();
+          buttons[0]!.click();
+          await Promise.resolve();
+          return { initial, afterRight, afterLeft: values() };
+        });
+        assert.deepEqual(result, {
+          initial: ["4", "14"],
+          afterRight: ["4", "15"],
+          afterLeft: ["5", "16"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves the visible direct branch when unused branches are elided`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: liveBranchBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            LiveBranch: { createLiveBranch(): Element };
+          }).LiveBranch;
+          const component = api.createLiveBranch();
+          document.querySelector("main")!.append(component);
+          const buttons = component.querySelectorAll("button");
+          const output = component.querySelector("output")!;
+          const initial = output.textContent;
+          buttons[1]!.click();
+          await Promise.resolve();
+          const afterRight = output.textContent;
+          buttons[0]!.click();
+          await Promise.resolve();
+          return { initial, afterRight, afterLeft: output.textContent };
+        });
+        assert.deepEqual(result, { initial: "11", afterRight: "12", afterLeft: "12" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves rounded direct output across equal and changed updates`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: roundedBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            RoundedCounter: { createRoundedCounter(): Element };
+          }).RoundedCounter;
+          const component = api.createRoundedCounter();
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          const initial = output.textContent;
+          for (let index = 0; index < 4; index += 1) {
+            component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = output.textContent;
+          component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, afterEqual, afterChanged: output.textContent };
+        });
+        assert.deepEqual(result, { initial: "0", afterEqual: "0", afterChanged: "1" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} updates ordinary and rounded direct outputs independently`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: mixedBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            MixedCounter: { createMixedCounter(): Element };
+          }).MixedCounter;
+          const component = api.createMixedCounter();
+          document.querySelector("main")!.append(component);
+          const outputs = Array.from(component.querySelectorAll("output"));
+          const values = () => outputs.map((output) => output.textContent);
+          for (let index = 0; index < 4; index += 1) {
+            component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = values();
+          component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { afterEqual, afterChanged: values() };
+        });
+        assert.deepEqual(result, { afterEqual: ["0.4", "0"], afterChanged: ["0.5", "1"] });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled numeric data attributes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: dataAttributeBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            DataCounter: { createDataCounter(): Element };
+          }).DataCounter;
+          const component = api.createDataCounter();
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          for (let index = 0; index < 4; index += 1) {
+            component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = { value: output.textContent, bucket: component.getAttribute("data-bucket") };
+          component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { afterEqual, afterChanged: { value: output.textContent, bucket: component.getAttribute("data-bucket") } };
+        });
+        assert.deepEqual(result, {
+          afterEqual: { value: "0.4", bucket: "0" },
+          afterChanged: { value: "0.5", bucket: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled numeric ARIA attributes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: ariaAttributeBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            AriaCounter: { createAriaCounter(): Element };
+          }).AriaCounter;
+          const component = api.createAriaCounter();
+          document.querySelector("main")!.append(component);
+          for (let index = 0; index < 4; index += 1) {
+            component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = {
+            value: component.getAttribute("aria-valuenow"),
+            text: component.getAttribute("aria-valuetext"),
+          };
+          component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return {
+            afterEqual,
+            afterChanged: {
+              value: component.getAttribute("aria-valuenow"),
+              text: component.getAttribute("aria-valuetext"),
+            },
+          };
+        });
+        assert.deepEqual(result, {
+          afterEqual: { value: "0.4", text: "0" },
+          afterChanged: { value: "0.5", text: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled numeric HTML attributes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: htmlAttributeBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            TitleCounter: { createTitleCounter(): Element };
+          }).TitleCounter;
+          const component = api.createTitleCounter();
+          document.querySelector("main")!.append(component);
+          for (let index = 0; index < 4; index += 1) {
+            component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = { output: component.querySelector("output")!.textContent, title: component.getAttribute("title") };
+          component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { afterEqual, afterChanged: { output: component.querySelector("output")!.textContent, title: component.getAttribute("title") } };
+        });
+        assert.deepEqual(result, {
+          afterEqual: { output: "0.4", title: "0" },
+          afterChanged: { output: "0.5", title: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled numeric HTML properties`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: propertyBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ValueCounter: { createValueCounter(): Element };
+          }).ValueCounter;
+          const component = api.createValueCounter();
+          document.querySelector("main")!.append(component);
+          const button = component.querySelector("button")!;
+          const input = component.querySelector("input")!;
+          for (let index = 0; index < 4; index += 1) {
+            button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await Promise.resolve();
+          }
+          const afterEqual = { output: component.querySelector("output")!.textContent, value: input.value };
+          button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { afterEqual, afterChanged: { output: component.querySelector("output")!.textContent, value: input.value } };
+        });
+        assert.deepEqual(result, {
+          afterEqual: { output: "0.4", value: "0" },
+          afterChanged: { output: "0.5", value: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled boolean attributes and properties`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: booleanBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            BooleanToggle: { createBooleanToggle(): HTMLButtonElement };
+          }).BooleanToggle;
+          const component = api.createBooleanToggle();
+          document.querySelector("main")!.append(component);
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({
+            expanded: component.getAttribute("aria-expanded"),
+            hidden: component.getAttribute("hidden"),
+            open: component.classList.contains("open"),
+            checked: input.checked,
+            output: output.textContent,
+          });
+          const initial = snapshot();
+          component.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          component.click();
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { expanded: "false", hidden: "", open: false, checked: false, output: "true" },
+          connected: { expanded: "true", hidden: null, open: true, checked: true, output: "false" },
+          detached: { expanded: "true", hidden: null, open: true, checked: true, output: "false" },
+          reconnected: { expanded: "false", hidden: "", open: false, checked: false, output: "true" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled primitive styles and honors connection lifecycle`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: styleBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            StyleCounter: { createStyleCounter(): HTMLButtonElement };
+          }).StyleCounter;
+          const component = api.createStyleCounter();
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          const chart = component.querySelector("svg")!;
+          const snapshot = () => ({ count: chart.style.getPropertyValue("--count"), output: output.textContent });
+          const initial = snapshot();
+          component.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          component.click();
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { count: "0", output: "0" },
+          connected: { count: "1", output: "1" },
+          detached: { count: "1", output: "1" },
+          reconnected: { count: "2", output: "2" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} binds directly compiled text controls without resetting their native dirty value`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: boundTextBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            BoundText: { createBoundText(): HTMLElement };
+          }).BoundText;
+          const component = api.createBoundText();
+          document.querySelector("main")!.append(component);
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({ value: input.value, output: output.textContent });
+          const initial = snapshot();
+          input.value = "Changed";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          input.value = "Detached";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          input.value = "Reconnected";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { value: "Ready", output: "Ready" },
+          connected: { value: "Changed", output: "Changed" },
+          detached: { value: "Detached", output: "Changed" },
+          reconnected: { value: "Reconnected", output: "Reconnected" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} binds directly compiled checkboxes and honors connection lifecycle`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: boundCheckBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            BoundCheck: { createBoundCheck(): HTMLElement };
+          }).BoundCheck;
+          const component = api.createBoundCheck();
+          document.querySelector("main")!.append(component);
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({ checked: input.checked, output: output.textContent });
+          const initial = snapshot();
+          input.checked = true;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          input.checked = false;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          input.checked = false;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { checked: false, output: "false" },
+          connected: { checked: true, output: "true" },
+          detached: { checked: false, output: "true" },
+          reconnected: { checked: false, output: "false" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} binds directly compiled textarea and single-select controls`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: boundChoiceBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            BoundChoice: { createBoundChoice(): HTMLElement };
+          }).BoundChoice;
+          const component = api.createBoundChoice();
+          document.querySelector("main")!.append(component);
+          const textarea = component.querySelector("textarea")!;
+          const select = component.querySelector("select")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({ textarea: textarea.value, select: select.value, output: output.textContent });
+          const initial = snapshot();
+          textarea.value = "two";
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const textChanged = snapshot();
+          select.value = "one";
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          await Promise.resolve();
+          const selectChanged = snapshot();
+          component.remove();
+          textarea.value = "detached";
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, textChanged, selectChanged, detached: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { textarea: "one", select: "one", output: "one" },
+          textChanged: { textarea: "two", select: "two", output: "two" },
+          selectChanged: { textarea: "one", select: "one", output: "one" },
+          detached: { textarea: "detached", select: "one", output: "one" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} binds directly compiled ranges through their finite numeric value`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: boundRangeBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            BoundRange: { createBoundRange(): HTMLElement };
+          }).BoundRange;
+          const component = api.createBoundRange();
+          document.querySelector("main")!.append(component);
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({ value: input.value, number: input.valueAsNumber, output: output.textContent });
+          const initial = snapshot();
+          input.value = "25";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          input.value = "50";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          input.value = "75";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { value: "0", number: 0, output: "0" },
+          connected: { value: "25", number: 25, output: "25" },
+          detached: { value: "50", number: 50, output: "25" },
+          reconnected: { value: "75", number: 75, output: "75" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} applies direct prevent and stop modifiers only while connected`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: modifierBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventModifier: { createEventModifier(): HTMLElement };
+          }).EventModifier;
+          const component = api.createEventModifier();
+          const main = document.querySelector("main")!;
+          let bubbled = 0;
+          main.addEventListener("click", () => { bubbled += 1; });
+          main.append(component);
+          const button = component.querySelector("button")!;
+          const output = component.querySelector("output")!;
+          const dispatch = () => button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          const connected = { accepted: dispatch(), bubbled, output: output.textContent };
+          component.remove();
+          const detached = { accepted: dispatch(), bubbled, output: output.textContent };
+          main.append(component);
+          const reconnected = { accepted: dispatch(), bubbled, output: output.textContent };
+          await Promise.resolve();
+          return { connected, detached, reconnected: { ...reconnected, output: output.textContent } };
+        });
+        assert.deepEqual(result, {
+          connected: { accepted: false, bubbled: 0, output: "0" },
+          detached: { accepted: true, bubbled: 0, output: "0" },
+          reconnected: { accepted: false, bubbled: 0, output: "2" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} applies direct self modifiers before handler scheduling`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: selfBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventSelf: { createEventSelf(): HTMLElement };
+          }).EventSelf;
+          const component = api.createEventSelf();
+          document.querySelector("main")!.append(component);
+          const button = component.querySelector("button")!;
+          const inner = component.querySelector("span")!;
+          const output = component.querySelector("output")!;
+          inner.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          const innerClick = output.textContent;
+          button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          const buttonClick = output.textContent;
+          component.remove();
+          button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+          return { innerClick, buttonClick, detached: output.textContent };
+        });
+        assert.deepEqual(result, { innerClick: "0", buttonClick: "1", detached: "1" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves native filtered-event behavior in the direct emitter`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: filteredEventBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventFilter: { createEventFilter(): HTMLElement };
+          }).EventFilter;
+          const component = api.createEventFilter();
+          const main = document.querySelector("main")!;
+          main.append(component);
+          const keys = component.querySelector<HTMLButtonElement>(".keys")!;
+          const inner = component.querySelector("span")!;
+          const mouse = component.querySelector<HTMLButtonElement>(".mouse")!;
+          const output = component.querySelector("output")!;
+          let bubbled = 0;
+          main.addEventListener("keydown", () => { bubbled += 1; });
+          const dispatchKey = (target: EventTarget, init: KeyboardEventInit) =>
+            target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+          const snapshot = (accepted: boolean) => ({ accepted, bubbled, output: output.textContent });
+          const innerKey = snapshot(dispatchKey(inner, { key: "Enter", ctrlKey: true }));
+          const wrongKey = snapshot(dispatchKey(keys, { key: "Escape", ctrlKey: true }));
+          const inexactKey = snapshot(dispatchKey(keys, { key: "Enter", ctrlKey: true, shiftKey: true }));
+          const plainKey = snapshot(keys.dispatchEvent(new Event("keydown", { bubbles: true, cancelable: true })));
+          const matchedKey = snapshot(dispatchKey(keys, { key: "Enter", ctrlKey: true }));
+          await Promise.resolve();
+          const afterKey = output.textContent;
+          const middleMouse = mouse.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 1 }));
+          await Promise.resolve();
+          const afterMiddle = output.textContent;
+          const plainMouse = mouse.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+          await Promise.resolve();
+          const afterPlainMouse = output.textContent;
+          component.remove();
+          const detached = dispatchKey(keys, { key: "Enter", ctrlKey: true });
+          await Promise.resolve();
+          return { innerKey, wrongKey, inexactKey, plainKey, matchedKey, afterKey, middleMouse, afterMiddle, plainMouse, afterPlainMouse, detached, afterDetached: output.textContent };
+        });
+        assert.deepEqual(result, {
+          innerKey: { accepted: true, bubbled: 1, output: "0" },
+          wrongKey: { accepted: true, bubbled: 2, output: "0" },
+          inexactKey: { accepted: true, bubbled: 3, output: "0" },
+          plainKey: { accepted: true, bubbled: 4, output: "0" },
+          matchedKey: { accepted: false, bubbled: 4, output: "0" },
+          afterKey: "1",
+          middleMouse: true,
+          afterMiddle: "1",
+          plainMouse: true,
+          afterPlainMouse: "2",
+          detached: true,
+          afterDetached: "2",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves capture, passive, and detached listener behavior in the direct emitter`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: eventOptionsBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventOptions: { createEventOptions(): HTMLElement };
+          }).EventOptions;
+          const component = api.createEventOptions();
+          const main = document.querySelector("main")!;
+          main.append(component);
+          const button = component.querySelector("button")!;
+          const inner = component.querySelector("span")!;
+          const output = component.querySelector("output")!;
+          const order: string[] = [];
+          main.addEventListener("click", () => order.push("main-capture"), true);
+          button.addEventListener("click", () => order.push("button-after"), true);
+          inner.addEventListener("click", () => order.push("inner-target"));
+          main.addEventListener("click", () => order.push("main-bubble"));
+          const dispatch = () => inner.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          const connected = dispatch();
+          await Promise.resolve();
+          const connectedResult = { accepted: connected, order: [...order], output: output.textContent };
+          component.remove();
+          order.length = 0;
+          const detached = dispatch();
+          await Promise.resolve();
+          const detachedResult = { accepted: detached, order: [...order], output: output.textContent };
+          main.append(component);
+          order.length = 0;
+          const reconnected = dispatch();
+          await Promise.resolve();
+          return { connected: connectedResult, detached: detachedResult, reconnected: { accepted: reconnected, order, output: output.textContent } };
+        });
+        assert.deepEqual(result, {
+          connected: { accepted: true, order: ["main-capture", "button-after"], output: "1" },
+          detached: { accepted: true, order: ["button-after", "inner-target"], output: "1" },
+          reconnected: { accepted: true, order: ["main-capture", "button-after"], output: "2" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} resets a direct once listener for each connected period`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: onceBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventOnce: { createEventOnce(): HTMLElement };
+          }).EventOnce;
+          const component = api.createEventOnce();
+          const main = document.querySelector("main")!;
+          const button = component.querySelector("button")!;
+          const output = component.querySelector("output")!;
+          const dispatch = (key: string) => button.dispatchEvent(new KeyboardEvent("keydown", {
+            key, bubbles: true, cancelable: true,
+          }));
+          const initiallyDetached = dispatch("Enter");
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const nonmatchingConsumes = dispatch("Escape");
+          const sameConnection = dispatch("Enter");
+          await Promise.resolve();
+          const afterFirstConnection = output.textContent;
+          component.remove();
+          await Promise.resolve();
+          await Promise.resolve();
+          const detachedAgain = dispatch("Enter");
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const reconnected = dispatch("Enter");
+          const consumedAgain = dispatch("Enter");
+          await Promise.resolve();
+          return { initiallyDetached, nonmatchingConsumes, sameConnection, afterFirstConnection, detachedAgain, reconnected, consumedAgain, afterReconnect: output.textContent };
+        });
+        assert.deepEqual(result, {
+          initiallyDetached: true,
+          nonmatchingConsumes: true,
+          sameConnection: true,
+          afterFirstConnection: "0",
+          detachedAgain: true,
+          reconnected: true,
+          consumedAgain: true,
+          afterReconnect: "1",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} runs a direct connect handler for each connected period`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: connectBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventConnect: { createEventConnect(): HTMLElement };
+          }).EventConnect;
+          const component = api.createEventConnect();
+          const main = document.querySelector("main")!;
+          const output = component.querySelector("output")!;
+          const detached = output.textContent;
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const connected = output.textContent;
+          component.remove();
+          await Promise.resolve();
+          await Promise.resolve();
+          const removed = output.textContent;
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          return { detached, connected, removed, reconnected: output.textContent };
+        });
+        assert.deepEqual(result, { detached: "0", connected: "1", removed: "1", reconnected: "2" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} defers a direct disconnect update until the next connected period`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: disconnectBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventDisconnect: { createEventDisconnect(): HTMLElement };
+          }).EventDisconnect;
+          const component = api.createEventDisconnect();
+          const main = document.querySelector("main")!;
+          const output = component.querySelector("output")!;
+          const detached = output.textContent;
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const connected = output.textContent;
+          component.remove();
+          await Promise.resolve();
+          await Promise.resolve();
+          const removed = output.textContent;
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const reconnected = output.textContent;
+          component.remove();
+          await Promise.resolve();
+          await Promise.resolve();
+          const removedAgain = output.textContent;
+          main.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          return { detached, connected, removed, reconnected, removedAgain, final: output.textContent };
+        });
+        assert.deepEqual(result, {
+          detached: "0", connected: "0", removed: "0", reconnected: "1", removedAgain: "1", final: "2",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} dispatches declared primitive events directly while connected`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: dispatchBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            EventDispatch: { createEventDispatch(): HTMLButtonElement };
+          }).EventDispatch;
+          const component = api.createEventDispatch();
+          const events: Array<{ readonly detail: unknown; readonly bubbles: boolean; readonly composed: boolean; readonly cancelable: boolean }> = [];
+          component.addEventListener("saved", (event) => {
+            events.push({
+              detail: (event as CustomEvent).detail,
+              bubbles: event.bubbles,
+              composed: event.composed,
+              cancelable: event.cancelable,
+            });
+          });
+          document.querySelector("main")!.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const output = component.querySelector("output")!;
+          component.click();
+          await Promise.resolve();
+          const connectedOutput = output.textContent;
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          return { events, connectedOutput, detachedOutput: output.textContent };
+        });
+        assert.deepEqual(result, {
+          events: [{ detail: 1, bubbles: false, composed: false, cancelable: true }],
+          connectedOutput: "1",
+          detachedOutput: "1",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} dispatches fresh primitive computed event detail directly`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: computedDispatchBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ComputedEventDispatch: { createComputedEventDispatch(): HTMLButtonElement };
+          }).ComputedEventDispatch;
+          const component = api.createComputedEventDispatch();
+          const events: unknown[] = [];
+          component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
+          document.querySelector("main")!.append(component);
+          await Promise.resolve();
+          await Promise.resolve();
+          const output = component.querySelector("output")!;
+          component.click();
+          await Promise.resolve();
+          const connectedOutput = output.textContent;
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          return { events, connectedOutput, detachedOutput: output.textContent };
+        });
+        assert.deepEqual(result, { events: [2, 4], connectedOutput: "5", detachedOutput: "5" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} renders inline primitive text expressions directly`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: inlineExpressionBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            InlineExpression: { createInlineExpression(): HTMLButtonElement };
+          }).InlineExpression;
+          const component = api.createInlineExpression();
+          const output = component.querySelector("output")!;
+          document.querySelector("main")!.append(component);
+          const initial = output.textContent;
+          component.click();
+          await Promise.resolve();
+          const connected = output.textContent;
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          return { initial, connected, detached: output.textContent };
+        });
+        assert.deepEqual(result, { initial: "1", connected: "2", detached: "2" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} renders inline primitive native expressions directly`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: inlineAttributesBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            InlineAttributes: { createInlineAttributes(): HTMLElement };
+          }).InlineAttributes;
+          const component = api.createInlineAttributes();
+          const button = component.querySelector("button")!;
+          const input = component.querySelector("input")!;
+          const snapshot = () => ({
+            count: component.getAttribute("data-count"),
+            zero: component.classList.contains("zero"),
+            style: component.style.getPropertyValue("--count"),
+            value: input.value,
+          });
+          document.querySelector("main")!.append(component);
+          const initial = snapshot();
+          button.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          button.click();
+          await Promise.resolve();
+          return { initial, connected, detached: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { count: "1", zero: true, style: "1", value: "1" },
+          connected: { count: "2", zero: false, style: "2", value: "2" },
+          detached: { count: "2", zero: false, style: "2", value: "2" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} preserves guarded direct handler ordering and detachment`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: guardedHandlerBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            GuardedHandler: { createGuardedHandler(): HTMLButtonElement };
+          }).GuardedHandler;
+          const component = api.createGuardedHandler();
+          const events: unknown[] = [];
+          component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
+          document.querySelector("main")!.append(component);
+          const output = component.querySelector("output")!;
+          component.click();
+          component.click();
+          component.click();
+          await Promise.resolve();
+          const connected = output.textContent;
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          return { events, connected, detached: output.textContent };
+        });
+        assert.deepEqual(result, { events: [1, 2], connected: "2", detached: "2" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} pulls computed guards after prior writes and preserves guarded event ordering`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: computedGuardBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ComputedGuard: { createComputedGuard(): HTMLButtonElement };
+          }).ComputedGuard;
+          const component = api.createComputedGuard();
+          const events: unknown[] = [];
+          component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
+          document.querySelector("main")!.append(component);
+          const outputs = component.querySelectorAll("output");
+          component.click();
+          component.click();
+          await Promise.resolve();
+          const connected = Array.from(outputs, (output) => output.textContent);
+          component.remove();
+          component.click();
+          await Promise.resolve();
+          return { events, connected, detached: Array.from(outputs, (output) => output.textContent) };
+        });
+        assert.deepEqual(result, { events: [2], connected: ["2", "1"], detached: ["2", "1"] });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} runs direct validation and static ref focus while connected`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: refActionBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            RefAction: { createRefAction(): HTMLElement };
+          }).RefAction;
+          const component = api.createRefAction();
+          const inputs = component.querySelectorAll("input");
+          const button = component.querySelector("button")!;
+          const output = component.querySelector("output")!;
+          document.querySelector("main")!.append(component);
+          button.click();
+          await Promise.resolve();
+          const connected = {
+            count: output.textContent,
+            invalid: inputs[0]!.validity.valueMissing,
+            focusedRef: document.activeElement === inputs[0],
+          };
+          component.remove();
+          button.click();
+          await Promise.resolve();
+          return { connected, detached: output.textContent };
+        });
+        assert.deepEqual(result, {
+          connected: { count: "1", invalid: true, focusedRef: true },
+          detached: "1",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} renders direct literal text beside dynamic output and stays inert when detached`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: literalTextBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            LiteralText: { createLiteralText(): HTMLElement };
+          }).LiteralText;
+          const component = api.createLiteralText();
+          const status = component.querySelector("output.status")!;
+          const count = component.querySelector("button output")!;
+          document.querySelector("main")!.append(component);
+          const initial = { status: status.textContent, count: count.textContent };
+          component.querySelector("button")!.click();
+          await Promise.resolve();
+          const connected = { status: status.textContent, count: count.textContent };
+          component.remove();
+          component.querySelector("button")!.click();
+          await Promise.resolve();
+          return { initial, connected, detached: { status: status.textContent, count: count.textContent } };
+        });
+        assert.deepEqual(result, {
+          initial: { status: "Ready", count: "0" },
+          connected: { status: "Ready", count: "1" },
+          detached: { status: "Ready", count: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} initializes direct literal native bindings without reapplying them on updates`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: literalNativeBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            LiteralNative: { createLiteralNative(): HTMLElement };
+          }).LiteralNative;
+          const component = api.createLiteralNative();
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({
+            status: component.getAttribute("data-status"),
+            ariaHidden: component.getAttribute("aria-hidden"),
+            hidden: component.hasAttribute("hidden"),
+            fixed: component.classList.contains("fixed"),
+            gap: component.style.getPropertyValue("--gap"),
+            value: input.value,
+            count: output.textContent,
+          });
+          document.querySelector("main")!.append(component);
+          const initial = snapshot();
+          input.value = "Draft";
+          component.querySelector("button")!.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          component.querySelector("button")!.click();
+          await Promise.resolve();
+          return { initial, connected, detached: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { status: "ready", ariaHidden: "false", hidden: true, fixed: true, gap: "4", value: "Fixed", count: "0" },
+          connected: { status: "ready", ariaHidden: "false", hidden: true, fixed: true, gap: "4", value: "Draft", count: "1" },
+          detached: { status: "ready", ariaHidden: "false", hidden: true, fixed: true, gap: "4", value: "Draft", count: "1" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps transitively constant direct computeds at construction while handlers can read them`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: staticComputedBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            StaticComputed: { createStaticComputed(): HTMLElement };
+          }).StaticComputed;
+          const component = api.createStaticComputed();
+          const status = component.querySelector("output.status")!;
+          const count = component.querySelector("button output")!;
+          const input = component.querySelector("input")!;
+          const buttons = component.querySelectorAll("button");
+          const events: unknown[] = [];
+          component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
+          document.querySelector("main")!.append(component);
+          const snapshot = () => ({
+            status: status.textContent,
+            count: count.textContent,
+            dataStatus: component.getAttribute("data-status"),
+            ready: component.classList.contains("ready"),
+            style: component.style.getPropertyValue("--label"),
+            value: input.value,
+          });
+          const initial = snapshot();
+          input.value = "Draft";
+          buttons[0]!.click();
+          await Promise.resolve();
+          buttons[1]!.click();
+          const connected = { ...snapshot(), events: [...events] };
+          component.remove();
+          buttons[0]!.click();
+          buttons[1]!.click();
+          await Promise.resolve();
+          return { initial, connected, detached: { ...snapshot(), events } };
+        });
+        assert.deepEqual(result, {
+          initial: { status: "Ready!", count: "0", dataStatus: "Ready!", ready: true, style: "Ready", value: "Ready!" },
+          connected: { status: "Ready!", count: "1", dataStatus: "Ready!", ready: true, style: "Ready", value: "Draft", events: ["Ready!"] },
+          detached: { status: "Ready!", count: "1", dataStatus: "Ready!", ready: true, style: "Ready", value: "Draft", events: ["Ready!"] },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} constructs a read-only direct reactive leaf without lifecycle runtime work`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: readOnlyBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            ReadOnlyLabel: { createReadOnlyLabel(): HTMLElement };
+          }).ReadOnlyLabel;
+          const component = api.createReadOnlyLabel();
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({
+            label: component.getAttribute("data-label"),
+            ready: component.classList.contains("ready"),
+            input: input.value,
+            output: output.textContent,
+            child: component.querySelector("x-read-only-child")?.getAttribute("aria-label"),
+            projected: component.querySelector("x-read-only-child > span")?.textContent,
+            grandchild: component.querySelector("x-read-only-child > span > x-read-only-grandchild")?.localName,
+            grandchildTitle: component.querySelector("x-read-only-child > span > x-read-only-grandchild")?.getAttribute("title"),
+          });
+          document.querySelector("main")!.append(component);
+          const initial = snapshot();
+          input.value = "Draft";
+          await Promise.resolve();
+          component.remove();
+          await Promise.resolve();
+          return { initial, detached: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { label: "Ready 1", ready: true, input: "Ready 1", output: "Ready 1", child: "Ready child", projected: "Projected", grandchild: "x-read-only-grandchild", grandchildTitle: "Ready grandchild" },
+          detached: { label: "Ready 1", ready: true, input: "Draft", output: "Ready 1", child: "Ready child", projected: "Projected", grandchild: "x-read-only-grandchild", grandchildTitle: "Ready grandchild" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled string modes and honors connection lifecycle`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: stringBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            StringTabs: { createStringTabs(): HTMLElement };
+          }).StringTabs;
+          const component = api.createStringTabs();
+          document.querySelector("main")!.append(component);
+          const buttons = component.querySelectorAll("button");
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({
+            tab: component.getAttribute("data-tab"),
+            title: component.getAttribute("title"),
+            value: input.value,
+            output: output.textContent,
+          });
+          const initial = snapshot();
+          buttons[1]!.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          buttons[0]!.click();
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          buttons[0]!.click();
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { tab: "one", title: "one", value: "one", output: "one" },
+          connected: { tab: "two", title: "two", value: "two", output: "two" },
+          detached: { tab: "two", title: "two", value: "two", output: "two" },
+          reconnected: { tab: "one", title: "one", value: "one", output: "one" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} publishes directly compiled literal formatted text`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: formatBundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as {
+            FormatCounter: { createFormatCounter(): HTMLElement };
+          }).FormatCounter;
+          const component = api.createFormatCounter();
+          document.querySelector("main")!.append(component);
+          const button = component.querySelector("button")!;
+          const input = component.querySelector("input")!;
+          const output = component.querySelector("output")!;
+          const snapshot = () => ({
+            label: component.getAttribute("aria-label"),
+            value: input.value,
+            output: output.textContent,
+          });
+          const initial = snapshot();
+          button.click();
+          await Promise.resolve();
+          const connected = snapshot();
+          component.remove();
+          button.click();
+          await Promise.resolve();
+          const detached = snapshot();
+          document.querySelector("main")!.append(component);
+          button.click();
+          await Promise.resolve();
+          return { initial, connected, detached, reconnected: snapshot() };
+        });
+        assert.deepEqual(result, {
+          initial: { label: "Step 0", value: "Step 0", output: "Step 0" },
+          connected: { label: "Step 1", value: "Step 1", output: "Step 1" },
+          detached: { label: "Step 1", value: "Step 1", output: "Step 1" },
+          reconnected: { label: "Step 2", value: "Step 2", output: "Step 2" },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+});
+
+describe.skipIf(!enabled)("generated Vanilla handler value dependencies", () => {
+  let directory = "";
+  let bundlePath = "";
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-handler-values-"));
+    await mkdir(join(directory, "vanilla"), { recursive: true });
+    await mkdir(join(directory, "styles"), { recursive: true });
+    const sources = [
+      `<template component="set-input" status="experimental" summary="Set input dependency.">
+        <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><handler name="save"><set name="snapshot" :value="count + 1"></set></handler></defs>
+        <button on:click="save"><output $value="snapshot"></output></button>
+      </template>`,
+      `<template component="sequential-sets" status="experimental" summary="Sequential sets.">
+        <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" :value="count + 1"></set><set name="snapshot" :value="double"></set></handler></defs>
+        <button on:click="advance"><output $value="snapshot"></output></button>
+      </template>`,
+    ];
+    for (const source of sources) {
+      const artifacts = generateComponent(parseComponent(source));
+      const module = artifacts.find(({ path }) => path.startsWith("vanilla/") && path.endsWith(".js"));
+      assert.ok(module);
+      assert.doesNotMatch(module.content, /@nextwebwg\/html-next\/runtime/);
+      await writeFile(join(directory, module.path), module.content);
+      const css = artifacts.find(({ path }) => path.endsWith(".css"));
+      assert.ok(css);
+      await writeFile(join(directory, css.path), css.content);
+    }
+    const entryPath = join(directory, "entry.ts");
+    bundlePath = join(directory, "bundle.js");
+    await writeFile(entryPath, `export { createSetInput } from "./vanilla/SetInput.js";\nexport { createSequentialSets } from "./vanilla/SequentialSets.js";`);
+    await build({
+      entryPoints: [entryPath], outfile: bundlePath, bundle: true, format: "iife",
+      globalName: "HandlerValues", platform: "browser", target: ["es2022"],
+      loader: { ".css": "empty" },
+    });
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  for (const [name, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it(`${name} reads hidden set dependencies and refreshes sequential computed values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as { HandlerValues: {
+            createSetInput(): HTMLElement;
+            createSequentialSets(): HTMLElement;
+          } }).HandlerValues;
+          const first = api.createSetInput();
+          const second = api.createSequentialSets();
+          document.querySelector("main")!.append(first, second);
+          first.click();
+          second.click();
+          await Promise.resolve();
+          return [first.querySelector("output")?.textContent, second.querySelector("output")?.textContent];
+        });
+        assert.deepEqual(result, ["1", "2"]);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
   }
 });
 
 describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
   let bundlePath = "";
   let mixedBundlePath = "";
+  let singleBundlePath = "";
   let directory = "";
 
   beforeAll(async () => {
@@ -490,6 +2876,35 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
       loader: { ".css": "empty" },
       alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
     });
+    const singleDefinition = parseComponent(`<template component="single-prop" status="experimental" summary="Single prop.">
+      <props><prop name="value" type="number" default="1">Value.</prop></props>
+      <input type="number" .value="value">
+    </template>`);
+    const singleModule = generateComponent(singleDefinition)
+      .find((artifact) => artifact.path === "vanilla/SingleProp.js")?.content;
+    assert.ok(singleModule);
+    assert.match(singleModule, /manageGeneratedProp\(/);
+    assert.doesNotMatch(singleModule, /@nextwebwg\/html-next\/runtime/);
+    await writeFile(join(directory, "styles/single-prop.css"), "");
+    await writeFile(join(directory, "vanilla/SingleProp.js"), singleModule);
+    const singleEntryPath = join(directory, "single.ts");
+    singleBundlePath = join(directory, "single.js");
+    await writeFile(
+      singleEntryPath,
+      `export { createSingleProp } from "./vanilla/SingleProp.js";\n` +
+      `export { updateGeneratedProps } from "@nextwebwg/html-next/generated-runtime";\n`,
+    );
+    await build({
+      entryPoints: [singleEntryPath],
+      outfile: singleBundlePath,
+      bundle: true,
+      format: "iife",
+      globalName: "SingleProp",
+      platform: "browser",
+      target: ["es2022"],
+      loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+    });
     const mixedEntryPath = join(directory, "mixed.ts");
     mixedBundlePath = join(directory, "mixed.js");
     await writeFile(
@@ -524,6 +2939,49 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} updates a compact scalar native property prop`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent("<main></main>");
+        await page.addScriptTag({ path: singleBundlePath });
+        const result = await page.evaluate(async () => {
+          const { createSingleProp: create, updateGeneratedProps: update } = (window as unknown as {
+            SingleProp: {
+              createSingleProp(options?: Record<string, unknown>): HTMLInputElement;
+              updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
+            };
+          }).SingleProp;
+          const root = create();
+          document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const initial = root.value;
+          update(root, { value: 2 });
+          const synchronous = root.value;
+          await Promise.resolve();
+          await Promise.resolve();
+          const updated = root.value;
+          root.remove();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          update(root, { value: 3 });
+          await Promise.resolve();
+          const detached = root.value;
+          document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const reconnected = root.value;
+          root.remove();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          root.value = "999";
+          document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initial, synchronous, updated, detached, reconnected, restored: root.value };
+        });
+        assert.deepEqual(result, { initial: "1", synchronous: "1", updated: "2", detached: "2", reconnected: "3", restored: "3" });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} batches reflected props and pauses DOM work while detached`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -552,7 +3010,9 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
               updateGeneratedProps(element: Element, props: Record<string, unknown>): void;
             };
           }).DemoProps;
-          const root = create({ children: ["Projected"] });
+          const projected = document.createElement("em");
+          projected.textContent = "Projected";
+          const root = create({ children: [projected] });
           const second = create();
           document.querySelector("main")!.append(root, second);
           await new Promise((resolve) => setTimeout(resolve, 0));
@@ -567,6 +3027,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             tone: root.getAttribute("data-tone"),
             reflectedLabel: root.hasAttribute("data-label"),
             ownProperties: ["count", "label", "tone"].filter((key) => Object.hasOwn(root, key)),
+            projectedMarker: projected.getAttribute("data-slotted"),
           };
 
           update(root, { count: 2, label: "First" });
@@ -616,7 +3077,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             observedTargets: (window as unknown as { observedTargets: string[] }).observedTargets,
           };
         });
-        assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [] });
+        assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [], projectedMarker: "" });
         assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
         assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
         assert.deepEqual(result.external, { label: "Second" });

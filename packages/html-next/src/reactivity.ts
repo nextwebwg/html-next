@@ -116,6 +116,17 @@ export class ReactiveScheduler {
           fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
         }
         effects = this.#pending;
+        if (effects.length === 1) {
+          this.#pending = this.#spare;
+          const effect = effects[0]!;
+          effect.queued = false;
+          const computed = effect.computed;
+          if (computed === undefined) effect.execute();
+          else computed.refresh();
+          this.#spare = emptied(effects);
+          effects = undefined;
+          continue;
+        }
         if (effects.length > 1) {
           let index = 1;
           let previous = effects[0]!;
@@ -136,24 +147,10 @@ export class ReactiveScheduler {
           const effect = effects[index]!;
           effect.queued = false;
           index += 1;
-          if (effect.computed === undefined) effect.execute();
-          else effect.computed.refresh();
-          // With no remaining owner and one ordinary pending effect, the next sortable round is
-          // already known. Adopt it in place, but still advance the round count so HR006 retains
-          // exactly the same propagation-depth bound as the generic outer loop.
-          if (this.#pending.length === 1 && index === effects.length &&
-            this.#pending[0]!.computed === undefined) {
-            rounds += 1;
-            if (rounds > maximumExecutionsPerFlush) {
-              this.#pending[0]!.queued = false;
-              this.#pending = [];
-              fail("HR006", "A reactive flush exceeded the propagation-depth limit.");
-            }
-            const next: ReactiveEffect[] = this.#pending;
-            this.#pending = emptied(effects);
-            effects = next;
-            index = 0;
-          } else if (this.#pending.length > 0) {
+          const computed = effect.computed;
+          if (computed === undefined) effect.execute();
+          else computed.refresh();
+          if (this.#pending.length > 0) {
             this.#deferConsumersBehindComputeds(effects, index);
           }
         } while (index < effects.length);
@@ -274,10 +271,6 @@ export class ReactiveEffect {
   }
 
   schedule(): void {
-    if (this.computed !== undefined) {
-      this.computed.invalidate();
-      return;
-    }
     if (!this.paused) this.scheduler.enqueue(this);
   }
 
@@ -325,7 +318,7 @@ export class ReactiveSignal<T> {
   }
 
   get(): T {
-    if (activeEffect !== undefined) activeEffect.track(this.#dependency);
+    activeEffect?.track(this.#dependency);
     return this.#value;
   }
 
@@ -373,26 +366,35 @@ export class ReactiveComputed<T> implements ReactiveOwner {
 
   get(): T {
     if (this.#effect.paused || this.#effect.stopped) return this.#readDetached();
-    this.#refresh();
-    if (activeEffect !== undefined) activeEffect.track(this.#dependency);
+    this.refresh();
+    activeEffect?.track(this.#dependency);
     return this.#value;
   }
 
   invalidate(): void {
     if (this.#effect.stopped || this.#dirty) return;
     this.#dirty = true;
-    for (let subscription = this.#dependency.first; subscription !== undefined;
-      subscription = subscription.nextSubscriber) {
-      if (subscription.effect.computed === undefined) {
-        this.#effect.scheduler.enqueue(this.#effect);
-        return;
-      }
+    const first = this.#dependency.first;
+    if (first === undefined) return;
+    if (first === this.#dependency.last && first.effect.computed !== undefined) {
+      first.effect.computed.invalidate();
+      return;
+    }
+    if (this.#dependency.last!.effect.computed === undefined) {
+      this.#effect.scheduler.enqueue(this.#effect);
+      return;
     }
     trigger(this.#dependency);
   }
 
   refresh(): void {
-    this.#refresh();
+    if (this.#evaluating) fail("HR006", "A reactive computed value depends on itself.");
+    if (!this.#dirty || this.#effect.stopped || this.#effect.paused) return;
+    const initialized = this.#initialized;
+    this.#effect.execute();
+    if (initialized && this.#changed) {
+      trigger(this.#dependency, activeEffect?.computed === undefined ? undefined : activeEffect);
+    }
   }
 
   pause(): void {
@@ -408,16 +410,6 @@ export class ReactiveComputed<T> implements ReactiveOwner {
 
   stop(): void {
     this.#effect.stop();
-  }
-
-  #refresh(): void {
-    if (this.#evaluating) fail("HR006", "A reactive computed value depends on itself.");
-    if (!this.#dirty || this.#effect.stopped || this.#effect.paused) return;
-    const initialized = this.#initialized;
-    this.#effect.execute();
-    if (initialized && this.#changed) {
-      trigger(this.#dependency, activeEffect?.computed === undefined ? undefined : activeEffect);
-    }
   }
 
   #readDetached(): T {
@@ -460,25 +452,17 @@ function trigger(dependency: Dependency | undefined, skip?: ReactiveEffect): voi
   const first = dependency?.first;
   if (first === undefined) return;
   const multiple = first !== dependency!.last;
-  // A singleton computed's generic schedule path can only invalidate this same owner.
-  if (!multiple && first.effect.computed !== undefined) {
-    if (first.effect !== skip) first.effect.computed.invalidate();
-    return;
-  }
-  if (first.effect.computed === undefined) {
-    if (skip === undefined && multiple && first.effect.scheduler.enqueueDependency(dependency!)) return;
-    for (let subscription: Subscription | undefined = first;
-      subscription !== undefined; ) {
-      const next: Subscription | undefined = subscription.nextSubscriber;
-      if (subscription.effect !== skip) subscription.effect.schedule();
-      subscription = next;
-    }
-    return;
-  }
+  if (first.effect.computed === undefined && skip === undefined && multiple &&
+    first.effect.scheduler.enqueueDependency(dependency!)) return;
   for (let subscription: Subscription | undefined = first;
     subscription !== undefined; ) {
     const next: Subscription | undefined = subscription.nextSubscriber;
-    if (subscription.effect !== skip) subscription.effect.schedule();
+    const effect = subscription.effect;
+    if (effect !== skip) {
+      const computed = effect.computed;
+      if (computed === undefined) effect.schedule();
+      else computed.invalidate();
+    }
     subscription = next;
   }
 }
@@ -524,7 +508,7 @@ export class ReactiveScope implements Scope {
   get(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
-    if (activeEffect !== undefined) activeEffect.track(cell);
+    activeEffect?.track(cell);
     return cell.value;
   }
 
@@ -587,7 +571,7 @@ export class ReactiveScope implements Scope {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
     if (cell.computed !== undefined) return cell.computed.get();
-    if (activeEffect !== undefined) activeEffect.track(cell);
+    activeEffect?.track(cell);
     return cell.value;
   }
 

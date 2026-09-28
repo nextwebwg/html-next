@@ -97,11 +97,12 @@ describe("generateComponent", () => {
     );
   });
 
-  it("keeps unsupported computed expressions on the full-runtime fallback", () => {
+  it("keeps dynamic-format computed expressions on the full-runtime fallback", () => {
     const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
       <defs>
         <state name="count" :value="0"></state>
-        <computed name="label" from="format('%s', count)"></computed>
+        <state name="pattern" :value="'%s'"></state>
+        <computed name="label" from="format(pattern, count)"></computed>
         <handler name="increment"><set name="count" :value="count + 1"></set></handler>
       </defs>
       <button type="button" on:click="increment"><output $value="label"></output></button>

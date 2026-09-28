@@ -271,6 +271,53 @@ export function manageGeneratedProps(
   );
 }
 
+/** A compact equivalent of manageGeneratedProps for generated components with exactly one scalar prop. */
+export function manageGeneratedProp(
+  element: Element,
+  prop: GeneratedProp,
+  apply?: (value: unknown) => void,
+): () => void {
+  let explicit = assignedGeneratedProp(prop, prop.value);
+  let dirty = true;
+  let connected = false;
+  let pending = false;
+  const effective = (): unknown => explicit ?? prop.default;
+  const flush = (): void => {
+    pending = false;
+    if (!connected || !dirty) return;
+    dirty = false;
+    const value = prop.bound ? effective() : explicit;
+    const serialized = value === undefined || value === null ? null : String(value);
+    if (serialized === null) element.removeAttribute(prop.attribute);
+    else element.setAttribute(prop.attribute, serialized);
+    apply?.(effective());
+  };
+  const schedule = (): void => {
+    dirty = true;
+    if (connected && !pending) {
+      pending = true;
+      queueMicrotask(flush);
+    }
+  };
+  generatedPropUpdaters.set(element, (next) => {
+    if (!Object.hasOwn(next, prop.name)) return;
+    const value = assignedGeneratedProp(prop, next[prop.name]);
+    if (!Object.is(explicit, value)) {
+      explicit = value;
+      schedule();
+    }
+  });
+  return manageGeneratedLifecycle(
+    element,
+    () => {
+      connected = true;
+      dirty = true;
+      flush();
+    },
+    () => { connected = false; },
+  );
+}
+
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
 export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
   generatedPropUpdaters.get(element)?.(props);
