@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents } from "../src/index.js";
 
-import { assertPixelsEqual, diagnosePixelMismatch } from "../../html-next/tests/pixel-parity.js";
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
@@ -330,12 +330,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => window.trace.connects === 2 && document.querySelector("#case") === window.detachedControllerRoot)));
         const [reconnectedLive, reconnectedVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(reconnectedVue.behavior, reconnectedLive.behavior, "external DOM reinsertion controller behavior differs");
-        try {
-          await assertPixelsEqual(vue, reconnectedVue.pixels, reconnectedLive.pixels, "external DOM reinsertion controller pixels differ");
-        } catch (error) {
-          const diagnostics = await diagnosePixelMismatch(vue, live, reconnectedVue.pixels, reconnectedLive.pixels, "#case");
-          throw new Error(`${String(error)}; diagnostics=${JSON.stringify(diagnostics)}`, { cause: error });
-        }
+        await assertPixelsEqual(vue, reconnectedVue.pixels, reconnectedLive.pixels, "external DOM reinsertion controller pixels differ", live);
         await Promise.all([live, vue].map((page) => page.evaluate(() => {
           const main = document.querySelector("main")!;
           main.append(document.createElement("aside"));

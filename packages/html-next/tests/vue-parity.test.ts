@@ -726,7 +726,7 @@ for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox
         context.fillRect(0, 0, 1, 1);
         return canvas.toDataURL("image/png").split(",")[1]!;
       }, screenshot.toString("base64")), "base64");
-      await assert.rejects(assertPixelsEqual(page, changedPixel, screenshot, "changed pixels differ"), /1 differing RGBA pixels/);
+      await assert.rejects(assertPixelsEqual(page, changedPixel, screenshot, "changed pixels differ", page), /1 differing RGBA pixels.*recapturedParity/);
     } finally {
       await page.close();
       await browser.close();
@@ -1026,7 +1026,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
             const [afterLive, afterVue] = await Promise.all([observe(live, testCase), observe(vue, testCase)]);
             if (testCase.expectedAfter !== undefined) assert.deepEqual(afterLive.behavior, testCase.expectedAfter, "live-runtime event contract changed");
             assert.deepEqual(afterVue.behavior, afterLive.behavior, "post-interaction browser behavior differs");
-            await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "post-interaction rendered pixels differ");
+            await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "post-interaction rendered pixels differ", live);
             assert.deepEqual(errors, []);
           } finally {
             for (const release of releaseStale) release();

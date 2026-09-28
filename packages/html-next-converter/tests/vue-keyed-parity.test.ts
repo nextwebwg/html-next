@@ -196,7 +196,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XKeyed
             });
             const [actualLive, actualHydrated] = await Promise.all([read(live), read(hydrated)]);
             assert.deepEqual(actualHydrated.behavior, actualLive.behavior, `${stage} keyed behavior differs`);
-            await assertPixelsEqual(hydrated, actualHydrated.pixels, actualLive.pixels, `${stage} keyed pixels differ`);
+            await assertPixelsEqual(hydrated, actualHydrated.pixels, actualLive.pixels, `${stage} keyed pixels differ`, live);
             return actualLive.behavior;
           };
           assert.deepEqual((await compare("initial", ["a", "b", "c"], 3)).labels, ["A", "B", "C"]);
@@ -245,7 +245,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XKeyed
           const compare = async (stage: string, order: readonly string[], count: number) => {
             const [actualLive, actualVue] = await Promise.all([snapshot(live, order, count), snapshot(vue, order, count)]);
             assert.deepEqual(actualVue.behavior, actualLive.behavior, `${stage} behavior differs`);
-            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, `${stage} pixels differ`);
+            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, `${stage} pixels differ`, live);
             return actualLive.behavior;
           };
           assert.deepEqual((await compare("initial", ["a", "b", "c"], 3)).lifecycle, ["connect:a", "connect:b", "connect:c"]);

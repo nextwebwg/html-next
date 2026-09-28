@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 
 import type { Page } from "playwright";
 
-/** Compare rendered RGBA pixels, not the PNG encoders' byte streams. */
-export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Buffer, message: string): Promise<void> {
-  if (actual.equals(expected)) return;
+interface PixelDifference {
+  readonly size: string;
+  readonly changed: number;
+  readonly first: { readonly x: number; readonly y: number; readonly actual: number[]; readonly expected: number[] } | null;
+}
 
-  const difference = await page.evaluate(async ([actualPng, expectedPng]: [string, string]) => {
+async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Promise<PixelDifference> {
+  if (actual.equals(expected)) return { size: "same PNG", changed: 0, first: null };
+  return page.evaluate(async ([actualPng, expectedPng]: [string, string]) => {
     const decode = async (encoded: string) => {
       const response = await fetch(`data:image/png;base64,${encoded}`);
       const bitmap = await createImageBitmap(await response.blob());
@@ -41,15 +45,11 @@ export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Bu
     }
     return { size: `${left.width}x${left.height}`, changed, first };
   }, [actual.toString("base64"), expected.toString("base64")] as [string, string]);
-
-  assert.equal(difference.changed, 0, `${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; first=${JSON.stringify(difference.first)}`);
 }
 
-/** Record whether a mismatch survives another paint and whether page input state differs. */
-export async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page, actual: Buffer, expected: Buffer, selector: string): Promise<unknown> {
-  const state = async (page: Page) => page.evaluate((rootSelector) => {
-    const root = document.querySelector(rootSelector)!;
-    const button = root.querySelector("button");
+async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | undefined, actual: Buffer, expected: Buffer): Promise<unknown> {
+  const state = async (page: Page) => page.evaluate(() => {
+    const button = document.querySelector("#case button");
     const style = button === null ? null : getComputedStyle(button);
     return {
       activeElement: document.activeElement?.localName,
@@ -60,21 +60,33 @@ export async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page
       buttonBackground: style?.backgroundColor,
       buttonBorder: style?.borderColor,
     };
-  }, selector);
-  const [actualState, expectedState] = await Promise.all([state(actualPage), state(expectedPage)]);
-  const recapture = async (page: Page) => {
+  });
+  const actualState = await state(actualPage);
+  const expectedState = expectedPage === undefined ? undefined : await state(expectedPage);
+  const recapture = async (page: Page, previous: Buffer) => {
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    return page.locator(selector).screenshot({ animations: "disabled" });
+    const viewport = page.viewportSize();
+    const fullPage = viewport !== null && previous.readUInt32BE(16) === viewport.width && previous.readUInt32BE(20) === viewport.height;
+    return fullPage || await page.locator("#case").count() === 0
+      ? page.screenshot({ animations: "disabled" })
+      : page.locator("#case").screenshot({ animations: "disabled" });
   };
-  const [nextActual, nextExpected] = await Promise.all([recapture(actualPage), recapture(expectedPage)]);
-  const difference = async (page: Page, left: Buffer, right: Buffer) => {
-    try { await assertPixelsEqual(page, left, right, "recapture"); return "equal"; }
-    catch (error) { return error instanceof Error ? error.message : String(error); }
-  };
+  const nextActual = await recapture(actualPage, actual);
+  const nextExpected = expectedPage === undefined ? undefined : await recapture(expectedPage, expected);
   return {
     actualState, expectedState,
-    actualChanged: await difference(actualPage, nextActual, actual),
-    expectedChanged: await difference(expectedPage, nextExpected, expected),
-    recapturedParity: await difference(actualPage, nextActual, nextExpected),
+    actualChanged: await pixelDifference(actualPage, nextActual, actual),
+    expectedChanged: expectedPage === undefined || nextExpected === undefined ? undefined : await pixelDifference(expectedPage, nextExpected, expected),
+    recapturedParity: nextExpected === undefined ? undefined : await pixelDifference(actualPage, nextActual, nextExpected),
   };
+}
+
+/** Compare rendered RGBA pixels, not the PNG encoders' byte streams. */
+export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Buffer, message: string, expectedPage?: Page): Promise<void> {
+  const difference = await pixelDifference(page, actual, expected);
+  if (difference.changed === 0) return;
+  let diagnostics: unknown;
+  try { diagnostics = await diagnosePixelMismatch(page, expectedPage, actual, expected); }
+  catch (error) { diagnostics = { error: String(error) }; }
+  assert.fail(`${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; first=${JSON.stringify(difference.first)}; diagnostics=${JSON.stringify(diagnostics)}`);
 }

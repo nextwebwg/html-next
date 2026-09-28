@@ -201,14 +201,14 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
               assert.deepEqual(liveResult, testCase.expect.result, "live runtime characterization changed");
               assert.deepEqual(withoutStylingMarkers(vueResult), withoutStylingMarkers(liveResult), "public Vue browser behavior differs");
               assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), `public Vue server behavior differs: ${serverDOM}`);
-              await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "public Vue rendered pixels differ");
-              await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue server-rendered pixels differ");
+              await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "public Vue rendered pixels differ", live);
+              await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue server-rendered pixels differ", live);
               await hydrated.evaluate(() => { window.hydrateVue = true; });
               await hydrated.addScriptTag({ path: output.bundle });
               const hydratedResult = await hydrated.evaluate((script) => Function(script)(), program);
               assert.deepEqual(withoutStylingMarkers(hydratedResult), withoutStylingMarkers(liveResult),
                 `public Vue hydrated behavior differs: before=${serverDOM} after=${await hydrated.locator("main").evaluate((root) => root.innerHTML)} warnings=${warnings.join(" | ")}`);
-              await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue hydrated pixels differ");
+              await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue hydrated pixels differ", live);
               if (testCase.name === "keeps a single native root when $with scopes the root") {
                 for (const page of [live, vue, hydrated]) await page.locator("#person button").click();
                 const read = (page: Page) => page.evaluate(() => {
@@ -218,8 +218,8 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
                 assert.deepEqual(await read(live), ["section", "Bea", "Bea"]);
                 assert.deepEqual(await read(vue), await read(live), "reactive root $with behavior differs");
                 assert.deepEqual(await read(hydrated), await read(live), "reactive hydrated root $with behavior differs");
-                await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "reactive root $with pixels differ");
-                await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "reactive hydrated root $with pixels differ");
+                await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "reactive root $with pixels differ", live);
+                await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "reactive hydrated root $with pixels differ", live);
               }
               assert.deepEqual(warnings.filter((message) => !message.startsWith("Feature flags ") && /hydration|mismatch/i.test(message)), [], "Vue reported a hydration mismatch");
               assert.deepEqual(errors, []);
