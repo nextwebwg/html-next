@@ -771,45 +771,13 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
-  it("compiles unmodified static connect handlers through the generated lifecycle coordinator", async () => {
-    const module = generated(`<template component="demo-event-connect" status="experimental" summary="Direct native connect.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
-      <button on:connect="increment"><output $value="count"></output></button>
-    </template>`).get("vanilla/DemoEventConnect.js")!;
-
-    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /manageGeneratedLifecycle/);
-    assert.match(module, /handler0\(\);/);
-    await transform(module, { loader: "js" });
-  });
-
-  it("compiles unmodified static disconnect handlers through the generated lifecycle coordinator", async () => {
-    const module = generated(`<template component="demo-event-disconnect" status="experimental" summary="Direct native disconnect.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
-      <button on:disconnect="increment"><output $value="count"></output></button>
-    </template>`).get("vanilla/DemoEventDisconnect.js")!;
-
-    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /manageGeneratedLifecycle/);
-    assert.match(module, /handler0Disconnect\(\);/);
-    await transform(module, { loader: "js" });
-  });
-
-  it("compiles static lifecycle modifiers from their synthetic Event semantics", async () => {
-    const module = generated(`<template component="demo-event-lifecycle-modifiers" status="experimental" summary="Direct lifecycle modifiers.">
-      <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-        <handler name="never"><set name="count" :value="count + 10"></set></handler>
-      </defs>
-      <button on:connect.once.exact.prevent.capture.enter.left="increment" on:disconnect.passive.stop="increment" on:connect.self="never"><output $value="count"></output></button>
-    </template>`).get("vanilla/DemoEventLifecycleModifiers.js")!;
-
-    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /manageGeneratedLifecycle/);
-    assert.match(module, /handler0\(\);/);
-    assert.doesNotMatch(module, /handler1/);
-    await transform(module, { loader: "js" });
+  it("rejects deferred declarative connection handlers", () => {
+    for (const binding of ["on:connect", "on:disconnect", "on:connect.once.exact.prevent.capture.enter.left", "on:disconnect.passive.stop"]) {
+      assert.throws(() => generated(`<template component="demo-event-lifecycle" status="experimental" summary="Deferred lifecycle.">
+        <defs><handler name="increment"></handler></defs>
+        <button ${binding}="increment"></button>
+      </template>`), /HT010/);
+    }
   });
 
   it("compiles static state-derived primitive event dispatch through generated runtime validation", async () => {

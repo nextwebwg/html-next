@@ -210,23 +210,6 @@ const onceSource = `<template component="event-once" status="experimental" summa
   <section><button type="button" on:keydown.enter.once="increment"><output $value="count"></output></button></section>
 </template>`;
 
-const connectSource = `<template component="event-connect" status="experimental" summary="Direct native connect fixture.">
-  <defs>
-    <state name="count" :value="0"></state>
-    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-  </defs>
-  <section><button type="button" on:connect="increment"><output $value="count"></output></button></section>
-</template>`;
-
-const disconnectSource = `<template component="event-disconnect" status="experimental" summary="Direct native disconnect fixture.">
-  <defs>
-    <state name="count" :value="0"></state>
-    <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-    <handler name="never"><set name="count" :value="count + 10"></set></handler>
-  </defs>
-  <section><button type="button" on:disconnect.once.exact.passive.stop.capture.enter.left="increment" on:connect.self="never"><output $value="count"></output></button></section>
-</template>`;
-
 const dispatchSource = `<template component="event-dispatch" status="experimental" summary="Direct declared event dispatch fixture.">
   <defs>
     <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
@@ -640,8 +623,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
   let filteredEventBundlePath = "";
   let eventOptionsBundlePath = "";
   let onceBundlePath = "";
-  let connectBundlePath = "";
-  let disconnectBundlePath = "";
   let dispatchBundlePath = "";
   let computedDispatchBundlePath = "";
   let inlineExpressionBundlePath = "";
@@ -1076,49 +1057,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       bundle: true,
       format: "iife",
       globalName: "EventOnce",
-      platform: "browser",
-      target: ["es2022"],
-      loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
-    });
-
-    const connectModule = generateComponent(parseComponent(connectSource, "event-connect.html"))
-      .find((artifact) => artifact.path === "vanilla/EventConnect.js")?.content;
-    assert.ok(connectModule);
-    assert.doesNotMatch(connectModule, /@nextwebwg\/html-next\/runtime/);
-    assert.match(connectModule, /manageGeneratedLifecycle/);
-    await writeFile(join(directory, "styles/event-connect.css"), "");
-    const connectEntryPath = join(directory, "vanilla/EventConnect.js");
-    connectBundlePath = join(directory, "event-connect-bundle.js");
-    await writeFile(connectEntryPath, connectModule);
-    await build({
-      entryPoints: [connectEntryPath],
-      outfile: connectBundlePath,
-      bundle: true,
-      format: "iife",
-      globalName: "EventConnect",
-      platform: "browser",
-      target: ["es2022"],
-      loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
-    });
-
-    const disconnectModule = generateComponent(parseComponent(disconnectSource, "event-disconnect.html"))
-      .find((artifact) => artifact.path === "vanilla/EventDisconnect.js")?.content;
-    assert.ok(disconnectModule);
-    assert.doesNotMatch(disconnectModule, /@nextwebwg\/html-next\/runtime/);
-    assert.match(disconnectModule, /manageGeneratedLifecycle/);
-    assert.match(disconnectModule, /handler0Disconnect\(\)/);
-    await writeFile(join(directory, "styles/event-disconnect.css"), "");
-    const disconnectEntryPath = join(directory, "vanilla/EventDisconnect.js");
-    disconnectBundlePath = join(directory, "event-disconnect-bundle.js");
-    await writeFile(disconnectEntryPath, disconnectModule);
-    await build({
-      entryPoints: [disconnectEntryPath],
-      outfile: disconnectBundlePath,
-      bundle: true,
-      format: "iife",
-      globalName: "EventDisconnect",
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
@@ -2185,82 +2123,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           reconnected: true,
           consumedAgain: true,
           afterReconnect: "1",
-        });
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} runs a direct connect handler for each connected period`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent("<main></main>");
-        await page.addScriptTag({ path: connectBundlePath });
-        const result = await page.evaluate(async () => {
-          const api = (window as unknown as {
-            EventConnect: { createEventConnect(): HTMLElement };
-          }).EventConnect;
-          const component = api.createEventConnect();
-          const main = document.querySelector("main")!;
-          const output = component.querySelector("output")!;
-          const detached = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const connected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removed = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          return { detached, connected, removed, reconnected: output.textContent };
-        });
-        assert.deepEqual(result, { detached: "0", connected: "1", removed: "1", reconnected: "2" });
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} defers a direct disconnect update until the next connected period`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent("<main></main>");
-        await page.addScriptTag({ path: disconnectBundlePath });
-        const result = await page.evaluate(async () => {
-          const api = (window as unknown as {
-            EventDisconnect: { createEventDisconnect(): HTMLElement };
-          }).EventDisconnect;
-          const component = api.createEventDisconnect();
-          const main = document.querySelector("main")!;
-          const output = component.querySelector("output")!;
-          const detached = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const connected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removed = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          const reconnected = output.textContent;
-          component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
-          const removedAgain = output.textContent;
-          main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
-          return { detached, connected, removed, reconnected, removedAgain, final: output.textContent };
-        });
-        assert.deepEqual(result, {
-          detached: "0", connected: "0", removed: "0", reconnected: "1", removedAgain: "1", final: "2",
         });
       } finally {
         await browser.close();
