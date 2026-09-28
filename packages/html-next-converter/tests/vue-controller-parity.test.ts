@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", import.meta.url).pathname;
@@ -191,7 +193,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, hydrated].map((page) => page.waitForFunction(() => window.trace.effects === 1)));
         const [initialLive, initialHydrated] = await Promise.all([snapshot(live), snapshot(hydrated)]);
         assert.deepEqual(initialHydrated.behavior, initialLive.behavior, "hydrated controller behavior differs");
-        assert.deepEqual(initialHydrated.pixels, initialLive.pixels, "hydrated controller pixels differ");
+        await assertPixelsEqual(hydrated, initialHydrated.pixels, initialLive.pixels, "hydrated controller pixels differ");
         assert.equal(initialLive.behavior.trace.connects, 1);
 
         await Promise.all([live, hydrated].map((page) => page.locator("#case button").focus()));
@@ -200,7 +202,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
           document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
         const [updatedLive, updatedHydrated] = await Promise.all([snapshot(live), snapshot(hydrated)]);
         assert.deepEqual(updatedHydrated.behavior, updatedLive.behavior, "hydrated controller update differs");
-        assert.deepEqual(updatedHydrated.pixels, updatedLive.pixels, "hydrated controller update pixels differ");
+        await assertPixelsEqual(hydrated, updatedHydrated.pixels, updatedLive.pixels, "hydrated controller update pixels differ");
 
         await Promise.all([
           live.evaluate(() => document.querySelector("#case")?.remove()),
@@ -243,7 +245,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => window.trace.effects === 1)));
         const [initialLive, initialVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(initialVue.behavior, initialLive.behavior, "initial controller behavior differs");
-        assert.deepEqual(initialVue.pixels, initialLive.pixels, "initial controller pixels differ");
+        await assertPixelsEqual(vue, initialVue.pixels, initialLive.pixels, "initial controller pixels differ");
 
         await Promise.all([live, vue].map((page) => page.locator("#case button").focus()));
         await Promise.all([live, vue].map((page) => page.locator("#case button").press("Enter")));
@@ -254,7 +256,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live.evaluate(() => (document.querySelector("#case") as Element & { focusButton(): Promise<void> }).focusButton()), vue.evaluate(() => window.vueMethod())]);
         const [afterLive, afterVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(afterVue.behavior, afterLive.behavior, "updated controller behavior differs");
-        assert.deepEqual(afterVue.pixels, afterLive.pixels, "updated controller pixels differ");
+        await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "updated controller pixels differ");
         assert.equal(afterLive.behavior.tag, "article");
         const [liveHelper, vueHelper] = await Promise.all([
           live.evaluate(() => (document.querySelector("#case") as Element & { loadHelper(): Promise<number> }).loadHelper()),
@@ -282,7 +284,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2" && document.querySelector("#case")?.localName === "section")));
         const [roundTripLive, roundTripVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(roundTripVue.behavior, roundTripLive.behavior, "root switch-back controller behavior differs");
-        assert.deepEqual(roundTripVue.pixels, roundTripLive.pixels, "root switch-back controller pixels differ");
+        await assertPixelsEqual(vue, roundTripVue.pixels, roundTripLive.pixels, "root switch-back controller pixels differ");
 
         const dispatchProbe = async (page: Page) => page.evaluate(() => {
           const root = document.querySelector("#case")!;
@@ -328,7 +330,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => window.trace.connects === 2 && document.querySelector("#case") === window.detachedControllerRoot)));
         const [reconnectedLive, reconnectedVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(reconnectedVue.behavior, reconnectedLive.behavior, "external DOM reinsertion controller behavior differs");
-        assert.deepEqual(reconnectedVue.pixels, reconnectedLive.pixels, "external DOM reinsertion controller pixels differ");
+        await assertPixelsEqual(vue, reconnectedVue.pixels, reconnectedLive.pixels, "external DOM reinsertion controller pixels differ");
         await Promise.all([live, vue].map((page) => page.evaluate(() => {
           const main = document.querySelector("main")!;
           main.append(document.createElement("aside"));

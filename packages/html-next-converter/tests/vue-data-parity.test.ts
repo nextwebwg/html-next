@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } 
 
 import { convertComponents } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -227,7 +229,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
           await hydrated.addScriptTag({ path: hydrationOutputs.get(mode)!.bundle });
           const [liveState, hydratedState] = await Promise.all([snapshot(live), snapshot(hydrated)]);
           assert.equal(hydratedState.text.replace(/\s/g, ""), liveState.text.replace(/\s/g, ""));
-          assert.deepEqual(hydratedState.pixels, liveState.pixels, "hydrated data pixels differ");
+          await assertPixelsEqual(hydrated, hydratedState.pixels, liveState.pixels, "hydrated data pixels differ");
           const expected = ["https://app.example/api/root", "https://app.example/app/components/api/feed", "https://app.example/app/components/api/note?tag=a&tag=b"];
           assert.deepEqual(requested.live.sort(), expected);
           assert.deepEqual(requested.hydrated.sort(), expected);
@@ -304,7 +306,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
             });
             const [actualLive, actualHydrated] = await Promise.all([read(live), read(hydrated)]);
             assert.deepEqual(actualHydrated.behavior, actualLive.behavior, `${stage} hydrated data behavior differs`);
-            assert.deepEqual(actualHydrated.pixels, actualLive.pixels, `${stage} hydrated data pixels differ`);
+            await assertPixelsEqual(hydrated, actualHydrated.pixels, actualLive.pixels, `${stage} hydrated data pixels differ`);
           };
           await waitFor("First", "no");
           await compare("loaded");
@@ -399,7 +401,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
           });
           const [actualLive, actualVue] = await Promise.all([read(live), read(vue)]);
           assert.deepEqual(actualVue.behavior, actualLive.behavior, `${stage} data behavior differs`);
-          assert.deepEqual(actualVue.pixels, actualLive.pixels, `${stage} pixels differ`);
+          await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, `${stage} pixels differ`);
           return actualLive.behavior;
         };
         await waitFor("First", "no");
@@ -477,7 +479,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XDataC
           throw new Error(`${String(error)}; live=${JSON.stringify(liveText)}; vue=${JSON.stringify(vueText)}; liveMarkup=${JSON.stringify(liveMarkup)}; definition=${hasDefinition}; requests=${JSON.stringify(requested)}; errors=${JSON.stringify(errors)}`);
         });
         assert.equal(vueState.text.replace(/\s/g, ""), liveState.text.replace(/\s/g, ""));
-        assert.deepEqual(vueState.pixels, liveState.pixels);
+        await assertPixelsEqual(vue, vueState.pixels, liveState.pixels, "data pixels differ");
         const expected = ["https://app.example/api/root", "https://app.example/app/components/api/feed", "https://app.example/app/components/api/note?tag=a&tag=b"];
         assert.deepEqual(requested.live.sort(), expected);
         assert.deepEqual(requested.vue.sort(), expected);

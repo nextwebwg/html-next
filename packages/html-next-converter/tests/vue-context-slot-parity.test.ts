@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -159,15 +161,15 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XSteps
           const initial: Behavior = { outer: ["yes", "no"], inner: ["yes", "no"] };
           const [serverLive, serverHydrated] = await Promise.all([snapshot(live, initial), snapshot(hydrated, initial)]);
           assert.deepEqual(serverHydrated.behavior, serverLive.behavior, "server-rendered context differs");
-          assert.deepEqual(serverHydrated.pixels, serverLive.pixels, "server-rendered context pixels differ");
+          await assertPixelsEqual(hydrated, serverHydrated.pixels, serverLive.pixels, "server-rendered context pixels differ");
           await hydrated.addScriptTag({ path: output.hydrate });
           const compare = async (expected: Behavior) => {
             const [liveResult, vueResult, hydratedResult] = await Promise.all([snapshot(live, expected), snapshot(vue, expected), snapshot(hydrated, expected)]);
             assert.deepEqual(liveResult.behavior, expected);
             assert.deepEqual(vueResult.behavior, expected);
-            assert.deepEqual(vueResult.pixels, liveResult.pixels);
+            await assertPixelsEqual(vue, vueResult.pixels, liveResult.pixels, "context pixels differ");
             assert.deepEqual(hydratedResult.behavior, expected, "hydrated context differs");
-            assert.deepEqual(hydratedResult.pixels, liveResult.pixels, "hydrated context pixels differ");
+            await assertPixelsEqual(hydrated, hydratedResult.pixels, liveResult.pixels, "hydrated context pixels differ");
           };
           await compare(initial);
           await Promise.all(pages.map((page) => page.locator("#case > button").click()));

@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -90,32 +92,7 @@ async function snapshot(page: Page): Promise<{ behavior: HydratedState; pixels: 
 }
 
 async function assertPixels(page: Page, expected: Buffer, actual: Buffer, stage: string): Promise<void> {
-  if (actual.equals(expected)) return;
-  const difference = await page.evaluate(async ([left, right]) => {
-    const decode = async (source: string) => {
-      const image = new Image();
-      image.src = `data:image/png;base64,${source}`;
-      await image.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const context = canvas.getContext("2d")!;
-      context.drawImage(image, 0, 0);
-      return context.getImageData(0, 0, image.width, image.height);
-    };
-    const a = await decode(left);
-    const b = await decode(right);
-    const points: string[] = [];
-    let count = 0;
-    for (let index = 0; index < a.data.length; index += 4) {
-      if (a.data[index] !== b.data[index] || a.data[index + 1] !== b.data[index + 1] || a.data[index + 2] !== b.data[index + 2]) {
-        count++;
-        if (points.length < 12) points.push(`${(index / 4) % a.width},${Math.floor(index / 4 / a.width)}:${a.data[index]}/${b.data[index]}`);
-      }
-    }
-    return { size: [a.width, a.height, b.width, b.height], count, points };
-  }, [expected.toString("base64"), actual.toString("base64")] as const);
-  assert.fail(`${stage} pixels differ: ${JSON.stringify(difference)}`);
+  await assertPixelsEqual(page, actual, expected, `${stage} pixels differ`);
 }
 
 describe.skipIf(!enabled)("public Vue converter SSR/hydration parity", () => {

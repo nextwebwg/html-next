@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -152,7 +154,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XScope
             if (action !== null) await Promise.all([live, vue].map((page) => page.locator(`#case ${action}`).click()));
             const [actualLive, actualVue] = await Promise.all([snapshot(live, expected), snapshot(vue, expected)]);
             assert.deepEqual(actualVue.behavior, actualLive.behavior);
-            assert.deepEqual(actualVue.pixels, actualLive.pixels);
+            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, "scoped-slot pixels differ");
           }
           assert.deepEqual(errors, []);
         } finally {
@@ -178,7 +180,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XScope
           await vue.setContent(`<main>${bundles.get(mode)!.server}</main>`);
           const [serverLive, serverVue] = await Promise.all([snapshot(live, "AddSwitchAdaTeam0"), snapshot(vue, "AddSwitchAdaTeam0")]);
           assert.deepEqual(serverVue.behavior, serverLive.behavior, "server-rendered scoped-slot behavior differs");
-          assert.deepEqual(serverVue.pixels, serverLive.pixels, "server-rendered scoped-slot pixels differ");
+          await assertPixelsEqual(vue, serverVue.pixels, serverLive.pixels, "server-rendered scoped-slot pixels differ");
           for (const page of [live, vue]) await page.evaluate(() => {
             window.scopedHydrationRoot = document.querySelector("#case")!;
             window.scopedHydrationRow = window.scopedHydrationRoot.querySelector("li")!;
@@ -197,7 +199,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XScope
             if (action !== null) await Promise.all([live, vue].map((page) => page.locator(`#case ${action}`).click()));
             const [actualLive, actualVue] = await Promise.all([snapshot(live, expected), snapshot(vue, expected)]);
             assert.deepEqual(actualVue.behavior, actualLive.behavior);
-            assert.deepEqual(actualVue.pixels, actualLive.pixels);
+            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, "scoped-slot pixels differ");
           }
           assert.deepEqual(errors, []);
         } finally {

@@ -13,6 +13,7 @@ import { generateVueComponent, vueHostArtifact, vueHtmlArtifact, vueControlArtif
 import { parseComponent } from "../src/source-parser.js";
 import type { ComponentDefinition } from "../src/template.js";
 import { cases as conformanceCases } from "./conformance/cases.js";
+import { assertPixelsEqual } from "./pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
@@ -702,6 +703,37 @@ async function observe(page: Page, testCase: ParityCase): Promise<{ behavior: un
   return { behavior, pixels };
 }
 
+for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+  it.skipIf(!enabled)(`${engine} compares decoded screenshot pixels across PNG encodings`, async () => {
+    const browser = await browserType.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.setContent('<div id="case" style="width:10px;height:10px;background:rgb(20 30 40)"></div>');
+      const screenshot = await page.locator("#case").screenshot();
+      assert.equal(screenshot.subarray(-8, -4).toString("ascii"), "IEND");
+      // A valid PNG text chunk changes the bytes while leaving all rendered pixels intact.
+      const comment = Buffer.from("0000001374455874436f6d6d656e740073616d6520706978656c73d01a19f2", "hex");
+      const samePixels = Buffer.concat([screenshot.subarray(0, -12), comment, screenshot.subarray(-12)]);
+      await assertPixelsEqual(page, samePixels, screenshot, "metadata-only pixels differ");
+      const changedPixel = Buffer.from(await page.evaluate(async (png) => {
+        const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d")!;
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        context.fillRect(0, 0, 1, 1);
+        return canvas.toDataURL("image/png").split(",")[1]!;
+      }, screenshot.toString("base64")), "base64");
+      await assert.rejects(assertPixelsEqual(page, changedPixel, screenshot, "changed pixels differ"), /1 differing RGBA pixels/);
+    } finally {
+      await page.close();
+      await browser.close();
+    }
+  });
+}
+
 describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
   let directory = "";
   let liveBundle = "";
@@ -905,7 +937,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
             const [liveState, vueState] = await Promise.all([state(live), state(vue)]);
             assert.equal(liveState.behavior.tooShort, expected, "live runtime native validity baseline changed");
             assert.deepEqual(vueState.behavior, liveState.behavior, "bound control validity differs");
-            assert.deepEqual(vueState.pixels, liveState.pixels, "bound control pixels differ");
+            await assertPixelsEqual(vue, vueState.pixels, liveState.pixels, "bound control pixels differ");
           }
         } finally {
           await Promise.all([live.close(), vue.close()]);
@@ -985,7 +1017,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
             if (beforeReady !== undefined) await Promise.all([live, vue].map((page) => page.waitForFunction(beforeReady, undefined, { timeout: 5000 })));
             const [beforeLive, beforeVue] = await Promise.all([observe(live, testCase), observe(vue, testCase)]);
             assert.deepEqual(beforeVue.behavior, beforeLive.behavior, "initial browser behavior differs");
-            assert.deepEqual(beforeVue.pixels, beforeLive.pixels, "initial rendered pixels differ");
+            await assertPixelsEqual(vue, beforeVue.pixels, beforeLive.pixels, "initial rendered pixels differ");
             await Promise.all([live, vue].map((page) => page.evaluate(({ selector, script }) => Function("root", script)(document.querySelector(selector)), { selector: testCase.root, script: testCase.action })));
             const afterReady = testCase.afterReady;
             if (afterReady !== undefined) await Promise.all([live, vue].map((page) => page.waitForFunction(afterReady, undefined, { timeout: 5000 })));
@@ -994,7 +1026,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
             const [afterLive, afterVue] = await Promise.all([observe(live, testCase), observe(vue, testCase)]);
             if (testCase.expectedAfter !== undefined) assert.deepEqual(afterLive.behavior, testCase.expectedAfter, "live-runtime event contract changed");
             assert.deepEqual(afterVue.behavior, afterLive.behavior, "post-interaction browser behavior differs");
-            assert.deepEqual(afterVue.pixels, afterLive.pixels, "post-interaction rendered pixels differ");
+            await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "post-interaction rendered pixels differ");
             assert.deepEqual(errors, []);
           } finally {
             for (const release of releaseStale) release();
@@ -1054,7 +1086,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
                 return page.screenshot({ animations: "disabled" });
               };
               const [livePixels, vuePixels] = await Promise.all([capturePixels(live), capturePixels(vue)]);
-              assert.deepEqual(vuePixels, livePixels, "Vue rendered pixels differ");
+              await assertPixelsEqual(vue, vuePixels, livePixels, "Vue rendered pixels differ");
             } finally {
               await Promise.all([live.close(), vue.close()]);
             }

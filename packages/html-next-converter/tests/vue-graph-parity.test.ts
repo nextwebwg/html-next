@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -187,7 +189,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
           })));
           const [serverLive, serverVue] = await Promise.all([snapshot(live, "Child:Item0"), snapshot(hydrated, "Child:Item0")]);
           assert.deepEqual(serverVue.behavior, serverLive.behavior, "server-rendered graph behavior differs");
-          assert.deepEqual(serverVue.pixels, serverLive.pixels, "server-rendered graph pixels differ");
+          await assertPixelsEqual(vue, serverVue.pixels, serverLive.pixels, "server-rendered graph pixels differ");
           await hydrated.addScriptTag({ path: output.hydrateBundle });
           await Promise.all(pages.map((page) => page.evaluate(() => {
             window.graphClicks = 0;
@@ -200,9 +202,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
               snapshot(live, expected), snapshot(vue, expected), snapshot(hydrated, expected),
             ]);
             assert.deepEqual(vueResult.behavior, liveResult.behavior);
-            assert.deepEqual(vueResult.pixels, liveResult.pixels);
+            await assertPixelsEqual(vue, vueResult.pixels, liveResult.pixels, "graph pixels differ");
             assert.deepEqual(hydratedResult.behavior, liveResult.behavior, "hydrated graph behavior differs");
-            assert.deepEqual(hydratedResult.pixels, liveResult.pixels, "hydrated graph pixels differ");
+            await assertPixelsEqual(hydrated, hydratedResult.pixels, liveResult.pixels, "hydrated graph pixels differ");
             assert.equal(liveResult.behavior.rootHits, "0");
             assert.equal(liveResult.behavior.savedHits, "0:0");
             assert.equal(liveResult.behavior.rightHits, "0");
@@ -221,9 +223,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
             snapshot(live, "Child:Item1"), snapshot(vue, "Child:Item1"), snapshot(hydrated, "Child:Item1"),
           ]);
           assert.deepEqual(rootVue.behavior, rootLive.behavior);
-          assert.deepEqual(rootVue.pixels, rootLive.pixels);
+          await assertPixelsEqual(vue, rootVue.pixels, rootLive.pixels, "graph root pixels differ");
           assert.deepEqual(rootHydrated.behavior, rootLive.behavior);
-          assert.deepEqual(rootHydrated.pixels, rootLive.pixels);
+          await assertPixelsEqual(hydrated, rootHydrated.pixels, rootLive.pixels, "hydrated graph root pixels differ");
           assert.equal(rootLive.behavior.rootHits, "1");
           assert.equal(rootLive.behavior.documentClicks, 1);
           await Promise.all(pages.map((page) => page.locator("#case li").click()));
@@ -231,9 +233,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
             snapshot(live, "Child:Item1"), snapshot(vue, "Child:Item1"), snapshot(hydrated, "Child:Item1"),
           ]);
           assert.deepEqual(eventVue.behavior, eventLive.behavior);
-          assert.deepEqual(eventVue.pixels, eventLive.pixels);
+          await assertPixelsEqual(vue, eventVue.pixels, eventLive.pixels, "graph event pixels differ");
           assert.deepEqual(eventHydrated.behavior, eventLive.behavior);
-          assert.deepEqual(eventHydrated.pixels, eventLive.pixels);
+          await assertPixelsEqual(hydrated, eventHydrated.pixels, eventLive.pixels, "hydrated graph event pixels differ");
           assert.equal(eventLive.behavior.savedHits, "1:0");
           assert.equal(eventLive.behavior.rightHits, "0");
           assert.equal(eventLive.behavior.documentSaved, 0);
@@ -245,9 +247,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XGraph
             snapshot(live, "Child:Item1"), snapshot(vue, "Child:Item1"), snapshot(hydrated, "Child:Item1"),
           ]);
           assert.deepEqual(rightVue.behavior, rightLive.behavior);
-          assert.deepEqual(rightVue.pixels, rightLive.pixels);
+          await assertPixelsEqual(vue, rightVue.pixels, rightLive.pixels, "graph event-option pixels differ");
           assert.deepEqual(rightHydrated.behavior, rightLive.behavior);
-          assert.deepEqual(rightHydrated.pixels, rightLive.pixels);
+          await assertPixelsEqual(hydrated, rightHydrated.pixels, rightLive.pixels, "hydrated graph event-option pixels differ");
           assert.equal(rightLive.behavior.rightHits, "1");
           assert.equal(rightLive.behavior.savedHits, "2:0");
           assert.deepEqual(warnings.filter((message) => !message.startsWith("Feature flags ") && /hydration|mismatch/i.test(message)), [], "Vue reported a hydration mismatch");

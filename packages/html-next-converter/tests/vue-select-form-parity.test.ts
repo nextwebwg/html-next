@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -146,7 +148,7 @@ export const render = () => renderToString(createSSRApp({ render: () => [h("form
           })));
           const [serverLive, serverHydrated] = await Promise.all([snapshot(liveServer), snapshot(hydrated)]);
           assert.deepEqual(serverHydrated.behavior, serverLive.behavior, "server-rendered select behavior differs");
-          assert.deepEqual(serverHydrated.pixels, serverLive.pixels, "server-rendered select pixels differ");
+          await assertPixelsEqual(hydrated, serverHydrated.pixels, serverLive.pixels, "server-rendered select pixels differ");
           await hydrated.addScriptTag({ path: output.hydrate });
           await Promise.all(pages.map((page) => page.evaluate(() => {
             window.selectFormTrace = { invalid: 0, submits: [] };
@@ -160,9 +162,9 @@ export const render = () => renderToString(createSSRApp({ render: () => [h("form
           const compare = async (stage: string) => {
             const [actualLive, actualVue, actualHydrated] = await Promise.all([snapshot(live), snapshot(vue), snapshot(hydrated)]);
             assert.deepEqual(actualVue.behavior, actualLive.behavior, `${stage} form behavior differs`);
-            assert.deepEqual(actualVue.pixels, actualLive.pixels, `${stage} form pixels differ`);
+            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, `${stage} form pixels differ`);
             assert.deepEqual(actualHydrated.behavior, actualLive.behavior, `${stage} hydrated form behavior differs`);
-            assert.deepEqual(actualHydrated.pixels, actualLive.pixels, `${stage} hydrated form pixels differ`);
+            await assertPixelsEqual(hydrated, actualHydrated.pixels, actualLive.pixels, `${stage} hydrated form pixels differ`);
             return actualLive.behavior;
           };
           const initial = await compare("initial");

@@ -11,6 +11,8 @@ import { HtmlDiagnosticError } from "@nextwebwg/html-next";
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -223,13 +225,13 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XEvent
           await hydrated.setContent(`<main>${output.server}</main>`);
           const [serverLive, serverHydrated] = await Promise.all([snapshot(live), snapshot(hydrated)]);
           assert.deepEqual(serverHydrated.counts, serverLive.counts, "server-rendered event counts differ");
-          assert.deepEqual(serverHydrated.pixels, serverLive.pixels, "server-rendered event pixels differ");
+          await assertPixelsEqual(hydrated, serverHydrated.pixels, serverLive.pixels, "server-rendered event pixels differ");
           await hydrated.addScriptTag({ path: output.hydrate });
           const [initialLive, initialVue, initialHydrated] = await Promise.all([snapshot(live), snapshot(vue), snapshot(hydrated)]);
           assert.deepEqual(initialVue.counts, initialLive.counts);
-          assert.deepEqual(initialVue.pixels, initialLive.pixels);
+          await assertPixelsEqual(vue, initialVue.pixels, initialLive.pixels, "event pixels differ");
           assert.deepEqual(initialHydrated.counts, initialLive.counts, "hydrated event counts differ");
-          assert.deepEqual(initialHydrated.pixels, initialLive.pixels, "hydrated event pixels differ");
+          await assertPixelsEqual(hydrated, initialHydrated.pixels, initialLive.pixels, "hydrated event pixels differ");
           const [liveResults, vueResults, hydratedResults] = await Promise.all([runMatrix(live), runMatrix(vue), runMatrix(hydrated)]);
           assert.deepEqual(vueResults, liveResults, "event dispatch behavior differs");
           assert.deepEqual(hydratedResults, liveResults, "hydrated event dispatch behavior differs");
@@ -245,9 +247,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XEvent
           const expected = cases.map(({ steps }) => String(steps.at(-1)!.count));
           assert.deepEqual(afterLive.counts, expected, "live-runtime modifier baseline changed");
           assert.deepEqual(afterVue.counts, expected, "converted modifier counts differ");
-          assert.deepEqual(afterVue.pixels, afterLive.pixels, "converted modifier pixels differ");
+          await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "converted modifier pixels differ");
           assert.deepEqual(afterHydrated.counts, expected, "hydrated modifier counts differ");
-          assert.deepEqual(afterHydrated.pixels, afterLive.pixels, "hydrated modifier pixels differ");
+          await assertPixelsEqual(hydrated, afterHydrated.pixels, afterLive.pixels, "hydrated modifier pixels differ");
           assert.deepEqual(warnings.filter((message) => !message.startsWith("Feature flags ") && /hydration|mismatch/i.test(message)), [], "Vue reported a hydration mismatch");
           assert.deepEqual(errors, []);
         } finally {

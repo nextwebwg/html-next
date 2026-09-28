@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -175,14 +177,14 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XSlotP
           await hydrated.setContent(`<main>${output.server}</main>`);
           const [serverLive, serverHydrated] = await Promise.all([snapshot(live, "section", 1), snapshot(hydrated, "section", 1)]);
           assert.deepEqual(serverHydrated.behavior, serverLive.behavior, "server-rendered slot behavior differs");
-          assert.deepEqual(serverHydrated.pixels, serverLive.pixels, "server-rendered slot pixels differ");
+          await assertPixelsEqual(hydrated, serverHydrated.pixels, serverLive.pixels, "server-rendered slot pixels differ");
           await hydrated.addScriptTag({ path: output.hydrate });
           const compare = async (stage: string, tag: string, rows: number) => {
             const [actualLive, actualVue, actualHydrated] = await Promise.all([snapshot(live, tag, rows), snapshot(vue, tag, rows), snapshot(hydrated, tag, rows)]);
             assert.deepEqual(actualVue.behavior, actualLive.behavior, `${stage} slot behavior differs`);
-            assert.deepEqual(actualVue.pixels, actualLive.pixels, `${stage} slot pixels differ`);
+            await assertPixelsEqual(vue, actualVue.pixels, actualLive.pixels, `${stage} slot pixels differ`);
             assert.deepEqual(actualHydrated.behavior, actualLive.behavior, `${stage} hydrated slot behavior differs`);
-            assert.deepEqual(actualHydrated.pixels, actualLive.pixels, `${stage} hydrated slot pixels differ`);
+            await assertPixelsEqual(hydrated, actualHydrated.pixels, actualLive.pixels, `${stage} hydrated slot pixels differ`);
             return actualLive.behavior;
           };
           const initial = await compare("initial", "section", 1);

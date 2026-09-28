@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -35,6 +37,12 @@ async function observe(page: Page): Promise<{ readonly output: string | null; re
   const root = page.locator("#case");
   if (await root.count() === 0) return { output: null, pixels: null };
   return { output: await root.textContent(), pixels: await root.screenshot({ animations: "disabled" }) };
+}
+
+async function assertObservedEqual(page: Page, actual: Awaited<ReturnType<typeof observe>>, expected: Awaited<ReturnType<typeof observe>>, message: string): Promise<void> {
+  assert.equal(actual.output, expected.output, message);
+  assert.equal(actual.pixels === null, expected.pixels === null, message);
+  if (actual.pixels !== null && expected.pixels !== null) await assertPixelsEqual(page, actual.pixels, expected.pixels, message);
 }
 
 describe.skipIf(!enabled)("public Vue converter prop diagnostic parity", () => {
@@ -113,7 +121,7 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
               if (testCase.output !== undefined) {
                 const [liveResult, vueResult] = await Promise.all([observe(live), observe(vue)]);
                 assert.equal(liveResult.output, testCase.output);
-                assert.deepEqual(vueResult, liveResult, `${testCase.name}: rendered output differs`);
+                await assertObservedEqual(vue, vueResult, liveResult, `${testCase.name}: rendered output differs`);
               }
             } finally {
               await Promise.all([live.close(), vue.close()]);
@@ -127,7 +135,7 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             await vue.setContent("<main></main>");
             await vue.addScriptTag({ path: converted.get(mode)! });
             await vue.evaluate(() => { window.vueDiagnostic = null; window.vueErrors = []; window.mountCase({ n: "42" }); });
-            assert.deepEqual(await observe(vue), await observe(live), "initial reactive prop output differs");
+            await assertObservedEqual(vue, await observe(vue), await observe(live), "initial reactive prop output differs");
 
             const liveCode = await live.evaluate(() => {
               try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: "bad" }); return null; }
@@ -136,13 +144,13 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             await vue.evaluate(() => window.setCase("bad"));
             assert.equal(liveCode, "HR002");
             assert.deepEqual(await vue.evaluate(() => window.vueErrors), [liveCode], "invalid update diagnostic differs");
-            assert.deepEqual(await observe(vue), await observe(live), "invalid update changed rendered output");
+            await assertObservedEqual(vue, await observe(vue), await observe(live), "invalid update changed rendered output");
 
             await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: "43" }));
             await vue.evaluate(() => window.setCase("43"));
             const [liveRecovered, vueRecovered] = await Promise.all([observe(live), observe(vue)]);
             assert.equal(liveRecovered.output, "44");
-            assert.deepEqual(vueRecovered, liveRecovered, "valid update did not recover parity");
+            await assertObservedEqual(vue, vueRecovered, liveRecovered, "valid update did not recover parity");
           } finally {
             await Promise.all([live.close(), vue.close()]);
           }

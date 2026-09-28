@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -78,7 +80,8 @@ createApp({ render: () => h(Component, { id: "case" }) }).mount(document.querySe
             });
             const [liveState, vueState] = await Promise.all([state(live), state(vue)]);
             assert.equal(liveState.text, "Fallback");
-            assert.deepEqual(vueState, liveState);
+            assert.equal(vueState.text, liveState.text);
+            await assertPixelsEqual(vue, vueState.pixels, liveState.pixels, "scoped-slot fallback pixels differ");
           } finally {
             await Promise.all([live.close(), vue.close()]);
             await browser.close();

@@ -10,6 +10,8 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { convertComponents, type ConversionGraph } from "../src/index.js";
 
+import { assertPixelsEqual } from "../../html-next/tests/pixel-parity.js";
+
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
@@ -131,37 +133,7 @@ createApp({ render: () => h(XFormMatrix, { id: "case" }) }).mount(document.query
           const compare = async (stage: string) => {
             const [liveState, vueState] = await Promise.all([snapshot(live), snapshot(vue)]);
             assert.deepEqual(vueState.behavior, liveState.behavior, `${stage} form behavior differs`);
-            if (!vueState.pixels.equals(liveState.pixels)) {
-              const differences = await vue.evaluate(async ([left, right]) => {
-                const decode = async (source: string) => {
-                  const image = new Image();
-                  image.src = `data:image/png;base64,${source}`;
-                  await image.decode();
-                  const canvas = document.createElement("canvas");
-                  canvas.width = image.width;
-                  canvas.height = image.height;
-                  const context = canvas.getContext("2d")!;
-                  context.drawImage(image, 0, 0);
-                  return context.getImageData(0, 0, image.width, image.height);
-                };
-                const a = await decode(left);
-                const b = await decode(right);
-                const points: string[] = [];
-                for (let index = 0; index < a.data.length; index += 4) {
-                  if (a.data[index] !== b.data[index] || a.data[index + 1] !== b.data[index + 1] || a.data[index + 2] !== b.data[index + 2]) {
-                    if (points.length < 12) {
-                      const x = (index / 4) % a.width;
-                      const y = Math.floor(index / 4 / a.width);
-                      const rect = document.querySelector("#case")!.getBoundingClientRect();
-                      const target = document.elementFromPoint(rect.x + x, rect.y + y);
-                      points.push(`${x},${y}:${a.data[index]}/${b.data[index]}:${target?.localName}.${target?.className}`);
-                    }
-                  }
-                }
-                return { size: [a.width, a.height, b.width, b.height], points };
-              }, [liveState.pixels.toString("base64"), vueState.pixels.toString("base64")] as const);
-              assert.fail(`${stage} form pixels differ: ${JSON.stringify(differences)}`);
-            }
+            await assertPixelsEqual(vue, vueState.pixels, liveState.pixels, `${stage} form pixels differ`);
             return liveState.behavior as { readonly text: string; readonly single: string; readonly multiple: readonly string[]; readonly tooShort: boolean };
           };
           const initial = await compare("initial");
