@@ -265,12 +265,21 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
+      parse5:
+        specifier: 'catalog:'
+        version: 8.0.1
+      playwright:
+        specifier: 'catalog:'
+        version: 1.63.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 'catalog:'
         version: 5.0.0(@types/node@25.9.5)(vite@8.3.0(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.13))
+      vue:
+        specifier: 'catalog:'
+        version: 3.5.42(typescript@7.0.2)
 
   packages/html-next-unplugin:
     dependencies:

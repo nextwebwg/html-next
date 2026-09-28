@@ -59,6 +59,72 @@ function scene(parts: {
 
 const successes: ConformanceCase[] = [
   {
+    name: "HTML parser recovery keeps the first duplicate attribute",
+    source: scene({
+      root: `<article class="first" class="second">Ready</article>`,
+      use: `<x-t id="recovered"></x-t>`,
+    }),
+    expect: {
+      probe: `const e = q('#recovered'); return { tag: e.localName, className: e.getAttribute('class'), text: e.textContent };`,
+      result: { tag: "article", className: "first", text: "Ready" },
+    },
+  },
+  {
+    name: "preserves SVG namespaces and camelCase attributes inside a native root",
+    source: scene({
+      tag: "icon-close",
+      defs: `<state name="box" value="0 0 24 24"></state>`,
+      root: `<button type="button"><svg :viewBox="box" width="24" height="24" fill="none" stroke="currentColor">
+        <path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" :gradientUnits="'userSpaceOnUse'"></linearGradient>
+        <foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button>`,
+      use: `<icon-close id="icon"></icon-close>`,
+    }),
+    expect: {
+      probe: `const svg = q('#icon svg'); return {
+        root: q('#icon').localName,
+        svgNamespace: svg.namespaceURI,
+        viewBox: svg.getAttribute('viewBox'),
+        pathNamespace: svg.querySelector('path').namespaceURI,
+        gradientNamespace: svg.querySelector('linearGradient').namespaceURI,
+        gradientUnits: svg.querySelector('linearGradient').getAttribute('gradientUnits'),
+        foreignChildNamespace: svg.querySelector('foreignObject > span').namespaceURI,
+      };`,
+      result: {
+        root: "button",
+        svgNamespace: "http://www.w3.org/2000/svg",
+        viewBox: "0 0 24 24",
+        pathNamespace: "http://www.w3.org/2000/svg",
+        gradientNamespace: "http://www.w3.org/2000/svg",
+        gradientUnits: "userSpaceOnUse",
+        foreignChildNamespace: "http://www.w3.org/1999/xhtml",
+      },
+    },
+  },
+  {
+    name: "keeps a single native root when $with scopes the root",
+    source: scene({
+      tag: "x-root-with",
+      defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" :value="'Bea'"></set></handler>`,
+      root: `<section $with="label as display" :data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
+      use: `<x-root-with id="person"></x-root-with>`,
+    }),
+    expect: {
+      probe: `return snapshot(q('#person'));`,
+      result: {
+        tag: "section",
+        attributes: [
+          ["data-component", "x-root-with"],
+          ["data-label", "Ada"],
+          ["id", "person"],
+        ],
+        children: [
+          { tag: "strong", attributes: [], children: [{ text: "Ada" }] },
+          { tag: "button", attributes: [["type", "button"]], children: [{ text: "Rename" }] },
+        ],
+      },
+    },
+  },
+  {
     name: "lowers to native root with prop :attr, passthrough attrs, and default slot",
     source: scene({
       tag: "x-btn",
@@ -201,21 +267,21 @@ const successes: ConformanceCase[] = [
       root:
         `<div><output bind:value="v"></output>` +
         `<button on:click="foo" $value="v"></button>` +
-        `<span on:connect="c" on:disconnect="d"></span></div>`,
+        `<span on:mouseover="c" on:mouseout="d"></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
         `const r = q('#b'); const o = r.querySelector('output'), btn = r.querySelector('button'), sp = r.querySelector('span');` +
         `return { bound: o.getAttribute('value'), btnText: btn.textContent, ` +
-        `btnHasOn: btn.hasAttribute('on:click'), spanHasConnect: sp.hasAttribute('on:connect'), ` +
-        `spanHasDisconnect: sp.hasAttribute('on:disconnect') };`,
+        `btnHasOn: btn.hasAttribute('on:click'), spanHasMouseover: sp.hasAttribute('on:mouseover'), ` +
+        `spanHasMouseout: sp.hasAttribute('on:mouseout') };`,
       result: {
         bound: "x",
         btnText: "x",
         btnHasOn: false,
-        spanHasConnect: false,
-        spanHasDisconnect: false,
+        spanHasMouseover: false,
+        spanHasMouseout: false,
       },
     },
   },
@@ -258,7 +324,7 @@ const successes: ConformanceCase[] = [
         `return { hasBold: e.querySelector('b') !== null, scripts: e.querySelectorAll('script').length, ` +
         `imgOnerror: img ? img.hasAttribute('onerror') : null, aHref: a ? a.hasAttribute('href') : null, ` +
         `xflag: window.__x || 'unset' };`,
-      result: { hasBold: true, scripts: 0, imgOnerror: false, aHref: false, xflag: "unset" },
+      result: { hasBold: true, scripts: 0, imgOnerror: null, aHref: false, xflag: "unset" },
     },
   },
   {
@@ -444,6 +510,25 @@ const successes: ConformanceCase[] = [
 
 const diagnostics: ConformanceCase[] = [
   {
+    name: "HC003: component summary cannot be empty",
+    source: `<template component="x-t" status="early" summary=""><button></button></template><x-t></x-t>`,
+    expect: { code: "HC003" },
+  },
+  {
+    name: "HP001: property bindings require a native property",
+    source: scene({ root: `<button .notRealProperty="true"></button>`, use: `<x-t></x-t>` }),
+    expect: { code: "HP001" },
+  },
+  {
+    name: "HT005: two-way bindings require declared state",
+    source: scene({
+      defs: `<prop name="label" type="string" default="">Label.</prop>`,
+      root: `<input bind:value="label">`,
+      use: `<x-t></x-t>`,
+    }),
+    expect: { code: "HT005" },
+  },
+  {
     name: "HC020: a required prop is not provided",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
@@ -477,6 +562,21 @@ const diagnostics: ConformanceCase[] = [
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HC011" },
+  },
+  {
+    name: "HY002: structured state cannot be tested by :host-state()",
+    source: scene({
+      defs: `<state name="items" type="list(string)" :value="[]"></state>`,
+      root: `<div></div>`,
+      style: `:host-state([items]) { color: red; }`,
+      use: `<x-t></x-t>`,
+    }),
+    expect: { code: "HY002" },
+  },
+  {
+    name: "HT021: a guarded root cannot guarantee one element",
+    source: scene({ root: `<button $if="false"></button>`, use: `<x-t></x-t>` }),
+    expect: { code: "HT021" },
   },
   {
     name: "HT018: a $match child is neither a $when nor $else arm",

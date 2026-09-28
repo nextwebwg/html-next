@@ -7,7 +7,9 @@ export default mergeConfig(baseConfig, {
     env: { HTMLNEXT_TARGET_TEST: "1" },
     include: [
       "packages/html-next/tests/targets.test.ts",
-      "packages/html-next/tests/target-runtime.test.ts"
+      "packages/html-next/tests/target-runtime.test.ts",
+      "packages/html-next/tests/vue-parity.test.ts",
+      "packages/html-next-converter/tests/vue-*-parity.test.ts"
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000

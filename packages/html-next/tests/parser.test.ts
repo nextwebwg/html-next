@@ -66,6 +66,46 @@ describe("parseComponent", () => {
     assert.ok(Object.isFrozen(definition.contract.props));
   });
 
+  it("parses repeated scoped slots and exposes their row bindings", () => {
+    const definition = parseComponent(
+      `<template component="x-rows"><defs><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
+      `<ul><slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index">` +
+      `<li $value="row.name"></li></slot></ul></template>`,
+    );
+    const slot = definition.template.children[0];
+    assert.ok(slot?.kind === "slot");
+    assert.equal(slot.flow?.kind, "each");
+    assert.deepEqual(slot.flow?.kind === "each" && slot.flow.listPlan?.dependencies, ["rows"]);
+    assert.deepEqual(slot.flow?.kind === "each" && slot.flow.keyPlan?.dependencies, ["row.id"]);
+    assert.deepEqual(slot.props?.map((prop) => [prop.name, prop.expressionPlan.dependencies]), [
+      ["item", ["row"]], ["index", ["loop.index"]],
+    ]);
+    assert.deepEqual(definition.slots, [{ name: "row", dynamic: false, required: false, props: ["item", "index"] }]);
+    assert.deepEqual(slot.fallback?.[0]?.kind === "element" && slot.fallback[0].attributes[0]?.kind === "directive"
+      && slot.fallback[0].attributes[0].expressionPlan?.dependencies, ["row.name"]);
+  });
+
+  it("retains every scoped prop when root alternatives expose the same slot", () => {
+    const definition = parseComponent(`<template component="x-alternate-slots"><defs>` +
+      `<state name="first" value="First"></state><state name="second" value="Second"></state>` +
+      `<state name="alternate" :value="false"></state></defs>` +
+      `<template $match><section $when="alternate"><slot name="item" :first="first"></slot></section>` +
+      `<article $else><slot name="item" :second="second"></slot></article></template></template>`);
+    assert.deepEqual(definition.slots, [{ name: "item", dynamic: false, required: true, props: ["first", "second"] }]);
+  });
+
+  it("defers unknown names only inside a consumer's scoped-slot template", () => {
+    const definition = parseComponent(`<template component="x-consumer"><defs><state name="heading" value="People"></state></defs>` +
+      `<section><x-row-list><template slot="row"><b $value="item.name"></b><i $value="heading"></i></template></x-row-list></section></template>`);
+    const invocation = definition.template.children[0];
+    assert.ok(invocation?.kind === "element");
+    const projection = invocation.children[0];
+    assert.ok(projection?.kind === "element" && projection.name === "template");
+    assert.equal(projection.children[0]?.kind === "element" && projection.children[0].attributes[0]?.kind === "directive" &&
+      projection.children[0].attributes[0].expressionPlan?.dependencies[0], "item.name");
+    expectDiagnostic("HT003", `<template component="x-invalid"><section><b $value="item.name"></b></section></template>`);
+  });
+
   it("treats status and summary as optional", () => {
     const definition = parseComponent('<template component="x-plain"><div></div></template>', "plain.html");
     assert.equal(definition.contract.status, undefined);
@@ -410,6 +450,15 @@ describe("parseComponent", () => {
     assert.deepEqual(delegated.root, { kind: "component", tag: "x-base-button" });
   });
 
+  it("rejects root directives that can produce zero or multiple elements", () => {
+    expectDiagnostic("HT021", componentSource(`<button $if="false"></button>`));
+    expectDiagnostic("HT021", componentSource(`<button $each="item of []"></button>`));
+    expectDiagnostic("HT021", componentSource(`<button $when="true"></button>`));
+    expectDiagnostic("HT021", componentSource(`<button $else></button>`));
+    expectDiagnostic("HT021", componentSource(`<template $with="1 as item"><button></button></template>`));
+    expectDiagnostic("HT021", componentSource(`<slot></slot>`));
+  });
+
   it("rejects non-state two-way bindings and unsafe raw HTML", () => {
     expectDiagnostic(
       "HT005",
@@ -461,6 +510,15 @@ describe("parseComponent", () => {
       "HT009",
       componentSource(`<button></button>`, `<script>bad()</script>`),
     );
+  });
+
+  it("rejects deferred declarative connection lifecycle bindings", () => {
+    const declarations = `<defs><state name="ready" :value="false"></state>` +
+      `<handler name="markReady"><set name="ready" :value="true"></set></handler></defs>`;
+    for (const attribute of ["on:connect", "on:disconnect"]) {
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section ${attribute}="markReady"></section></template>`);
+      expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section><span ${attribute}="markReady"></span></section></template>`);
+    }
   });
 
   it("applies the shared executable URL policy to every URL attribute", () => {

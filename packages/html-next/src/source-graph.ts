@@ -1,7 +1,6 @@
 import {
   parseFragment,
   type DefaultTreeAdapterTypes,
-  type ParserError,
 } from "parse5";
 
 import { fail } from "./diagnostics.js";
@@ -35,14 +34,9 @@ function significant(nodes: readonly ChildNode[]): ChildNode[] {
 
 /** Separates resource-level dependency links from the one inert component carrier. */
 export function parseComponentResource(sourceText: string, source: string): ParsedComponentResource {
-  const parserErrors: ParserError[] = [];
   const fragment = parseFragment(sourceText, {
     sourceCodeLocationInfo: true,
-    onParseError: (error) => parserErrors.push(error),
   });
-  if (parserErrors.length > 0) {
-    fail("HS005", `HTML parse error: ${parserErrors[0]!.code}.`, source);
-  }
   const nodes = significant(fragment.childNodes);
   const templates = nodes.filter(
     (node): node is Template => isElement(node) && node.tagName === "template" && attr(node, "component") !== undefined,

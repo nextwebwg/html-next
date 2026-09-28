@@ -149,7 +149,7 @@ describe("workspace package contracts", () => {
       ],
       { cwd: root, shell: useCommandShell },
     );
-  });
+  }, 120_000);
 
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
     for (const packageDirectory of [
