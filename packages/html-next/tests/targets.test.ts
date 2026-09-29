@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
@@ -10,6 +13,8 @@ import { generateComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifa
 import { parseComponent } from "../src/source-parser.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
+const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+const run = promisify(execFile);
 
 // The component name is derived from `tag` and the native root inferred from `template`;
 // `props` supplies the `<prop>` declarations for the bindings in `template`.
@@ -100,6 +105,46 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /ref="root"/);
   });
 
+  it("types an optional Vue prop so an explicit undefined means unset", async () => {
+    const vue = generated(componentSource(
+      "x-optional",
+      '<prop name="label" type="string">Label.</prop><prop name="size" type="sm | md" default="md">Size.</prop>' +
+        '<prop name="count" type="number" required>Count.</prop>',
+      '<p :data-label="label" :data-size="size" :data-count="count"></p>',
+    )).get("vue/XOptional.vue")!;
+    // Vue reads an explicit undefined as an absent prop, so the type admits it; a required prop does not.
+    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| undefined> \}/);
+    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| undefined>, default: 'md' \}/);
+    assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
+
+    // A consumer under exactOptionalPropertyTypes can pass undefined for an optional prop, still
+    // cannot pass a value outside its type, and cannot pass undefined for a required one.
+    const directory = await mkdtemp(join(packageRoot, ".vue-types-"));
+    try {
+      await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
+      await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await writeFile(join(directory, "consumer.ts"), [
+        'import XOptional from "./XOptional";',
+        'type Props = InstanceType<typeof XOptional>["$props"];',
+        "const maybe = undefined as string | undefined;",
+        "export const unset: Props = { count: 1, label: maybe, size: undefined };",
+        "export const set: Props = { count: 1, label: \"Name\", size: \"sm\" };",
+        "// @ts-expect-error outside the declared type",
+        "export const outside: Props = { count: 1, size: \"lg\" };",
+        "",
+      ].join("\n"));
+      await run("corepack", [
+        "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--skipLibCheck",
+        "--target", "ES2023", "--module", "ESNext", "--moduleResolution", "Bundler", "--lib", "ES2023,DOM",
+        join(directory, "consumer.ts"),
+      ], { cwd: packageRoot, shell: process.platform === "win32" }).catch((error: { stdout?: string; stderr?: string }) => {
+        throw new Error(`Consumer typecheck failed.\n${error.stdout ?? ""}${error.stderr ?? ""}`, { cause: error });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Vue's modelValue API while binding a native root through its DOM events", () => {
     const outputs = generated(componentSource(
       "x-field",
@@ -108,7 +153,7 @@ describe("official target compilers", () => {
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
-    assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null> \}/);
+    assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null \| undefined> \}/);
     assert.match(vue, /'update:modelValue': \[value: string\]\n/);
     assert.match(vue, /<input\s+data-component="x-field"/);
     assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, defaultValue: '' \}"/);
@@ -297,7 +342,7 @@ describe("official target compilers", () => {
       `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null> \}/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null \| undefined> \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
@@ -315,7 +360,7 @@ describe("official target compilers", () => {
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a'>, default: 'button' \}/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| undefined>, default: 'button' \}/);
     assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");
