@@ -837,10 +837,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const rootValues = rootArmRefs.map((name) => name === context.rootArmRef ? unnamedRootRef! : context.refs.get(name)!);
   const reflectsProps = rootMarkup.includes("reflectedProp(");
   // Runtime declarations deliberately use `type: null`: Vue's Boolean casting and type warnings
-  // would otherwise change HTML Next's absent/bare-attribute and diagnostic semantics.
+  // would otherwise change HTML Next's absent/bare-attribute and diagnostic semantics. Vue treats an
+  // explicit `undefined` as an absent prop, so an optional prop's type admits it too; otherwise a
+  // consumer under `exactOptionalPropertyTypes` could not pass `undefined` for "unset".
+  const optionalType = (source: string, required: boolean): string => required ? source : `${source} | undefined`;
   const propDefinitions = target.props.map((prop) =>
-    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${typeSource(prop.contract.type)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : ""} },`);
-  if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${propTypeSource(modelProp.contract)}> },`);
+    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(typeSource(prop.contract.type), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : ""} },`);
+  if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propTypeSource(modelProp.contract), false)}> },`);
   const checkedPropSources = target.props.map((prop) => {
     const type = typeSource(prop.contract.type);
     const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${JSON.stringify(normalizeType(prop.contract.type))}, ${prop.contract.required}, ${quote(prop.name)})`;
