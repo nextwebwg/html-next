@@ -53,6 +53,12 @@ function writeBoundControl(element: Control, binding: BoundControl): void {
       if (option.selected !== next) option.selected = next;
     }
   } else {
+    // Keep in-progress numeric spellings such as 1e3 or 1.0 when the live control
+    // already represents the bound number. Rewriting moves the caret and loses syntax.
+    if (element instanceof HTMLInputElement && (element.type === "number" || element.type === "range")) {
+      if (typeof value === "number" && element.valueAsNumber === value) return;
+      if (value == null && element.value === "") return;
+    }
     const next = binding.nativeProperty ? String(value) : value == null ? "" : String(value);
     if (element.value !== next) element.value = next;
   }
