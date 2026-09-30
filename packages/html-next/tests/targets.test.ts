@@ -165,20 +165,20 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /ref="root"/);
   });
 
-  it("types an optional Vue prop so an explicit undefined means unset", async () => {
+  it("types defaulted Vue props by their resolved values", async () => {
     const vue = generated(componentSource(
       "x-optional",
       `<prop name="label" type="string">Label.</prop><prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
       '<p :data-label="label" :data-size="size" :data-count="count"></p>',
     )).get("vue/XOptional.vue")!;
-    // Vue reads an explicit undefined as an absent prop, so the type admits it; a required prop does not.
-    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null \| undefined>, default: null \}/);
-    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null \| undefined>, default: 'md' \}/);
+    // Vue applies defaults before exposing resolved props, including the implicit null default.
+    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
+    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null>, default: 'md' \}/);
     assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
 
-    // A consumer under exactOptionalPropertyTypes can pass undefined for an optional prop, still
-    // cannot pass a value outside its type, and cannot pass undefined for a required one.
+    // A consumer under exactOptionalPropertyTypes can omit an optional prop, but a resolved
+    // instance prop does not include undefined after Vue applies its default.
     const directory = await mkdtemp(join(packageRoot, ".vue-types-"));
     try {
       await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
@@ -186,8 +186,7 @@ describe("official target compilers", () => {
       await writeFile(join(directory, "consumer.ts"), [
         'import XOptional from "./XOptional";',
         'type Props = InstanceType<typeof XOptional>["$props"];',
-        "const maybe = undefined as string | undefined;",
-        "export const unset: Props = { count: 1, label: maybe, size: undefined };",
+        "export const unset: Props = { count: 1 };",
         "export const set: Props = { count: 1, label: \"Name\", size: \"sm\" };",
         "// @ts-expect-error outside the declared type",
         "export const outside: Props = { count: 1, size: \"lg\" };",
@@ -404,7 +403,7 @@ describe("official target compilers", () => {
       `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null \| undefined>, default: null \}/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
@@ -424,7 +423,7 @@ describe("official target compilers", () => {
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null \| undefined>, default: 'button' \}/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null>, default: 'button' \}/);
     assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");
@@ -908,7 +907,7 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
-  it("exposes declared event detail as a typed Vue payload", () => {
+  it("exposes declared event detail through a typed Vue CustomEvent", () => {
     const vue = generated(`<template component="demo-vue-event" status="experimental" summary="Typed Vue event.">
       <defs>
         <event name="select" type="object"><prop name="value" type="keyword" values="small, large" required></prop></event>
@@ -916,7 +915,7 @@ describe("official target compilers", () => {
       </defs>
       <button on:click="choose">Choose</button>
     </template>`).get("vue/DemoVueEvent.vue")!;
-    assert.match(vue, /select: \[detail: \{ readonly value: 'small' \| 'large' \}\]/);
+    assert.match(vue, /select: \[event: CustomEvent<\{ readonly value: 'small' \| 'large' \}>\]/);
     assert.match(vue, /createDispatch\(root, emit as \(name: string, detail: unknown\) => void/);
   });
 

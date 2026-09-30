@@ -7,11 +7,9 @@ import { checkedProp } from './props'
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps({
-  size: { type: null as unknown as PropType<'sm' | 'md' | 'lg' | null | undefined>, default: 'md' },
+  size: { type: null as unknown as PropType<'sm' | 'md' | 'lg' | null>, default: 'md' },
   variant: {
-    type: null as unknown as PropType<
-      'outline' | 'solid' | 'destructive' | 'ghost' | null | undefined
-    >,
+    type: null as unknown as PropType<'outline' | 'solid' | 'destructive' | 'ghost' | null>,
     default: 'outline',
   },
 })

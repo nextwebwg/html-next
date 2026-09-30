@@ -518,7 +518,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const nativeAttribute = nativeControl && ["value", "checked"].includes(attribute.name);
       const attributeValueFor = (scope: Scope): string =>
         nativeAttribute && attribute.name === "checked" && category(typeOf(value, scope).type) === "boolean"
-          ? `${lowering.condition(value, scope)} ? '' : undefined`
+          ? `${lowering.condition(value, scope)} ? true : undefined`
           : lowering.attribute(value, scope, attribute.name);
       const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) =>
         component ? lowering.value(value, scope) : attributeValueFor(scope));
@@ -857,13 +857,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const rootValues = rootArmRefs.map((name) => name === context.rootArmRef ? unnamedRootRef! : context.refs.get(name)!);
   const reflectsProps = rootMarkup.includes("reflectedProp(");
   // Runtime declarations deliberately use `type: null`: Vue's Boolean casting and type warnings
-  // would otherwise change HTML Next's absent/bare-attribute and diagnostic semantics. Vue treats an
-  // explicit `undefined` as an absent prop, so an optional prop's type admits it too; otherwise a
-  // consumer under `exactOptionalPropertyTypes` could not pass `undefined` for "unset".
+  // would otherwise change HTML Next's absent/bare-attribute and diagnostic semantics. Every
+  // declared optional prop has a default (authored or null), so its resolved type excludes undefined.
+  // The separate optional modelValue has no default and retains undefined.
   const optionalType = (source: string, required: boolean): string => required ? source
     : `${source.includes(" extends ") ? `(${source})` : source} | undefined`;
   const propDefinitions = target.props.map((prop) =>
-    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(propType(prop), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
+    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${propType(prop)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
   if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propType(modelProp), false)}> },`);
   const checkedPropSources = target.props.map((prop) => {
     const type = prop.contract.select === undefined

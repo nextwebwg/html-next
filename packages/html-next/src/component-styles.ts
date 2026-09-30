@@ -246,7 +246,7 @@ export function compileComponentStyles(
   const own = compile("own");
   const slotted = compile("slotted");
   validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
 }
 
 /** The state attribute's tokens for the current values: `name` while truthy, `name=value` for text. */
