@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
+import { parseComponent } from "../src/source-parser.js";
 
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
@@ -61,6 +62,188 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} parses the supported types at an HTML component boundary`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const cases: ReadonlyArray<[string, string, unknown]> = [
+          ["string", "Save", "Save"], ["keyword", "size-2", "size-2"],
+          ["boolean", "false", false], ["integer", "-2", -2], ["number", "0.3", 0.3],
+          ["url", "https://example.org/", "https://example.org/"], ["email", "ada@example.org", "ada@example.org"],
+          ["email", "a@b", "a@b"],
+          ["date", "2026-09-29", "2026-09-29"], ["month", "2026-09", "2026-09"],
+          ["week", "2026-W40", "2026-W40"], ["time", "13:45", "13:45"],
+          ["datetime-local", "2026-09-29T13:45", "2026-09-29T13:45"],
+          ["datetime", "2026-09-29T13:45Z", "2026-09-29T13:45Z"],
+          ["color", "rebeccapurple", "rebeccapurple"], ["color", "rgb(102 51 153)", "rgb(102 51 153)"],
+          ["color-hex", "#663399cc", "#663399cc"],
+          ["length", "1rem", "1rem"], ["percentage", "25%", "25%"], ["duration", "200ms", "200ms"],
+          ["keyword+", "red blue", ["red", "blue"]], ["keyword#", "red, blue", ["red", "blue"]],
+          ["enum(true, false, 'page')", "false", false],
+          ["object({ x: number, y: number })", "{ x: 3, y: 5 }", { x: 3, y: 5 }],
+        ];
+        const declarations = cases.map(([type], index) =>
+          `<prop name="v${index}" type="${type}">Value ${index}.</prop>`).join("");
+        const bindings = cases.map((_, index) => ` :data-v${index}="v${index}"`).join("");
+        const attributes = cases.map(([, written], index) => ` v${index}="${written}"`).join("");
+        await page.setContent(`<template component="x-types"><defs>${declarations}</defs><output${bindings}></output></template><x-types id="typed"${attributes}></x-types>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate((count) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const state = runtime.getComponentHost(document.querySelector("#typed")!)!.state;
+          return Array.from({ length: count }, (_, index) => state[`v${index}`]);
+        }, cases.length);
+        assert.deepEqual(actual, cases.map(([, , expected]) => expected));
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} follows native email format cases at the component boundary`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-email"><defs>
+          <prop name="address" type="email">Email address.</prop>
+        </defs><output :data-address="address"></output></template><x-email id="valid" address="a@b"></x-email>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const native = document.createElement("input");
+          native.type = "email";
+          native.value = "a@b";
+          const nativeValid = native.validity.valid;
+          native.value = "a@-b";
+          const nativeInvalid = native.validity.typeMismatch;
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#valid")!;
+          let rejected = false;
+          try { runtime.updateComponentProps(root, { address: "a@-b" }); }
+          catch (error) { rejected = String(error).includes("HR002"); }
+          return { nativeValid, nativeInvalid, reflected: root.getAttribute("data-address"), rejected };
+        });
+        assert.deepEqual(result, { nativeValid: true, nativeInvalid: true, reflected: "a@b", rejected: true });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} converts HTML enum spelling but requires typed framework values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-current"><defs>
+          <prop name="current" type="enum(true, false, 'page')">Current location.</prop>
+        </defs><output :data-current="current"></output></template><x-current id="current" current="false"></x-current>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { current: unknown } } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#current")!;
+          const fromHtml = runtime.getComponentHost(root)?.state.current;
+          let rejectedString = false;
+          try { runtime.updateComponentProps(root, { current: "false" }); }
+          catch { rejectedString = true; }
+          runtime.updateComponentProps(root, { current: false });
+          return { fromHtml, rejectedString, fromValue: runtime.getComponentHost(root)?.state.current };
+        });
+        assert.deepEqual(result, { fromHtml: false, rejectedString: true, fromValue: false });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} checks a declared pattern on HTML and typed prop values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-sku"><defs>
+          <prop name="sku" type="string" pattern="[A-Z]{3}-[0-9]{4}">Stock code.</prop>
+        </defs><output :data-sku="sku"></output></template><x-sku id="valid" sku="ABC-1234"></x-sku>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#valid")!;
+          const initial = root.getAttribute("data-sku");
+          let rejected = false;
+          try { runtime.updateComponentProps(root, { sku: "xABC-1234" }); }
+          catch (error) { rejected = String(error).includes("HR002"); }
+          return { initial, rejected, after: root.getAttribute("data-sku") };
+        });
+        assert.deepEqual(result, { initial: "ABC-1234", rejected: true, after: "ABC-1234" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} uses an explicit null before framework root selection`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const definition = parseComponent(`<template component="x-null-choice" status="early" summary="Null root.">
+          <defs><prop name="choice" type="enum('on', 'off')" default="on">Choice.</prop></defs>
+          <template $match><article $when="choice = null"><output $value="choice"></output></article><section $else><output $value="choice"></output></section></template>
+        </template>`, "null-choice.html");
+        const page = await browser.newPage();
+        await page.setContent(`<article id="null"></article><section id="default"></section>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate((parsed) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            attachComponent(element: Element, definition: unknown, options?: { props?: Record<string, unknown> }): () => void;
+            getComponentHost(element: Element): { state: { choice: unknown } } | undefined;
+          } }).HtmlRuntime;
+          const nullRoot = document.querySelector("#null")!;
+          const defaultRoot = document.querySelector("#default")!;
+          const disposeNull = runtime.attachComponent(nullRoot, parsed, { props: { choice: null } });
+          const disposeDefault = runtime.attachComponent(defaultRoot, parsed);
+          const values = [runtime.getComponentHost(nullRoot)?.state.choice, runtime.getComponentHost(defaultRoot)?.state.choice];
+          disposeNull();
+          disposeDefault();
+          return values;
+        }, JSON.parse(JSON.stringify(definition)) as Record<string, unknown>);
+        assert.deepEqual(result, [null, "on"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} exposes an omitted optional prop as null to the host`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-null-prop"><defs>
+          <prop name="value" type="number">Optional count.</prop>
+        </defs><output :data-value="value"></output></template><x-null-prop id="missing"></x-null-prop>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { value: unknown } } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#missing")!;
+          return runtime.getComponentHost(root)?.state.value;
+        });
+        assert.equal(result, null);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} ignores malformed serialized form-default records during hydration`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -1311,7 +1494,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-demo" status="early" summary="Control flow.">` +
             `<defs>` +
-            `<prop name="tier" type="free | pro" default="free">Plan.</prop>` +
+            `<prop name="tier" type="enum('free', 'pro')" default="free">Plan.</prop>` +
             `<prop name="show" type="boolean" default="false">Show.</prop>` +
             `</defs>` +
             `<div>` +
@@ -1349,7 +1532,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} coerces explicit boolean invocation strings in both runtimes`, async () => {
+    it(`${name} parses boolean HTML attributes and checks typed generated updates`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -1376,17 +1559,21 @@ describe.skipIf(!enabled)("browser runtime", () => {
             name: "enabled", attribute: "data-enabled", value: false, type: "boolean", required: false
           }], (_name, value) => { applied = value; });
           const values = [];
-          for (const value of ["", "true", "false"]) {
+          for (const value of [true, false]) {
             window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: value });
             await new Promise(resolve => setTimeout(resolve, 0));
             values.push(applied);
           }
-          return { interpreted, generated: values };
+          let invalid = false;
+          try { window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: "false" }); }
+          catch (error) { invalid = String(error).includes("HR002"); }
+          return { interpreted, generated: values, invalid };
         })()`);
 
         assert.deepEqual(result, {
           interpreted: ["true", "true", "false", "true"],
-          generated: [true, true, false],
+          generated: [true, false],
+          invalid: true,
         });
       } finally {
         await browser.close();
@@ -1831,7 +2018,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-first" status="early" summary="Indexed reads.">` +
             `<defs><state name="items" type="list(object({ name: string, 'odd key': string }))"` +
             ` :value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
-            `<state name="byId" type="record(object({ name: string }))" :value="{ '42': { name: 'Ann' } }"></state>` +
+            `<state name="byId" type="object({ '42': object({ name: string }) })" :value="{ '42': { name: 'Ann' } }"></state>` +
             `<handler name="swap"><set name="items" :value="[{ name: 7, 'odd key': 'y' }]"></set>` +
             `<set name="byId" :value="{ '42': { name: 7 } }"></set></handler></defs>` +
             `<main><output $value="items[0].name"></output><b $value="items[0]['odd key']"></b><i $value="byId['42'].name"></i>` +
@@ -1850,9 +2037,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const initial = await read();
         await page.click("#first button");
         await page.waitForTimeout(50);
-        // A dependency path names a list index and a record key alike (items.0.name, byId.42.name);
+        // A dependency path names a list index and an object key alike (items.0.name, byId.42.name);
         // reading it must not fail, and a value that breaks its declared type leaves only that
-        // reference inert, whether a list or a record holds it.
+        // reference inert, whether a list or an object holds it.
         assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann"], swapped: ["Apple", "y", "Ann"] });
         assert.deepEqual(messages.filter((text) => /SyntaxError/.test(text)), []);
       } finally {
@@ -2089,7 +2276,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
             `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
-            `<prop name="as" type="section | article" default="section">Root.</prop></defs>` +
+            `<prop name="as" type="enum('section', 'article')" default="section">Root.</prop></defs>` +
             `<template $match><article $when="as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
@@ -2219,7 +2406,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const body = `<slot></slot><output $value="count"></output>`;
         await page.setContent(
           `<template component="x-action" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="button | a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
+            `<defs><prop name="as" type="enum('button', 'a')" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
             `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
             `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
             `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
@@ -2339,7 +2526,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.setContent(
           `<template component="x-choice" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="button | a" default="button">Root.</prop></defs>` +
+            `<defs><prop name="as" type="enum('button', 'a')" default="button">Root.</prop></defs>` +
             `<template $match><a $when="as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
           `</template>` +
           `<template component="x-host" status="early" summary="Parent.">` +
@@ -2437,7 +2624,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<template component="x-card" status="early" summary="Delegates.">` +
-            `<defs><prop name="tone" type="warm | cool" default="warm">Tone.</prop></defs>` +
+            `<defs><prop name="tone" type="enum('warm', 'cool')" default="warm">Tone.</prop></defs>` +
             `<x-fold><output $value="tone"></output></x-fold>` +
           `</template>` +
           `<x-card id="card" tone="warm"></x-card>`,
@@ -2584,7 +2771,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-openable" status="early" summary="Openable.">` +
-            `<defs><prop name="open" type="boolean?">Open state.</prop><event name="open" type="boolean"></event></defs>` +
+            `<defs><prop name="open" type="boolean">Open state.</prop><event name="open" type="boolean"></event></defs>` +
             `<section :data-open="open"></section></template><x-openable id="openable" open></x-openable>`,
         );
         await page.addScriptTag({ path: bundlePath });

@@ -73,7 +73,9 @@ export function generatedPropDescriptor(
 ): string | undefined {
   const type = prop.type === "string" || prop.type === "boolean" || prop.type === "number"
     ? quote(prop.type)
-    : "enum" in prop.type ? JSON.stringify(prop.type.enum) : undefined;
+    : "enum" in prop.type ? JSON.stringify(prop.type.enum)
+    : prop.type.kind === "enum" && prop.type.members.every((member) => typeof member === "string")
+      ? JSON.stringify(prop.type.members) : undefined;
   if (type === undefined) return undefined;
   const attribute = `data-${kebabCase(name)}`;
   const defaultValue = "default" in prop ? `, default: ${JSON.stringify(prop.default)}` : "";
@@ -112,6 +114,7 @@ export function serializedDefinition(definition: ComponentDefinition): string {
     name,
     {
       type: prop.type,
+      ...(prop.pattern === undefined ? {} : { pattern: prop.pattern }),
       required: prop.required,
       target: prop.target,
       ...("default" in prop ? { default: prop.default } : {}),

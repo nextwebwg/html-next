@@ -63,7 +63,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
   <defs>
     <prop name="label" type="string" default="Items">Heading.</prop>
     <prop name="items" type="list(object({ id: string, name: string, done: boolean }))">Rows.</prop>
-    <prop name="size" type="sm | md" default="md">Size.</prop>
+    <prop name="size" type="enum('sm', 'md')" default="md">Size.</prop>
     <state name="open" :value="false"></state>
     <state name="query" :value="''"></state>
     <computed name="count" from="items.length"></computed>
@@ -108,13 +108,13 @@ describe("official target compilers", () => {
   it("types an optional Vue prop so an explicit undefined means unset", async () => {
     const vue = generated(componentSource(
       "x-optional",
-      '<prop name="label" type="string">Label.</prop><prop name="size" type="sm | md" default="md">Size.</prop>' +
+      `<prop name="label" type="string">Label.</prop><prop name="size" type="enum('sm', 'md')" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
       '<p :data-label="label" :data-size="size" :data-count="count"></p>',
     )).get("vue/XOptional.vue")!;
     // Vue reads an explicit undefined as an absent prop, so the type admits it; a required prop does not.
-    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| undefined> \}/);
-    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| undefined>, default: 'md' \}/);
+    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null \| undefined>, default: null \}/);
+    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null \| undefined>, default: 'md' \}/);
     assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
 
     // A consumer under exactOptionalPropertyTypes can pass undefined for an optional prop, still
@@ -284,7 +284,7 @@ describe("official target compilers", () => {
 
   it("types optional fields, open objects, and nullable records in state", () => {
     const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
-      `<defs><state name="hovered" type="object({ row: integer, label?: string, ... }) | null" :value="null"></state>` +
+      `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" :value="null"></state>` +
       `<state name="issues" type="list(object({ message: string }))" :value="[]"></state></defs>` +
       `<div><span $if="hovered" :title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
@@ -339,28 +339,30 @@ describe("official target compilers", () => {
   it("types optional nullable props once", () => {
     const vue = generated(componentSource(
       "demo-anchor",
-      `<prop name="anchor" type="start | end | null">Anchor edge.</prop>`,
+      `<prop name="anchor" type="enum('start', 'end')">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null \| undefined> \}/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null \| undefined>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
   it("renders a polymorphic root as the native root its `$match` arm chooses", async () => {
     const outputs = generated(`<template component="x-action" status="experimental" summary="Button or link.">
   <defs>
-    <prop name="as" type="button | a" default="button">Native root.</prop>
+    <prop name="as" type="enum('button', 'a')" default="button">Native root.</prop>
     <prop name="href" type="string">Link.</prop>
     <prop name="disabled" type="boolean" default="false">Off.</prop>
+    <prop name="tags" type="keyword#">Comma-separated tags.</prop>
+    <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>
   </defs>
   <template $match>
-    <a $when="as = 'a'" class="action" :href="{ true: null, false: href }[format('%s', disabled)]" $ref="control"><slot></slot></a>
+    <a $when="as = 'a'" class="action" :href="{ true: null, false: href }[format('%s', disabled)]" :data-tags="tags" :data-space-tags="spaceTags" $ref="control"><slot></slot></a>
     <button $else class="action" type="button" :disabled="disabled" $ref="control"><slot></slot></button>
   </template>
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| undefined>, default: 'button' \}/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null \| undefined>, default: 'button' \}/);
     assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");
@@ -388,6 +390,9 @@ describe("official target compilers", () => {
         .then((html: string) => html.replace(/<!--[[\]]-->/g, "").replace(/ data-v-[\w-]+(?:="")?/g, ""));
     assert.equal(await render({}), '<button data-component="x-action" class="action" type="button">Go</button>');
     assert.equal(await render({ as: "a", href: "/next" }), '<a data-component="x-action" class="action" href="/next" data-as="a" data-href="/next">Go</a>');
+    const listed = await render({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] });
+    assert.match(listed, /data-tags="red, blue"/);
+    assert.match(listed, /data-space-tags="one two"/);
     // A null binding leaves the attribute off, so a disabled link has no href.
     assert.equal(await render({ as: "a", href: "/next", disabled: true }), '<a data-component="x-action" class="action" data-as="a" data-disabled="true" data-href="/next">Go</a>');
     assert.match(await render({ constructor: "safe" }), / constructor="safe"/);
@@ -405,7 +410,7 @@ describe("official target compilers", () => {
     // A real-element $match keeps that element as the root and switches only its chosen child.
     const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
-      '<prop name="as" type="a | b" default="a">Kind.</prop>',
+      `<prop name="as" type="enum('a', 'b')" default="a">Kind.</prop>`,
       `<section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
     )));
     assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);

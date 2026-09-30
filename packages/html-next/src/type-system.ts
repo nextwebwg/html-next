@@ -1,12 +1,28 @@
 /** The complete HTML Next value-type grammar and its canonical runtime representation. */
 
 import { deepFreeze } from "./freeze.js";
+import { compileExpression, type ExpressionNode } from "./expression.js";
+import { CSS_COLOR_KEYWORDS } from "./css-color-keywords.js";
 
 export type TerminalTypeName =
   | "string"
+  | "keyword"
   | "boolean"
   | "number"
   | "integer"
+  | "url"
+  | "email"
+  | "date"
+  | "month"
+  | "week"
+  | "time"
+  | "datetime-local"
+  | "datetime"
+  | "color"
+  | "color-hex"
+  | "length"
+  | "percentage"
+  | "duration"
   | "null"
   | "absent"
   | "trusted-html"
@@ -22,6 +38,17 @@ export interface TerminalType {
 export interface KeywordType {
   readonly kind: "keyword";
   readonly value: string;
+}
+
+export interface EnumNode {
+  readonly kind: "enum";
+  readonly members: readonly (string | number | boolean)[];
+}
+
+export interface SeparatedListType {
+  readonly kind: "separated-list";
+  readonly item: TerminalType;
+  readonly separator: "space" | "comma";
 }
 
 export interface UnionType {
@@ -54,6 +81,8 @@ export interface ObjectType {
 export type TypeNode =
   | TerminalType
   | KeywordType
+  | EnumNode
+  | SeparatedListType
   | UnionType
   | ListType
   | RecordType
@@ -86,9 +115,20 @@ export interface TrustedContentValue {
 const UNKNOWN: TypeNode = { kind: "terminal", name: "unknown" };
 
 const TERMINALS = new Set<TerminalTypeName>([
-  "string", "boolean", "number", "integer", "null", "absent",
+  "string", "keyword", "boolean", "number", "integer", "url", "email", "date", "month",
+  "week", "time", "datetime-local", "datetime", "color", "color-hex", "length",
+  "percentage", "duration", "null", "absent",
   "trusted-html", "trusted-script", "function", "unknown",
 ]);
+
+const PUBLIC_TERMINALS = new Set([
+  "string", "keyword", "boolean", "integer", "number", "url", "email", "date",
+  "month", "week", "time", "datetime-local", "datetime", "color", "color-hex",
+  "length", "percentage", "duration",
+]);
+const CSS_NAMED_COLOR_SET = new Set<string>(CSS_COLOR_KEYWORDS);
+// HTML's valid-email-address production permits a single-label domain such as a@b.
+export const HTML_EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/?=^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 /** Names the grammar reads as a type, so a keyword spelling one must be written quoted. */
 const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set([...TERMINALS, "list", "record", "object"]);
@@ -109,57 +149,55 @@ class Parser {
   constructor(readonly source: string) {}
 
   parse(): TypeNode {
-    const result = this.#union();
+    const result = this.#primary();
     this.#space();
     if (this.#index !== this.source.length) this.#error("Unexpected type syntax");
     return result;
   }
 
-  #union(): TypeNode {
-    const members = [this.#postfix()];
-    while (this.#take("|")) members.push(this.#postfix());
-    return members.length === 1 ? members[0]! : union(members);
-  }
-
-  #postfix(): TypeNode {
-    let type = this.#primary();
-    while (this.#take("?")) {
-      type = union([
-        type,
-        { kind: "terminal", name: "null" },
-        { kind: "terminal", name: "absent" },
-      ]);
-    }
-    return type;
-  }
-
   #primary(): TypeNode {
-    if (this.#take("(")) {
-      const type = this.#union();
-      this.#expect(")");
-      return type;
-    }
-    const quoted = this.#quoted();
-    if (quoted !== undefined) return { kind: "keyword", value: quoted };
-
     const name = this.#identifier();
-    if (name === undefined) this.#error("Expected a type, keyword, or group");
-    // `list`, `record`, and `object` may also be written bare, meaning any list, any record, or
-    // any structured value, for declarations that only need the shape and not the item type.
-    if (name === "list" || name === "record") {
-      if (!this.#peek("(")) {
-        return name === "list" ? { kind: "list", item: UNKNOWN } : { kind: "record", value: UNKNOWN };
-      }
+    if (name === undefined) this.#error("Expected a type name");
+    if (name === "enum") return this.#enum();
+    if (PUBLIC_TERMINALS.has(name)) {
+      const item = { kind: "terminal", name: name as TerminalTypeName } as const;
+      if (name === "keyword" && this.#take("+")) return { kind: "separated-list", item, separator: "space" };
+      if (name === "keyword" && this.#take("#")) return { kind: "separated-list", item, separator: "comma" };
+      return item;
+    }
+    if (name === "list") {
       this.#expect("(");
-      const nested = this.#union();
+      const item = this.#primary();
       this.#expect(")");
-      return name === "list" ? { kind: "list", item: nested } : { kind: "record", value: nested };
+      return { kind: "list", item };
     }
     if (name === "object") return this.#peek("(") ? this.#object() : { kind: "record", value: UNKNOWN };
-    if (TERMINALS.has(name as TerminalTypeName)) {
-      return { kind: "terminal", name: name as TerminalTypeName };
-    }
-    return { kind: "keyword", value: name };
+    this.#error(`Unknown type \`${name}\``);
+  }
+
+  #enum(): EnumNode {
+    this.#expect("(");
+    const members: (string | number | boolean)[] = [];
+    const spellings = new Set<string>();
+    do {
+      const quoted = this.#quoted();
+      let member: string | number | boolean;
+      if (quoted !== undefined) member = quoted;
+      else {
+        this.#space();
+        const match = /^(?:true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.-])/.exec(this.source.slice(this.#index));
+        if (match === null) this.#error("Expected a quoted string, boolean, or finite number");
+        this.#index += match[0].length;
+        member = match[0] === "true" ? true : match[0] === "false" ? false : Number(match[0]);
+        if (typeof member === "number" && !Number.isFinite(member)) this.#error("Enum numbers must be finite");
+      }
+      const spelling = String(member);
+      if (spellings.has(spelling)) this.#error(`Enum members share the same HTML spelling \`${spelling}\``);
+      spellings.add(spelling);
+      members.push(member);
+    } while (this.#take(","));
+    this.#expect(")");
+    return { kind: "enum", members };
   }
 
   #object(): ObjectType {
@@ -177,7 +215,7 @@ class Parser {
         if (name === undefined) this.#error("Expected an object field or `...`");
         const optional = this.#take("?");
         this.#expect(":");
-        const type = this.#union();
+        const type = this.#primary();
         if (fields.some((field) => field.name === name)) this.#error(`Duplicate object field \`${name}\``);
         fields.push({ name, type, optional });
       }
@@ -263,7 +301,7 @@ export function parseTypeExpression(source: string): TypeNode {
 
 export function isTypeNode(value: unknown): value is TypeNode {
   return typeof value === "object" && value !== null && "kind" in value &&
-    ["terminal", "keyword", "union", "list", "record", "object"].includes(
+    ["terminal", "keyword", "enum", "separated-list", "union", "list", "record", "object"].includes(
       String((value as { kind?: unknown }).kind),
     );
 }
@@ -271,7 +309,11 @@ export function isTypeNode(value: unknown): value is TypeNode {
 export function normalizeType(type: TypeInput): TypeNode {
   if (isTypeNode(type)) return type;
   if (typeof type === "string") return { kind: "terminal", name: type };
-  return union(type.enum.map((value) => ({ kind: "keyword", value })));
+  return { kind: "enum", members: type.enum };
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll("\n", "\\n")}'`;
 }
 
 /** The canonical source spelling used by serializers, diagnostics, and generated docs. */
@@ -279,6 +321,8 @@ export function formatType(type: TypeInput): string {
   const node = isTypeNode(type) ? type : normalizeType(type);
   switch (node.kind) {
     case "terminal": return node.name;
+    case "enum": return `enum(${node.members.map((member) => typeof member === "string" ? quoteLiteral(member) : String(member)).join(", ")})`;
+    case "separated-list": return `${node.item.name}${node.separator === "space" ? "+" : "#"}`;
     // A keyword spelled like a type name has to stay quoted, or reading the result back would
     // widen the literal `'unknown'` into the type that accepts anything.
     case "keyword": return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(node.value) && !RESERVED_TYPE_NAMES.has(node.value)
@@ -328,13 +372,18 @@ export function typeScriptType(type: TypeInput): string {
   switch (node.kind) {
     case "terminal": {
       const values: Readonly<Record<TerminalTypeName, string>> = {
-        string: "string", boolean: "boolean", number: "number", integer: "number",
+        string: "string", keyword: "string", boolean: "boolean", number: "number", integer: "number",
+        url: "string", email: "string", date: "string", month: "string", week: "string",
+        time: "string", "datetime-local": "string", datetime: "string", color: "string",
+        "color-hex": "string", length: "string", percentage: "string", duration: "string",
         null: "null", absent: "undefined", "trusted-html": "TrustedHTML",
         "trusted-script": "TrustedScript", "function": "(...args: readonly unknown[]) => unknown",
         unknown: "unknown",
       };
       return values[node.name];
     }
+    case "enum": return node.members.map((member) => typeof member === "string" ? JSON.stringify(member) : String(member)).join(" | ");
+    case "separated-list": return "readonly string[]";
     case "keyword": return JSON.stringify(node.value);
     case "union": return node.members.map(typeScriptType).join(" | ");
     case "list": return `readonly (${typeScriptType(node.item)})[]`;
@@ -371,8 +420,21 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 
 function structuredInput(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  try { return JSON.parse(value) as unknown; }
-  catch { return Symbol.for("html-next.bad-json"); }
+  const literal = (node: ExpressionNode): unknown => {
+    switch (node.kind) {
+      case "literal": return node.value;
+      case "unary": {
+        const operand = literal(node.operand);
+        if (node.op === "-" && typeof operand === "number") return -operand;
+        throw new SyntaxError("Structured attributes must contain literal values.");
+      }
+      case "array": return node.items.map(literal);
+      case "object": return Object.fromEntries(node.pairs.map(({ key, value: item }) => [key, literal(item)]));
+      default: throw new SyntaxError("Structured attributes must contain literal values.");
+    }
+  };
+  try { return literal(compileExpression(value).ast); }
+  catch { return Symbol.for("html-next.bad-literal"); }
 }
 
 function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
@@ -383,19 +445,106 @@ function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script")
     Object.prototype.toString.call(value) === `[object ${expected}]`;
 }
 
-function parseTerminal(value: unknown, name: TerminalTypeName, path: string): TypedResult {
+function validDate(value: string): boolean {
+  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null || match[1] === "0000") return false;
+  const year = Number(match[1]);
+  const date = new Date(0);
+  date.setUTCFullYear(year, Number(match[2]) - 1, Number(match[3]));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
+}
+
+function validTime(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
+  return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60 && Number(match[3] ?? 0) < 60;
+}
+
+function validFunctionalColor(value: string): boolean {
+  const match = /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\((.*)\)$/i.exec(value);
+  if (match === null) return false;
+  const body = match[2]!.trim();
+  const parts = body.replaceAll(",", " ").replaceAll("/", " ").split(/\s+/);
+  const colorSpace = match[1]!.toLowerCase() === "color";
+  if (colorSpace && !/^(?:srgb|srgb-linear|display-p3|a98-rgb|prophoto-rgb|rec2020|xyz|xyz-d50|xyz-d65)$/.test(parts.shift() ?? "")) return false;
+  if (parts.length < 3 || parts.length > 4) return false;
+  if (parts.length === 4 && !body.includes("/") && !body.includes(",")) return false;
+  return parts.every((part) => part === "none" || /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|deg|rad|grad|turn)?$/.test(part));
+}
+
+// Prop parsing also runs in Node during builds and SSR. The color subset stays the same in
+// both environments rather than accepting browser-only CSS forms during hydration.
+function validFormat(value: string, name: TerminalTypeName): boolean {
+  switch (name) {
+    case "keyword": return /^[A-Za-z0-9_-]+$/.test(value);
+    case "url": {
+      try { return new URL(value).protocol !== ""; } catch { return false; }
+    }
+    case "email": return HTML_EMAIL_PATTERN.test(value);
+    case "date": return validDate(value);
+    case "month": return /^(?!0000)\d{4,}-(?:0[1-9]|1[0-2])$/.test(value);
+    case "week": {
+      const match = /^(\d{4,})-W(\d{2})$/.exec(value);
+      if (match === null || match[1] === "0000") return false;
+      const year = Number(match[1]);
+      const week = Number(match[2]);
+      const jan1 = new Date(0);
+      jan1.setUTCFullYear(year, 0, 1);
+      const jan1Day = jan1.getUTCDay();
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      return week >= 1 && (week < 53 || (week === 53 && (jan1Day === 4 || (jan1Day === 3 && leap))));
+    }
+    case "time": return validTime(value);
+    case "datetime-local": {
+      const match = /^(\d{4,}-\d{2}-\d{2})[T ](.+)$/.exec(value);
+      return match !== null && validDate(match[1]!) && validTime(match[2]!);
+    }
+    case "datetime": {
+      const match = /^(\d{4,}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/.exec(value);
+      return match !== null && validDate(match[1]!) && validTime(match[2]!);
+    }
+    case "color-hex": return /^#[\da-fA-F]{3}(?:[\da-fA-F]{1}|[\da-fA-F]{3}(?:[\da-fA-F]{2})?)?$/.test(value);
+    case "color": return validFormat(value, "color-hex") || CSS_NAMED_COLOR_SET.has(value.toLowerCase()) ||
+      validFunctionalColor(value);
+    case "length": return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vw|vh|vmin|vmax|ch|ex|cm|mm|in|pt|pc|q)$/.test(value) || value === "0";
+    case "percentage": return /^-?(?:\d+(?:\.\d+)?|\.\d+)%$/.test(value);
+    case "duration": return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:ms|s)$/.test(value);
+    default: return false;
+  }
+}
+
+function parseTerminal(value: unknown, name: TerminalTypeName, path: string, source: "html" | "value"): TypedResult {
   switch (name) {
     case "string":
       return typeof value === "string" ? { ok: true, value } : issue("typeMismatch", "Must be a string.", path);
+    case "keyword":
+    case "url":
+    case "email":
+    case "date":
+    case "month":
+    case "week":
+    case "time":
+    case "datetime-local":
+    case "datetime":
+    case "color":
+    case "color-hex":
+    case "length":
+    case "percentage":
+    case "duration":
+      return typeof value === "string" && validFormat(value, name)
+        ? { ok: true, value } : issue("typeMismatch", `Must be a valid ${name} value.`, path);
     case "boolean":
       if (typeof value === "boolean") return { ok: true, value };
+      if (source === "value") return issue("typeMismatch", "Must be true or false.", path);
       if (value === "" || value === "true") return { ok: true, value: true };
       if (value === "false") return { ok: true, value: false };
       return issue("typeMismatch", "Must be true or false.", path);
     case "number":
     case "integer": {
       const parsed = typeof value === "number" ? value :
-        typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
+        source === "value" ? Number.NaN :
+        typeof value === "string" && (name === "integer" ? /^-?\d+$/.test(value)
+          : /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value))
+          ? Number(value) : Number.NaN;
       if (!Number.isFinite(parsed)) return issue("badInput", `Must be ${name === "integer" ? "an integer" : "a finite number"}.`, path);
       if (name === "integer" && !Number.isInteger(parsed)) return issue("typeMismatch", "Must be an integer.", path);
       return { ok: true, value: parsed };
@@ -413,45 +562,63 @@ function parseTerminal(value: unknown, name: TerminalTypeName, path: string): Ty
   }
 }
 
-function parseNode(value: unknown, node: TypeNode, path: string): TypedResult {
+function parseNode(value: unknown, node: TypeNode, path: string, source: "html" | "value"): TypedResult {
   switch (node.kind) {
-    case "terminal": return parseTerminal(value, node.name, path);
+    case "terminal": return parseTerminal(value, node.name, path, source);
+    case "enum": {
+      const member = node.members.find((candidate) => source === "html" && typeof value === "string"
+        ? String(candidate) === value : candidate === value);
+      return member !== undefined ? { ok: true, value: member }
+        : issue("typeMismatch", `Must match ${formatType(node)}.`, path);
+    }
+    case "separated-list": {
+      const input = typeof value === "string" ? value.split(node.separator === "space" ? /\s+/ : /\s*,\s*/)
+        : value;
+      if (!Array.isArray(input) || input.length === 0 || input.some((item) => item === "")) {
+        return issue("typeMismatch", "Must be a nonempty separated list.", path);
+      }
+      const issues = input.flatMap((item, index) => {
+        const result = parseNode(item, node.item, childPath(path, index), "value");
+        return result.ok ? [] : result.issues;
+      });
+      return issues.length === 0 ? { ok: true, value: input } : { ok: false, issues };
+    }
     case "keyword": return value === node.value
       ? { ok: true, value }
       : issue("typeMismatch", `Must be ${JSON.stringify(node.value)}.`, path);
     case "union": {
       for (const member of node.members) {
-        const result = parseNode(value, member, path);
+        const result = parseNode(value, member, path, source);
         if (result.ok) return result;
       }
       return issue("typeMismatch", `Must match ${formatType(node)}.`, path);
     }
     case "list": {
-      const input = structuredInput(value);
+      const input = source === "html" ? structuredInput(value) : value;
       if (!Array.isArray(input)) return issue("typeMismatch", "Must be a list.", path);
       const output: unknown[] = [];
       const issues: TypeIssue[] = [];
       input.forEach((item, index) => {
-        const result = parseNode(item, node.item, childPath(path, index));
+        const result = parseNode(item, node.item, childPath(path, index), "value");
         if (result.ok) output.push(result.value);
         else issues.push(...result.issues);
       });
       return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
     }
     case "record": {
-      const input = structuredInput(value);
+      const input = source === "html" ? structuredInput(value) : value;
       if (!plainObject(input)) return issue("typeMismatch", "Must be a string-keyed record.", path);
       const output: Record<string, unknown> = {};
       const issues: TypeIssue[] = [];
       for (const [key, item] of Object.entries(input)) {
-        const result = parseNode(item, node.value, childPath(path, key));
+        const result = parseNode(item, node.value, childPath(path, key), "value");
         if (result.ok) output[key] = result.value;
         else issues.push(...result.issues);
       }
       return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
     }
     case "object": {
-      const input = structuredInput(value);
+      const input = source === "html" ? structuredInput(value) : value;
       if (!plainObject(input)) return issue("typeMismatch", "Must be an object.", path);
       const output: Record<string, unknown> = {};
       const issues: TypeIssue[] = [];
@@ -461,7 +628,7 @@ function parseNode(value: unknown, node: TypeNode, path: string): TypedResult {
           if (!field.optional) issues.push({ reason: "typeMismatch", message: "Required field is absent.", path: childPath(path, field.name) });
           continue;
         }
-        const result = parseNode(input[field.name], field.type, childPath(path, field.name));
+        const result = parseNode(input[field.name], field.type, childPath(path, field.name), "value");
         if (result.ok) output[field.name] = result.value;
         else issues.push(...result.issues);
       }
@@ -476,8 +643,8 @@ function parseNode(value: unknown, node: TypeNode, path: string): TypedResult {
 }
 
 /** Parse and canonicalize a value at a typed boundary without implicit JS coercion. */
-export function parseTypedValue(value: unknown, type: TypeInput, path = "$" ): TypedResult {
-  return parseNode(value, normalizeType(type), path);
+export function parseTypedValue(value: unknown, type: TypeInput, path = "$", source: "html" | "value" = "html"): TypedResult {
+  return parseNode(value, normalizeType(type), path, source);
 }
 
 /** Serialize a value using its declared type, never JavaScript's object stringification. */
@@ -492,6 +659,7 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
       (node.kind === "union" && typeof parsed.value === "object" && parsed.value !== null)) {
     return JSON.stringify(parsed.value);
   }
+  if (node.kind === "separated-list") return (parsed.value as string[]).join(node.separator === "space" ? " " : ", ");
   if (parsed.value === null) return "null";
   if (parsed.value === undefined) return "";
   return String(parsed.value);
@@ -499,8 +667,8 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
 
 /**
  * Whether a prop type can be written as an HTML attribute. Props are attributes on the component
- * invocation, so every declared type with a text form qualifies: terminals and keyword unions as
- * their text, and collection and structured shapes as JSON text parsed against the declared shape.
+ * invocation, so every declared type with a text form qualifies: scalar types and enums as
+ * their text, and collection and structured shapes as literal text parsed against the declared shape.
  * `function`, `unknown`, and trusted content have no text form and cannot be props.
  */
 export function isAttributeType(type: TypeInput): boolean {
@@ -509,6 +677,7 @@ export function isAttributeType(type: TypeInput): boolean {
     return !["function", "unknown", "trusted-html", "trusted-script"].includes(node.name);
   }
   if (node.kind === "keyword") return true;
+  if (node.kind === "enum" || node.kind === "separated-list") return true;
   if (node.kind === "union") return node.members.every(isAttributeType);
   if (node.kind === "list") return isAttributeType(node.item);
   if (node.kind === "record") return isAttributeType(node.value);

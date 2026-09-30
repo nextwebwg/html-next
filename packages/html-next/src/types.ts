@@ -40,6 +40,7 @@ export interface PropValueRecord {
 
 export interface PropContract {
   readonly type: PropType;
+  readonly pattern?: string;
   readonly required: boolean;
   readonly default?: PropValue;
   readonly target: PropTarget;

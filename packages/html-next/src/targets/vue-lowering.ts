@@ -50,6 +50,11 @@ export function category(type: TypeNode): Category {
       if (type.name === "number" || type.name === "integer") return "number";
       return "unknown";
     case "keyword": return "string";
+    case "enum": {
+      const kinds = new Set(type.members.map((member) => typeof member));
+      return kinds.size === 1 ? [...kinds][0] as Category : "scalar";
+    }
+    case "separated-list": return "list";
     case "list": return "list";
     case "record":
     case "object": return "object";
@@ -154,6 +159,8 @@ export function typeScript(value: Static): string {
           : type.name === "absent" ? "undefined"
           : "any";
       case "keyword": return JSON.stringify(type.value);
+      case "enum": return type.members.map((member) => typeof member === "string" ? JSON.stringify(member) : String(member)).join(" | ");
+      case "separated-list": return "string[]";
       case "union": return type.members.map(source).join(" | ");
       case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;

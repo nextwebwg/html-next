@@ -22,7 +22,7 @@ const baseSource = `<template component="x-hydrated-field" status="early" summar
   <state name="checked" :value="false"></state>
   <state name="choice" value="b"></state>
   <state name="choices" :value="['b']"></state>
-  <state name="emptyChoice" type="string | null" :value="null"></state>
+  <state name="emptyChoice" type="string" :value="null"></state>
   <handler name="increment"><set name="count" :value="count + 1"></set></handler>
   <handler name="chooseB"><set name="choice" :value="'b'"></set></handler>
   <handler name="chooseA"><set name="choice" :value="'a'"></set></handler>

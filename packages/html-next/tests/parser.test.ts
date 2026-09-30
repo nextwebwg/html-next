@@ -5,7 +5,7 @@ import { describe, it } from "vitest";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
-import { normalizeType, parseTypedValue } from "../src/type-system.js";
+import { formatType, normalizeType, parseTypedValue } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
@@ -29,6 +29,29 @@ function componentSource(
 }
 
 describe("parseComponent", () => {
+  it("reads nested object and array prop shapes", () => {
+    const definition = parseComponent(`<template component="x-table" status="early" summary="Rows.">
+      <defs>
+        <prop name="rows" type="array">Table rows.
+          <prop type="object">
+            <prop name="id" type="integer" required></prop>
+            <prop name="name" type="string" required></prop>
+          </prop>
+        </prop>
+      </defs>
+      <div :data-rows="rows"></div>
+    </template>`);
+    const type = normalizeType(definition.contract.props.rows!.type);
+    assert.equal(formatType(type), "list(object({ id: integer, name: string }))");
+  });
+
+  it("keeps a prop's HTML pattern constraint", () => {
+    const definition = parseComponent(componentSource(
+      `<output :data-sku="sku"></output>`,
+      `<prop name="sku" type="string" pattern="[A-Z]{3}-[0-9]{4}">Product code.</prop>`,
+    ));
+    assert.equal(definition.contract.props.sku?.pattern, "[A-Z]{3}-[0-9]{4}");
+  });
   it("normalizes the full component interface and named slot shapes", () => {
     const definition = parseComponent(
       `<template component="ui-combobox" status="early" summary="A composed field." controller="./combobox.js">` +
@@ -226,14 +249,14 @@ describe("parseComponent", () => {
     });
   });
 
-  it("rejects property bindings to non-native properties and non-attribute prop types", () => {
+  it("rejects property bindings to non-native properties and removed prop types", () => {
     // A property binding may only reach a native DOM property; component inputs are attributes.
     expectDiagnostic(
       "HP001",
       componentSource(`<div .anchorRect="anchor"></div>`, `<prop name="anchor" type="string">Anchor id.</prop>`),
     );
     expectDiagnostic(
-      "HC017",
+      "HC013",
       componentSource(`<div :data-anchor="anchor"></div>`, `<prop name="anchor" type="unknown">Anchor geometry.</prop>`),
     );
   });
@@ -410,7 +433,7 @@ describe("parseComponent", () => {
 
   it("records polymorphic native roots and delegated component roots", () => {
     // The spec's polymorphic root: an ordinary `as` prop chooses between explicit native roots.
-    const button = (root: string, defs = `<prop name="as" type="button | a" default="button">Root.</prop>`) =>
+    const button = (root: string, defs = `<prop name="as" type="enum('button', 'a')" default="button">Root.</prop>`) =>
       `<template component="x-button" status="early" summary="Polymorphic."><defs>${defs}</defs>${root}</template>`;
     const polymorphic = parseComponent(button(
       `<template $match><a $when="as = 'a'" $ref="control"><slot name="icon"></slot><slot></slot></a>` +
@@ -429,7 +452,7 @@ describe("parseComponent", () => {
     // Arms read props, state, and computed values, like any expression.
     assert.deepEqual(parseComponent(button(
       `<template $match><details $when="open"></details><a $when="linked"></a><button $else></button></template>`,
-      `<prop name="as" type="button | a" default="button">Root.</prop><state name="open" :value="false"></state>` +
+      `<prop name="as" type="enum('button', 'a')" default="button">Root.</prop><state name="open" :value="false"></state>` +
         `<computed name="linked" from="as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
     // A slot required by any arm is required; arms' dynamic slots merge by position.
@@ -558,31 +581,28 @@ describe("parseComponent", () => {
   });
 
 
-  it("reads a quoted enum member that spells a built-in type name", () => {
-    // Bare `unknown` is the type that accepts any value, so a literal of that spelling is quoted.
-    // The default stays a plain attribute value: quoting belongs to the type expression.
+  it("reads an enum member that spells a type name", () => {
     const definition = parseComponent(
       `<template component="x-state" status="early" summary="Reserved enum.">` +
-      `<defs><prop name="status" type="'unknown' | known" default="unknown">Status.</prop></defs>` +
+      `<defs><prop name="status" type="enum('unknown', 'known')" default="unknown">Status.</prop></defs>` +
       `<output :data-status="status"></output></template>`,
     );
     const prop = definition.contract.props.status!;
-    assert.deepEqual(prop.type, { enum: ["unknown", "known"] });
+    assert.deepEqual(prop.type, { kind: "enum", members: ["unknown", "known"] });
     const type = normalizeType(prop.type);
     assert.deepEqual(
       ["unknown", "known", "other", 42].map((value) => parseTypedValue(value, type).ok),
       [true, true, false, false],
     );
 
-    // Writing the member bare reads `unknown` as the type, which a prop cannot carry: it has no
-    // attribute text form. The mistake is a diagnostic rather than a union that accepts anything.
+    // The old bare keyword syntax is no longer a declaration.
     assert.throws(
       () => parseComponent(
         `<template component="x-wide" status="early" summary="Wide.">` +
         `<defs><prop name="status" type="unknown | known" default="unknown">Status.</prop></defs>` +
         `<output :data-status="status"></output></template>`,
       ),
-      /HC017/,
+      /HC013/,
     );
   });
 

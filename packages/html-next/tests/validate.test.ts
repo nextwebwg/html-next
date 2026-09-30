@@ -34,7 +34,7 @@ describe("shared validation", () => {
       ["datetime-local", "2024-02-29T12:30", "2024-02-30T12:30"],
       ["month", "2024-12", "2024-13"],
       ["week", "2020-W53", "2021-W53"],
-      ["color", "#00aaff", "blue"],
+      ["color", "#00aaff", "notacolor"],
     ] as const) {
       assert.equal(validate(good, { type }).valid, true, type);
       assert.equal(validate(bad, { type }).valid, false, type);

@@ -157,6 +157,8 @@ function referenceCheck(type: TypeNode, value: string): string {
     case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
     case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
     case "keyword": return `${value} === ${quote(type.value)}`;
+    case "enum": return `(${type.members.map((member) => `${value} === ${JSON.stringify(member)}`).join(" || ")})`;
+    case "separated-list": return `Array.isArray(${value})`;
     case "terminal":
       if (type.name === "string") return `typeof ${value} === "string"`;
       if (type.name === "boolean") return `typeof ${value} === "boolean"`;
@@ -549,7 +551,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     for (const { propName, attributeName, existing } of reflected) {
       const value = /^[A-Za-z_$][\w$]*$/.test(propName) ? `checkedProps.${propName}` : `checkedProps[${quote(propName)}]`;
       const fallback = existing?.kind === "literal" ? quote(existing.value) : "undefined";
-      attributes.push(`:${attributeName}=${bound(`reflectedProp(${quote(propName)}, ${quote(kebabCase(propName))}, ${value}, ${fallback}, ${existing?.kind === "attribute"})`)}`);
+      const type = normalizeType(context.definition.contract.props[propName]!.type);
+      const separator = type.kind === "separated-list" ? `, ${quote(type.separator === "space" ? " " : ", ")}` : "";
+      attributes.push(`:${attributeName}=${bound(`reflectedProp(${quote(propName)}, ${quote(kebabCase(propName))}, ${value}, ${fallback}, ${existing?.kind === "attribute"}${separator})`)}`);
     }
     // Keep the Vue-facing modelValue/update:modelValue API, but use native control semantics below.
     if (context.model && nativeControl && !twoWayControl) {
@@ -615,6 +619,10 @@ function typeCheck(type: TypeNode, value: string): string {
       }
     case "keyword":
       return `${value} === ${JSON.stringify(type.value)}`;
+    case "enum":
+      return `(${type.members.map((member) => `${value} === ${JSON.stringify(member)}`).join(" || ")})`;
+    case "separated-list":
+      return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => typeof item === "string"))`;
     case "union":
       return `(${type.members.map((member) => typeCheck(member, value)).join(" || ")})`;
     case "list":
@@ -667,6 +675,8 @@ function stateTokens(name: string, scope: Scope, lowering: Lowering): string[] {
   const code = lowering.value(node, scope);
   const kind = category(type.type);
   const keywords = type.type.kind === "keyword" ? [type.type.value]
+    : type.type.kind === "enum" && type.type.members.every((member) => typeof member === "string")
+      ? type.type.members as readonly string[]
     : type.type.kind === "union" && type.type.members.every((member) => member.kind === "keyword")
       ? type.type.members.map((member) => (member as { value: string }).value)
       : undefined;
@@ -842,15 +852,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   // consumer under `exactOptionalPropertyTypes` could not pass `undefined` for "unset".
   const optionalType = (source: string, required: boolean): string => required ? source : `${source} | undefined`;
   const propDefinitions = target.props.map((prop) =>
-    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(typeSource(prop.contract.type), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : ""} },`);
+    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(propTypeSource(prop.contract), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
   if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propTypeSource(modelProp.contract), false)}> },`);
   const checkedPropSources = target.props.map((prop) => {
     const type = typeSource(prop.contract.type);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${JSON.stringify(normalizeType(prop.contract.type))}, ${prop.contract.required}, ${quote(prop.name)})`;
+    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${JSON.stringify(normalizeType(prop.contract.type))}, ${prop.contract.required}, ${quote(prop.name)}${prop.contract.pattern === undefined ? "" : `, ${quote(prop.contract.pattern)}`})`;
     return `  ${propKey(prop.name)}: ${!prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked},`;
   });
   if (modelProp !== undefined) checkedPropSources.push(
-    `  modelValue: checkedProp<${propTypeSource(modelProp.contract)}>(props.modelValue, ${JSON.stringify(normalizeType(modelProp.contract.type))}, false, "modelValue"),`);
+    `  modelValue: checkedProp<${propTypeSource(modelProp.contract)}>(props.modelValue, ${JSON.stringify(normalizeType(modelProp.contract.type))}, false, "modelValue"${modelProp.contract.pattern === undefined ? "" : `, ${quote(modelProp.contract.pattern)}`}),`);
   // An event whose detail reports a prop's new value (query-change's { query }, open and close's
   // { open }) also updates that prop, so Vue consumers can write v-model:query and v-model:open.
   const modeled = target.props.filter((prop) => prop !== modelProp && events.some((event) => {
@@ -964,11 +974,11 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ] : []),
     ...(!reflectsProps ? [] : [
       "const componentInstance = getCurrentInstance();",
-      "function reflectedProp(name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean): string | undefined {",
+      "function reflectedProp(name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean, separator?: string): string | undefined {",
       "  const incoming = componentInstance?.vnode.props;",
       "  if (!bound && (incoming === null || incoming === undefined || (!Object.hasOwn(incoming, name) && !Object.hasOwn(incoming, kebab)))) return fallback;",
       "  if (value === null || value === undefined) return undefined;",
-      "  return typeof value === 'object' ? JSON.stringify(value) : String(value);",
+      "  return Array.isArray(value) && separator !== undefined ? value.join(separator) : typeof value === 'object' ? JSON.stringify(value) : String(value);",
       "}",
     ]),
     `const ${hydrationInstanceName} = getCurrentInstance();`,

@@ -1,6 +1,6 @@
 import type { DefaultTreeAdapterTypes } from "parse5";
 
-import { parseTypeAttribute } from "./contract.js";
+import { matchesPropPattern, parseTypeAttribute } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import { parseDuration } from "./duration.js";
@@ -23,7 +23,7 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import { isAttributeType, parseTypedValue, parseTypeExpression } from "./type-system.js";
+import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
 
 type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
@@ -236,6 +236,30 @@ function readProps(
   source: string,
   requireBinding = true,
 ): Record<string, PropContract> {
+  const declaredType = (element: Element): PropContract["type"] => {
+    const written = attr(element, "type");
+    if (written === undefined || written === "") fail("HC013", "A <prop> requires a `type` attribute.", source);
+    const children = directElements(element, "prop");
+    if (written === "array") {
+      if (children.length !== 1 || attr(children[0]!, "name") !== undefined) {
+        fail("HC013", "An array prop requires one unnamed item <prop>.", source);
+      }
+      return { kind: "list", item: normalizeType(declaredType(children[0]!)) };
+    }
+    if (written === "object" && children.length > 0) {
+      const fields: { name: string; type: TypeNode; optional: boolean }[] = [];
+      for (const child of children) {
+        const fieldName = attr(child, "name");
+        if (fieldName === undefined || fieldName === "" || fields.some((field) => field.name === fieldName)) {
+          fail("HC013", "Object fields require distinct names.", source);
+        }
+        fields.push({ name: fieldName, type: normalizeType(declaredType(child)), optional: attr(child, "required") === undefined });
+      }
+      return { kind: "object", fields, open: false };
+    }
+    if (children.length > 0) fail("HC013", "Only object and array props contain nested <prop> declarations.", source);
+    return parseTypeAttribute(written);
+  };
   const props = Object.create(null) as Record<string, PropContract>;
   const normalizedNames = Object.create(null) as Record<string, string>;
   if (group === undefined) return props;
@@ -268,8 +292,16 @@ function readProps(
       fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
     }
     target ??= { attribute: name.toLowerCase() };
-    const type = parseTypeAttribute(typeAttribute);
+    const type = declaredType(element);
     const required = attr(element, "required") !== undefined;
+    const pattern = attr(element, "pattern");
+    if (pattern !== undefined) {
+      try { new RegExp(`^(?:${pattern})$`, "v"); }
+      catch {
+        try { new RegExp(`^(?:${pattern})$`, "u"); }
+        catch { fail("HC013", `Pattern for prop \`${name}\` is invalid.`, source); }
+      }
+    }
     const description = textContent(element).trim();
     if (description === "") {
       fail("HC003", `\`props.${name}.description\` must be a non-empty string.`, source);
@@ -287,14 +319,16 @@ function readProps(
     }
     const spec: {
       type: PropContract["type"];
+      pattern?: string;
       required: boolean;
       default?: PropValue;
       target: PropTarget;
       description: string;
     } = { type, required, target, description };
+    if (pattern !== undefined) spec.pattern = pattern;
     if (defaultValue !== undefined) {
       const parsed = parseTypedValue(defaultValue, type);
-      if (!parsed.ok) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
+      if (!parsed.ok || !matchesPropPattern(parsed.value, pattern)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
       spec.default = parsed.value as PropValue;
     }
     props[name] = spec;

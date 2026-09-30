@@ -1,4 +1,5 @@
 import type { ControllerModule } from "./controller.js";
+import { matchesPropPattern } from "./contract.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
@@ -289,22 +290,28 @@ export function installComponentGraph(
   return installed;
 }
 
-function invocationValue(prop: PropContract, input: unknown, attributePresent = false): PropValue {
+function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false): PropValue {
+  if (input === null) {
+    if (prop.required) fail("HC021", "A required prop cannot be null.");
+    return null;
+  }
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = prop.type === "boolean" && attributePresent && input === "" ? true : input;
-  const parsed = parseTypedValue(candidate, prop.type);
+  if (prop.required && candidate === "") fail("HR002", "A required prop cannot be empty.");
+  const parsed = parseTypedValue(candidate, prop.type, "$", source);
   if (!parsed.ok) {
     const detail = parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
     fail("HR002", `A prop invocation value does not satisfy its declared type. ${detail}`);
   }
+  if (!matchesPropPattern(parsed.value, prop.pattern)) fail("HR002", "A prop invocation value does not match its pattern.");
   return parsed.value as PropValue;
 }
 
 function assignedPropValue(name: string, prop: PropContract, input: unknown): Value {
-  if (input !== undefined) return invocationValue(prop, input) as Value;
+  if (input !== undefined) return invocationValue(prop, input, "value") as Value;
   if (prop.required) fail("HC020", `Required prop \`${name}\` was not provided.`);
-  return (prop.default === undefined ? ABSENT : prop.default) as Value;
+  return (prop.default === undefined ? null : prop.default) as Value;
 }
 
 function propAttributeNames(
@@ -335,15 +342,15 @@ function componentScope(
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(definition.contract.props)) {
-    if (prop.required && values[name] === undefined) {
+    if (prop.required && (values[name] === undefined || values[name] === null)) {
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
-    // The effective value seen by expressions: passed value, default, or first-class absence.
+    // The effective value seen by expressions: passed value, default, or null.
     scope.set(
       name,
       (values[name] !== undefined
         ? values[name]!
-        : prop.default === undefined ? ABSENT : prop.default) as Value,
+        : prop.default === undefined ? null : prop.default) as Value,
     );
   }
 
@@ -394,6 +401,7 @@ function readInvocation(
   definition: ComponentDefinition,
   hydration = false,
   parent?: RuntimeInstance,
+  frameworkProps?: Readonly<Record<string, unknown>>,
 ): {
   readonly scope: ReactiveScope;
   readonly passThrough: readonly RootAttribute[];
@@ -410,12 +418,16 @@ function readInvocation(
       if (!hydration) passThrough.push(attribute);
       continue;
     }
-    values[propName] = invocationValue(contract.props[propName]!, attribute.value, !hydration);
+    values[propName] = invocationValue(contract.props[propName]!, attribute.value, "html", !hydration);
+  }
+  for (const [name, input] of Object.entries(frameworkProps ?? {})) {
+    const prop = contract.props[name];
+    if (prop !== undefined && input !== undefined) values[name] = invocationValue(prop, input, "value");
   }
 
   // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
   // author's explicit attributes). They are never read from JavaScript properties.
-  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined));
+  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined && values[name] !== null));
   const { scope, effects } = componentScope(definition, values, parent);
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
@@ -1311,11 +1323,11 @@ export function componentRootIndex(
   props: Readonly<Record<string, unknown>>,
 ): number {
   const values = Object.create(null) as Record<string, PropValue | undefined>;
-  // The same conversion attachComponent applies: a framework's null leaves the prop to its
-  // default, and a value round-trips through its data-* form and declared type.
+  // Use the same typed prop channel as attachment so explicit null overrides a default.
   for (const [name, prop] of Object.entries(definition.contract.props)) {
     const input = props[name];
-    if (input !== undefined && input !== null) values[name] = invocationValue(prop, serializeTypedValue(input, prop.type));
+    if (input === null) values[name] = null;
+    else if (input !== undefined) values[name] = invocationValue(prop, input, "value");
   }
   const { scope, effects } = componentScope(definition, values);
   try {
@@ -1510,7 +1522,7 @@ function renderInstance(
         if (lowered !== undefined && attribute.target === undefined) {
           const propName = propAttributeNames(lowered.instance.definition, false)[attribute.name.toLowerCase()];
           if (propName !== undefined) {
-            applyComponentProps(lowered.instance, { [propName]: toAttribute(value) });
+            applyComponentProps(lowered.instance, { [propName]: value });
             return;
           }
         }
@@ -2063,6 +2075,7 @@ function prepareRuntimeInvocation(
   projectedSlotNames = new WeakMap<Node, string>(),
   frameworkOwned = false,
   parent?: RuntimeInstance,
+  frameworkProps?: Readonly<Record<string, unknown>>,
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -2070,7 +2083,7 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration, parent);
+  const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -2803,7 +2816,7 @@ export function attachComponent(
       if (value !== undefined && value !== null) element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, prop.type));
     }
     const attaching = [
-      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true, invocationParent(element, new WeakMap())),
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true, invocationParent(element, new WeakMap()), options.props),
     ];
     commitRuntimeInvocations(registry, attaching);
     // Generated output attaches its own root, so nothing else will lower the components this
@@ -2861,7 +2874,7 @@ function applyComponentProps(
     if (prop === undefined) continue;
     const attributeName = `data-${kebabCase(name)}`;
     const value = assignedPropValue(name, prop, input);
-    // Null has no attribute form: like undefined, it leaves no explicit data-* attribute.
+    // Null has no attribute form, but remains the effective in-memory prop value.
     if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
