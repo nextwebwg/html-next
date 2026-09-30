@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes each listed package whose version is not yet on npm, through npm trusted publishing
+# Publishes the lockstep package set through npm trusted publishing
 # (OIDC): no npm token, and provenance is generated automatically. Each package needs this
 # repository and workflow configured as its trusted publisher on npmjs.com. Trusted publishing
 # cannot create a package, so a new package name needs one manual first publish.
@@ -32,7 +32,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:release
-      - name: Publish unpublished versions
+      - name: Publish the shared version of every package
         run: |
           mkdir -p .release
           # One package's failure must not hide the others: attempt every package, record each

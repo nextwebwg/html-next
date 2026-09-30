@@ -11,6 +11,7 @@ const repositoryLicense = readFileSync(join(root, "LICENSE"), "utf8");
 const workspace = mkdtempSync(join(tmpdir(), "html-next-package-consumer-"));
 const useCommandShell = process.platform === "win32";
 const componentsPackage = "@nextwebwg/html-next";
+const releaseDirectories = ["html-next", "html-next-converter", "html-next-unplugin"] as const;
 const publicExports = [
   ".",
   "./runtime",
@@ -87,7 +88,8 @@ describe("workspace package contracts", () => {
       repository?: { type: string; url: string; directory: string };
       publishConfig?: { access: string; tag: string; registry: string };
     };
-    expect(manifest.version).toBe("1.0.0-alpha.9");
+    const sourceManifest = JSON.parse(readFileSync(join(root, "packages/html-next/package.json"), "utf8")) as { version: string };
+    expect(manifest.version).toBe(sourceManifest.version);
     expect(manifest.private).toBeUndefined();
     expect(manifest.license).toBe("MIT");
     expect(manifest.repository).toEqual({
@@ -152,19 +154,18 @@ describe("workspace package contracts", () => {
   }, 120_000);
 
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
-    for (const packageDirectory of [
-      "html-next",
-      "html-next-converter",
-      "html-next-unplugin",
-    ]) {
+    const versions = new Set<string>();
+    for (const packageDirectory of releaseDirectories) {
       const packageRoot = join(root, "packages", packageDirectory);
       const manifest = JSON.parse(
         readFileSync(join(packageRoot, "package.json"), "utf8"),
-      ) as { private?: boolean; license?: string; publishConfig?: { access: string; tag: string } };
+      ) as { version: string; private?: boolean; license?: string; publishConfig?: { access: string; tag: string } };
+      versions.add(manifest.version);
       expect(manifest.private, packageDirectory).toBeUndefined();
       expect(manifest.publishConfig, packageDirectory).toMatchObject({ access: "public", tag: "latest" });
       expect(manifest.license, packageDirectory).toBe("MIT");
       expect(readFileSync(join(packageRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
     }
+    expect([...versions], "All published packages must share one version.").toHaveLength(1);
   });
 });

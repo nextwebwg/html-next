@@ -116,7 +116,7 @@
     }
   ],
   "release": {
-    "strategy": "independent-monorepo"
+    "strategy": "fixed-monorepo"
   },
   "schemaVersion": "1.0",
   "settings": {

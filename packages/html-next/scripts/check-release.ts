@@ -20,6 +20,14 @@ interface PackageManifest {
 const manifest = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as PackageManifest;
+const adapterVersions = await Promise.all(
+  ["html-next-converter", "html-next-unplugin"].map(async (directory) => {
+    const adapter = JSON.parse(await readFile(
+      new URL(`../../${directory}/package.json`, import.meta.url), "utf8",
+    )) as { readonly name: string; readonly version: string };
+    return adapter;
+  }),
+);
 const packageLicense = await readFile(new URL("../LICENSE", import.meta.url), "utf8");
 const repositoryLicense = await readFile(new URL("../../../LICENSE", import.meta.url), "utf8");
 const expectedExports = [
@@ -35,6 +43,9 @@ const expectedExports = [
 
 assert.equal(manifest.name, "@nextwebwg/html-next");
 assert.equal(GENERATOR_VERSION, manifest.version, "Generator and package versions must match.");
+for (const adapter of adapterVersions) {
+  assert.equal(adapter.version, manifest.version, `${adapter.name} must share the HTML Next release version.`);
+}
 assert.equal(manifest.license, "MIT");
 assert.equal(packageLicense, repositoryLicense, "The packed MIT notice must match the repository.");
 assert.deepEqual(manifest.files, ["dist"]);
