@@ -2,7 +2,7 @@
 <template component="ui-badge" status="early" summary="A small status label.">
   <defs>
     <prop name="label" type="string" default="">Text shown inside the badge.</prop>
-    <prop name="tone" type="enum('neutral', 'warning', 'danger')" default="neutral">Visual emphasis.</prop>
+    <prop name="tone" type="keyword" values="neutral, warning, danger" default="neutral">Visual emphasis.</prop>
   </defs>
   <span class="badge" :data-tone="tone" $value="label"></span>
   <style>

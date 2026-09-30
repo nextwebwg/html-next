@@ -63,7 +63,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
   <defs>
     <prop name="label" type="string" default="Items">Heading.</prop>
     <prop name="items" type="list(object({ id: string, name: string, done: boolean }))">Rows.</prop>
-    <prop name="size" type="enum('sm', 'md')" default="md">Size.</prop>
+    <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
     <state name="open" :value="false"></state>
     <state name="query" :value="''"></state>
     <computed name="count" from="items.length"></computed>
@@ -95,6 +95,66 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("preserves nested permitted event values in generated targets", () => {
+    const outputs = generated(`<template component="x-nested-event"><defs>
+      <event name="change" type="object">
+        <prop name="value" type="number" required></prop>
+        <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
+      </event>
+    </defs><output></output></template>`);
+    const vanilla = outputs.get("vanilla/XNestedEvent.d.ts")!;
+    const vue = outputs.get("vue/XNestedEvent.vue")!;
+    assert.match(vanilla, /trigger: "keyboard" \| "pointer"/);
+    assert.match(vue, /\['trigger'\] === 'keyboard'/);
+    assert.match(vue, /\['trigger'\] === 'pointer'/);
+    compileVue(vue, "XNestedEvent.vue");
+  });
+
+  for (const form of ["inline", "named"] as const) {
+    it(`generates dependent Vue and vanilla props from a ${form} type`, async () => {
+      const declaration = form === "inline"
+        ? `<prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>`
+        : `<type name="input-value" from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop>`;
+      const outputs = generated(`<template component="x-dependent"><defs>
+        <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
+        ${declaration}
+      </defs><input :type="type" :value="value"></template>`);
+      const vue = outputs.get("vue/XDependent.vue")!;
+      const vanilla = outputs.get("vanilla/XDependent.d.ts")!;
+      compileVue(vue, "XDependent.vue");
+      assert.match(vue, /generic="T0 extends/);
+      assert.match(vue, /T0 extends 'number' \? number/);
+      assert.match(vanilla, /XDependentProps<T0 extends/);
+      assert.match(vanilla, /T0 extends "number" \? number/);
+      const directory = await mkdtemp(join(packageRoot, ".dependent-types-"));
+      try {
+        await writeFile(join(directory, "vanilla.d.ts"), vanilla);
+        await writeFile(join(directory, "consumer.ts"), [
+          'import { createXDependent } from "./vanilla";',
+          'createXDependent({ type: "number", value: 2.5 });',
+          'createXDependent({ type: "text", value: "2.5" });',
+          'createXDependent({ value: "2.5" });',
+          '// @ts-expect-error numeric mode requires a number',
+          'createXDependent({ type: "number", value: "2.5" });',
+          '// @ts-expect-error text mode requires a string',
+          'createXDependent({ type: "text", value: 2.5 });',
+          '// @ts-expect-error the default mode is text',
+          'createXDependent({ value: 2.5 });',
+          '',
+        ].join("\n"));
+        await run("corepack", [
+          "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--skipLibCheck",
+          "--target", "ES2023", "--module", "ESNext", "--moduleResolution", "Bundler", "--lib", "ES2023,DOM",
+          join(directory, "consumer.ts"),
+        ], { cwd: packageRoot, shell: process.platform === "win32" }).catch((error: { stdout?: string; stderr?: string }) => {
+          throw new Error(`Dependent consumer typecheck failed.\n${error.stdout ?? ""}${error.stderr ?? ""}`, { cause: error });
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
   it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
     const vue = generated(`<template component="x-root-ref" controller="./root.js" status="early" summary="Root reference.">
       <button $ref="control" type="button">Go</button>
@@ -105,20 +165,20 @@ describe("official target compilers", () => {
     assert.doesNotMatch(vue, /ref="root"/);
   });
 
-  it("types an optional Vue prop so an explicit undefined means unset", async () => {
+  it("types defaulted Vue props by their resolved values", async () => {
     const vue = generated(componentSource(
       "x-optional",
-      `<prop name="label" type="string">Label.</prop><prop name="size" type="enum('sm', 'md')" default="md">Size.</prop>` +
+      `<prop name="label" type="string">Label.</prop><prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
       '<p :data-label="label" :data-size="size" :data-count="count"></p>',
     )).get("vue/XOptional.vue")!;
-    // Vue reads an explicit undefined as an absent prop, so the type admits it; a required prop does not.
-    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null \| undefined>, default: null \}/);
-    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null \| undefined>, default: 'md' \}/);
+    // Vue applies defaults before exposing resolved props, including the implicit null default.
+    assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
+    assert.match(vue, /size: \{ type: null as unknown as PropType<'sm' \| 'md' \| null>, default: 'md' \}/);
     assert.match(vue, /count: \{ type: null as unknown as PropType<number> \}/);
 
-    // A consumer under exactOptionalPropertyTypes can pass undefined for an optional prop, still
-    // cannot pass a value outside its type, and cannot pass undefined for a required one.
+    // A consumer under exactOptionalPropertyTypes can omit an optional prop, but a resolved
+    // instance prop does not include undefined after Vue applies its default.
     const directory = await mkdtemp(join(packageRoot, ".vue-types-"));
     try {
       await writeFile(join(directory, "XOptional.ts"), compileVue(vue, "XOptional.vue"));
@@ -126,8 +186,7 @@ describe("official target compilers", () => {
       await writeFile(join(directory, "consumer.ts"), [
         'import XOptional from "./XOptional";',
         'type Props = InstanceType<typeof XOptional>["$props"];',
-        "const maybe = undefined as string | undefined;",
-        "export const unset: Props = { count: 1, label: maybe, size: undefined };",
+        "export const unset: Props = { count: 1 };",
         "export const set: Props = { count: 1, label: \"Name\", size: \"sm\" };",
         "// @ts-expect-error outside the declared type",
         "export const outside: Props = { count: 1, size: \"lg\" };",
@@ -223,8 +282,8 @@ describe("official target compilers", () => {
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
     // Vue writes a boolean on an ARIA attribute as "true" or "false", and removes a false boolean attribute.
-    assert.match(vue, /:aria-expanded="checkedProps\.open"/);
-    assert.match(vue, /:hidden="checkedProps\.gone"/);
+    assert.match(vue, /:aria-expanded="checkedProps\.open \?\? undefined"/);
+    assert.match(vue, /:hidden="checkedProps\.gone \?\? undefined"/);
     const vanilla = outputs.get("vanilla/XAria.js")!;
     assert.match(vanilla, /setAttribute\("aria-expanded", String\(value\d+\)\)/);
     assert.match(vanilla, /setAttribute\("hidden", ""\)/);
@@ -250,7 +309,9 @@ describe("official target compilers", () => {
     assert.match(vue, /const query = ref\(''\)\n/);
     assert.match(vue, /const count = cycleCheckedComputed\(\(\) => checkedProps\.value\.items\?\.length\)\n/);
     assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('search'\)\n/);
-    assert.match(vue, /const hostState = computed\(\(\) =>\n  \[\n    open\.value && 'open',\n    checkedProps\.value\.size && `size size=\$\{checkedProps\.value\.size\}`,\n  \]\.filter\(Boolean\)\.join\(' '\)\n\)/);
+    assert.match(vue, /const hostState = computed\(\(\) =>/);
+    assert.match(vue, /checkedProps\.value\.size && 'size'/);
+    assert.match(vue, /`size=\$\{encodeURIComponent\(checkedProps\.value\.size\)\}`/);
     assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value\n/);
     assert.match(vue, /<ul v-if="open">/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
@@ -262,7 +323,7 @@ describe("official target compilers", () => {
     assert.match(vue, /@input="query = readBoundControl\(/);
     assert.match(vue, /@click="flip"/);
     assert.match(vue, /:class="\{ compact: checkedProps\.size === 'sm' \}"/);
-    assert.match(vue, /:style="\{ '--gap': checkedProps\.size \}"/);
+    assert.match(vue, /:style="\{ '--gap': checkedProps\.size \?\? undefined \}"/);
     assert.match(vue, /<XBadge :tone="checkedProps\.size"><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
     assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
@@ -339,17 +400,17 @@ describe("official target compilers", () => {
   it("types optional nullable props once", () => {
     const vue = generated(componentSource(
       "demo-anchor",
-      `<prop name="anchor" type="enum('start', 'end')">Anchor edge.</prop>`,
+      `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
       `<div :data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
-    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null \| undefined>, default: null \}/);
+    assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
   });
 
   it("renders a polymorphic root as the native root its `$match` arm chooses", async () => {
     const outputs = generated(`<template component="x-action" status="experimental" summary="Button or link.">
   <defs>
-    <prop name="as" type="enum('button', 'a')" default="button">Native root.</prop>
+    <prop name="as" type="keyword" values="button, a" default="button">Native root.</prop>
     <prop name="href" type="string">Link.</prop>
     <prop name="disabled" type="boolean" default="false">Off.</prop>
     <prop name="tags" type="keyword#">Comma-separated tags.</prop>
@@ -362,7 +423,7 @@ describe("official target compilers", () => {
   <style>:host { display: inline-flex; }</style>
 </template>`);
     const vue = outputs.get("vue/XAction.vue")!;
-    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null \| undefined>, default: 'button' \}/);
+    assert.match(vue, /as: \{ type: null as unknown as PropType<'button' \| 'a' \| null>, default: 'button' \}/);
     assert.match(vue, /<a\n\s+v-if="checkedProps\.as === 'a'"/);
     assert.match(vue, /<button\n\s+v-else\n/);
     const script = compileVue(vue, "XAction.vue");
@@ -410,7 +471,7 @@ describe("official target compilers", () => {
     // A real-element $match keeps that element as the root and switches only its chosen child.
     const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
-      `<prop name="as" type="enum('a', 'b')" default="a">Kind.</prop>`,
+      `<prop name="as" type="keyword" values="a, b" default="a">Kind.</prop>`,
       `<section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
     )));
     assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);
@@ -844,6 +905,18 @@ describe("official target compilers", () => {
     assert.match(module, /dispatchGeneratedEvent/);
     assert.match(module, /name: "saved", type: "number", detail: state0, bubbles: false, composed: false, cancelable: true/);
     await transform(module, { loader: "js" });
+  });
+
+  it("exposes declared event detail through a typed Vue CustomEvent", () => {
+    const vue = generated(`<template component="demo-vue-event" status="experimental" summary="Typed Vue event.">
+      <defs>
+        <event name="select" type="object"><prop name="value" type="keyword" values="small, large" required></prop></event>
+        <handler name="choose"><dispatch event="select" :value="{ value: 'small' }"></dispatch></handler>
+      </defs>
+      <button on:click="choose">Choose</button>
+    </template>`).get("vue/DemoVueEvent.vue")!;
+    assert.match(vue, /select: \[event: CustomEvent<\{ readonly value: 'small' \| 'large' \}>\]/);
+    assert.match(vue, /createDispatch\(root, emit as \(name: string, detail: unknown\) => void/);
   });
 
   it("compiles state-only boolean handler guards while preserving subsequent steps", async () => {

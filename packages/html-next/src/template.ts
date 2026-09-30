@@ -1,5 +1,6 @@
 import type { ComponentContract } from "./types.js";
 import type { CompiledExpression, WritablePath } from "./expression.js";
+import type { TypeNode } from "./type-system.js";
 
 export interface ComponentDefinition {
   readonly source: { readonly file: string };
@@ -38,6 +39,8 @@ export interface ReactiveDeclaration {
   readonly context?: boolean;
   /** A state's declared type, in the type-expression syntax props use. */
   readonly type?: string;
+  /** Parsed nested fields and their values constraints, when authored. */
+  readonly shape?: TypeNode;
   readonly value?: string;
   readonly expression?: CompiledExpression;
 }
@@ -70,6 +73,8 @@ export interface EventDeclaration {
   readonly kind: "event";
   readonly name: string;
   readonly type: string;
+  /** Parsed nested fields and their values constraints, when authored. */
+  readonly shape?: TypeNode;
   readonly bubbles: boolean;
   readonly composed: boolean;
   readonly cancelable: boolean;

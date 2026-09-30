@@ -407,7 +407,7 @@ describe("framework converter", () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-gap-"));
     temporary.push(root);
     await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
-      <defs><prop name="as" type="enum('a', 'b')" default="a">Kind.</prop></defs>
+      <defs><prop name="as" type="keyword" values="a, b" default="a">Kind.</prop></defs>
       <section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>
     </template>`);
     const outDirectory = join(root, "generated");

@@ -1,6 +1,6 @@
 import type { DefaultTreeAdapterTypes } from "parse5";
 
-import { matchesPropPattern, parseTypeAttribute } from "./contract.js";
+import { matchesPropPattern, matchesPropValues, parseTypeAttribute, parseValuesConstraint } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import { parseDuration } from "./duration.js";
@@ -35,6 +35,7 @@ export type ComponentSourceNode = ChildNode;
 export interface ComponentParserPlatform {
   readonly isNativeElement: (name: string) => boolean;
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
+  readonly warnInvalidDeclaration?: (message: string, source: string) => void;
 }
 
 /** Parse the inert contents of a consumer's scoped-slot template against its exposed names. */
@@ -230,40 +231,111 @@ function collectTargets(
   return targets;
 }
 
+function readDeclaredType(
+  element: Element,
+  source: string,
+  nested = false,
+  warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
+): PropContract["type"] {
+  const written = attr(element, "type");
+  if (written === undefined || written === "") fail("HC013", "A typed declaration requires a `type` attribute.", source);
+  if (attr(element, "open") !== undefined && written !== "object") {
+    fail("HC013", "Only an object declaration can be open.", source);
+  }
+  const children = directElements(element, "prop");
+  let type: PropContract["type"];
+  if (written === "array") {
+    if (children.length !== 1 || attr(children[0]!, "name") !== undefined) {
+      fail("HC013", "An array requires one unnamed item <prop>.", source);
+    }
+    type = { kind: "list", item: normalizeType(readDeclaredType(children[0]!, source, true, warnInvalidDeclaration)) };
+  } else if (written === "object" && (children.length > 0 || attr(element, "open") !== undefined)) {
+    const fields: { name: string; type: TypeNode; optional: boolean }[] = [];
+    for (const child of children) {
+      const fieldName = attr(child, "name");
+      if (fieldName === undefined || fieldName === "" || fields.some((field) => field.name === fieldName)) {
+        fail("HC013", "Object fields require distinct names.", source);
+      }
+      fields.push({ name: fieldName, type: normalizeType(readDeclaredType(child, source, true, warnInvalidDeclaration)), optional: attr(child, "required") === undefined });
+    }
+    type = { kind: "object", fields, open: attr(element, "open") !== undefined };
+  } else {
+    if (children.length > 0) fail("HC013", "Only object and array declarations contain nested <prop> fields.", source);
+    type = parseTypeAttribute(written);
+  }
+  if (!nested) return type;
+  const rawValues = attr(element, "values");
+  if (rawValues !== undefined) {
+    const values = parseValuesConstraint(type, rawValues);
+    if (values === undefined) {
+      const message = `A nested values constraint does not conform to type \`${written}\`; the constraint is ignored.`;
+      if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+      warnInvalidDeclaration(message, source);
+    } else {
+      type = { kind: "constrained", base: normalizeType(type), values };
+    }
+  }
+  return attr(element, "nullable") === undefined ? type
+    : { kind: "union", members: [normalizeType(type), { kind: "terminal", name: "null" }] };
+}
+
 function readProps(
   group: Element | undefined,
   targets: Record<string, PropTarget>,
   source: string,
   requireBinding = true,
+  warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): Record<string, PropContract> {
-  const declaredType = (element: Element): PropContract["type"] => {
-    const written = attr(element, "type");
-    if (written === undefined || written === "") fail("HC013", "A <prop> requires a `type` attribute.", source);
-    const children = directElements(element, "prop");
-    if (written === "array") {
-      if (children.length !== 1 || attr(children[0]!, "name") !== undefined) {
-        fail("HC013", "An array prop requires one unnamed item <prop>.", source);
-      }
-      return { kind: "list", item: normalizeType(declaredType(children[0]!)) };
+  const elements = group === undefined ? [] : directElements(group, "prop");
+  const namedTypes = new Map<string, Element>();
+  for (const element of group === undefined ? [] : directElements(group, "type")) {
+    const name = attr(element, "name") ?? "";
+    if (!/^[a-z][a-z0-9-]*$/.test(name) || namedTypes.has(name)) {
+      fail("HC013", "Named <type> declarations require distinct lowercase names.", source);
     }
-    if (written === "object" && children.length > 0) {
-      const fields: { name: string; type: TypeNode; optional: boolean }[] = [];
-      for (const child of children) {
-        const fieldName = attr(child, "name");
-        if (fieldName === undefined || fieldName === "" || fields.some((field) => field.name === fieldName)) {
-          fail("HC013", "Object fields require distinct names.", source);
-        }
-        fields.push({ name: fieldName, type: normalizeType(declaredType(child)), optional: attr(child, "required") === undefined });
-      }
-      return { kind: "object", fields, open: false };
+    try { parseTypeExpression(name); }
+    catch { namedTypes.set(name, element); continue; }
+    fail("HC013", `Named type \`${name}\` conflicts with a built-in type.`, source);
+  }
+  const selectedType = (element: Element): NonNullable<PropContract["select"]> => {
+    const from = attr(element, "from") ?? "";
+    const selector = elements.find((candidate) => attr(candidate, "name") === from);
+    if (selector === undefined || attr(selector, "type") === undefined) {
+      fail("HC013", `<type from="${from}"> must name a declared prop with finite values.`, source);
     }
-    if (children.length > 0) fail("HC013", "Only object and array props contain nested <prop> declarations.", source);
-    return parseTypeAttribute(written);
+    const selectorType = normalizeType(parseTypeAttribute(attr(selector, "type")!));
+    const selectorValues = parseValuesConstraint(selectorType, attr(selector, "values"));
+    if (selectorValues === undefined) {
+      fail("HC013", `<type from="${from}"> requires a valid values constraint.`, source);
+    }
+    if (attr(selector, "default") === undefined && attr(selector, "required") === undefined) {
+      fail("HC013", `Selecting prop \`${from}\` must be required or have a default.`, source);
+    }
+    const options: { value: string | number | boolean; type: TypeNode }[] = [];
+    for (const node of significant(sourceChildren(element))) {
+      if (!isElement(node) || sourceTag(node) !== "option") {
+        fail("HC013", "A <type> contains <option> elements only.", source);
+      }
+      const value = attr(node, "value");
+      const type = attr(node, "type");
+      if (value === undefined || type === undefined || directElements(node, "option").length > 0) {
+        fail("HC013", "Each type <option> requires `value` and `type` attributes.", source);
+      }
+      const parsed = parseTypedValue(value, selectorType);
+      if (!parsed.ok || options.some((option) => option.value === parsed.value)) {
+        fail("HC013", `Type option \`${value}\` is not a distinct selector member.`, source);
+      }
+      options.push({ value: parsed.value as string | number | boolean, type: normalizeType(parseTypeAttribute(type)) });
+    }
+    if (options.length !== selectorValues.length ||
+      selectorValues.some((member) => !options.some((option) => option.value === member))) {
+      fail("HC013", `<type from="${from}"> must cover every permitted selector value exactly once.`, source);
+    }
+    return { from, options };
   };
   const props = Object.create(null) as Record<string, PropContract>;
   const normalizedNames = Object.create(null) as Record<string, string>;
   if (group === undefined) return props;
-  const elements = directElements(group, "prop");
   elements.sort((left, right) => {
     const leftName = attr(left, "name") ?? "";
     const rightName = attr(right, "name") ?? "";
@@ -278,7 +350,11 @@ function readProps(
       fail("HC010", `Invalid prop name \`${name}\`.`, source);
     }
     const typeAttribute = attr(element, "type");
-    if (typeAttribute === undefined || typeAttribute === "") {
+    const inline = directElements(element, "type");
+    if (inline.length > 1 || (inline.length === 1 && typeAttribute !== undefined)) {
+      fail("HC013", `Prop \`${name}\` must declare one type, inline or by attribute.`, source);
+    }
+    if ((typeAttribute === undefined || typeAttribute === "") && inline.length === 0) {
       fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
     }
     const normalizedName = name.toLowerCase();
@@ -292,8 +368,20 @@ function readProps(
       fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
     }
     target ??= { attribute: name.toLowerCase() };
-    const type = declaredType(element);
+    const selected = inline[0] ?? namedTypes.get(typeAttribute ?? "");
+    if (inline[0] !== undefined && attr(inline[0], "name") !== undefined) {
+      fail("HC013", "An inline <type> has no name; put named types directly under <defs>.", source);
+    }
+    const select = selected === undefined ? undefined : selectedType(selected);
+    const type = select === undefined ? readDeclaredType(element, source, false, warnInvalidDeclaration)
+      : { kind: "selected", from: select.from, options: select.options } as const;
     const required = attr(element, "required") !== undefined;
+    const values = parseValuesConstraint(type, attr(element, "values"));
+    if (attr(element, "values") !== undefined && values === undefined) {
+      const message = `Prop \`${name}\` has a values constraint that does not conform to its type; the constraint is ignored.`;
+      if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+      warnInvalidDeclaration(message, source);
+    }
     const pattern = attr(element, "pattern");
     if (pattern !== undefined) {
       try { new RegExp(`^(?:${pattern})$`, "v"); }
@@ -319,16 +407,31 @@ function readProps(
     }
     const spec: {
       type: PropContract["type"];
+      values?: readonly (string | number | boolean)[];
+      select?: NonNullable<PropContract["select"]>;
       pattern?: string;
       required: boolean;
       default?: PropValue;
       target: PropTarget;
       description: string;
     } = { type, required, target, description };
+    if (values !== undefined) spec.values = values;
+    if (select !== undefined) spec.select = select;
     if (pattern !== undefined) spec.pattern = pattern;
     if (defaultValue !== undefined) {
-      const parsed = parseTypedValue(defaultValue, type);
-      if (!parsed.ok || !matchesPropPattern(parsed.value, pattern)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
+      let defaultType = type;
+      if (select !== undefined) {
+        const selector = elements.find((candidate) => attr(candidate, "name") === select.from)!;
+        const selectorDefault = attr(selector, "default");
+        if (selectorDefault === undefined) {
+          fail("HC015", `Prop \`${name}\` needs a selector default before it can declare its own default.`, source);
+        }
+        const selected = parseTypedValue(selectorDefault, parseTypeAttribute(attr(selector, "type")!));
+        if (!selected.ok) fail("HC015", `Default for selecting prop \`${select.from}\` is invalid.`, source);
+        defaultType = select.options.find((option) => option.value === selected.value)!.type;
+      }
+      const parsed = parseTypedValue(defaultValue, defaultType);
+      if (!parsed.ok || !matchesPropPattern(parsed.value, pattern) || !matchesPropValues(parsed.value, values)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
       spec.default = parsed.value as PropValue;
     }
     props[name] = spec;
@@ -344,6 +447,7 @@ function readContract(
   targets: Record<string, PropTarget>,
   source: string,
   requireBinding: boolean,
+  warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): ComponentContract {
   const tag = attr(wrapper, "component") ?? "";
   if (tag.trim() === "") fail("HC003", "`component` must be a non-empty string.", source);
@@ -369,7 +473,7 @@ function readContract(
     ...(status === undefined ? {} : { status: status as ContractStatus }),
     ...(summary === undefined ? {} : { summary }),
     nativeElement,
-    props: readProps(group, targets, source, requireBinding),
+    props: readProps(group, targets, source, requireBinding, warnInvalidDeclaration),
   };
 }
 
@@ -478,6 +582,7 @@ function readDeclarations(
   group: Element | undefined,
   contract: ComponentContract,
   source: string,
+  warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
 ): { declarations: ComponentDeclaration[]; scope: ParseScope } {
   const declarations: ComponentDeclaration[] = [];
   const roots = new Set(Object.keys(contract.props));
@@ -492,9 +597,10 @@ function readDeclarations(
     const element = node;
     elements.push(element);
     const kind = sourceTag(element);
-    if (!/^(?:prop|state|computed|data|context|handler|event|method)$/.test(kind)) {
+    if (!/^(?:prop|type|state|computed|data|context|handler|event|method)$/.test(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
+    if (kind === "type") continue;
     const name = attr(element, "name") ?? "";
     if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
     if (kind === "event") {
@@ -518,7 +624,7 @@ function readDeclarations(
   const scope = { roots, writableRoots, handlers };
   for (const element of elements) {
     const kind = sourceTag(element);
-    if (kind === "prop") continue;
+    if (kind === "prop" || kind === "type") continue;
     const name = attr(element, "name")!;
 
     if (kind === "context") {
@@ -545,6 +651,7 @@ function readDeclarations(
         kind: "state";
         name: string;
         type?: string;
+        shape?: TypeNode;
         context?: boolean;
         value?: string;
         expression?: CompiledExpression;
@@ -556,8 +663,12 @@ function readDeclarations(
       // A declared type states what the state holds, as a prop's does.
       const stateType = attr(element, "type");
       if (stateType !== undefined) {
-        parseTypeAttribute(stateType);
+        if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined) {
+          declaration.shape = normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration));
+        } else parseTypeAttribute(stateType);
         declaration.type = stateType;
+      } else if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined) {
+        fail("HC013", `<state name="${name}"> needs a type for its nested fields or values.`, source);
       }
       if (literal !== undefined) declaration.value = literal;
       if (expression !== undefined) declaration.expression = expression;
@@ -629,10 +740,15 @@ function readDeclarations(
       continue;
     }
     if (kind === "event") {
+      const eventType = attr(element, "type") ?? "object";
+      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
+        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration)) : undefined;
+      if (shape === undefined) parseTypeAttribute(eventType);
       declarations.push({
         kind,
         name,
-        type: attr(element, "type") ?? "object",
+        type: eventType,
+        ...(shape === undefined ? {} : { shape }),
         bubbles: attr(element, "bubbles") !== "false",
         composed: attr(element, "composed") !== "false",
         cancelable: attr(element, "cancelable") === "true",
@@ -1238,9 +1354,10 @@ export function parseComponentNodes(
     targets,
     source,
     legacyProps,
+    platform.warnInvalidDeclaration,
   );
 
-  const { declarations, scope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source);
+  const { declarations, scope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration);
   const slotState = {
     defaults: 0,
     names: new Set<string>(),
