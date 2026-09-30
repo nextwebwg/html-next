@@ -22,14 +22,17 @@ const source = `<template component="x-required-number" status="early" summary="
 interface Case {
   readonly name: string;
   readonly attribute?: string;
+  readonly vueValue?: number;
   readonly code?: string;
+  readonly vueCode?: string;
   readonly output?: string;
 }
 
 const cases: readonly Case[] = [
   { name: "missing required", code: "HC020" },
   { name: "invalid number", attribute: "abc", code: "HR002" },
-  { name: "numeric attribute", attribute: "42", output: "43" },
+  { name: "numeric Vue string", attribute: "42", vueCode: "HR002" },
+  { name: "numeric Vue binding", attribute: "42", vueValue: 42, output: "43" },
 ];
 
 async function observe(page: Page): Promise<{ readonly output: string | null; readonly pixels: Buffer | null }> {
@@ -114,10 +117,10 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
                 try { window.mountCase(value === null ? {} : { n: value }); }
                 catch (error) { window.vueDiagnostic = (error as { diagnostic?: { code?: string }; message?: string }).diagnostic?.code ?? `THROWN: ${(error as Error).message}`; }
                 return window.vueDiagnostic;
-              }, testCase.attribute ?? null);
+              }, testCase.vueValue ?? testCase.attribute ?? null);
               assert.equal(liveCode, testCase.code ?? null, `${testCase.name}: live diagnostic changed`);
-              assert.equal(vueCode, liveCode, `${testCase.name}: Vue diagnostic differs`);
-              assert.deepEqual(await vue.evaluate(() => window.vueErrors), liveCode === null ? [] : [liveCode], `${testCase.name}: additional Vue errors`);
+              assert.equal(vueCode, testCase.vueCode ?? testCase.code ?? null, `${testCase.name}: Vue diagnostic differs`);
+              assert.deepEqual(await vue.evaluate(() => window.vueErrors), vueCode === null ? [] : [vueCode], `${testCase.name}: additional Vue errors`);
               if (testCase.output !== undefined) {
                 const [liveResult, vueResult] = await Promise.all([observe(live), observe(vue)]);
                 assert.equal(liveResult.output, testCase.output);
@@ -134,7 +137,7 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             await live.evaluate(() => window.HtmlRuntime.lowerDocument());
             await vue.setContent("<main></main>");
             await vue.addScriptTag({ path: converted.get(mode)! });
-            await vue.evaluate(() => { window.vueDiagnostic = null; window.vueErrors = []; window.mountCase({ n: "42" }); });
+            await vue.evaluate(() => { window.vueDiagnostic = null; window.vueErrors = []; window.mountCase({ n: 42 }); });
             await assertObservedEqual(vue, await observe(vue), await observe(live), "initial reactive prop output differs");
 
             const liveCode = await live.evaluate(() => {
@@ -146,8 +149,16 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
             assert.deepEqual(await vue.evaluate(() => window.vueErrors), [liveCode], "invalid update diagnostic differs");
             await assertObservedEqual(vue, await observe(vue), await observe(live), "invalid update changed rendered output");
 
-            await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: "43" }));
-            await vue.evaluate(() => window.setCase("43"));
+            const nullCode = await live.evaluate(() => {
+              try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: null }); return null; }
+              catch (error) { return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? "THROWN"; }
+            });
+            await vue.evaluate(() => window.setCase(null));
+            assert.equal(nullCode, "HC021");
+            assert.deepEqual(await vue.evaluate(() => window.vueErrors), ["HR002", nullCode], "required null diagnostic differs");
+
+            await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: 43 }));
+            await vue.evaluate(() => window.setCase(43));
             const [liveRecovered, vueRecovered] = await Promise.all([observe(live), observe(vue)]);
             assert.equal(liveRecovered.output, "44");
             await assertObservedEqual(vue, vueRecovered, liveRecovered, "valid update did not recover parity");

@@ -186,16 +186,8 @@ const generatedPropUpdaters = new WeakMap<Element, (props: Readonly<Record<strin
 
 function propValue(input: unknown, type: GeneratedPropType): unknown {
   if (type === "string" && typeof input === "string") return input;
-  if (type === "boolean") {
-    if (typeof input === "boolean") return input;
-    if (input === "" || input === "true") return true;
-    if (input === "false") return false;
-  }
-  if (type === "number") {
-    const value = typeof input === "number" ? input
-      : typeof input === "string" && input.trim() !== "" ? Number(input) : Number.NaN;
-    if (Number.isFinite(value)) return value;
-  }
+  if (type === "boolean" && typeof input === "boolean") return input;
+  if (type === "number" && typeof input === "number" && Number.isFinite(input)) return input;
   if (Array.isArray(type) && type.includes(input as string)) return input;
   throw new TypeError("HR002: A prop invocation value does not satisfy its declared type.");
 }
@@ -204,6 +196,11 @@ function assignedGeneratedProp(
   prop: GeneratedProp,
   input: unknown,
 ): unknown {
+  if (input === null) {
+    if (prop.required) throw new TypeError(`HC021: Required prop \`${prop.name}\` cannot be null.`);
+    return null;
+  }
+  if (prop.required && input === "") throw new TypeError(`HR002: Required prop \`${prop.name}\` cannot be empty.`);
   if (input !== undefined) return propValue(input, prop.type);
   if (prop.required) throw new TypeError(`HC020: Required prop \`${prop.name}\` was not provided.`);
   return undefined;
@@ -221,7 +218,8 @@ export function manageGeneratedProps(
 ): () => void {
   // `explicit` holds the supplied value (or undefined); `effective` adds the declared default.
   const explicit = props.map((prop) => assignedGeneratedProp(prop, prop.value));
-  const effective = (index: number): unknown => explicit[index] ?? props[index]!.default;
+  const effective = (index: number): unknown => explicit[index] === undefined
+    ? (props[index]!.default ?? null) : explicit[index];
   const byName = new Map(props.map((prop, index) => [prop.name, index]));
   const dirty = new Set(props.map((_, index) => index));
   let connected = false;
@@ -281,7 +279,7 @@ export function manageGeneratedProp(
   let dirty = true;
   let connected = false;
   let pending = false;
-  const effective = (): unknown => explicit ?? prop.default;
+  const effective = (): unknown => explicit === undefined ? (prop.default ?? null) : explicit;
   const flush = (): void => {
     pending = false;
     if (!connected || !dirty) return;

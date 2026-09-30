@@ -46,6 +46,47 @@ function defineFromButtonFile(value: unknown) {
 }
 
 describe("defineContract", () => {
+  it("enforces a full-match pattern on string props", () => {
+    const contract = validContract();
+    contract.props = { sku: {
+      type: "string", pattern: "[A-Z]{3}-[0-9]{4}", target: { attribute: "data-sku" }, description: "Product code.",
+    } };
+    const prop = defineFromButtonFile(contract).props.sku!;
+    assert.deepEqual(serializePropTarget(prop, "ABC-1234"), { kind: "attribute", name: "data-sku", value: "ABC-1234" });
+    assert.throws(() => serializePropTarget(prop, "xABC-1234"), /HC021/);
+  });
+
+  it("rejects an empty required string", () => {
+    const contract = validContract();
+    contract.props = { label: {
+      type: "string", required: true, target: { attribute: "aria-label" }, description: "Accessible label.",
+    } };
+    const prop = defineFromButtonFile(contract).props.label!;
+    assert.throws(() => serializePropTarget(prop, ""), /HC021/);
+  });
+
+  it("serializes a boolean enum member with its HTML spelling", () => {
+    const contract = validContract();
+    contract.props = {
+      current: {
+        type: "enum(true, false, 'page')",
+        target: { attribute: "aria-current" },
+        description: "Current location.",
+      },
+    };
+    const prop = defineFromButtonFile(contract).props.current!;
+    assert.deepEqual(serializePropTarget(prop, false), { kind: "attribute", name: "aria-current", value: "false" });
+    assert.deepEqual(serializePropTarget(prop, "page"), { kind: "attribute", name: "aria-current", value: "page" });
+  });
+
+  it("canonicalizes a numeric enum default from its HTML spelling", () => {
+    const contract = validContract();
+    contract.props = { size: {
+      type: "enum(1, 2, 3)", default: "3", target: { attribute: "data-size" }, description: "Size.",
+    } };
+    assert.equal(defineFromButtonFile(contract).props.size!.default, 3);
+  });
+
   it("validates and normalizes a component, deriving the name from the tag", () => {
     const contract = defineFromButtonFile(validContract());
 
@@ -115,7 +156,7 @@ describe("defineContract", () => {
 
   it("rejects prop types that cannot be written as HTML attributes", () => {
     // Props are attributes on the invocation: callbacks and opaque values have no text form, so
-    // they are not props whatever their binding target. Structured types are written as JSON.
+    // Removed type names are rejected before a binding target is considered.
     const structured = validContract();
     structured.props = {
       provider: { type: { kind: "list", item: "string" }, target: { attribute: "data-provider" }, description: "Values." },
@@ -127,7 +168,7 @@ describe("defineContract", () => {
         input.props = {
           provider: { type, target, description: "Loads values." },
         } as unknown as typeof input.props;
-        expectDiagnostic("HC017", () => defineFromButtonFile(input));
+        expectDiagnostic("HC013", () => defineFromButtonFile(input));
       }
     }
   });

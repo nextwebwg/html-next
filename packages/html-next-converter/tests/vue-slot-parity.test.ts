@@ -22,7 +22,7 @@ const panelBody = `<button type="button" class="expand" on:click="expand">Expand
   <ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)"><span class="missing">Missing</span></slot></li></ul>
   <div class="extra" $if="open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
 const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs>
-  <state name="branch" type="section | article" :value="'section'"></state>
+  <state name="branch" type="enum('section', 'article')" :value="'section'"></state>
   <state name="rows" :value="['a']"></state>
   <state name="open" :value="false"></state>
   <handler name="expand"><set name="rows" :value="['a', 'b']"></set><set name="open" :value="true"></set></handler>

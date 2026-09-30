@@ -217,7 +217,7 @@ const successes: ConformanceCase[] = [
       defs:
         `<prop name="n" type="number" default="0">Number.</prop>` +
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>` +
-        `<prop name="kind" type="a | b" default="a">Enum.</prop>` +
+        `<prop name="kind" type="enum('a', 'b')" default="a">Enum.</prop>` +
         `<prop name="s" type="string" default="">String.</prop>`,
       root: `<div :data-sum="n + 1" :data-flag="flag" :data-kind="kind" :data-s="s"></div>`,
       use: `<x-t id="b" n="5" flag kind="b" s="hey"></x-t>`,
@@ -421,7 +421,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$match/$when/$else renders only the winning arm",
     source: scene({
-      defs: `<prop name="tier" type="free | pro" default="free">Tier.</prop>`,
+      defs: `<prop name="tier" type="enum('free', 'pro')" default="free">Tier.</prop>`,
       root:
         `<div><template $match="tier as t">` +
         `<span class="t" $when="t = 'pro'">Pro</span>` +
@@ -436,7 +436,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$match selects a row inside <table><tbody>, falling back to $else",
     source: scene({
-      defs: `<prop name="status" type="ok | bad" default="ok">Status.</prop>`,
+      defs: `<prop name="status" type="enum('ok', 'bad')" default="ok">Status.</prop>`,
       root:
         `<table><tbody><template $match="status as s">` +
         `<tr class="r" $when="s = 'ok'"><td>OK</td></tr>` +
@@ -581,7 +581,7 @@ const diagnostics: ConformanceCase[] = [
   {
     name: "HT018: a $match child is neither a $when nor $else arm",
     source: scene({
-      defs: `<prop name="s" type="a | b" default="a">S.</prop>`,
+      defs: `<prop name="s" type="enum('a', 'b')" default="a">S.</prop>`,
       root: `<div $match="s as t"><span $when="t = 'a'">A</span><div>oops</div></div>`,
       use: `<x-t></x-t>`,
     }),

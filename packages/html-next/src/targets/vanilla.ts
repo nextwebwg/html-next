@@ -930,8 +930,12 @@ function usesSelectiveDirectUpdates(
 }
 
 function directPropType(prop: PropContract): "string" | "boolean" | "number" | readonly string[] | undefined {
+  if (prop.pattern !== undefined) return undefined;
   if (prop.type === "string" || prop.type === "boolean" || prop.type === "number") return prop.type;
   if ("enum" in prop.type) return prop.type.enum;
+  if (prop.type.kind === "enum" && prop.type.members.every((member) => typeof member === "string")) {
+    return prop.type.members as readonly string[];
+  }
   return undefined;
 }
 
@@ -1183,7 +1187,7 @@ function renderAttributes(
     const prop = props[attribute.expression];
     if (prop === undefined) continue;
     const directProp = directProps?.plan.props.get(attribute.expression);
-    const expression = directProp?.variable ?? `componentProps[${js(attribute.expression)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "undefined"} : componentProps[${js(attribute.expression)}]`;
+    const expression = directProp?.variable ?? `componentProps[${js(attribute.expression)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "null"} : componentProps[${js(attribute.expression)}]`;
     if (directProp !== undefined && attribute.kind === "property") {
       directProps!.bindings.push({
         element: variable,

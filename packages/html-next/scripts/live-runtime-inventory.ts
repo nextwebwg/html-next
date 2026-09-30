@@ -23,6 +23,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/runtime.ts",
   ],
   typesAndValidation: [
+    "packages/html-next/src/css-color-keywords.ts",
     "packages/html-next/src/freeze.ts",
     "packages/html-next/src/type-system.ts",
     "packages/html-next/src/validate.ts",

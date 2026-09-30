@@ -32,6 +32,7 @@ const CONTRACT_FIELDS = [
 ] as const;
 const PROP_FIELDS = [
   "type",
+  "pattern",
   "default",
   "required",
   "target",
@@ -41,11 +42,7 @@ const STATUS_RE = /^(?:early|experimental|stable|deprecated)$/;
 
 type UnknownRecord = Record<string, unknown>;
 
-/**
- * Parses a `<prop type>` attribute into a raw prop type. A single scalar keyword
- * (`string`/`number`/`boolean`) stays scalar; anything else is an enum whose members are
- * split on the CSS value-definition-syntax single bar `|` (Values and Units, "one of").
- */
+/** Parses a `<prop type>` declaration using the public type grammar. */
 export function parseTypeAttribute(value: string): PropType {
   let parsed: TypeNode;
   try {
@@ -57,10 +54,6 @@ export function parseTypeAttribute(value: string): PropType {
     parsed.kind === "terminal" &&
     (parsed.name === "string" || parsed.name === "boolean" || parsed.name === "number")
   ) return parsed.name;
-  if (parsed.kind === "keyword") return { enum: [parsed.value] };
-  if (parsed.kind === "union" && parsed.members.every((member) => member.kind === "keyword")) {
-    return { enum: parsed.members.map((member) => member.value) };
-  }
   return parsed;
 }
 
@@ -170,11 +163,27 @@ function accepts(type: PropType, value: unknown): value is PropValue {
   return parseTypedValue(value, type).ok;
 }
 
+export function matchesPropPattern(value: unknown, pattern: string | undefined): boolean {
+  if (pattern === undefined || value === null || value === undefined || value === "") return true;
+  if (typeof value !== "string") return false;
+  try { return new RegExp(`^(?:${pattern})$`, "v").test(value); }
+  catch { return new RegExp(`^(?:${pattern})$`, "u").test(value); }
+}
+
 function parseProp(name: string, value: unknown, source?: string): PropContract {
   const object = record(value, "HC012", `Prop \`${name}\` must be an object.`, source);
   rejectUnknownFields(object, PROP_FIELDS, source);
 
   const type = parseType(object.type, source);
+  const pattern = object.pattern;
+  if (pattern !== undefined) {
+    if (typeof pattern !== "string") fail("HC013", `Pattern for prop \`${name}\` must be a string.`, source);
+    try { new RegExp(`^(?:${pattern})$`, "v"); }
+    catch {
+      try { new RegExp(`^(?:${pattern})$`, "u"); }
+      catch { fail("HC013", `Pattern for prop \`${name}\` is invalid.`, source); }
+    }
+  }
   const required = object.required ?? false;
   if (typeof required !== "boolean") {
     fail("HC016", `Prop \`${name}\` has a non-boolean \`required\` value.`, source);
@@ -182,7 +191,10 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   if (required && "default" in object) {
     fail("HC019", `Required prop \`${name}\` cannot also declare a default.`, source);
   }
-  if ("default" in object && !accepts(type, object.default)) {
+  const parsedDefault = "default" in object && object.default !== null
+    ? parseTypedValue(object.default, type) : undefined;
+  if ("default" in object && object.default !== null &&
+      (parsedDefault === undefined || !parsedDefault.ok || !matchesPropPattern(parsedDefault.value, pattern))) {
     fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
   }
 
@@ -197,12 +209,17 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   const description = requiredString(object.description, `props.${name}.description`, source);
   const normalized: {
     type: PropType;
+    pattern?: string;
     required: boolean;
     default?: PropValue;
     target: PropTarget;
     description: string;
   } = { type, required, target, description };
-  if ("default" in object) normalized.default = object.default as PropValue;
+  if (pattern !== undefined) normalized.pattern = pattern;
+  if ("default" in object) {
+    if (object.default === null) normalized.default = null;
+    else if (parsedDefault?.ok) normalized.default = parsedDefault.value as PropValue;
+  }
   return deepFreeze(normalized);
 }
 
@@ -286,7 +303,7 @@ export function serializePropTarget(
     }
     return { kind: "property", name: prop.target.property, value: null };
   }
-  if (!accepts(prop.type, value)) {
+  if ((prop.required && value === "") || !accepts(prop.type, value) || !matchesPropPattern(value, prop.pattern)) {
     fail("HC021", "A prop value does not satisfy its declared type.");
   }
   const parsed = parseTypedValue(value, prop.type);
@@ -296,7 +313,8 @@ export function serializePropTarget(
   if ("property" in prop.target) {
     return { kind: "property", name: prop.target.property, value: canonical };
   }
-  if (typeof canonical === "boolean") {
+  if (typeof canonical === "boolean" && (prop.type === "boolean" ||
+    (typeof prop.type !== "string" && "kind" in prop.type && prop.type.kind === "terminal" && prop.type.name === "boolean"))) {
     return { kind: "attribute", name: prop.target.attribute, value: canonical ? "" : null };
   }
   return { kind: "attribute", name: prop.target.attribute, value: serializeTypedValue(canonical, prop.type) };
