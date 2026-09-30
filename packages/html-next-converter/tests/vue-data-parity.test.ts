@@ -18,12 +18,12 @@ const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathnam
 const source = `<template component="x-feed" status="early" summary="Feed."><defs>
   <data name="nearby" src="./api/feed" type="object({ label: string })"></data>
   <data name="rooted" src="/api/root" type="object({ label: string })"></data>
-  <data name="note" src="./api/note" type="string"><param name="tag" :value="['a', 'b']"></param></data>
+  <data name="note" src="./api/note" type="string"><param name="tag" from:value="['a', 'b']"></param></data>
 </defs><section><output class="nearby" $value="nearby.value.label"></output>
 <output class="rooted" $value="rooted.value.label"></output><output class="note" $value="note.value"></output></section></template>`;
 const lifecycleSource = `<template component="x-data-cycle" status="early" summary="Data lifecycle."><defs>
   <state name="page" :value="1"></state>
-  <data name="feed" src="/api/cycle" type="object({ label: string })" debounce="500ms" poll="1500ms"><param name="page" :value="page"></param></data>
+  <data name="feed" src="/api/cycle" type="object({ label: string })" debounce="500ms" poll="1500ms"><param name="page" from:value="page"></param></data>
   <handler name="next"><set name="page" :value="page + 1"></set></handler>
 </defs><section><button type="button" on:click="next">Next</button>
 <output class="label" $value="feed.value.label"></output>

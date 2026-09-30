@@ -22,7 +22,7 @@ const provider = `<template component="x-steps" status="early" summary="Context 
 const reader = `<template component="x-step" status="early" summary="Context reader."><defs>
   <prop name="number" type="number" required>Step number.</prop>
   <context name="current" from="x-steps" as="activeStep"></context>
-</defs><p :data-active="activeStep = number ? 'yes' : 'no'"><slot></slot></p></template>`;
+</defs><p from:data-active="activeStep = number ? 'yes' : 'no'"><slot></slot></p></template>`;
 const invocation = `<x-steps id="case"><x-step id="outer-one" number="1">Outer one</x-step>
   <x-step id="outer-two" number="2">Outer two</x-step>
   <x-steps id="inner"><x-step id="inner-one" number="1">Inner one</x-step>

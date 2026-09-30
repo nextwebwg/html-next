@@ -42,7 +42,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-card": `<template component="x-card" status="early" summary="Parity card.">
         <defs><prop name="label" type="string" default="Ready">Label.</prop></defs>
-        <article class="base" :aria-label="label"><slot><strong>Fallback</strong></slot></article>
+        <article class="base" from:aria-label="label"><slot><strong>Fallback</strong></slot></article>
         <style>:host { display: block; padding: 6px; background: rgb(220 235 250); } :host > strong { color: rgb(10 50 90); }</style>
       </template>`,
     },
@@ -60,7 +60,7 @@ const cases: readonly ParityCase[] = [
         <defs><state name="count" :value="0"></state><computed name="double" from="count * 2"></computed>
         <event name="count-change" type="number"></event>
         <handler name="increment"><set name="count" :value="count + 1"></set><dispatch event="count-change" :value="count"></dispatch></handler></defs>
-        <button type="button" on:click="increment" :aria-label="format('Count %s', count)"><output $value="double"></output></button>
+        <button type="button" on:click="increment" from:aria-label="format('Count %s', count)"><output $value="double"></output></button>
       </template>`,
     },
     invocation: `<x-counter id="case"></x-counter>`,
@@ -242,7 +242,7 @@ const cases: readonly ParityCase[] = [
       "x-step": `<template component="x-step" status="early" summary="Parity step."><defs>
         <prop name="number" type="number" required>Step number.</prop>
         <context name="current" from="x-steps" as="activeStep"></context>
-        </defs><li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`,
+        </defs><li from:aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`,
     },
     invocation: `<x-steps id="case"><x-step number="1">One</x-step><x-step number="2">Two</x-step></x-steps>`,
     vueRender: `h(XSteps, { id: "case" }, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })`,
@@ -260,7 +260,7 @@ const cases: readonly ParityCase[] = [
         </defs><section><button type="button" on:click="toggle">Toggle</button>
         <span class="flag" $if="show" $value="show ? 'Shown' : 'Hidden'"></span>
         <template $match="show as active"><b $when="active">On</b><i $else>Off</i></template>
-        <div class="wrapped" $match="show as active" :data-show="show"><small $when="active">Yes</small><small $else>No</small></div>
+        <div class="wrapped" $match="show as active" from:data-show="show"><small $when="active">Yes</small><small $else>No</small></div>
         <template $with="{ name: 'Ada' } as user"><em $value="user.name"></em></template>
         </section></template>`,
     },
@@ -278,7 +278,7 @@ const cases: readonly ParityCase[] = [
         <state name="rows" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
         <handler name="reorder"><set name="rows" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }, { id: 'b', label: 'Bee' }]"></set></handler>
         </defs><section><button type="button" on:click="reorder">Reorder</button><ul>
-        <x-item $each="row of rows" $key="row.id" :data-id="row.id" :label="row.label"></x-item>
+        <x-item $each="row of rows" $key="row.id" from:data-id="row.id" from:label="row.label"></x-item>
         </ul></section></template>`,
       "x-item": `<template component="x-item" status="early" summary="One item."><defs>
         <prop name="label" type="string">Label.</prop></defs>
@@ -344,7 +344,7 @@ const cases: readonly ParityCase[] = [
         <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
-        <slot $each="row of rows" $key="row.id" name="row" :item="row"></slot></ul></section></template>`,
+        <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>`,
       "x-scoped-consumer": `<template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
         <handler name="rename"><set name="heading" :value="'Team'"></set></handler></defs>
         <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
@@ -366,7 +366,7 @@ const cases: readonly ParityCase[] = [
         <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
         <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button type="button" on:click="add">Add</button><ul>
-        <slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index">
+        <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index">
         <li class="fallback" $value="row.name"></li></slot></ul></section></template>`,
     },
     invocation: `<x-scoped-list id="case"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-list>`,
@@ -384,7 +384,7 @@ const cases: readonly ParityCase[] = [
         <state name="label" value="first"></state><state name="enabled" :value="true"></state><state name="count" :value="0"></state>
         <handler name="bump"><set name="count" :value="count + 1"></set></handler>
         <handler name="advance"><set name="label" :value="'second'"></set><set name="enabled" :value="false"></set></handler>
-        </defs><form><input class="text" :value="label"><input class="property" .value="label" value="authored"><input class="check" type="checkbox" :checked="enabled">
+        </defs><form><input class="text" from:value="label"><input class="property" .value="label" value="authored"><input class="check" type="checkbox" from:checked="enabled">
         <button class="bump" type="button" on:click="bump">Bump</button><button class="advance" type="button" on:click="advance">Advance</button>
         <output $value="count"></output></form></template>`,
     },
@@ -437,7 +437,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-choice": `<template component="x-choice" status="early" summary="Choice field."><defs>
         <state name="choice" value="b"></state></defs>
-        <select name="choice" :data-choice="choice" bind:value="choice"><slot></slot></select>
+        <select name="choice" from:data-choice="choice" bind:value="choice"><slot></slot></select>
         </template>`,
     },
     invocation: `<form id="owner"><x-choice id="case"><option value="a">A</option><option value="b">B</option></x-choice></form>`,
@@ -452,7 +452,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-multi": `<template component="x-multi" status="early" summary="Multiple choice."><defs>
         <state name="choices" :value="['a']"></state><computed name="selectedCount" from="choices.length"></computed>
-        </defs><select name="choice" multiple bind:value="choices" :data-count="selectedCount">
+        </defs><select name="choice" multiple bind:value="choices" from:data-count="selectedCount">
         <option value="a">A</option><option value="b">B</option><option value="c">C</option></select></template>`,
     },
     invocation: `<form id="owner"><x-multi id="case"></x-multi></form>`,
@@ -468,7 +468,7 @@ const cases: readonly ParityCase[] = [
       "x-switching-select": `<template component="x-switching-select" status="early" summary="Reactive select mode."><defs>
         <state name="multi" :value="false"></state><state name="choices" :value="['b']"></state>
         <handler name="toggle"><set name="multi" :value="not multi"></set></handler></defs>
-        <form><select name="choice" :multiple="multi" bind:value="choices"><option value="a">A</option><option value="b">B</option></select>
+        <form><select name="choice" from:multiple="multi" bind:value="choices"><option value="a">A</option><option value="b">B</option></select>
         <button type="button" on:click="toggle">Toggle</button><output $value="multi"></output></form></template>`,
     },
     invocation: `<x-switching-select id="case"></x-switching-select>`,
@@ -485,7 +485,7 @@ const cases: readonly ParityCase[] = [
       "x-root-choice": `<template component="x-root-choice" status="early" summary="Root choice."><defs>
         <state name="kind" value="a"></state>
         <handler name="toggle"><set name="kind" :value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
-        <section class="choice" $match="kind as choice" :data-kind="kind" on:click="toggle">
+        <section class="choice" $match="kind as choice" from:data-kind="kind" on:click="toggle">
           <p $when="choice = 'a'" class="first">First</p>
           <p $else class="second">Second</p>
         </section><style>:host { display: block; padding: 2px; border: 1px solid rgb(0, 0, 0); } :host > p { margin: 0; }</style></template>`,
@@ -505,7 +505,7 @@ const cases: readonly ParityCase[] = [
         <state name="items" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
         <state name="choice" value="b"></state>
         <handler name="change"><set name="items" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler></defs>
-        <form><select name="choice" bind:value="choice"><option $each="item of items" $key="item.id" :value="item.id" $value="item.label"></option></select>
+        <form><select name="choice" bind:value="choice"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
         <button type="button" on:click="change">Change</button><output $value="choice"></output></form></template>`,
     },
     invocation: `<x-changing-options id="case"></x-changing-options>`,
@@ -523,8 +523,8 @@ const cases: readonly ParityCase[] = [
         <state name="choices" :value="['b']"></state>
         <handler name="change"><set name="items" :value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }, { id: 'a', label: 'A' }]"></set>
         <set name="choices" :value="['c']"></set></handler></defs>
-        <form><select name="choice" multiple bind:value="choices" :data-count="choices.length">
-        <option $each="item of items" $key="item.id" :value="item.id" $value="item.label"></option></select>
+        <form><select name="choice" multiple bind:value="choices" from:data-count="choices.length">
+        <option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
         <button type="button" on:click="change">Change</button></form></template>`,
     },
     invocation: `<x-dynamic-choice id="case"></x-dynamic-choice>`,
@@ -540,7 +540,7 @@ const cases: readonly ParityCase[] = [
       "x-feed": `<template component="x-feed" status="early" summary="Parity feed."><defs>
         <state name="query" value="first"></state>
         <data name="result" src="https://api.example/search" type="object({ label: string })">
-          <param name="q" :value="query"></param>
+          <param name="q" from:value="query"></param>
         </data>
         <handler name="next"><set name="query" value="second"></set></handler>
         </defs><section><button type="button" on:click="next">Next</button>
@@ -562,7 +562,7 @@ const cases: readonly ParityCase[] = [
       "x-stale": `<template component="x-stale" status="early" summary="Parity stale data."><defs>
         <state name="query" value="first"></state>
         <data name="result" src="https://api.example/search" type="object({ label: string })">
-          <param name="q" :value="query"></param>
+          <param name="q" from:value="query"></param>
         </data>
         <handler name="next"><set name="query" value="second"></set></handler>
         </defs><section><button type="button" on:click="next">Next</button>
@@ -584,11 +584,11 @@ const cases: readonly ParityCase[] = [
       "x-typed-data": `<template component="x-typed-data" status="early" summary="Parity typed data."><defs>
         <state name="round" :value="1"></state>
         <data name="result" src="https://api.example/search" type="object({ label: string, note: string, ... })">
-          <param name="round" :value="round"></param>
+          <param name="round" from:value="round"></param>
         </data>
         <computed name="shouted" from="format('%s!', result.value.label)"></computed>
         <handler name="again"><set name="round" :value="round + 1"></set></handler>
-        </defs><section :data-label="result.value.label" :data-note="result.value.note"><button type="button" on:click="again">Again</button>
+        </defs><section from:data-label="result.value.label" from:data-note="result.value.note"><button type="button" on:click="again">Again</button>
         <output class="label" $value="result.value.label"></output>
         <output class="note" $value="result.value.note"></output>
         <output class="shouted" $value="shouted"></output>

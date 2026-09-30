@@ -93,7 +93,7 @@ component dependency graph, not a registration script.
   <defs>
     <prop name="start" type="number" default="0">Initial count.</prop>
     <state name="count" :value="start"></state>
-    <computed name="label" :value="format('Count: {0}', count)"></computed>
+    <computed name="label" from="format('Count: {0}', count)"></computed>
   </defs>
 
   <button $ref="button" type="button">

@@ -13,9 +13,9 @@ import { convertComponents, type ConversionGraph } from "../src/index.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
-const receiver = `<template component="x-scoped-receiver" status="early" summary="Scoped slot receiver."><div><slot name="row" :item="'Ada'"><span>Fallback</span></slot></div></template>`;
+const receiver = `<template component="x-scoped-receiver" status="early" summary="Scoped slot receiver."><div><slot name="row" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
 const consumer = `<link rel="component" href="./receiver.html"><template component="x-invalid-scoped-consumer" status="early" summary="Invalid scoped slot consumer."><main><x-scoped-receiver><span slot="row">Not a template</span></x-scoped-receiver></main></template>`;
-const dynamicReceiver = `<template component="x-dynamic-scoped-receiver" status="early" summary="Dynamic scoped slot receiver."><defs><state name="slotName" value="row"></state></defs><div><slot :name="slotName" :item="'Ada'"><span>Fallback</span></slot></div></template>`;
+const dynamicReceiver = `<template component="x-dynamic-scoped-receiver" status="early" summary="Dynamic scoped slot receiver."><defs><state name="slotName" value="row"></state></defs><div><slot from:name="slotName" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
 const dynamicConsumer = `<link rel="component" href="./dynamic-receiver.html"><template component="x-invalid-dynamic-scoped-consumer" status="early" summary="Invalid dynamic scoped slot consumer."><main><x-dynamic-scoped-receiver><span slot="row">Not a template</span></x-dynamic-scoped-receiver></main></template>`;
 
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };

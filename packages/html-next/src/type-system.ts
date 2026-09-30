@@ -579,7 +579,7 @@ function parseNode(value: unknown, node: TypeNode, path: string, source: "html" 
       }
       return issue("typeMismatch", `Must match ${formatType(node)}.`, path);
     }
-    case "selected": return issue("typeMismatch", `Type depends on the \`${node.from}\` prop.`, path);
+    case "selected": return issue("typeMismatch", `Type depends on the \`${node.from}\` declaration.`, path);
     case "constrained": {
       const parsed = parseNode(value, node.base, path, source);
       return parsed.ok && node.values.some((choice) => choice === parsed.value) ? parsed

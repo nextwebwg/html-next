@@ -717,9 +717,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const selectedNode = (prop: (typeof target.props)[number]): string =>
     prop.contract.select === undefined
       ? JSON.stringify(normalizeType(prop.contract.type))
-      : `selectedPropNode(props[${quote(prop.contract.select.from)}], ${JSON.stringify(prop.contract.select.options)})`;
+      : `selectedPropNode(${contract.props[prop.contract.select.from] === undefined
+        ? `${stateNames.get(states.find((state) => state.name === prop.contract.select!.from)!)}.value`
+        : `props[${quote(prop.contract.select.from)}]`}, ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
+  const hasStateSelected = target.props.some((prop) => prop.contract.select !== undefined &&
+    contract.props[prop.contract.select.from] === undefined);
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const computedValues = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const contexts = declarations.filter((declaration) => declaration.kind === "context");
@@ -871,7 +875,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
     const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, ${prop.contract.pattern === undefined ? "undefined" : quote(prop.contract.pattern)}, ${prop.contract.values === undefined ? "undefined" : JSON.stringify(prop.contract.values)})`;
-    return `  ${propKey(prop.name)}: ${!prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked},`;
+    const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
+    return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
+      : `  ${propKey(prop.name)}: ${value},`;
   });
   if (modelProp !== undefined) checkedPropSources.push(
     `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue", ${modelProp.contract.pattern === undefined ? "undefined" : quote(modelProp.contract.pattern)}, ${modelProp.contract.values === undefined ? "undefined" : JSON.stringify(modelProp.contract.values)}),`);
@@ -957,8 +963,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       "const checkedProps = computed(() => ({",
       ...checkedPropSources,
       "}));",
-      "void checkedProps.value;",
-      "watchSyncEffect(() => { void checkedProps.value; });",
+      ...(hasStateSelected ? [] : ["void checkedProps.value;", "watchSyncEffect(() => { void checkedProps.value; });"]),
     ]),
     "function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {",
     "  const names = Object.keys(attrs);",
@@ -1030,6 +1035,12 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       "}",
     ]),
     ...states.map(stateSource),
+    ...(hasStateSelected ? [
+      ...target.props.map((prop) => `void checkedProps.value[${quote(prop.name)}];`),
+      "watchSyncEffect(() => {",
+      ...target.props.map((prop) => `  void checkedProps.value[${quote(prop.name)}];`),
+      "});",
+    ] : []),
     ...data.flatMap(dataSource),
     ...computedValues.map(stateSource),
     ...(rootWith === undefined ? [] : [`const ${rootWithName} = computed(() => ${lowering.value(rootWithValue!, names.script)});`]),
@@ -1096,7 +1107,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp${generics.length === 0 ? "" : ", selectedPropNode"} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 ? [] : [`import { checkedProp${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(VUE_HTML_SPECIFIER)};`] : []),
     ...(context.usesHydrationControl ? [`import { ${[

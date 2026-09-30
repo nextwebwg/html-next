@@ -21,9 +21,9 @@ const rows = `<template component="x-scoped-rows"><defs>
   <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
   <handler name="switch"><set name="alternate" :value="not alternate"></set></handler>
 </defs><template $match><ol $when="alternate"><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
-  <slot name="row" $each="row of rows" $key="row.id" :index="loop.index"><li>Missing</li></slot></ol>
+  <slot name="row" $each="row of rows" $key="row.id" from:index="loop.index"><li>Missing</li></slot></ol>
   <ul $else><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
-  <slot name="row" $each="row of rows" $key="row.id" :item="row" :index="loop.index"><li>Missing</li></slot></ul>
+  <slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot></ul>
 </template></template>`;
 const consumer = `<link rel="component" href="./rows.html">
 <template component="x-scoped-consumer"><defs>

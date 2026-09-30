@@ -66,7 +66,7 @@ describe("HTML Next unplugin", () => {
     </template>`);
     await writeFile(join(root, "src/label.html"), `<template component="x-label" status="early" summary="Label.">
       <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-      <output :aria-label="label"></output>
+      <output from:aria-label="label"></output>
     </template>`);
     await writeFile(join(root, "src/main.js"), `
       import { createXCounter, createXLabel } from ${JSON.stringify(componentsModule)};
@@ -193,7 +193,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <strong>Compiled child</strong>
@@ -247,7 +247,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child class="app-child" style="color: red" aria-label="Ready"></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child class="app-child" style="color: red" aria-label="Ready"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <strong class="child" style="font-weight: 700">Compiled child</strong>
@@ -301,11 +301,11 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child count="2"></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child count="2"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <defs><prop name="count" type="number" required>Count.</prop></defs>
-      <strong :data-count="count" $value="count"></strong>
+      <strong from:data-count="count" $value="count"></strong>
     </template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
@@ -368,7 +368,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child><span class="projected">Projected</span></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child><span class="projected">Projected</span></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <p class="child"><slot></slot></p>
@@ -423,7 +423,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child><strong slot="title">Title</strong><span>Body</span></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child><strong slot="title">Title</strong><span>Body</span></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <article><header><slot name="title"></slot></header><p><slot></slot></p></article>
@@ -480,7 +480,7 @@ describe("HTML Next unplugin", () => {
       <link rel="component" href="./grandchild.html">
       <template component="x-app" status="early" summary="Read-only parent.">
         <defs><state name="count" :value="1"></state></defs>
-        <main :data-count="count"><output $value="count"></output><x-child><x-grandchild title="Grandchild title"></x-grandchild></x-child></main>
+        <main from:data-count="count"><output $value="count"></output><x-child><x-grandchild title="Grandchild title"></x-grandchild></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <article><slot></slot></article>
@@ -604,7 +604,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="App.">
         <defs><state name="count" :value="0"></state></defs>
-        <main><output $value="count + 1"></output><x-child :label="count"></x-child></main>
+        <main><output $value="count + 1"></output><x-child from:label="count"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <defs><prop name="label" type="string" default="none">Label.</prop></defs>
@@ -649,7 +649,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="App.">
-        <main><x-child :label="'Ready'"><span>Projected</span></x-child></main>
+        <main><x-child from:label="'Ready'"><span>Projected</span></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <p><slot></slot></p>
@@ -707,7 +707,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<template component="x-app"><defs>
       <prop name="size" type="keyword" values="sm, two words">Size.</prop>
-      </defs><output :data-size="size"></output></template>`);
+      </defs><output from:data-size="size"></output></template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
     await assert.rejects(() => build({

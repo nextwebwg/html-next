@@ -196,7 +196,7 @@ function validateCompiledExpression(
 
 /**
  * A prop's target is defined by where it is bound in the markup, not restated: a
- * `:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property. A prop
+ * `from:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property. A prop
  * bound in several places targets its first binding in document order; the others only render it.
  */
 function collectTargets(
@@ -210,9 +210,9 @@ function collectTargets(
   };
   const visit = (element: Element): void => {
     for (const attribute of sourceAttributes(element)) {
-      if (attribute.name.startsWith(":")) {
+      if (attribute.name.startsWith("from:")) {
         if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
-          record(attribute.value, { attribute: attribute.name.slice(1).toLowerCase() });
+          record(attribute.value, { attribute: attribute.name.slice("from:".length).toLowerCase() });
         }
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
@@ -299,16 +299,18 @@ function readProps(
   }
   const selectedType = (element: Element): NonNullable<PropContract["select"]> => {
     const from = attr(element, "from") ?? "";
-    const selector = elements.find((candidate) => attr(candidate, "name") === from);
+    const selectorProp = elements.find((candidate) => attr(candidate, "name") === from);
+    const selector = selectorProp ?? (group === undefined ? undefined : directElements(group, "state")
+      .find((candidate) => attr(candidate, "name") === from));
     if (selector === undefined || attr(selector, "type") === undefined) {
-      fail("HC013", `<type from="${from}"> must name a declared prop with finite values.`, source);
+      fail("HC013", `<type from="${from}"> must name a declared prop or state with finite values.`, source);
     }
     const selectorType = normalizeType(parseTypeAttribute(attr(selector, "type")!));
     const selectorValues = parseValuesConstraint(selectorType, attr(selector, "values"));
     if (selectorValues === undefined) {
       fail("HC013", `<type from="${from}"> requires a valid values constraint.`, source);
     }
-    if (attr(selector, "default") === undefined && attr(selector, "required") === undefined) {
+    if (selectorProp !== undefined && attr(selector, "default") === undefined && attr(selector, "required") === undefined) {
       fail("HC013", `Selecting prop \`${from}\` must be required or have a default.`, source);
     }
     const options: { value: string | number | boolean; type: TypeNode }[] = [];
@@ -421,7 +423,10 @@ function readProps(
     if (defaultValue !== undefined) {
       let defaultType = type;
       if (select !== undefined) {
-        const selector = elements.find((candidate) => attr(candidate, "name") === select.from)!;
+        const selector = elements.find((candidate) => attr(candidate, "name") === select.from);
+        if (selector === undefined) {
+          fail("HC015", `Prop \`${name}\` needs a prop-selected type before it can declare its own default.`, source);
+        }
         const selectorDefault = attr(selector, "default");
         if (selectorDefault === undefined) {
           fail("HC015", `Prop \`${name}\` needs a selector default before it can declare its own default.`, source);
@@ -706,9 +711,9 @@ function readDeclarations(
       const parameterNames = new Set<string>();
       for (const parameter of directElements(element, "param")) {
         const parameterName = attr(parameter, "name") ?? "";
-        const expressionSource = attr(parameter, ":value");
+        const expressionSource = attr(parameter, "from:value");
         if (!NAME_RE.test(parameterName) || expressionSource === undefined) {
-          fail("HC024", "A data <param> requires a valid `name` and a `:value` expression.", source);
+          fail("HC024", "A data <param> requires a valid `name` and a `from:value` expression.", source);
         }
         if (parameterNames.has(parameterName)) {
           fail("HC024", `Data source \`${name}\` repeats a parameter name.`, source);
@@ -846,10 +851,10 @@ function parseAttributes(
       continue;
     }
 
-    if (attribute.name.startsWith(":")) {
-      const name = attribute.name.slice(1).toLowerCase();
+    if (attribute.name.startsWith("from:")) {
+      const name = attribute.name.slice("from:".length).toLowerCase();
       if (RAW_SINK_RE.test(name)) {
-        fail("HT007", `\`:${name}\` cannot bind a raw content sink.`, source);
+        fail("HT007", `\`from:${name}\` cannot bind a raw content sink.`, source);
       }
       const expressionPlan = compileScopedExpression(attribute.value, scope, source);
       parsed.push({ kind: "attribute", name, expression: attribute.value, expressionPlan });
@@ -1095,22 +1100,22 @@ function parseElement(
     if (!isElement(child)) continue;
     if (sourceTag(child) === "slot") {
       const name = attr(child, "name");
-      const nameExpression = attr(child, ":name");
+      const nameExpression = attr(child, "from:name");
       if (name !== undefined && nameExpression !== undefined) {
-        fail("HT008", "A slot cannot declare both `name` and `:name`.", source);
+        fail("HT008", "A slot cannot declare both `name` and `from:name`.", source);
       }
       const flowValues: Record<string, string> = {};
       const rawProps: Array<{ name: string; expression: string }> = [];
       for (const attribute of sourceAttributes(child)) {
         if (FLOW_NAME_RE.test(attribute.name)) {
           flowValues[attribute.name] = attribute.value;
-        } else if (attribute.name.startsWith(":") && attribute.name !== ":name") {
-          const prop = attribute.name.slice(1);
+        } else if (attribute.name.startsWith("from:") && attribute.name !== "from:name") {
+          const prop = attribute.name.slice("from:".length);
           if (!/^[A-Za-z_$][\w$]*$/.test(prop)) {
             fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
           }
           rawProps.push({ name: prop, expression: attribute.value });
-        } else if (attribute.name !== "name" && attribute.name !== ":name") {
+        } else if (attribute.name !== "name" && attribute.name !== "from:name") {
           fail("HT008", "A slot has an unsupported attribute.", source);
         }
       }

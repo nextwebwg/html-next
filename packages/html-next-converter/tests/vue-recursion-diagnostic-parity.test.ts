@@ -15,7 +15,7 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-depth" status="early" summary="Bounded recursive component."><defs>
   <prop name="level" type="number" default="0">Current depth.</prop>
-</defs><section><span $value="level"></span><x-depth $if="level < 33" :level="level + 1"></x-depth></section></template>`;
+</defs><section><span $value="level"></span><x-depth $if="level < 33" from:level="level + 1"></x-depth></section></template>`;
 
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };
 

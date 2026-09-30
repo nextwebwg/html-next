@@ -72,7 +72,8 @@ export function selectorGenerics(props: Readonly<Record<string, PropContract>>):
   readonly parameter: string;
   readonly declaration: string;
 }[] {
-  const selectors = [...new Set(Object.values(props).flatMap((prop) => prop.select === undefined ? [] : [prop.select.from]))];
+  const selectors = [...new Set(Object.values(props).flatMap((prop) =>
+    prop.select === undefined || props[prop.select.from] === undefined ? [] : [prop.select.from]))];
   return selectors.map((from, index) => {
     const prop = props[from]!;
     const parameter = `T${index}`;
@@ -87,7 +88,8 @@ export function dependentPropTypeSource(
   parameters: ReadonlyMap<string, string>,
 ): string {
   if (prop.select === undefined) return propTypeSource(prop);
-  const parameter = parameters.get(prop.select.from)!;
+  const parameter = parameters.get(prop.select.from);
+  if (parameter === undefined) return propTypeSource(prop);
   const cases = prop.select.options.map((option) => ({
     value: JSON.stringify(option.value),
     type: `${typeScriptType(option.type)}${prop.required ? "" : " | null"}`,

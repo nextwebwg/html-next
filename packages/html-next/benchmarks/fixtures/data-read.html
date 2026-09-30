@@ -2,7 +2,7 @@
   <defs>
     <state name="query" :value="'html'"></state>
     <data name="result" src="/api/search" type="object">
-      <param name="q" :value="query"></param>
+      <param name="q" from:value="query"></param>
     </data>
   </defs>
   <output $value="result.value"></output>
