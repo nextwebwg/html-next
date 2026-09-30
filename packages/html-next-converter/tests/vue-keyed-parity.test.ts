@@ -17,7 +17,7 @@ const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", impor
 const child = `<template component="x-keyed-item" status="early" summary="Keyed child." controller="./item.js"><defs>
   <prop name="itemId" type="string">Item identity.</prop>
   <prop name="label" type="string">Item label.</prop>
-</defs><li :data-id="itemId"><input><span $value="label"></span></li></template>`;
+</defs><li from:data-id="itemId"><input><span $value="label"></span></li></template>`;
 const controller = `export default function connect(host) {
   const id = host.state.itemId;
   window.keyedLifecycle.push("connect:" + id);
@@ -34,7 +34,7 @@ const parent = `<link rel="component" href="./item.html">
   <button type="button" class="remove" on:click="remove">Remove</button>
   <button type="button" class="restore" on:click="restore">Restore</button>
   <button type="button" class="duplicate" on:click="duplicate">Duplicate</button>
-  <ul><x-keyed-item $each="row of rows" $key="row.id" :item-id="row.id" :label="row.label"></x-keyed-item></ul>
+  <ul><x-keyed-item $each="row of rows" $key="row.id" from:item-id="row.id" from:label="row.label"></x-keyed-item></ul>
 </section></template>`;
 
 type State = {

@@ -29,7 +29,7 @@ async function fixture(): Promise<string> {
   await writeFile(join(root, "package.json"), "{}");
   await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
     <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-    <article :aria-label="label"><slot></slot></article>
+    <article from:aria-label="label"><slot></slot></article>
     <style>:host { display: block; }</style>
   </template>`);
   return root;
@@ -264,7 +264,7 @@ describe("framework converter", () => {
           <dispatch event="count-change" :value="count"></dispatch>
         </handler>
       </defs>
-      <button :data-count="count" on:click="increment"><output $value="double"></output></button>
+      <button from:data-count="count" on:click="increment"><output $value="double"></output></button>
     </template>`);
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["counter.html"], target: "vue", root, outDirectory });
@@ -408,7 +408,7 @@ describe("framework converter", () => {
     temporary.push(root);
     await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
       <defs><prop name="as" type="keyword" values="a, b" default="a">Kind.</prop></defs>
-      <section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>
+      <section $match from:data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>
     </template>`);
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["counter.html"], target: "vue", root, outDirectory });
@@ -422,7 +422,7 @@ describe("framework converter", () => {
     temporary.push(root);
     await writeFile(join(root, "guarded.html"), `<template component="x-guarded" status="early" summary="Guarded.">
       <defs><prop name="show" type="boolean" default="true">Visibility.</prop></defs>
-      <section $if="show" :data-show="show">Visible</section>
+      <section $if="show" from:data-show="show">Visible</section>
     </template>`);
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(root, `generated-${mode}`);

@@ -82,7 +82,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
       <small $when="size = 'sm'">small</small>
       <span $else>regular</span>
     </template>
-    <x-badge :tone="size"><slot name="badge">none</slot></x-badge>
+    <x-badge from:tone="size"><slot name="badge">none</slot></x-badge>
     <slot></slot>
   </section>
   <style>
@@ -118,7 +118,7 @@ describe("official target compilers", () => {
       const outputs = generated(`<template component="x-dependent"><defs>
         <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
         ${declaration}
-      </defs><input :type="type" :value="value"></template>`);
+      </defs><input from:type="type" from:value="value"></template>`);
       const vue = outputs.get("vue/XDependent.vue")!;
       const vanilla = outputs.get("vanilla/XDependent.d.ts")!;
       compileVue(vue, "XDependent.vue");
@@ -155,6 +155,20 @@ describe("official target compilers", () => {
     });
   }
 
+  it("generates a reactive state-selected prop for Vue and vanilla", () => {
+    const outputs = generated(`<template component="x-state-dependent"><defs>
+      <state name="mode" type="keyword" values="text, number" :value="'text'"></state>
+      <prop name="value">Value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+      <handler name="toggle"><set name="mode" :value="mode = 'text' ? 'number' : 'text'"></set></handler>
+    </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>`);
+    const vue = outputs.get("vue/XStateDependent.vue")!;
+    const vanilla = outputs.get("vanilla/XStateDependent.d.ts")!;
+    compileVue(vue, "XStateDependent.vue");
+    assert.match(vue, /selectedPropNode\(mode\.value,/);
+    assert.match(vue, /value: \{ type: null as unknown as PropType<(?:string \| number|number \| string) \| null>/);
+    assert.match(vanilla, /value\?: (?:string \| number|number \| string) \| null/);
+  });
+
   it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
     const vue = generated(`<template component="x-root-ref" controller="./root.js" status="early" summary="Root reference.">
       <button $ref="control" type="button">Go</button>
@@ -170,7 +184,7 @@ describe("official target compilers", () => {
       "x-optional",
       `<prop name="label" type="string">Label.</prop><prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
-      '<p :data-label="label" :data-size="size" :data-count="count"></p>',
+      '<p from:data-label="label" from:data-size="size" from:data-count="count"></p>',
     )).get("vue/XOptional.vue")!;
     // Vue applies defaults before exposing resolved props, including the implicit null default.
     assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
@@ -208,7 +222,7 @@ describe("official target compilers", () => {
     const outputs = generated(componentSource(
       "x-field",
       '<prop name="value" type="string">Value.</prop>',
-      '<input :value="value">',
+      '<input from:value="value">',
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
@@ -219,7 +233,7 @@ describe("official target compilers", () => {
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
-    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select :value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
+    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
     assert.match(select, /<select\s+data-component="x-choice"/);
     assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
@@ -231,7 +245,7 @@ describe("official target compilers", () => {
     const vue = generated(componentSource(
       "x-native-control-primitives",
       '<prop name="value" type="string">Value.</prop><prop name="selected" type="boolean">Selected.</prop>',
-      '<div><input class="property" .value="value" value="authored"><input class="attribute" :value="value"><input type="checkbox" :checked="selected"></div>',
+      '<div><input class="property" .value="value" value="authored"><input class="attribute" from:value="value"><input type="checkbox" from:checked="selected"></div>',
     )).get("vue/XNativeControlPrimitives.vue")!;
     compileVue(vue, "XNativeControlPrimitives.vue");
     assert.match(vue, /<input\s+class="property"\s+v-bind-control="\{[\s\S]*?value: checkedProps\.value,[\s\S]*?nativeProperty: true,[\s\S]*?defaultValue: 'authored',[\s\S]*?\}"/);
@@ -244,7 +258,7 @@ describe("official target compilers", () => {
   it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
     const vue = generated(`<template component="x-row-list"><defs>` +
       '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
-      '<ul><slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index"><li $value="row.name"></li></slot></ul></template>')
+      '<ul><slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"><li $value="row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
@@ -266,7 +280,7 @@ describe("official target compilers", () => {
     const vue = generated(componentSource(
       "x-both",
       '<prop name="a" type="boolean" default="false">A.</prop><prop name="b" type="boolean" default="false">B.</prop>',
-      '<button :hidden="a and b" :title="a" :data-b="b"></button>',
+      '<button from:hidden="a and b" from:title="a" from:data-b="b"></button>',
     )).get("vue/XBoth.vue")!;
     compileVue(vue, "XBoth.vue");
     assert.match(vue, /:hidden="checkedProps\.a && checkedProps\.b"/);
@@ -277,7 +291,7 @@ describe("official target compilers", () => {
     const outputs = generated(componentSource(
       "x-aria",
       '<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop>',
-      '<button :aria-expanded="open" :hidden="gone"></button>',
+      '<button from:aria-expanded="open" from:hidden="gone"></button>',
     ));
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
@@ -334,7 +348,7 @@ describe("official target compilers", () => {
   it("reads a typed state list's items plainly while checking its keys", () => {
     const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
       `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" :value="[]"></state></defs>` +
-      `<div><button $each="tab of tabs" $key="tab.id" :id="tab.id" :aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
+      `<div><button $each="tab of tabs" $key="tab.id" from:id="tab.id" from:aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
@@ -347,7 +361,7 @@ describe("official target compilers", () => {
     const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
       `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" :value="null"></state>` +
       `<state name="issues" type="list(object({ message: string }))" :value="[]"></state></defs>` +
-      `<div><span $if="hovered" :title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
+      `<div><span $if="hovered" from:title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
@@ -391,7 +405,7 @@ describe("official target compilers", () => {
     const vue = generated(
       `<template component="x-choice" status="experimental" summary="A target compiler fixture.">` +
       `<defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>` +
-      `<select :disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
+      `<select from:disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
     ).get("vue/XChoice.vue")!;
     compileVue(vue, "XChoice.vue");
     assert.match(vue, /<select[^>]*>\n\s+<option value="">None<\/option>\n\s+<slot \/>\n\s+<\/select>/);
@@ -401,7 +415,7 @@ describe("official target compilers", () => {
     const vue = generated(componentSource(
       "demo-anchor",
       `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
-      `<div :data-edge="anchor"></div>`,
+      `<div from:data-edge="anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
     assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
@@ -417,8 +431,8 @@ describe("official target compilers", () => {
     <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>
   </defs>
   <template $match>
-    <a $when="as = 'a'" class="action" :href="{ true: null, false: href }[format('%s', disabled)]" :data-tags="tags" :data-space-tags="spaceTags" $ref="control"><slot></slot></a>
-    <button $else class="action" type="button" :disabled="disabled" $ref="control"><slot></slot></button>
+    <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[format('%s', disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
+    <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
   </template>
   <style>:host { display: inline-flex; }</style>
 </template>`);
@@ -472,13 +486,13 @@ describe("official target compilers", () => {
     const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
       `<prop name="as" type="keyword" values="a, b" default="a">Kind.</prop>`,
-      `<section $match :data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
+      `<section $match from:data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
     )));
     assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);
     assert.throws(() => generateVueComponent(parseComponent(componentSource(
       "x-guarded",
       '<prop name="show" type="boolean" default="true">Show.</prop>',
-      `<section $if="show" :data-show="show">Visible</section>`,
+      `<section $if="show" from:data-show="show">Visible</section>`,
     ))), /HT021/);
     // $html is supported through a generated, feature-specific sanitizer helper.
     const source = `<template component="demo-html" status="experimental" summary="Html.">
@@ -628,7 +642,7 @@ describe("official target compilers", () => {
         <computed name="bucket" from="round(position)"></computed>
         <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" :data-bucket="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoData.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -644,7 +658,7 @@ describe("official target compilers", () => {
         <computed name="bucket" from="round(position)"></computed>
         <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" role="progressbar" :aria-valuenow="position" :aria-valuetext="bucket"><output $value="position"></output></button>
+      <button on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoAria.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -660,7 +674,7 @@ describe("official target compilers", () => {
         <computed name="bucket" from="round(position)"></computed>
         <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" :title="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:title="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoTitle.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -690,7 +704,7 @@ describe("official target compilers", () => {
         <computed name="closed" from="not open"></computed>
         <handler name="toggle"><set name="open" :value="not open"></set></handler>
       </defs>
-      <button on:click="toggle" :aria-expanded="open" :hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+      <button on:click="toggle" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
     </template>`).get("vanilla/DemoToggle.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -983,7 +997,7 @@ describe("official target compilers", () => {
   it("compiles dependency-free primitive native bindings beside dynamic direct output", async () => {
     const module = generated(`<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
       <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
-      <section :data-status="'ready'" :aria-hidden="false" :hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
+      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoLiteralNative.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1006,7 +1020,7 @@ describe("official target compilers", () => {
         <handler name="increment"><set name="count" :value="count + 1"></set></handler>
         <handler name="save"><dispatch event="saved" :value="label"></dispatch></handler>
       </defs>
-      <section :data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
+      <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
     </template>`).get("vanilla/DemoStaticComputed.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1057,7 +1071,7 @@ describe("official target compilers", () => {
         <state name="count" :value="0"></state>
         <handler name="increment"><set name="count" :value="count + 1"></set></handler>
       </defs>
-      <section :data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+      <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
     </template>`).get("vanilla/DemoInlineAttributes.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1088,7 +1102,7 @@ describe("official target compilers", () => {
         <state name="open" type="string" :value="false"></state>
         <handler name="toggle"><set name="open" :value="not open"></set></handler>
       </defs>
-      <button on:click="toggle" :aria-expanded="open"><output $value="open"></output></button>
+      <button on:click="toggle" from:aria-expanded="open"><output $value="open"></output></button>
     </template>`).get("vanilla/DemoInert.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1147,7 +1161,7 @@ describe("official target compilers", () => {
         <handler name="showOne"><set name="tab" :value="'one'"></set></handler>
         <handler name="showTwo"><set name="tab" :value="'two'"></set></handler>
       </defs>
-      <section :data-tab="tab" :title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+      <section from:data-tab="tab" from:title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
     </template>`).get("vanilla/DemoTabs.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1163,7 +1177,7 @@ describe("official target compilers", () => {
         <state name="destination" :value="'/start'"></state>
         <handler name="change"><set name="destination" :value="'javascript:alert(1)'"></set></handler>
       </defs>
-      <a on:click="change" :href="destination"><output $value="destination"></output></a>
+      <a on:click="change" from:href="destination"><output $value="destination"></output></a>
     </template>`).get("vanilla/DemoLink.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1176,7 +1190,7 @@ describe("official target compilers", () => {
         <computed name="label" from="format('Step %s', count)"></computed>
         <handler name="increment"><set name="count" :value="count + 1"></set></handler>
       </defs>
-      <button on:click="increment" :aria-label="label"><input .value="label"><output $value="label"></output></button>
+      <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
     </template>`).get("vanilla/DemoLabel.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1204,7 +1218,7 @@ describe("official target compilers", () => {
         <state name="size" :value="24"></state>
         <handler name="grow"><set name="size" :value="size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg :viewBox="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:viewBox="size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgBound.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1216,7 +1230,7 @@ describe("official target compilers", () => {
         <state name="size" :value="24"></state>
         <handler name="grow"><set name="size" :value="size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg :data-size="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:data-size="size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgData.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1228,7 +1242,7 @@ describe("official target compilers", () => {
     const module = generated(componentSource(
       "demo-label",
       `<prop name="label" type="string" default="Ready">Label.</prop>`,
-      `<output :data-label="label"><span $value="label"></span></output>`,
+      `<output from:data-label="label"><span $value="label"></span></output>`,
     )).get("vanilla/DemoLabel.js")!;
 
     assert.match(module, /html-next\/generated-runtime/);
@@ -1254,7 +1268,7 @@ describe("official target compilers", () => {
     const module = generated(componentSource(
       "demo-prop-values",
       `<prop name="value" type="number" default="1">Value.</prop><prop name="label" type="string" default="Ready">Label.</prop>`,
-      `<section><input type="number" .value="value" :data-label="label"></section>`,
+      `<section><input type="number" .value="value" from:data-label="label"></section>`,
     )).get("vanilla/DemoPropValues.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1264,7 +1278,7 @@ describe("official target compilers", () => {
     const module = generated(componentSource(
       "demo-icon",
       `<prop name="label" type="string" default="Close">Label.</prop>`,
-      `<button :aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path>` +
+      `<button from:aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path>` +
         `<foreignObject><span>html</span></foreignObject></svg></button>`,
     )).get("vanilla/DemoIcon.js")!;
 
@@ -1280,7 +1294,7 @@ describe("official target compilers", () => {
     const module = generated(componentSource(
       "demo-link",
       `<prop name="target" type="string" default="https://example.test">Target.</prop>`,
-      `<a :href="target"><slot></slot></a>`,
+      `<a from:href="target"><slot></slot></a>`,
     )).get("vanilla/DemoLink.js")!;
 
     assert.match(module, /html-next\/runtime/);

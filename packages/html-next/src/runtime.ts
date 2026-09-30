@@ -347,7 +347,8 @@ function componentScope(
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(definition.contract.props)) {
-    if (prop.required && (values[name] === undefined || values[name] === null)) {
+    if (prop.required && (values[name] === undefined || values[name] === null) &&
+        (prop.select === undefined || definition.contract.props[prop.select.from] !== undefined)) {
       fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
     // The effective value seen by expressions: passed value, default, or null.
@@ -420,7 +421,7 @@ function parseIncomingProps(
   }
   for (const [name, prop] of Object.entries(contract.props)) {
     const item = incoming[name];
-    if (item !== undefined && prop.select !== undefined) {
+    if (item !== undefined && prop.select !== undefined && contract.props[prop.select.from] !== undefined) {
       const type = selectedPropType(contract, prop, values);
       values[name] = invocationValue(prop, item.value, item.source, item.attributePresent, type);
     }
@@ -461,8 +462,19 @@ function readInvocation(
 
   // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
   // author's explicit attributes). They are never read from JavaScript properties.
-  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined && values[name] !== null));
   const { scope, effects } = componentScope(definition, values, parent);
+  for (const [name, prop] of Object.entries(contract.props)) {
+    if (prop.select === undefined || contract.props[prop.select.from] !== undefined) continue;
+    const item = incoming[name];
+    if (item !== undefined) {
+      const type = selectedPropType(contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
+      values[name] = invocationValue(prop, item.value, item.source, item.attributePresent, type);
+      scope.set(name, values[name] as Value);
+    } else if (prop.required) {
+      fail("HC020", `Required prop \`${name}\` was not provided.`);
+    }
+  }
+  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined && values[name] !== null));
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
@@ -2072,6 +2084,10 @@ function installPropReflection(instance: RuntimeInstance): void {
       if (selected === null && value !== undefined && value !== ABSENT && value !== null) {
         fail("HR002", `Prop \`${name}\` has no selected type.`);
       }
+      if (selected !== null && value !== undefined && value !== ABSENT && value !== null &&
+          !parseTypedValue(value, selected, "$", "value").ok) {
+        fail("HR002", `Prop \`${name}\` does not satisfy its selected type.`);
+      }
       const serialized = value === undefined || value === ABSENT || value === null
         ? null : serializeTypedValue(value, selected!);
       if (serialized === null) root.removeAttribute(attributeName);
@@ -2852,6 +2868,7 @@ export function attachComponent(
     for (const [name, prop] of Object.entries(definition.contract.props)) {
       const value = options.props?.[name];
       if (value !== undefined && value !== null) {
+        if (prop.select !== undefined && definition.contract.props[prop.select.from] === undefined) continue;
         const selected = selectedPropType(definition.contract, prop, options.props ?? {});
         if (selected === null) fail("HR002", `Prop \`${name}\` has no selected type.`);
         element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, selected));
@@ -2913,6 +2930,11 @@ function applyComponentProps(
   const element = instance.element!;
   const contract = instance.definition.contract;
   const next = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
+  for (const prop of Object.values(contract.props)) {
+    if (prop.select !== undefined && contract.props[prop.select.from] === undefined) {
+      next[prop.select.from] = instance.scope.get(prop.select.from);
+    }
+  }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) next[name] = assignedPropValue(name, prop, input);

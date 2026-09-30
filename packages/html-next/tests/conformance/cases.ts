@@ -74,8 +74,8 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "icon-close",
       defs: `<state name="box" value="0 0 24 24"></state>`,
-      root: `<button type="button"><svg :viewBox="box" width="24" height="24" fill="none" stroke="currentColor">
-        <path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" :gradientUnits="'userSpaceOnUse'"></linearGradient>
+      root: `<button type="button"><svg from:viewBox="box" width="24" height="24" fill="none" stroke="currentColor">
+        <path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="'userSpaceOnUse'"></linearGradient>
         <foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button>`,
       use: `<icon-close id="icon"></icon-close>`,
     }),
@@ -105,7 +105,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-root-with",
       defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" :value="'Bea'"></set></handler>`,
-      root: `<section $with="label as display" :data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
+      root: `<section $with="label as display" from:data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
       use: `<x-root-with id="person"></x-root-with>`,
     }),
     expect: {
@@ -129,7 +129,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-btn",
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button type="button" :aria-label="label"><slot></slot></button>`,
+      root: `<button type="button" from:aria-label="label"><slot></slot></button>`,
       use: `<x-btn id="b" class="cta" label="Save"><strong>now</strong></x-btn>`,
     }),
     expect: {
@@ -153,7 +153,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-pre",
       defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
-      root: `<button type="button" role="button" class="base" style="color: red" :aria-label="label"></button>`,
+      root: `<button type="button" role="button" class="base" style="color: red" from:aria-label="label"></button>`,
       use: `<x-pre id="p" type="submit" class="cta" style="margin: 0" aria-label="Ignored"></x-pre>`,
     }),
     expect: {
@@ -166,7 +166,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-aria",
       defs: `<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop><prop name="edit" type="boolean" default="false">Edit.</prop>`,
-      root: `<button :aria-expanded="open" :hidden="gone" :contenteditable="edit"></button>`,
+      root: `<button from:aria-expanded="open" from:hidden="gone" from:contenteditable="edit"></button>`,
       use: `<x-aria id="closed"></x-aria><x-aria id="open" open gone edit></x-aria>`,
     }),
     expect: {
@@ -206,7 +206,7 @@ const successes: ConformanceCase[] = [
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,
-      root: `<button :data-label="label"></button>`,
+      root: `<button from:data-label="label"></button>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: { probe: `return q('#b').getAttribute('data-label');`, result: "Hi" },
@@ -219,7 +219,7 @@ const successes: ConformanceCase[] = [
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>` +
         `<prop name="kind" type="keyword" values="a, b" default="a">Enum.</prop>` +
         `<prop name="s" type="string" default="">String.</prop>`,
-      root: `<div :data-sum="n + 1" :data-flag="flag" :data-kind="kind" :data-s="s"></div>`,
+      root: `<div from:data-sum="n + 1" from:data-flag="flag" from:data-kind="kind" from:data-s="s"></div>`,
       use: `<x-t id="b" n="5" flag kind="b" s="hey"></x-t>`,
     }),
     expect: {
@@ -236,7 +236,7 @@ const successes: ConformanceCase[] = [
       defs:
         `<prop name="missing" type="string">Missing.</prop>` +
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>`,
-      root: `<div :data-missing="missing" :data-off="flag" :data-on="not flag" :data-num="3" :class="['a', 'b']"></div>`,
+      root: `<div from:data-missing="missing" from:data-off="flag" from:data-on="not flag" from:data-num="3" from:class="['a', 'b']"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -366,7 +366,7 @@ const successes: ConformanceCase[] = [
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
       defs: `<state name="obj" :value="{ a: 1 }"></state>`,
-      root: `<div :data-x="obj.b.c" $value="obj.missing"></div>`,
+      root: `<div from:data-x="obj.b.c" $value="obj.missing"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -379,7 +379,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       root:
         `<ul><li $each="n, i of [3, 1, 2, 5]" $sort="n" $limit="3" ` +
-        `:data-i="i" :data-last="loop.last" :data-count="loop.count" $value="n"></li></ul>`,
+        ` from:data-i="i" from:data-last="loop.last" from:data-count="loop.count" $value="n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -396,7 +396,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$each $where filters and reindexes the loop",
     source: scene({
-      root: `<ul><li $each="n, i of [10, 20, 30]" $where="n > 10" :data-i="i" $value="n"></li></ul>`,
+      root: `<ul><li $each="n, i of [10, 20, 30]" $where="n > 10" from:data-i="i" $value="n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -477,7 +477,7 @@ const successes: ConformanceCase[] = [
         `<state name="count" :value="start"></state>` +
         `<computed name="doubled" from="count * 2"></computed>` +
         `<data name="feed"></data>`,
-      root: `<div :data-count="count" :data-doubled="doubled"><i $value="feed.pending"></i></div>`,
+      root: `<div from:data-count="count" from:data-doubled="doubled"><i $value="feed.pending"></i></div>`,
       use: `<x-t id="b" start="5"></x-t>`,
     }),
     expect: {
@@ -532,7 +532,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HC020: a required prop is not provided",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button :data-l="label"></button>`,
+      root: `<button from:data-l="label"></button>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HC020" },
@@ -549,7 +549,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HC020: a name collides in the flat component namespace (prop and state)",
     source: scene({
       defs: `<prop name="count" type="number" default="0">Count.</prop><state name="count" :value="1"></state>`,
-      root: `<div :data-c="count"></div>`,
+      root: `<div from:data-c="count"></div>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HC020" },
@@ -599,7 +599,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HT007: a :srcdoc binding into a raw content sink",
     source: scene({
       defs: `<prop name="h" type="string" default="">H.</prop>`,
-      root: `<iframe :srcdoc="h"></iframe>`,
+      root: `<iframe from:srcdoc="h"></iframe>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HT007" },
@@ -621,7 +621,7 @@ const diagnostics: ConformanceCase[] = [
   },
   {
     name: "HT013: a malformed expression",
-    source: scene({ root: `<div :data-x="1 +"></div>`, use: `<x-t></x-t>` }),
+    source: scene({ root: `<div from:data-x="1 +"></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT013" },
   },
   {
@@ -665,7 +665,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HR002: a non-finite number prop invocation value",
     source: scene({
       defs: `<prop name="n" type="number" default="0">N.</prop>`,
-      root: `<div :data-n="n"></div>`,
+      root: `<div from:data-n="n"></div>`,
       use: `<x-t n="abc"></x-t>`,
     }),
     expect: { code: "HR002" },

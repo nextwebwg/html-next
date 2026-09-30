@@ -27,8 +27,8 @@ const source = `<template component="x-form-matrix" status="early" summary="Nati
   <input class="read-only" value="authored" .value="form.text">
   <input class="check" type="checkbox" name="check" bind:checked="form.checked">
   <input class="radio" type="radio" name="radio" value="r" bind:checked="form.radio">
-  <select class="single" name="single" bind:value="form.choice"><option $each="item of items" $key="item.id" :value="item.id" $value="item.label"></option></select>
-  <select class="multiple" name="multiple" multiple bind:value="form.choices"><option $each="item of items" $key="item.id" :value="item.id" $value="item.label"></option></select>
+  <select class="single" name="single" bind:value="form.choice"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
+  <select class="multiple" name="multiple" multiple bind:value="form.choices"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
   <button type="button" class="unrelated" on:click="unrelated">Unrelated</button>
   <button type="button" class="options" on:click="changeOptions">Options</button>
   <button type="button" class="choose" on:click="chooseC">Choose C</button>

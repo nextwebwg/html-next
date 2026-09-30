@@ -29,6 +29,15 @@ function componentSource(
 }
 
 describe("parseComponent", () => {
+  it("reads from: bindings and rejects the former bare-colon spelling", () => {
+    const definition = parseComponent(`<template component="x-from"><defs>
+      <prop name="label" type="string">Label.</prop>
+      <state name="count" :value="0"></state>
+    </defs><output from:aria-label="label" from:data-count="count"></output></template>`);
+    assert.deepEqual(definition.template.attributes.filter((entry) => entry.kind === "attribute").map((entry) => entry.name), ["aria-label", "data-count"]);
+    expectDiagnostic("HT010", `<template component="x-old"><defs><prop name="label" type="string">Label.</prop></defs><output :aria-label="label"></output></template>`);
+  });
+
   it("reads an inline type selected by a prop's permitted values", () => {
     const definition = parseComponent(`<template component="x-inline-type"><defs>
       <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
@@ -36,7 +45,7 @@ describe("parseComponent", () => {
         <option value="text" type="string"></option>
         <option value="number" type="number"></option>
       </type></prop>
-    </defs><input :type="type" :value="value"></template>`);
+    </defs><input from:type="type" from:value="value"></template>`);
     assert.deepEqual(definition.contract.props.value?.select, {
       from: "type",
       options: [
@@ -55,7 +64,7 @@ describe("parseComponent", () => {
       </type>
       <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
       <prop name="value" type="input-value">Control value.</prop>
-    </defs><input :type="type" :value="value"></template>`);
+    </defs><input from:type="type" from:value="value"></template>`);
     assert.deepEqual(definition.contract.props.value?.select, {
       from: "type",
       options: [
@@ -66,9 +75,26 @@ describe("parseComponent", () => {
     assert.equal(normalizeType(definition.contract.props.value!.type).kind, "selected");
   });
 
+  it("resolves a selected type from a declared state by name", () => {
+    const definition = parseComponent(`<template component="x-state-type"><defs>
+      <state name="mode" type="keyword" values="text, number" :value="'text'"></state>
+      <prop name="value">Value.<type from="mode">
+        <option value="text" type="string"></option>
+        <option value="number" type="number"></option>
+      </type></prop>
+    </defs><output from:data-value="value"></output></template>`);
+    assert.deepEqual(definition.contract.props.value?.select, {
+      from: "mode",
+      options: [
+        { value: "text", type: { kind: "terminal", name: "string" } },
+        { value: "number", type: { kind: "terminal", name: "number" } },
+      ],
+    });
+  });
+
   it("rejects a values constraint containing an item outside the declared type", () => {
     expectDiagnostic("HC013", componentSource(
-      `<output :data-size="size"></output>`,
+      `<output from:data-size="size"></output>`,
       `<prop name="size" type="keyword" values="sm, two words">Size.</prop>`,
     ));
   });
@@ -83,7 +109,7 @@ describe("parseComponent", () => {
           </prop>
         </prop>
       </defs>
-      <div :data-rows="rows"></div>
+      <div from:data-rows="rows"></div>
     </template>`);
     const type = normalizeType(definition.contract.props.rows!.type);
     assert.equal(formatType(type), "list(object({ id: integer, name: string }))");
@@ -119,7 +145,7 @@ describe("parseComponent", () => {
 
   it("keeps a prop's HTML pattern constraint", () => {
     const definition = parseComponent(componentSource(
-      `<output :data-sku="sku"></output>`,
+      `<output from:data-sku="sku"></output>`,
       `<prop name="sku" type="string" pattern="[A-Z]{3}-[0-9]{4}">Product code.</prop>`,
     ));
     assert.equal(definition.contract.props.sku?.pattern, "[A-Z]{3}-[0-9]{4}");
@@ -134,7 +160,7 @@ describe("parseComponent", () => {
         `<event name="value-change" type="string"></event>` +
         `<method name="validate" returns="string" export="validate"></method>` +
         `</defs>` +
-        `<div><slot name="start"><span>Start</span></slot><slot :name="query"></slot></div>` +
+        `<div><slot name="start"><span>Start</span></slot><slot from:name="query"></slot></div>` +
         `</template>`,
       "combobox.html",
     );
@@ -164,7 +190,7 @@ describe("parseComponent", () => {
   it("parses repeated scoped slots and exposes their row bindings", () => {
     const definition = parseComponent(
       `<template component="x-rows"><defs><prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>` +
-      `<ul><slot $each="row of rows" $key="row.id" name="row" :item="row" :index="loop.index">` +
+      `<ul><slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index">` +
       `<li $value="row.name"></li></slot></ul></template>`,
     );
     const slot = definition.template.children[0];
@@ -184,8 +210,8 @@ describe("parseComponent", () => {
     const definition = parseComponent(`<template component="x-alternate-slots"><defs>` +
       `<state name="first" value="First"></state><state name="second" value="Second"></state>` +
       `<state name="alternate" :value="false"></state></defs>` +
-      `<template $match><section $when="alternate"><slot name="item" :first="first"></slot></section>` +
-      `<article $else><slot name="item" :second="second"></slot></article></template></template>`);
+      `<template $match><section $when="alternate"><slot name="item" from:first="first"></slot></section>` +
+      `<article $else><slot name="item" from:second="second"></slot></article></template></template>`);
     assert.deepEqual(definition.slots, [{ name: "item", dynamic: false, required: true, props: ["first", "second"] }]);
   });
 
@@ -210,7 +236,7 @@ describe("parseComponent", () => {
   it("accepts prop names that exist on Object.prototype", () => {
     const definition = parseComponent(
       componentSource(
-        `<button :data-constructor="constructor"></button>`,
+        `<button from:data-constructor="constructor"></button>`,
         `<prop name="constructor" type="string" default="safe">Constructor label.</prop>`,
       ),
       "constructor-prop.html",
@@ -224,7 +250,7 @@ describe("parseComponent", () => {
       "HC020",
       `<template component="demo-example" status="early" summary="Collision.">` +
         `<defs><prop name="value" type="string">Value.</prop><state name="value"></state></defs>` +
-        `<button :data-value="value"></button></template>`,
+        `<button from:data-value="value"></button></template>`,
     );
   });
 
@@ -235,7 +261,7 @@ describe("parseComponent", () => {
     );
     const reader = parseComponent(
       `<template component="x-step"><defs><context name="current" from="x-steps" as="activeStep"></context></defs>` +
-        `<li :aria-current="activeStep = 1 ? 'step' : null"></li></template>`,
+        `<li from:aria-current="activeStep = 1 ? 'step' : null"></li></template>`,
     );
     assert.equal(provider.declarations?.[0]?.kind, "state");
     assert.equal(provider.declarations?.[0]?.name, "current");
@@ -243,7 +269,7 @@ describe("parseComponent", () => {
     assert.deepEqual(reader.declarations?.[0], {
       kind: "context",
       name: "current",
-      from: "x-steps",
+ from: "x-steps",
       as: "activeStep",
     });
     assert.deepEqual(reader.template.attributes[0]?.kind, "attribute");
@@ -262,7 +288,7 @@ describe("parseComponent", () => {
       `<template component="demo-example" status="early" summary="Event namespace.">` +
         `<defs><prop name="open" type="boolean" default="false">Open.</prop>` +
         `<event name="open" type="boolean"></event></defs>` +
-        `<button :data-open="open"></button></template>`,
+        `<button from:data-open="open"></button></template>`,
     );
     assert.deepEqual(definition.declarations?.map((declaration) => declaration.kind), ["event"]);
   });
@@ -329,7 +355,7 @@ describe("parseComponent", () => {
     );
     expectDiagnostic(
       "HC017",
-      componentSource(`<div :data-anchor="anchor"></div>`, `<prop name="anchor" type="unknown">Anchor geometry.</prop>`),
+      componentSource(`<div from:data-anchor="anchor"></div>`, `<prop name="anchor" type="unknown">Anchor geometry.</prop>`),
     );
   });
 
@@ -358,13 +384,13 @@ describe("parseComponent", () => {
   });
 
   it("rejects undeclared expressions", () => {
-    expectDiagnostic("HT003", componentSource(`<button :title="missing"></button>`));
+    expectDiagnostic("HT003", componentSource(`<button from:title="missing"></button>`));
   });
 
   it("targets a prop's first binding and lets it bind in more places", () => {
     const definition = parseComponent(
       componentSource(
-        `<button :title="label" :aria-label="label"><span $value="label"></span></button>`,
+        `<button from:title="label" from:aria-label="label"><span $value="label"></span></button>`,
         `<prop name="label" type="string">Label.</prop>`,
       ),
       "label.html",
@@ -376,11 +402,11 @@ describe("parseComponent", () => {
   it("rejects props declared without a name, type, or binding", () => {
     expectDiagnostic(
       "HC010",
-      componentSource(`<button :data-x="v"></button>`, `<prop type="string">No name.</prop>`),
+      componentSource(`<button from:data-x="v"></button>`, `<prop type="string">No name.</prop>`),
     );
     expectDiagnostic(
       "HC013",
-      componentSource(`<button :data-x="v"></button>`, `<prop name="v">No type.</prop>`),
+      componentSource(`<button from:data-x="v"></button>`, `<prop name="v">No type.</prop>`),
     );
     expectDiagnostic(
       "HC018",
@@ -441,7 +467,7 @@ describe("parseComponent", () => {
         `<state name="form" :value="{ selected: 0 }"></state>` +
         `<computed name="hasQuery" from="query != ''"></computed>` +
         `<data name="results" src="/api/search" type="object" debounce="150ms" poll="30s">` +
-        `<param name="q" :value="query"></param></data>` +
+        `<param name="q" from:value="query"></param></data>` +
         `<event name="selection-change" type="number" bubbles="false" composed="false" cancelable="true"></event>` +
         `<method name="refresh" export="refresh" returns="promise(undefined)"></method>` +
         `<handler name="select">` +
@@ -449,10 +475,10 @@ describe("parseComponent", () => {
         `<validate target="search"></validate><focus ref="search"></focus>` +
         `<dispatch event="selection-change" :value="form.selected"></dispatch>` +
         `</handler></defs>` +
-        `<section :data-ready="hasQuery" class:active="hasQuery" style:opacity="hasQuery" $ref="root">` +
+        `<section from:data-ready="hasQuery" class:active="hasQuery" style:opacity="hasQuery" $ref="root">` +
         `<input .value="query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
         `<ol><li $each="row, i of results.value" $where="row.visible" $sort="-score,name" $limit="3" $key="row.id">` +
-        `<slot :name="row.id"><span $value="i"></span></slot></li></ol>` +
+        `<slot from:name="row.id"><span $value="i"></span></slot></li></ol>` +
         `<div $with="form as current"><output $value="current.selected"></output></div>` +
         `<div $match="form as current"><span $when="current.selected > 0">Selected</span><span $else>None</span></div>` +
         `</section><style>:scope { display: block; }</style></template>`,
@@ -529,8 +555,8 @@ describe("parseComponent", () => {
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
     // A slot required by any arm is required; arms' dynamic slots merge by position.
     const merged = parseComponent(button(
-      `<template $match><a $when="as = 'a'"><slot name="icon"></slot><slot :name="as"></slot></a>` +
-        `<button $else><slot name="icon">★</slot><slot :name="as">fallback</slot></button></template>`,
+      `<template $match><a $when="as = 'a'"><slot name="icon"></slot><slot from:name="as"></slot></a>` +
+        `<button $else><slot name="icon">★</slot><slot from:name="as">fallback</slot></button></template>`,
     ));
     assert.deepEqual(merged.slots, [{ name: "icon", dynamic: false, required: true }, { dynamic: true, required: true }]);
     // A slot is not a native root.
@@ -657,7 +683,7 @@ describe("parseComponent", () => {
     const definition = parseComponent(
       `<template component="x-state" status="early" summary="Reserved enum.">` +
       `<defs><prop name="status" type="keyword" values="unknown, known" default="unknown">Status.</prop></defs>` +
-      `<output :data-status="status"></output></template>`,
+      `<output from:data-status="status"></output></template>`,
     );
     const prop = definition.contract.props.status!;
     assert.deepEqual(prop.type, { kind: "terminal", name: "keyword" });
@@ -671,7 +697,7 @@ describe("parseComponent", () => {
       () => parseComponent(
         `<template component="x-wide" status="early" summary="Wide.">` +
         `<defs><prop name="status" type="unknown | known" default="unknown">Status.</prop></defs>` +
-        `<output :data-status="status"></output></template>`,
+        `<output from:data-status="status"></output></template>`,
       ),
       /HC013/,
     );

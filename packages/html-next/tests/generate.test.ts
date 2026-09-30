@@ -120,7 +120,7 @@ describe("generateComponent", () => {
     const reader = parseComponent(`<template component="x-step"><defs>` +
       `<prop name="number" type="number" required>Step number.</prop>` +
       `<context name="current" from="x-steps" as="activeStep"></context></defs>` +
-      `<li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`);
+      `<li from:aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`);
     const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
     const providerOutput = artifacts(provider);
     const readerOutput = artifacts(reader);
@@ -134,7 +134,7 @@ describe("generateComponent", () => {
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
-      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" :disabled="disabled" :data-selected="selected">Text &amp; {literal}<slot></slot></button>`,
+      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; {literal}<slot></slot></button>`,
     ));
     const byPath = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
 

@@ -38,7 +38,7 @@ const source = `<template component="demo-counter" controller="./demo-controller
     <header><slot name="title"><h2>Untitled</h2></slot></header>
     <button type="button" on:click="increment"><output $value="count"></output></button>
     <button type="button" data-invalid on:click="invalid">Invalid event</button>
-    <input type="email" required :value="email">
+    <input type="email" required from:value="email">
     <slot><strong>Fallback</strong></slot>
   </section>
 </template>`;
@@ -48,7 +48,7 @@ const panelSource = `<template component="demo-panel" status="early" summary="Di
     <prop name="align" type="keyword" values="start, center, end">Alignment.</prop>
     <prop name="label" type="string">Label.</prop>
   </props>
-  <div class="base" role="group"><span :data-align="align" :data-label="label"></span></div>
+  <div class="base" role="group"><span from:data-align="align" from:data-label="label"></span></div>
 </template>`;
 
 const selectiveSource = `<template component="split-counter" status="experimental" summary="Static dependency fixture.">
@@ -103,7 +103,7 @@ const dataAttributeSource = `<template component="data-counter" status="experime
     <computed name="bucket" from="round(position)"></computed>
     <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
   </defs>
-  <button type="button" on:click="advance" :data-bucket="bucket"><output $value="position"></output></button>
+  <button type="button" on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
 </template>`;
 
 const ariaAttributeSource = `<template component="aria-counter" status="experimental" summary="Direct ARIA attribute fixture.">
@@ -112,7 +112,7 @@ const ariaAttributeSource = `<template component="aria-counter" status="experime
     <computed name="bucket" from="round(position)"></computed>
     <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
   </defs>
-  <button type="button" on:click="advance" role="progressbar" :aria-valuenow="position" :aria-valuetext="bucket"><output $value="position"></output></button>
+  <button type="button" on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
 </template>`;
 
 const htmlAttributeSource = `<template component="title-counter" status="experimental" summary="Direct HTML attribute fixture.">
@@ -121,7 +121,7 @@ const htmlAttributeSource = `<template component="title-counter" status="experim
     <computed name="bucket" from="round(position)"></computed>
     <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
   </defs>
-  <button type="button" on:click="advance" :title="bucket"><output $value="position"></output></button>
+  <button type="button" on:click="advance" from:title="bucket"><output $value="position"></output></button>
 </template>`;
 
 const propertySource = `<template component="value-counter" status="experimental" summary="Direct HTML property fixture.">
@@ -139,7 +139,7 @@ const booleanSource = `<template component="boolean-toggle" status="experimental
     <computed name="closed" from="not open"></computed>
     <handler name="toggle"><set name="open" :value="not open"></set></handler>
   </defs>
-  <button type="button" on:click="toggle" class:open="open" :aria-expanded="open" :hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+  <button type="button" on:click="toggle" class:open="open" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
 </template>`;
 
 const styleSource = `<template component="style-counter" status="experimental" summary="Direct primitive style fixture.">
@@ -243,7 +243,7 @@ const inlineAttributesSource = `<template component="inline-attributes" status="
     <state name="count" :value="0"></state>
     <handler name="increment"><set name="count" :value="count + 1"></set></handler>
   </defs>
-  <section :data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button type="button" on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+  <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button type="button" on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
 </template>`;
 
 const guardedHandlerSource = `<template component="guarded-handler" status="experimental" summary="Direct state-only guarded handler fixture.">
@@ -288,7 +288,7 @@ const literalNativeSource = `<template component="literal-native" status="experi
     <state name="count" :value="0"></state>
     <handler name="increment"><set name="count" :value="count + 1"></set></handler>
   </defs>
-  <section :data-status="'ready'" :aria-hidden="false" :hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button type="button" on:click="increment"><output $value="count"></output></button></section>
+  <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button type="button" on:click="increment"><output $value="count"></output></button></section>
 </template>`;
 
 const staticComputedSource = `<template component="static-computed" status="experimental" summary="Static computed direct construction fixture.">
@@ -300,7 +300,7 @@ const staticComputedSource = `<template component="static-computed" status="expe
     <handler name="increment"><set name="count" :value="count + 1"></set></handler>
     <handler name="save"><dispatch event="saved" :value="label"></dispatch></handler>
   </defs>
-  <section :data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button type="button" on:click="increment"><output $value="count"></output></button><button type="button" on:click="save">Save</button></section>
+  <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button type="button" on:click="increment"><output $value="count"></output></button><button type="button" on:click="save">Save</button></section>
 </template>`;
 
 const readOnlySource = `<template component="read-only-label" status="experimental" summary="Read-only direct leaf fixture.">
@@ -308,7 +308,7 @@ const readOnlySource = `<template component="read-only-label" status="experiment
     <state name="count" :value="1"></state>
     <computed name="label" from="format('Ready %s', count)"></computed>
   </defs>
-  <section :data-label="label" class:ready="count = 1"><input .value="label"><output $value="label"></output><x-read-only-child class="child" aria-label="Ready child"><span class="projected">Projected<x-read-only-grandchild title="Ready grandchild"></x-read-only-grandchild></span></x-read-only-child></section>
+  <section from:data-label="label" class:ready="count = 1"><input .value="label"><output $value="label"></output><x-read-only-child class="child" aria-label="Ready child"><span class="projected">Projected<x-read-only-grandchild title="Ready grandchild"></x-read-only-grandchild></span></x-read-only-child></section>
 </template>`;
 
 const stringSource = `<template component="string-tabs" status="experimental" summary="Direct primitive string fixture.">
@@ -317,7 +317,7 @@ const stringSource = `<template component="string-tabs" status="experimental" su
     <handler name="showOne"><set name="tab" :value="'one'"></set></handler>
     <handler name="showTwo"><set name="tab" :value="'two'"></set></handler>
   </defs>
-  <section :data-tab="tab" :title="tab"><button type="button" on:click="showOne">One</button><button type="button" on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+  <section from:data-tab="tab" from:title="tab"><button type="button" on:click="showOne">One</button><button type="button" on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
 </template>`;
 
 const formatSource = `<template component="format-counter" status="experimental" summary="Direct primitive format fixture.">
@@ -326,7 +326,7 @@ const formatSource = `<template component="format-counter" status="experimental"
     <computed name="label" from="format('Step %s', count)"></computed>
     <handler name="increment"><set name="count" :value="count + 1"></set></handler>
   </defs>
-  <section :aria-label="label"><button type="button" on:click="increment">Increment</button><input .value="label"><output $value="label"></output></section>
+  <section from:aria-label="label"><button type="button" on:click="increment">Increment</button><input .value="label"><output $value="label"></output></section>
 </template>`;
 const stepsSource = `<template component="x-steps"><defs>
   <state name="current" :value="1" context></state>
@@ -336,7 +336,7 @@ const stepsSource = `<template component="x-steps"><defs>
 const stepSource = `<template component="x-step"><defs>
   <prop name="number" type="number" required>Step number.</prop>
   <context name="current" from="x-steps" as="activeStep"></context>
-  </defs><li :aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`;
+  </defs><li from:aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`;
 
 describe.skipIf(!enabled)("generated target runtime parity", () => {
   let directory = "";
@@ -2708,7 +2708,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         <prop name="label" type="string" default="Ready">Label.</prop>
         <prop name="tone" type="keyword" values="quiet, loud" default="quiet">Tone.</prop>
       </props>
-      <section :data-count="count" :data-tone="tone"><output $value="count"></output><span :aria-label="label"></span><slot></slot></section>
+      <section from:data-count="count" from:data-tone="tone"><output $value="count"></output><span from:aria-label="label"></span><slot></slot></section>
     </template>`);
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/DemoProps.js")?.content;
@@ -3003,8 +3003,8 @@ const actionSource = `<template component="x-action" status="early" summary="But
     <computed name="linked" from="as = 'a'"></computed>
   </defs>
   <template $match>
-    <a $when="linked" :href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
-    <button $else type="button" :disabled="disabled"><slot></slot></button>
+    <a $when="linked" from:href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
+    <button $else type="button" from:disabled="disabled"><slot></slot></button>
   </template>
 </template>`;
 
