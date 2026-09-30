@@ -62,6 +62,71 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    for (const form of ["inline", "named"] as const) {
+      it(`${engine} selects a ${form} prop type before parsing an HTML value`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const definition = form === "inline"
+            ? `<prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>`
+            : `<type name="input-value" from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop>`;
+          await page.setContent(`<template component="x-dependent"><defs>
+            <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
+            ${definition}</defs><input :type="type" :value="value"></template>
+            <x-dependent id="numeric" value="2.5" type="number"></x-dependent>
+            <x-dependent id="text" value="2.5"></x-dependent>
+            <x-dependent id="empty"></x-dependent>`);
+          await page.addScriptTag({ path: bundlePath });
+          const actual = await page.evaluate(() => {
+            const runtime = (window as unknown as { HtmlRuntime: {
+              lowerDocument(): void;
+              getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+              updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            } }).HtmlRuntime;
+            runtime.lowerDocument();
+            const numeric = document.querySelector("#numeric")!;
+            const text = document.querySelector("#text")!;
+            const empty = document.querySelector("#empty")!;
+            const initial = [numeric, text, empty].map((element) => runtime.getComponentHost(element)?.state.value);
+            runtime.updateComponentProps(numeric, { type: "text", value: "2.5" });
+            const changed = runtime.getComponentHost(numeric)?.state.value;
+            let rejected = false;
+            try { runtime.updateComponentProps(numeric, { type: "number", value: "2.5" }); }
+            catch (error) { rejected = String(error).includes("HR002"); }
+            return { initial, changed, rejected, typeAfterRejection: runtime.getComponentHost(numeric)?.state.type };
+          });
+          assert.deepEqual(actual, { initial: [2.5, "2.5", null], changed: "2.5", rejected: true, typeAfterRejection: "text" });
+        } finally {
+          await browser.close();
+        }
+      });
+    }
+
+    it(`${engine} warns and ignores an invalid values constraint in a live definition`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-choices"><defs>
+          <prop name="size" type="keyword" values="sm, two words">Size.</prop>
+        </defs><output :data-size="size"></output></template><x-choices id="choice" size="lg"></x-choices>`);
+        await page.addScriptTag({ path: bundlePath });
+        const size = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { size: unknown } } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          return runtime.getComponentHost(document.querySelector("#choice")!)?.state.size;
+        });
+        assert.equal(size, "lg");
+        assert.ok(warnings.some((message) => message.includes("HC013") && message.includes("values constraint")));
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} parses the supported types at an HTML component boundary`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -79,7 +144,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
           ["color-hex", "#663399cc", "#663399cc"],
           ["length", "1rem", "1rem"], ["percentage", "25%", "25%"], ["duration", "200ms", "200ms"],
           ["keyword+", "red blue", ["red", "blue"]], ["keyword#", "red, blue", ["red", "blue"]],
-          ["enum(true, false, 'page')", "false", false],
           ["object({ x: number, y: number })", "{ x: 3, y: 5 }", { x: 3, y: 5 }],
         ];
         const declarations = cases.map(([type], index) =>
@@ -135,13 +199,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${engine} converts HTML enum spelling but requires typed framework values`, async () => {
+    it(`${engine} parses constrained numeric values but requires typed framework values`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-current"><defs>
-          <prop name="current" type="enum(true, false, 'page')">Current location.</prop>
-        </defs><output :data-current="current"></output></template><x-current id="current" current="false"></x-current>`);
+          <prop name="current" type="integer" values="1, 2, 3">Current location.</prop>
+        </defs><output :data-current="current"></output></template><x-current id="current" current="2"></x-current>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -153,12 +217,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const root = document.querySelector("#current")!;
           const fromHtml = runtime.getComponentHost(root)?.state.current;
           let rejectedString = false;
-          try { runtime.updateComponentProps(root, { current: "false" }); }
+          try { runtime.updateComponentProps(root, { current: "2" }); }
           catch { rejectedString = true; }
-          runtime.updateComponentProps(root, { current: false });
+          runtime.updateComponentProps(root, { current: 3 });
           return { fromHtml, rejectedString, fromValue: runtime.getComponentHost(root)?.state.current };
         });
-        assert.deepEqual(result, { fromHtml: false, rejectedString: true, fromValue: false });
+        assert.deepEqual(result, { fromHtml: 2, rejectedString: true, fromValue: 3 });
       } finally {
         await browser.close();
       }
@@ -195,7 +259,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const definition = parseComponent(`<template component="x-null-choice" status="early" summary="Null root.">
-          <defs><prop name="choice" type="enum('on', 'off')" default="on">Choice.</prop></defs>
+          <defs><prop name="choice" type="keyword" values="on, off" default="on">Choice.</prop></defs>
           <template $match><article $when="choice = null"><output $value="choice"></output></article><section $else><output $value="choice"></output></section></template>
         </template>`, "null-choice.html");
         const page = await browser.newPage();
@@ -752,12 +816,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
             const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
-              getComponentHost(element: Element): { root: Element; state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { root: Element; element: Element; state: Record<string, unknown> } | undefined;
             };
             const host = runtime.getComponentHost(document.querySelector("section.frame")!);
             return host === undefined
               ? "no host"
-              : `${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+              : `${host.element === host.root}:${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
           })(),
         }));
         assert.deepEqual(result, {
@@ -765,7 +829,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           heading: "count 2",
           feed: "from the endpoint",
           lineage: "x-outer x-frame",
-          hostState: "section:count=2:label=reflected",
+          hostState: "true:section:count=2:label=reflected",
         });
       } finally {
         await browser.close();
@@ -1494,7 +1558,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-demo" status="early" summary="Control flow.">` +
             `<defs>` +
-            `<prop name="tier" type="enum('free', 'pro')" default="free">Plan.</prop>` +
+            `<prop name="tier" type="keyword" values="free, pro" default="free">Plan.</prop>` +
             `<prop name="show" type="boolean" default="false">Show.</prop>` +
             `</defs>` +
             `<div>` +
@@ -2276,7 +2340,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
             `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
-            `<prop name="as" type="enum('section', 'article')" default="section">Root.</prop></defs>` +
+            `<prop name="as" type="keyword" values="section, article" default="section">Root.</prop></defs>` +
             `<template $match><article $when="as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
@@ -2406,7 +2470,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const body = `<slot></slot><output $value="count"></output>`;
         await page.setContent(
           `<template component="x-action" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="enum('button', 'a')" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
+            `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
             `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
             `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
             `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
@@ -2526,7 +2590,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.setContent(
           `<template component="x-choice" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="enum('button', 'a')" default="button">Root.</prop></defs>` +
+            `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop></defs>` +
             `<template $match><a $when="as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
           `</template>` +
           `<template component="x-host" status="early" summary="Parent.">` +
@@ -2624,7 +2688,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<template component="x-card" status="early" summary="Delegates.">` +
-            `<defs><prop name="tone" type="enum('warm', 'cool')" default="warm">Tone.</prop></defs>` +
+            `<defs><prop name="tone" type="keyword" values="warm, cool" default="warm">Tone.</prop></defs>` +
             `<x-fold><output $value="tone"></output></x-fold>` +
           `</template>` +
           `<x-card id="card" tone="warm"></x-card>`,

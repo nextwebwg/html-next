@@ -14,7 +14,6 @@ import type {
   ComponentContract,
   ContractStatus,
   DefineContractOptions,
-  EnumType,
   PropContract,
   PropTarget,
   PropType,
@@ -32,6 +31,7 @@ const CONTRACT_FIELDS = [
 ] as const;
 const PROP_FIELDS = [
   "type",
+  "values",
   "pattern",
   "default",
   "required",
@@ -106,7 +106,7 @@ function parseType(value: unknown, source?: string): PropType {
       : parsed;
   }
 
-  const object = record(value, "HC013", "A prop type must be a scalar name or enum object.", source);
+  const object = record(value, "HC013", "A prop type must be a base type or type node.", source);
   if (isTypeNode(object)) {
     try {
       return parseTypeExpression(formatType(object));
@@ -114,20 +114,7 @@ function parseType(value: unknown, source?: string): PropType {
       fail("HC013", error instanceof Error ? error.message : "Invalid type node.", source);
     }
   }
-  rejectUnknownFields(object, ["enum"], source);
-  if (!Array.isArray(object.enum) || object.enum.length === 0) {
-    fail("HC014", "An enum must contain at least one string member.", source);
-  }
-  if (!object.enum.every((member) => typeof member === "string")) {
-    fail("HC014", "Every enum member must be a string.", source);
-  }
-  const members = object.enum as string[];
-  for (let index = 0; index < members.length; index += 1) {
-    if (members.indexOf(members[index]!, index + 1) !== -1) {
-      fail("HC014", "Enum members must be unique.", source);
-    }
-  }
-  return { enum: Object.freeze([...members]) } satisfies EnumType;
+  fail("HC013", "A prop type must be a base type or type node.", source);
 }
 
 function parseTarget(value: unknown, source?: string): PropTarget {
@@ -170,11 +157,49 @@ export function matchesPropPattern(value: unknown, pattern: string | undefined):
   catch { return new RegExp(`^(?:${pattern})$`, "u").test(value); }
 }
 
+/** Invalid entries invalidate the whole optional constraint, as if it were absent. */
+export function parseValuesConstraint(type: PropType, source: string | undefined): readonly (string | number | boolean)[] | undefined {
+  if (source === undefined) return undefined;
+  const entries = source.split(",").map((entry) => entry.trim());
+  if (entries.length === 0 || entries.some((entry) => entry === "")) return undefined;
+  const parsed = entries.map((entry) => parseTypedValue(entry, type));
+  if (parsed.some((result) => !result.ok || !["string", "number", "boolean"].includes(typeof result.value))) return undefined;
+  return [...new Set(parsed.map((result) => (result as { ok: true; value: string | number | boolean }).value))];
+}
+
+export function matchesPropValues(value: unknown, values: PropContract["values"]): boolean {
+  return values === undefined || value === null || values.some((choice) => choice === value);
+}
+
+/** Resolve a dependent prop after the selecting prop has been parsed and defaulted. */
+export function selectedPropType(
+  contract: ComponentContract,
+  prop: PropContract,
+  values: Readonly<Record<string, unknown>>,
+): PropType | null {
+  if (prop.select === undefined) return prop.type;
+  const selector = contract.props[prop.select.from];
+  const supplied = values[prop.select.from];
+  const value = supplied === undefined ? selector?.default ?? null : supplied;
+  if (value === null) return null;
+  const option = prop.select.options.find((candidate) => candidate.value === value);
+  if (option === undefined) fail("HR002", `No type option matches \`${prop.select.from}\` value \`${String(value)}\`.`);
+  return option.type;
+}
+
 function parseProp(name: string, value: unknown, source?: string): PropContract {
   const object = record(value, "HC012", `Prop \`${name}\` must be an object.`, source);
   rejectUnknownFields(object, PROP_FIELDS, source);
 
   const type = parseType(object.type, source);
+  const values = object.values === undefined ? undefined : typeof object.values === "string"
+    ? parseValuesConstraint(type, object.values) : undefined;
+  if (object.values !== undefined && typeof object.values !== "string") {
+    fail("HC013", `Values for prop \`${name}\` must be a string.`, source);
+  }
+  if (object.values !== undefined && values === undefined) {
+    fail("HC013", `Values for prop \`${name}\` do not conform to its type.`, source);
+  }
   const pattern = object.pattern;
   if (pattern !== undefined) {
     if (typeof pattern !== "string") fail("HC013", `Pattern for prop \`${name}\` must be a string.`, source);
@@ -194,7 +219,7 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   const parsedDefault = "default" in object && object.default !== null
     ? parseTypedValue(object.default, type) : undefined;
   if ("default" in object && object.default !== null &&
-      (parsedDefault === undefined || !parsedDefault.ok || !matchesPropPattern(parsedDefault.value, pattern))) {
+      (parsedDefault === undefined || !parsedDefault.ok || !matchesPropPattern(parsedDefault.value, pattern) || !matchesPropValues(parsedDefault.value, values))) {
     fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
   }
 
@@ -209,12 +234,14 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   const description = requiredString(object.description, `props.${name}.description`, source);
   const normalized: {
     type: PropType;
+    values?: readonly (string | number | boolean)[];
     pattern?: string;
     required: boolean;
     default?: PropValue;
     target: PropTarget;
     description: string;
   } = { type, required, target, description };
+  if (values !== undefined) normalized.values = values;
   if (pattern !== undefined) normalized.pattern = pattern;
   if ("default" in object) {
     if (object.default === null) normalized.default = null;
@@ -303,7 +330,8 @@ export function serializePropTarget(
     }
     return { kind: "property", name: prop.target.property, value: null };
   }
-  if ((prop.required && value === "") || !accepts(prop.type, value) || !matchesPropPattern(value, prop.pattern)) {
+  if ((prop.required && value === "") || !accepts(prop.type, value) ||
+      !matchesPropPattern(value, prop.pattern) || !matchesPropValues(value, prop.values)) {
     fail("HC021", "A prop value does not satisfy its declared type.");
   }
   const parsed = parseTypedValue(value, prop.type);

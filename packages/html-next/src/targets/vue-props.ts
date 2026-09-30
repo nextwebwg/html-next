@@ -13,10 +13,10 @@ const CSS_NAMED_COLOR_SET = new Set<string>(${JSON.stringify(CSS_COLOR_KEYWORDS)
 const HTML_EMAIL_PATTERN = ${HTML_EMAIL_PATTERN.toString()};
 type TypeNode =
   | { readonly kind: "terminal"; readonly name: string }
-  | { readonly kind: "enum"; readonly members: readonly (string | number | boolean)[] }
   | { readonly kind: "separated-list"; readonly item: TypeNode; readonly separator: "space" | "comma" }
   | { readonly kind: "keyword"; readonly value: string }
   | { readonly kind: "union"; readonly members: readonly TypeNode[] }
+  | { readonly kind: "constrained"; readonly base: TypeNode; readonly values: readonly (string | number | boolean)[] }
   | { readonly kind: "list"; readonly item: TypeNode }
   | { readonly kind: "record"; readonly value: TypeNode }
   | { readonly kind: "object"; readonly fields: readonly { readonly name: string; readonly type: TypeNode; readonly optional: boolean }[]; readonly open: boolean };
@@ -126,12 +126,12 @@ function validFormat(value: string, name: string): boolean {
 function typeName(node: TypeNode): string {
   switch (node.kind) {
     case "terminal": return node.name;
-    case "enum": return "enum(" + node.members.map((member) => JSON.stringify(member)).join(", ") + ")";
     case "separated-list": return "keyword" + (node.separator === "space" ? "+" : "#");
     case "keyword": return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(node.value) &&
       !["string", "boolean", "number", "integer", "null", "absent", "trusted-html", "trusted-script", "function", "unknown", "list", "record", "object"].includes(node.value)
       ? node.value : JSON.stringify(node.value);
     case "union": return node.members.map(typeName).join(" | ");
+    case "constrained": return typeName(node.base) + " with values " + node.values.map(String).join(", ");
     case "list": return "list(" + typeName(node.item) + ")";
     case "record": return "record(" + typeName(node.value) + ")";
     case "object": return "object({ " + [...node.fields.map((field) => field.name + (field.optional ? "?" : "") + ": " + typeName(field.type)), ...(node.open ? ["..."] : [])].join(", ") + " })";
@@ -177,8 +177,6 @@ function parse(value: unknown, node: TypeNode, path: string): Parsed {
       }
       return issue(path, "Unknown declared type.");
     }
-    case "enum": return node.members.some((member) => member === value)
-      ? { ok: true, value } : issue(path, "Must match " + typeName(node) + ".");
     case "separated-list": return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string" && /^[A-Za-z0-9_-]+$/.test(item))
       ? { ok: true, value } : issue(path, "Must be a nonempty keyword list.");
     case "keyword": return value === node.value ? { ok: true, value } : issue(path, "Must be " + JSON.stringify(node.value) + ".");
@@ -188,6 +186,11 @@ function parse(value: unknown, node: TypeNode, path: string): Parsed {
         if (result.ok) return result;
       }
       return issue(path, "Must match " + typeName(node) + ".");
+    }
+    case "constrained": {
+      const parsed = parse(value, node.base, path);
+      return parsed.ok && node.values.some((choice) => choice === parsed.value) ? parsed
+        : issue(path, "Must be one of " + node.values.map(String).join(", ") + ".");
     }
     case "list": {
       const input = structured(value);
@@ -239,9 +242,19 @@ function parse(value: unknown, node: TypeNode, path: string): Parsed {
 }
 
 /** Match HTML Next's typed invocation boundary before Vue renders or a controller reads a prop. */
-export function checkedProp<T>(value: unknown, type: TypeNode, required: true, name: string, pattern?: string): T;
-export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string, pattern?: string): T | null;
-export function checkedProp<T>(value: unknown, type: TypeNode, required: boolean, name: string, pattern?: string): T | null {
+export function selectedPropNode(
+  selector: unknown,
+  options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[],
+): TypeNode {
+  if (selector === null || selector === undefined) return { kind: "terminal", name: "null" };
+  const option = options.find((candidate) => candidate.value === selector);
+  if (option === undefined) throw new HtmlDiagnosticError("HR002", "A selecting prop has no matching type option.");
+  return option.type;
+}
+
+export function checkedProp<T>(value: unknown, type: TypeNode, required: true, name: string, pattern?: string, values?: readonly (string | number | boolean)[]): T;
+export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string, pattern?: string, values?: readonly (string | number | boolean)[]): T | null;
+export function checkedProp<T>(value: unknown, type: TypeNode, required: boolean, name: string, pattern?: string, values?: readonly (string | number | boolean)[]): T | null {
   if (value === undefined) {
     if (required) throw new HtmlDiagnosticError("HC020", "Required prop \`" + name + "\` was not provided.");
     return null;
@@ -253,6 +266,9 @@ export function checkedProp<T>(value: unknown, type: TypeNode, required: boolean
   if (required && value === "") throw new HtmlDiagnosticError("HR002", "A required prop cannot be empty.");
   const result = parse(value, type, "$");
   if (!result.ok) throw new HtmlDiagnosticError("HR002", "A prop invocation value does not satisfy its declared type. " + result.issues.join("; "));
+  if (values !== undefined && !values.some((choice) => choice === result.value)) {
+    throw new HtmlDiagnosticError("HR002", "A prop invocation value is not among its permitted values.");
+  }
   if (pattern !== undefined && value !== "") {
     let expression: RegExp;
     try { expression = new RegExp("^(?:" + pattern + ")$", "v"); }

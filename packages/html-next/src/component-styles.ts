@@ -149,21 +149,21 @@ export function assembleComponentStyles(tag: string, own: string, slotted: strin
   ].filter((part) => part !== "").join("\n");
 }
 
-/** Scalars, keywords, enums, and unions of them can be tested; lists, records, and objects cannot. */
+/** Scalars, keywords, and unions of them can be tested; lists, records, and objects cannot. */
 function stylableType(type: unknown): boolean {
   if (typeof type === "string") return true;
   if (type === null || typeof type !== "object") return false;
-  if ("enum" in type) return true;
   const node = type as { kind?: string; members?: readonly unknown[] };
   if (node.kind === "union") return (node.members ?? []).every(stylableType);
+  if (node.kind === "constrained") return stylableType((type as { base: unknown }).base);
   return node.kind !== "list" && node.kind !== "record" && node.kind !== "object";
 }
 
 /** Rejects `:host-state()` tests on names that are not declared props or state of a stylable type. */
 export function validateStateNames(definition: ComponentDefinition, names: ReadonlySet<string>, source?: string): void {
-  const states = new Map<string, string | undefined>();
+  const states = new Map<string, unknown>();
   for (const declaration of definition.declarations ?? []) {
-    if (declaration.kind === "state") states.set(declaration.name, declaration.type);
+    if (declaration.kind === "state") states.set(declaration.name, declaration.shape ?? declaration.type);
   }
   for (const name of names) {
     const prop = definition.contract.props[name];
@@ -172,7 +172,7 @@ export function validateStateNames(definition: ComponentDefinition, names: Reado
     }
     const stateType = states.get(name);
     if ((prop !== undefined && !stylableType(prop.type)) ||
-      (stateType !== undefined && !stylableType(parseTypeExpression(stateType)))) {
+      (stateType !== undefined && !stylableType(typeof stateType === "string" ? parseTypeExpression(stateType) : stateType))) {
       fail("HY002", `\`:host-state()\` cannot test \`${name}\`, whose type is structured.`, source);
     }
   }
@@ -246,7 +246,7 @@ export function compileComponentStyles(
   const own = compile("own");
   const slotted = compile("slotted");
   validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
 }
 
 /** The state attribute's tokens for the current values: `name` while truthy, `name=value` for text. */

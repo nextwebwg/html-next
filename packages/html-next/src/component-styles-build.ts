@@ -59,7 +59,7 @@ export function compileComponentStylesForBuild(
   const own = compile("own");
   const slotted = compile("slotted");
   validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
 }
 
 /**
@@ -83,5 +83,5 @@ export function compileComponentStylesForVue(
     rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names);
   });
   validateStateNames(definition, names, source);
-  return { css: root.toString().trim(), stateNames: [...names] };
+  return { css: root.toString().trim(), stateNames: Array.from(names) };
 }

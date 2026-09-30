@@ -45,7 +45,7 @@ const source = `<template component="demo-counter" controller="./demo-controller
 
 const panelSource = `<template component="demo-panel" status="early" summary="Direct prop boundary fixture.">
   <props>
-    <prop name="align" type="enum('start', 'center', 'end')">Alignment.</prop>
+    <prop name="align" type="keyword" values="start, center, end">Alignment.</prop>
     <prop name="label" type="string">Label.</prop>
   </props>
   <div class="base" role="group"><span :data-align="align" :data-label="label"></span></div>
@@ -2706,7 +2706,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
       <props>
         <prop name="count" type="number" default="1">Count.</prop>
         <prop name="label" type="string" default="Ready">Label.</prop>
-        <prop name="tone" type="enum('quiet', 'loud')" default="quiet">Tone.</prop>
+        <prop name="tone" type="keyword" values="quiet, loud" default="quiet">Tone.</prop>
       </props>
       <section :data-count="count" :data-tone="tone"><output $value="count"></output><span :aria-label="label"></span><slot></slot></section>
     </template>`);
@@ -2997,7 +2997,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
 
 const actionSource = `<template component="x-action" status="early" summary="Button or link.">
   <defs>
-    <prop name="as" type="enum('button', 'a')" default="button">Native root.</prop>
+    <prop name="as" type="keyword" values="button, a" default="button">Native root.</prop>
     <prop name="href" type="string">Link.</prop>
     <prop name="disabled" type="boolean" default="false">Off.</prop>
     <computed name="linked" from="as = 'a'"></computed>

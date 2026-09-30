@@ -142,7 +142,7 @@ describe("generateComponent", () => {
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
     const vue = byPath.get("vue/DemoAction.vue")!;
     assert.match(vue, /:formAction\.prop="checkedProps\.destination as any"/);
-    assert.match(vue, /:disabled="checkedProps\.disabled"/);
+    assert.match(vue, /:disabled="checkedProps\.disabled \?\? undefined"/);
     // The root's reflected prop is the final writer for a bound data-* attribute.
     assert.match(vue, /:data-selected="reflectedProp\('selected', 'selected', checkedProps\.selected, undefined, true\)"/);
     assert.match(vue, /title="A & &quot;quote&quot;"/);

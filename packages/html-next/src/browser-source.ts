@@ -21,6 +21,9 @@ function browserPlatform(root: Document) {
   };
   return {
     isNativeElement,
+    warnInvalidDeclaration(message: string, source: string) {
+      root.defaultView?.console.warn(`${source}: HC013: ${message}`);
+    },
     resolveDomProperty(tagName: string, propertyName: string): string | undefined {
       if (!isNativeElement(tagName)) return undefined;
       const key = `${tagName}:${propertyName}`;
