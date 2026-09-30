@@ -16,7 +16,7 @@ function generated(source: string): Map<string, string> {
 }
 
 const declarations = `<defs>
-    <prop name="size" type="enum('sm', 'md')" default="md">Size.</prop>
+    <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
     <state name="open" :value="false"></state>
   </defs>
   <section class="panel"><slot></slot></section>`;

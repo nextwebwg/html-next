@@ -5,7 +5,7 @@ import { describe, it } from "vitest";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
-import { formatType, normalizeType, parseTypedValue } from "../src/type-system.js";
+import { formatType, normalizeType, parseTypedValue, typeScriptType } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
@@ -29,6 +29,50 @@ function componentSource(
 }
 
 describe("parseComponent", () => {
+  it("reads an inline type selected by a prop's permitted values", () => {
+    const definition = parseComponent(`<template component="x-inline-type"><defs>
+      <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
+      <prop name="value">Control value.<type from="type">
+        <option value="text" type="string"></option>
+        <option value="number" type="number"></option>
+      </type></prop>
+    </defs><input :type="type" :value="value"></template>`);
+    assert.deepEqual(definition.contract.props.value?.select, {
+      from: "type",
+      options: [
+        { value: "text", type: { kind: "terminal", name: "string" } },
+        { value: "number", type: { kind: "terminal", name: "number" } },
+      ],
+    });
+    assert.equal(normalizeType(definition.contract.props.value!.type).kind, "selected");
+  });
+
+  it("resolves a named type under defs to the same selected prop type", () => {
+    const definition = parseComponent(`<template component="x-named-type"><defs>
+      <type name="input-value" from="type">
+        <option value="text" type="string"></option>
+        <option value="number" type="number"></option>
+      </type>
+      <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
+      <prop name="value" type="input-value">Control value.</prop>
+    </defs><input :type="type" :value="value"></template>`);
+    assert.deepEqual(definition.contract.props.value?.select, {
+      from: "type",
+      options: [
+        { value: "text", type: { kind: "terminal", name: "string" } },
+        { value: "number", type: { kind: "terminal", name: "number" } },
+      ],
+    });
+    assert.equal(normalizeType(definition.contract.props.value!.type).kind, "selected");
+  });
+
+  it("rejects a values constraint containing an item outside the declared type", () => {
+    expectDiagnostic("HC013", componentSource(
+      `<output :data-size="size"></output>`,
+      `<prop name="size" type="keyword" values="sm, two words">Size.</prop>`,
+    ));
+  });
+
   it("reads nested object and array prop shapes", () => {
     const definition = parseComponent(`<template component="x-table" status="early" summary="Rows.">
       <defs>
@@ -43,6 +87,34 @@ describe("parseComponent", () => {
     </template>`);
     const type = normalizeType(definition.contract.props.rows!.type);
     assert.equal(formatType(type), "list(object({ id: integer, name: string }))");
+  });
+
+  it("constrains nested event and state fields with their own declared types", () => {
+    const definition = parseComponent(`<template component="x-events"><defs>
+      <state name="history" type="array" :value="[]" nullable>
+        <prop type="object">
+          <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
+        </prop>
+      </state>
+      <event name="change" type="object" open>
+        <prop name="value" type="number" required></prop>
+        <prop name="previous" type="string" required nullable></prop>
+        <prop name="output" type="unknown"></prop>
+        <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
+      </event>
+    </defs><output></output></template>`);
+    const state = definition.declarations!.find((item) => item.kind === "state");
+    const event = definition.declarations!.find((item) => item.kind === "event");
+    assert.ok(state?.kind === "state" && state.shape !== undefined);
+    assert.ok(event?.kind === "event" && event.shape !== undefined);
+    assert.equal(typeScriptType(event.shape), '{ readonly value: number; readonly previous: string | null; readonly output?: unknown; readonly trigger: "keyboard" | "pointer"; readonly [name: string]: unknown }');
+    assert.equal(parseTypedValue({ value: 3, previous: null, trigger: "keyboard" }, event.shape).ok, true);
+    assert.equal(parseTypedValue({ value: 3, previous: null, output: { arbitrary: true }, extra: 5, trigger: "keyboard" }, event.shape).ok, true);
+    assert.equal(parseTypedValue({ value: 3, previous: null, trigger: "touch" }, event.shape).ok, false);
+    assert.equal(parseTypedValue({ value: 3, trigger: "keyboard" }, event.shape).ok, false);
+    assert.equal(parseTypedValue([{ trigger: "pointer" }], state.shape).ok, true);
+    assert.equal(parseTypedValue([{ trigger: "touch" }], state.shape).ok, false);
+    assert.equal(parseTypedValue(null, state.shape).ok, true);
   });
 
   it("keeps a prop's HTML pattern constraint", () => {
@@ -249,14 +321,14 @@ describe("parseComponent", () => {
     });
   });
 
-  it("rejects property bindings to non-native properties and removed prop types", () => {
+  it("rejects property bindings to non-native properties and property-only prop types", () => {
     // A property binding may only reach a native DOM property; component inputs are attributes.
     expectDiagnostic(
       "HP001",
       componentSource(`<div .anchorRect="anchor"></div>`, `<prop name="anchor" type="string">Anchor id.</prop>`),
     );
     expectDiagnostic(
-      "HC013",
+      "HC017",
       componentSource(`<div :data-anchor="anchor"></div>`, `<prop name="anchor" type="unknown">Anchor geometry.</prop>`),
     );
   });
@@ -433,7 +505,7 @@ describe("parseComponent", () => {
 
   it("records polymorphic native roots and delegated component roots", () => {
     // The spec's polymorphic root: an ordinary `as` prop chooses between explicit native roots.
-    const button = (root: string, defs = `<prop name="as" type="enum('button', 'a')" default="button">Root.</prop>`) =>
+    const button = (root: string, defs = `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop>`) =>
       `<template component="x-button" status="early" summary="Polymorphic."><defs>${defs}</defs>${root}</template>`;
     const polymorphic = parseComponent(button(
       `<template $match><a $when="as = 'a'" $ref="control"><slot name="icon"></slot><slot></slot></a>` +
@@ -452,7 +524,7 @@ describe("parseComponent", () => {
     // Arms read props, state, and computed values, like any expression.
     assert.deepEqual(parseComponent(button(
       `<template $match><details $when="open"></details><a $when="linked"></a><button $else></button></template>`,
-      `<prop name="as" type="enum('button', 'a')" default="button">Root.</prop><state name="open" :value="false"></state>` +
+      `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop><state name="open" :value="false"></state>` +
         `<computed name="linked" from="as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
     // A slot required by any arm is required; arms' dynamic slots merge by position.
@@ -581,19 +653,18 @@ describe("parseComponent", () => {
   });
 
 
-  it("reads an enum member that spells a type name", () => {
+  it("reads permitted values that spell type names", () => {
     const definition = parseComponent(
       `<template component="x-state" status="early" summary="Reserved enum.">` +
-      `<defs><prop name="status" type="enum('unknown', 'known')" default="unknown">Status.</prop></defs>` +
+      `<defs><prop name="status" type="keyword" values="unknown, known" default="unknown">Status.</prop></defs>` +
       `<output :data-status="status"></output></template>`,
     );
     const prop = definition.contract.props.status!;
-    assert.deepEqual(prop.type, { kind: "enum", members: ["unknown", "known"] });
+    assert.deepEqual(prop.type, { kind: "terminal", name: "keyword" });
+    assert.deepEqual(prop.values, ["unknown", "known"]);
     const type = normalizeType(prop.type);
-    assert.deepEqual(
-      ["unknown", "known", "other", 42].map((value) => parseTypedValue(value, type).ok),
-      [true, true, false, false],
-    );
+    assert.deepEqual(["unknown", "known", "other", 42].map((value) =>
+      parseTypedValue(value, type).ok && prop.values?.includes(value as string)), [true, true, false, false]);
 
     // The old bare keyword syntax is no longer a declaration.
     assert.throws(

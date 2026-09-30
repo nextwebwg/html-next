@@ -61,7 +61,7 @@ export function nativeDispatch(
 ): NativeDispatch | undefined {
   const declaration = events.find(({ name }) => name === step.event);
   const detail = step.value === undefined ? "undefined" : nativeExpression(step.value.ast, values);
-  if (declaration === undefined || detail === undefined) return undefined;
+  if (declaration === undefined || detail === undefined || declaration.shape !== undefined) return undefined;
   return {
     event: step.event,
     type: declaration.type,

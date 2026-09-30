@@ -209,7 +209,7 @@ export function useComponentHost(
   const report = (error: unknown): void => {
     const handler = component?.appContext.config.errorHandler;
     if (handler === undefined) queueMicrotask(() => { throw error; });
-    else handler(error, component.proxy, "HTML Next controller");
+    else handler(error, component?.proxy ?? null, "HTML Next controller");
   };
   const controllerDiagnostic = (code: "HJ001" | "HJ002", reason?: unknown): Error => {
     const edge = options.controllerSource;
@@ -244,6 +244,9 @@ export function useComponentHost(
       ? computedValues[name]!.value
       : props?.value[name];
   const host = {
+    get element(): Element {
+      return root.value as Element;
+    },
     get root(): Element {
       return root.value as Element;
     },
@@ -350,7 +353,7 @@ export function useComponentHost(
     disconnect();
   });
   /** \`ready\` settles once the controller has started; a method exposed by the component awaits it. */
-  return { host, ready: (): Promise<void> | undefined => started };
+  return { host, ready: (): Promise<ControllerModule> | undefined => started };
 }
 
 export interface DispatchOptions {
@@ -400,7 +403,7 @@ export function runFilteredEvent(event: Event, modifiers: readonly string[], han
   handler();
 }
 
-/** Dispatches the component's native CustomEvent; only v-model updates use Vue emits. */
+/** Reports declared events to Vue with their detail, and dispatches native CustomEvents. */
 export function createDispatch(
   root: Readable<HTMLElement | null>,
   emit?: (name: string, detail: unknown) => void,
@@ -426,6 +429,7 @@ export function createDispatch(
         emit?.(\`update:\${prop}\`, value);
       }
     }
+    if (check !== undefined) emit?.(name, detail);
     return root.value?.dispatchEvent(
       new CustomEvent(name, { bubbles: true, composed: true, ...declared[name], detail }),
     ) ?? true;

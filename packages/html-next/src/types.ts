@@ -8,11 +8,7 @@ export type ContractStatus =
 
 export type ScalarType = "string" | "boolean" | "number";
 
-export interface EnumType {
-  readonly enum: readonly string[];
-}
-
-export type PropType = ScalarType | EnumType | TypeNode;
+export type PropType = ScalarType | TypeNode;
 
 export interface AttributeTarget {
   readonly attribute: string;
@@ -40,6 +36,13 @@ export interface PropValueRecord {
 
 export interface PropContract {
   readonly type: PropType;
+  /** Finite permitted values, all parsed through the prop's single declared type. */
+  readonly values?: readonly (string | number | boolean)[];
+  /** A declared prop whose constrained value selects this prop's non-null type. */
+  readonly select?: {
+    readonly from: string;
+    readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[];
+  };
   readonly pattern?: string;
   readonly required: boolean;
   readonly default?: PropValue;

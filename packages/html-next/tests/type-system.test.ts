@@ -8,7 +8,6 @@ import {
   parseTypeExpression,
   serializeTypedValue,
   typeAtKey,
-  typeScriptType,
 } from "../src/type-system.js";
 
 describe("HTML Next type system", () => {
@@ -57,17 +56,6 @@ describe("HTML Next type system", () => {
     }
   });
 
-  it("preserves each typed member of an enum", () => {
-    const type = parseTypeExpression("enum(true, false, 'page', 'step', 3)");
-    assert.equal(formatType(type), "enum(true, false, 'page', 'step', 3)");
-    assert.equal(typeScriptType(type), 'true | false | "page" | "step" | 3');
-    for (const [written, expected] of [["false", false], ["3", 3], ["step", "step"]] as const) {
-      assert.deepEqual(parseTypedValue(written, type), { ok: true, value: expected });
-    }
-    assert.equal(parseTypedValue("other", type).ok, false);
-    assert.throws(() => parseTypeExpression("enum(false, 'false')"), /same HTML spelling/);
-  });
-
   it("parses separated keyword lists and serializes their declared separator", () => {
     const space = parseTypeExpression("keyword+");
     const comma = parseTypeExpression("keyword#");
@@ -105,8 +93,12 @@ describe("HTML Next type system", () => {
   });
 
   it("rejects removed public type syntax", () => {
-    for (const old of ["small | large", "number?", "'small'", "record(number)", "<length>", "unknown", "null", "list()"] ) {
+    for (const old of ["small | large", "number?", "'small'", "record(number)", "<length>", "null", "list()", "enum('sm', 'md')"] ) {
       assert.throws(() => parseTypeExpression(old), TypeSyntaxError, old);
     }
+  });
+
+  it("recognizes unknown for structured fields while prop validation keeps it property-only", () => {
+    assert.equal(formatType(parseTypeExpression("unknown")), "unknown");
   });
 });
