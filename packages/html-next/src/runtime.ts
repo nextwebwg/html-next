@@ -2961,6 +2961,8 @@ function applyComponentProps(
 export interface ComponentHost {
   /** The component's root element. Its connection owns this controller's lifetime. */
   readonly root: Element;
+  /** Alias for the rendered root used by generated component controllers. */
+  readonly element: Element;
   readonly state: Record<string, unknown>;
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
   /**
@@ -3077,6 +3079,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
   }) as Readonly<Record<string, Element | readonly Element[]>>;
   const host: ComponentHost = {
     get root() { return instance.rootElement.get()!; },
+    get element() { return instance.rootElement.get()!; },
     state,
     refs,
     slots,

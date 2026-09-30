@@ -816,12 +816,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
             const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
-              getComponentHost(element: Element): { root: Element; state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { root: Element; element: Element; state: Record<string, unknown> } | undefined;
             };
             const host = runtime.getComponentHost(document.querySelector("section.frame")!);
             return host === undefined
               ? "no host"
-              : `${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+              : `${host.element === host.root}:${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
           })(),
         }));
         assert.deepEqual(result, {
@@ -829,7 +829,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           heading: "count 2",
           feed: "from the endpoint",
           lineage: "x-outer x-frame",
-          hostState: "section:count=2:label=reflected",
+          hostState: "true:section:count=2:label=reflected",
         });
       } finally {
         await browser.close();
