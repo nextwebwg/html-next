@@ -403,7 +403,7 @@ export function runFilteredEvent(event: Event, modifiers: readonly string[], han
   handler();
 }
 
-/** Reports declared events to Vue with their detail, and dispatches native CustomEvents. */
+/** Reports declared CustomEvents to Vue and dispatches them through the DOM. */
 export function createDispatch(
   root: Readable<HTMLElement | null>,
   emit?: (name: string, detail: unknown) => void,
@@ -429,10 +429,9 @@ export function createDispatch(
         emit?.(\`update:\${prop}\`, value);
       }
     }
-    if (check !== undefined) emit?.(name, detail);
-    return root.value?.dispatchEvent(
-      new CustomEvent(name, { bubbles: true, composed: true, ...declared[name], detail }),
-    ) ?? true;
+    const event = new CustomEvent(name, { bubbles: true, composed: true, ...declared[name], detail });
+    if (check !== undefined) emit?.(name, event);
+    return root.value?.dispatchEvent(event) ?? true;
   };
 }
 `;

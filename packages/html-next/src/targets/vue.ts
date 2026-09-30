@@ -518,7 +518,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const nativeAttribute = nativeControl && ["value", "checked"].includes(attribute.name);
       const attributeValueFor = (scope: Scope): string =>
         nativeAttribute && attribute.name === "checked" && category(typeOf(value, scope).type) === "boolean"
-          ? lowering.condition(value, scope)
+          ? `${lowering.condition(value, scope)} ? '' : undefined`
           : lowering.attribute(value, scope, attribute.name);
       const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) =>
         component ? lowering.value(value, scope) : attributeValueFor(scope));
@@ -884,7 +884,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const emits = [
     ...modeled.map((prop) => `  ${quote(`update:${prop.name}`)}: [value: ${typeSource(prop.contract.type)}];`),
     ...(modelProp === undefined ? [] : [`  "update:modelValue": [value: ${modelProp.contract.select === undefined ? "string" : propType(modelProp)}];`]),
-    ...events.map((event) => `  ${quote(event.name)}: [detail: ${typeScriptType(declarationTypeNode(event.type, event.shape)!)}];`),
+    ...events.map((event) => `  ${quote(event.name)}: [event: CustomEvent<${typeScriptType(declarationTypeNode(event.type, event.shape)!)}>];`),
   ];
   const handlerSources = handlers.map((handler) => handlerSource(handler, handlerNames.get(handler.name)!, names, events, context));
 
