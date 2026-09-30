@@ -56,13 +56,20 @@ describe("HTML Next type system", () => {
     }
   });
 
-  it("parses separated keyword lists and serializes their declared separator", () => {
+  it("gives bracketed and separated keyword lists the same JavaScript shape", () => {
+    const bracketed = parseTypeExpression("list(keyword)");
     const space = parseTypeExpression("keyword+");
     const comma = parseTypeExpression("keyword#");
+    assert.deepEqual(parseTypedValue("['red', 'blue']", bracketed), { ok: true, value: ["red", "blue"] });
     assert.deepEqual(parseTypedValue("red blue", space), { ok: true, value: ["red", "blue"] });
     assert.deepEqual(parseTypedValue("red, blue", comma), { ok: true, value: ["red", "blue"] });
+    assert.equal(serializeTypedValue(["red", "blue"], bracketed), '["red","blue"]');
     assert.equal(serializeTypedValue(["red", "blue"], space), "red blue");
     assert.equal(serializeTypedValue(["red", "blue"], comma), "red, blue");
+    assert.deepEqual(parseTypedValue("[]", bracketed), { ok: true, value: [] });
+    assert.equal(parseTypedValue("", space).ok, false);
+    assert.equal(parseTypedValue("", comma).ok, false);
+    assert.equal(parseTypedValue("['red', 2]", bracketed).ok, false);
     assert.equal(parseTypedValue("red,,blue", comma).ok, false);
   });
 

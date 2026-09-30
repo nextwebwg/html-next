@@ -5,7 +5,7 @@ import { describe, it } from "vitest";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
-import { formatType, normalizeType, parseTypedValue, typeScriptType } from "../src/type-system.js";
+import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeScriptType } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 
@@ -99,10 +99,10 @@ describe("parseComponent", () => {
     ));
   });
 
-  it("reads nested object and array prop shapes", () => {
+  it("reads a nested list as the same homogeneous type as list(T)", () => {
     const definition = parseComponent(`<template component="x-table" status="early" summary="Rows.">
       <defs>
-        <prop name="rows" type="array">Table rows.
+        <prop name="rows" type="list">Table rows.
           <prop type="object">
             <prop name="id" type="integer" required></prop>
             <prop name="name" type="string" required></prop>
@@ -113,11 +113,19 @@ describe("parseComponent", () => {
     </template>`);
     const type = normalizeType(definition.contract.props.rows!.type);
     assert.equal(formatType(type), "list(object({ id: integer, name: string }))");
+    assert.deepEqual(type, normalizeType(parseTypeExpression("list(object({ id: integer, name: string }))")));
+  });
+
+  it("rejects array as a declaration type and lists without one item type", () => {
+    expectDiagnostic("HC013", componentSource(`<output from:data-rows="rows"></output>`,
+      `<prop name="rows" type="array"><prop type="string"></prop></prop>`));
+    expectDiagnostic("HC013", componentSource(`<output from:data-rows="rows"></output>`,
+      `<prop name="rows" type="list"></prop>`));
   });
 
   it("constrains nested event and state fields with their own declared types", () => {
     const definition = parseComponent(`<template component="x-events"><defs>
-      <state name="history" type="array" :value="[]" nullable>
+      <state name="history" type="list" :value="[]" nullable>
         <prop type="object">
           <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
         </prop>
