@@ -45,15 +45,11 @@ export function present(type: TypeNode): Static {
 export function category(type: TypeNode): Category {
   switch (type.kind) {
     case "terminal":
-      if (type.name === "string") return "string";
+      if (["string", "keyword", "url", "email", "date", "month", "week", "time", "datetime-local", "datetime", "color", "color-hex", "length", "percentage", "duration"].includes(type.name)) return "string";
       if (type.name === "boolean") return "boolean";
       if (type.name === "number" || type.name === "integer") return "number";
       return "unknown";
     case "keyword": return "string";
-    case "enum": {
-      const kinds = new Set(type.members.map((member) => typeof member));
-      return kinds.size === 1 ? [...kinds][0] as Category : "scalar";
-    }
     case "separated-list": return "list";
     case "list": return "list";
     case "record":
@@ -65,6 +61,11 @@ export function category(type: TypeNode): Category {
         ? "scalar"
         : "unknown";
     }
+    case "selected": {
+      const members = new Set(type.options.map((option) => category(option.type)));
+      return members.size === 1 ? [...members][0]! : "scalar";
+    }
+    case "constrained": return category(type.base);
   }
 }
 
@@ -152,16 +153,17 @@ export function typeScript(value: Static): string {
   const source = (type: TypeNode): string => {
     switch (type.kind) {
       case "terminal":
-        return type.name === "string" ? "string"
+        return ["string", "keyword", "url", "email", "date", "month", "week", "time", "datetime-local", "datetime", "color", "color-hex", "length", "percentage", "duration"].includes(type.name) ? "string"
           : type.name === "boolean" ? "boolean"
           : type.name === "number" || type.name === "integer" ? "number"
           : type.name === "null" ? "null"
           : type.name === "absent" ? "undefined"
           : "any";
       case "keyword": return JSON.stringify(type.value);
-      case "enum": return type.members.map((member) => typeof member === "string" ? JSON.stringify(member) : String(member)).join(" | ");
       case "separated-list": return "string[]";
       case "union": return type.members.map(source).join(" | ");
+      case "selected": return [...new Set(type.options.map((option) => source(option.type)))].join(" | ");
+      case "constrained": return type.values.map((value) => JSON.stringify(value)).join(" | ");
       case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;
       case "object": {
@@ -272,8 +274,16 @@ export class Lowering {
         const access = typeOf(node.object, scope).nullable ? "?." : ".";
         return /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${object}${access}${node.key}` : `${object}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
       }
-      case "index":
-        return `${this.#operand(node.object, scope)}${typeOf(node.object, scope).nullable ? "?." : ""}[${this.value(node.index, scope)}]`;
+      case "index": {
+        const object = this.#operand(node.object, scope);
+        const index = this.value(node.index, scope);
+        // A computed key may not be one of an object literal's declared names. JavaScript then
+        // reads an absent property, while TypeScript rejects the indexing expression.
+        if (typeOf(node.object, scope).type.kind === "object") {
+          return `(${object} as Record<string, any>${typeOf(node.object, scope).nullable ? " | null | undefined" : ""})${typeOf(node.object, scope).nullable ? "?." : ""}[${index}]`;
+        }
+        return `${object}${typeOf(node.object, scope).nullable ? "?." : ""}[${index}]`;
+      }
       case "unary": {
         if (node.op === "not") return this.#not(node.operand, scope);
         if (node.operand.kind === "literal" && typeof node.operand.value === "number") return `-${node.operand.value}`;

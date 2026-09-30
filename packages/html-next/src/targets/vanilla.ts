@@ -18,7 +18,7 @@ import { parseTypeExpression, parseTypedValue } from "../type-system.js";
 import { isUrlAttribute } from "../sanitize.js";
 import { getDomInterface, resolveDomProperty } from "../platform.js";
 import { kebabCase } from "../names.js";
-import { propTypeSource, serializedDefinition } from "./shared.js";
+import { dependentPropTypeSource, selectorGenerics, serializedDefinition } from "./shared.js";
 import { targetComponent } from "./backend.js";
 
 function js(value: string): string {
@@ -371,6 +371,7 @@ function directDispatch(
 ): string | undefined {
   const declaration = events.find((event) => event.name === step.event);
   if (declaration === undefined) return undefined;
+  if (declaration.shape !== undefined) return undefined;
   const expression = step.value === undefined ? undefined : directPrimitiveExpression(step.value.ast, values);
   const detail = step.value === undefined ? "undefined" : expression?.source;
   if (detail === undefined) return undefined;
@@ -931,11 +932,9 @@ function usesSelectiveDirectUpdates(
 
 function directPropType(prop: PropContract): "string" | "boolean" | "number" | readonly string[] | undefined {
   if (prop.pattern !== undefined) return undefined;
+  if (prop.values !== undefined) return prop.values.every((value) => typeof value === "string")
+    ? prop.values as readonly string[] : undefined;
   if (prop.type === "string" || prop.type === "boolean" || prop.type === "number") return prop.type;
-  if ("enum" in prop.type) return prop.type.enum;
-  if (prop.type.kind === "enum" && prop.type.members.every((member) => typeof member === "string")) {
-    return prop.type.members as readonly string[];
-  }
   return undefined;
 }
 
@@ -1228,6 +1227,10 @@ export function generateVanilla(
   const { contract, template } = definition;
   const target = targetComponent(definition);
   const props = target.props.map(({ name, contract }) => [name, contract] as const);
+  const generics = selectorGenerics(contract.props);
+  const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
+  const genericDeclaration = generics.length === 0 ? "" : `<${generics.map(({ declaration }) => declaration).join(", ")}>`;
+  const genericReference = generics.length === 0 ? "" : `<${generics.map(({ parameter }) => parameter).join(", ")}>`;
   const hasRequired = props.some(([, prop]) => prop.required);
   // A root `$match` renders the arm the props choose; the runtime makes that choice, as it does in HTML.
   const arms = rootArms(template);
@@ -1658,15 +1661,15 @@ export function generateVanilla(
     `  addEventListener<K extends keyof ${contract.name}EventMap>(type: K, listener: (this: ${elementType}, event: ${contract.name}EventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;`,
     `  removeEventListener<K extends keyof ${contract.name}EventMap>(type: K, listener: (this: ${elementType}, event: ${contract.name}EventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;`,
     "}",
-    `export interface ${contract.name}Props {`,
+    `export interface ${contract.name}Props${genericDeclaration} {`,
     ...props.map(
-      ([name, prop]) => `  ${tsKey(name)}${optional(prop)}: ${propTypeSource(prop)};`,
+      ([name, prop]) => `  ${tsKey(name)}${optional(prop)}: ${parameters.get(name) ?? dependentPropTypeSource(prop, parameters)};`,
     ),
     "  attributes?: Readonly<Record<string, string | number | boolean | null | undefined>>;",
     "  children?: readonly (string | Node)[];",
     "  slots?: Readonly<Record<string, readonly (string | Node)[]>>;",
     "}",
-    `export declare function create${contract.name}(props${hasRequired ? "" : "?"}: ${contract.name}Props): ${elementType};`,
+    `export declare function create${contract.name}${genericDeclaration}(props${hasRequired ? "" : "?"}: ${contract.name}Props${genericReference}): ${elementType};`,
     "",
   ].join("\n");
 

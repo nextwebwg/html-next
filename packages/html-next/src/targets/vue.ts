@@ -26,9 +26,9 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../te
 import type { WritablePathSegment } from "../expression.js";
 import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
-import { normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, isVoidElement, propKey, propTypeSource, quote, typeSource } from "./shared.js";
+import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -156,8 +156,9 @@ function referenceCheck(type: TypeNode, value: string): string {
     case "record":
     case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
     case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
+    case "selected": return `(${type.options.map((option) => referenceCheck(option.type, value)).join(" || ")})`;
+    case "constrained": return `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
     case "keyword": return `${value} === ${quote(type.value)}`;
-    case "enum": return `(${type.members.map((member) => `${value} === ${JSON.stringify(member)}`).join(" || ")})`;
     case "separated-list": return `Array.isArray(${value})`;
     case "terminal":
       if (type.name === "string") return `typeof ${value} === "string"`;
@@ -181,7 +182,7 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
     // Prop boundary handling is separate from these mutable declaration guards.
     if (definition.contract.props[root!] !== undefined) continue;
     if (declaration?.kind === "state" || declaration?.kind === "computed") {
-      type = declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
+      type = declarationTypeNode(declaration.type, declaration.shape);
     } else if (declaration?.kind === "data") {
       const first = steps.shift();
       if (first === "value") type = declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
@@ -488,7 +489,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     } else if (attribute.target === "class") {
       classes.push(`${quote(attribute.name)}: ${lowering.condition(ast(attribute.expressionPlan, attribute.expression), names.template)}`);
     } else if (attribute.target === "style") {
-      styles.push(`${quote(attribute.name)}: ${lowering.text(ast(attribute.expressionPlan, attribute.expression), names.template)}`);
+      const value = ast(attribute.expressionPlan, attribute.expression);
+      const code = lowering.text(value, names.template);
+      styles.push(`${quote(attribute.name)}: ${typeOf(value, names.template).nullable ? `(${code} ?? undefined)` : code}`);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       if (nativeControl && ["value", "checked"].includes(attribute.name)) {
@@ -515,7 +518,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const nativeAttribute = nativeControl && ["value", "checked"].includes(attribute.name);
       const attributeValueFor = (scope: Scope): string =>
         nativeAttribute && attribute.name === "checked" && category(typeOf(value, scope).type) === "boolean"
-          ? `${lowering.condition(value, scope)} ? '' : undefined`
+          ? lowering.condition(value, scope)
           : lowering.attribute(value, scope, attribute.name);
       const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) =>
         component ? lowering.value(value, scope) : attributeValueFor(scope));
@@ -619,12 +622,14 @@ function typeCheck(type: TypeNode, value: string): string {
       }
     case "keyword":
       return `${value} === ${JSON.stringify(type.value)}`;
-    case "enum":
-      return `(${type.members.map((member) => `${value} === ${JSON.stringify(member)}`).join(" || ")})`;
     case "separated-list":
       return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => typeof item === "string"))`;
     case "union":
       return `(${type.members.map((member) => typeCheck(member, value)).join(" || ")})`;
+    case "selected":
+      return `(${type.options.map((option) => typeCheck(option.type, value)).join(" || ")})`;
+    case "constrained":
+      return `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
     case "list":
       return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => ${typeCheck(type.item, "item")}))`;
     case "record":
@@ -675,8 +680,6 @@ function stateTokens(name: string, scope: Scope, lowering: Lowering): string[] {
   const code = lowering.value(node, scope);
   const kind = category(type.type);
   const keywords = type.type.kind === "keyword" ? [type.type.value]
-    : type.type.kind === "enum" && type.type.members.every((member) => typeof member === "string")
-      ? type.type.members as readonly string[]
     : type.type.kind === "union" && type.type.members.every((member) => member.kind === "keyword")
       ? type.type.members.map((member) => (member as { value: string }).value)
       : undefined;
@@ -707,6 +710,14 @@ export interface VueConversionOptions {
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
   const { contract, template } = definition;
   const target = targetComponent(definition);
+  const generics = selectorGenerics(contract.props);
+  const parameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
+  const propType = (prop: (typeof target.props)[number]): string =>
+    parameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, parameters);
+  const selectedNode = (prop: (typeof target.props)[number]): string =>
+    prop.contract.select === undefined
+      ? JSON.stringify(normalizeType(prop.contract.type))
+      : `selectedPropNode(props[${quote(prop.contract.select.from)}], ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
@@ -735,8 +746,6 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     templateScope.types.set(name, type);
     script.types.set(name, type);
   };
-  // A prop with a default or marked required is present; others may be absent.
-  const optional = (prop: (typeof target.props)[number]): boolean => !prop.contract.required && !("default" in prop.contract);
   for (const prop of target.props) {
     const identifier = /^[A-Za-z_$][\w$]*$/.test(prop.name);
     const read = prop === modelProp
@@ -745,14 +754,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const templateRead = prop === modelProp ? "(checkedProps.modelValue ?? checkedProps.value)"
       : identifier ? `checkedProps.${prop.name}` : `checkedProps[${quote(prop.name)}]`;
     const type = present(normalizeType(prop.contract.type));
-    define(prop.name, templateRead, read, { type: type.type, nullable: type.nullable || optional(prop) || prop === modelProp });
+    define(prop.name, templateRead, read, { type: type.type, nullable: type.nullable || !prop.contract.required || prop === modelProp, null: !prop.contract.required || prop === modelProp });
   }
   const stateNames = new Map<ReactiveDeclaration, string>();
   for (const state of states) {
     const name = identifiers.take(state.name, "State");
     stateNames.set(state, name);
     const inferred = state.expression === undefined ? UNKNOWN : typeOf(state.expression.ast, script);
-    const declared = state.type === undefined ? undefined : present(parseTypeExpression(state.type));
+    const declaredNode = declarationTypeNode(state.type, state.shape);
+    const declared = declaredNode === undefined ? undefined : present(declaredNode);
     // A declared type wins; an absent initial value keeps the state nullable.
     const initial = declared === undefined ? inferred : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN, null: (declared.null ?? false) || inferred === UNKNOWN };
     define(state.name, name, `${name}.value`, initial);
@@ -850,26 +860,31 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   // would otherwise change HTML Next's absent/bare-attribute and diagnostic semantics. Vue treats an
   // explicit `undefined` as an absent prop, so an optional prop's type admits it too; otherwise a
   // consumer under `exactOptionalPropertyTypes` could not pass `undefined` for "unset".
-  const optionalType = (source: string, required: boolean): string => required ? source : `${source} | undefined`;
+  const optionalType = (source: string, required: boolean): string => required ? source
+    : `${source.includes(" extends ") ? `(${source})` : source} | undefined`;
   const propDefinitions = target.props.map((prop) =>
-    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(propTypeSource(prop.contract), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
-  if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propTypeSource(modelProp.contract), false)}> },`);
+    `  ${propKey(prop.name)}: { type: null as unknown as PropType<${optionalType(propType(prop), prop.contract.required)}>${"default" in prop.contract ? `, default: ${defaultSource(prop.contract.default)}` : prop.contract.required ? "" : ", default: null"} },`);
+  if (modelProp !== undefined) propDefinitions.push(`  modelValue: { type: null as unknown as PropType<${optionalType(propType(modelProp), false)}> },`);
   const checkedPropSources = target.props.map((prop) => {
-    const type = typeSource(prop.contract.type);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${JSON.stringify(normalizeType(prop.contract.type))}, ${prop.contract.required}, ${quote(prop.name)}${prop.contract.pattern === undefined ? "" : `, ${quote(prop.contract.pattern)}`})`;
+    const type = prop.contract.select === undefined
+      ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
+        : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
+      : propType(prop);
+    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, ${prop.contract.pattern === undefined ? "undefined" : quote(prop.contract.pattern)}, ${prop.contract.values === undefined ? "undefined" : JSON.stringify(prop.contract.values)})`;
     return `  ${propKey(prop.name)}: ${!prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked},`;
   });
   if (modelProp !== undefined) checkedPropSources.push(
-    `  modelValue: checkedProp<${propTypeSource(modelProp.contract)}>(props.modelValue, ${JSON.stringify(normalizeType(modelProp.contract.type))}, false, "modelValue"${modelProp.contract.pattern === undefined ? "" : `, ${quote(modelProp.contract.pattern)}`}),`);
+    `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue", ${modelProp.contract.pattern === undefined ? "undefined" : quote(modelProp.contract.pattern)}, ${modelProp.contract.values === undefined ? "undefined" : JSON.stringify(modelProp.contract.values)}),`);
   // An event whose detail reports a prop's new value (query-change's { query }, open and close's
   // { open }) also updates that prop, so Vue consumers can write v-model:query and v-model:open.
   const modeled = target.props.filter((prop) => prop !== modelProp && events.some((event) => {
-    const detail = parseTypeExpression(event.type);
+    const detail = declarationTypeNode(event.type, event.shape)!;
     return detail.kind === "object" && detail.fields.some((field) => field.name === prop.name);
   }));
   const emits = [
     ...modeled.map((prop) => `  ${quote(`update:${prop.name}`)}: [value: ${typeSource(prop.contract.type)}];`),
-    ...(modelProp === undefined ? [] : ['  "update:modelValue": [value: string];']),
+    ...(modelProp === undefined ? [] : [`  "update:modelValue": [value: ${modelProp.contract.select === undefined ? "string" : propType(modelProp)}];`]),
+    ...events.map((event) => `  ${quote(event.name)}: [detail: ${typeScriptType(declarationTypeNode(event.type, event.shape)!)}];`),
   ];
   const handlerSources = handlers.map((handler) => handlerSource(handler, handlerNames.get(handler.name)!, names, events, context));
 
@@ -878,7 +893,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const checkNames = new Map<EventDeclaration, string>();
   const checksBySource = new Map<string, string>();
   for (const event of events) {
-    const source = typeCheck(parseTypeExpression(event.type), "detail").replace(/^\((.*)\)$/s, "$1");
+    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail").replace(/^\((.*)\)$/s, "$1");
     let name = checksBySource.get(source);
     if (name === undefined) {
       name = identifiers.take(`is${pascal(event.name)}Detail`, "Check");
@@ -891,7 +906,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   // differs from that needs to declare its own init.
   const declared = events.filter((event) => !(event.bubbles && event.composed && !event.cancelable));
   const dispatchSource = events.length === 0 ? "const dispatch = createDispatch(root);" : [
-    `const dispatch = createDispatch(root, ${modeled.length === 0 ? "undefined" : "emit as (name: string, detail: unknown) => void"}, {`,
+    "const dispatch = createDispatch(root, emit as (name: string, detail: unknown) => void, {",
     ...(declared.length === 0 ? [] : [
       `  declared: ${JSON.stringify(Object.fromEntries(declared.map((event) => [event.name, { bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable }])))},`,
     ]),
@@ -986,7 +1001,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(modelProp === undefined ? [] : [
       "const model = computed({",
       "  get: () => checkedProps.value.modelValue ?? checkedProps.value.value ?? undefined,",
-      '  set: (value) => emit("update:modelValue", value as string),',
+      `  set: (value) => emit("update:modelValue", value as ${modelProp === undefined || modelProp.contract.select === undefined ? "string" : propType(modelProp)}),`,
       "});",
     ]),
     "",
@@ -1078,10 +1093,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   ];
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
-    '<script setup lang="ts">',
+    `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp } from ${quote(VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 ? [] : [`import { checkedProp${generics.length === 0 ? "" : ", selectedPropNode"} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(VUE_HTML_SPECIFIER)};`] : []),
     ...(context.usesHydrationControl ? [`import { ${[

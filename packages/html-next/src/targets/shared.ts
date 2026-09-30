@@ -54,15 +54,47 @@ export function typeSource(type: PropType): string {
 }
 
 function includesNull(type: PropType): boolean {
-  if (typeof type === "string" || "enum" in type) return false;
+  if (typeof type === "string") return false;
   if (type.kind === "terminal") return type.name === "null";
   return type.kind === "union" && type.members.some(includesNull);
 }
 
 /** Optional component inputs accept an explicit null unless their declared type already does. */
 export function propTypeSource(prop: PropContract): string {
-  const source = typeSource(prop.type);
+  const source = prop.values === undefined ? typeSource(prop.type)
+    : prop.values.map((value) => JSON.stringify(value)).join(" | ");
   return prop.required || includesNull(prop.type) ? source : `${source} | null`;
+}
+
+/** One generic parameter per selecting prop keeps generated call-site types correlated. */
+export function selectorGenerics(props: Readonly<Record<string, PropContract>>): readonly {
+  readonly from: string;
+  readonly parameter: string;
+  readonly declaration: string;
+}[] {
+  const selectors = [...new Set(Object.values(props).flatMap((prop) => prop.select === undefined ? [] : [prop.select.from]))];
+  return selectors.map((from, index) => {
+    const prop = props[from]!;
+    const parameter = `T${index}`;
+    const bound = propTypeSource(prop);
+    const fallback = "default" in prop ? JSON.stringify(prop.default) : bound;
+    return { from, parameter, declaration: `${parameter} extends ${bound} = ${fallback}` };
+  });
+}
+
+export function dependentPropTypeSource(
+  prop: PropContract,
+  parameters: ReadonlyMap<string, string>,
+): string {
+  if (prop.select === undefined) return propTypeSource(prop);
+  const parameter = parameters.get(prop.select.from)!;
+  const cases = prop.select.options.map((option) => ({
+    value: JSON.stringify(option.value),
+    type: `${typeScriptType(option.type)}${prop.required ? "" : " | null"}`,
+  }));
+  return cases.reduceRight((otherwise, item) =>
+    `${parameter} extends ${item.value} ? ${item.type} : ${otherwise}`,
+  prop.required ? "never" : "null");
 }
 
 export function generatedPropDescriptor(
@@ -71,11 +103,10 @@ export function generatedPropDescriptor(
   value: string,
   root?: ElementNode,
 ): string | undefined {
-  const type = prop.type === "string" || prop.type === "boolean" || prop.type === "number"
-    ? quote(prop.type)
-    : "enum" in prop.type ? JSON.stringify(prop.type.enum)
-    : prop.type.kind === "enum" && prop.type.members.every((member) => typeof member === "string")
-      ? JSON.stringify(prop.type.members) : undefined;
+  const type = prop.values !== undefined && prop.values.every((member) => typeof member === "string")
+    ? JSON.stringify(prop.values)
+    : prop.type === "string" || prop.type === "boolean" || prop.type === "number"
+      ? quote(prop.type) : undefined;
   if (type === undefined) return undefined;
   const attribute = `data-${kebabCase(name)}`;
   const defaultValue = "default" in prop ? `, default: ${JSON.stringify(prop.default)}` : "";
@@ -114,6 +145,8 @@ export function serializedDefinition(definition: ComponentDefinition): string {
     name,
     {
       type: prop.type,
+      ...(prop.values === undefined ? {} : { values: prop.values }),
+      ...(prop.select === undefined ? {} : { select: prop.select }),
       ...(prop.pattern === undefined ? {} : { pattern: prop.pattern }),
       required: prop.required,
       target: prop.target,

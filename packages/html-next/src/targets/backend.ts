@@ -5,7 +5,7 @@ import type {
   SlotContract,
 } from "../template.js";
 import type { PropContract } from "../types.js";
-import { parseTypeExpression, typeScriptType } from "../type-system.js";
+import { declarationTypeNode, parseTypeExpression, typeScriptType } from "../type-system.js";
 
 export interface TargetProp {
   readonly name: string;
@@ -60,7 +60,7 @@ export function targetComponent(definition: ComponentDefinition): TargetComponen
       declaration.kind === "event"
     ).map((event) => Object.freeze({
       ...event,
-      detailType: typeScriptType(parseTypeExpression(event.type)),
+      detailType: typeScriptType(declarationTypeNode(event.type, event.shape)!),
       callbackName: `on${pascalCase(event.name)}`,
     }))),
     methods: Object.freeze(declarations.filter((declaration): declaration is MethodDeclaration =>

@@ -702,6 +702,22 @@ describe("HTML Next unplugin", () => {
     }), /app\.html: HN014:.*requires an input/);
   });
 
+  it("rejects a values constraint that does not conform to its declared type", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-values-"));
+    temporary.push(root);
+    await writeFile(join(root, "app.html"), `<template component="x-app"><defs>
+      <prop name="size" type="keyword" values="sm, two words">Size.</prop>
+      </defs><output :data-size="size"></output></template>`);
+    await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
+
+    await assert.rejects(() => build({
+      root,
+      logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["app.html"], root })],
+      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
+    }), /app\.html: HC013:.*values constraint.*does not conform/);
+  });
+
   it("rejects cycles in compiled component invocations", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-cycle-"));
     temporary.push(root);

@@ -18,7 +18,8 @@ function validContract(): any {
     nativeElement: "button",
     props: {
       variant: {
-        type: { enum: ["outline", "solid", "destructive", "ghost"] },
+        type: "keyword",
+        values: "outline, solid, destructive, ghost",
         default: "outline",
         target: { attribute: "data-variant" },
         description: "Visual treatment.",
@@ -65,24 +66,24 @@ describe("defineContract", () => {
     assert.throws(() => serializePropTarget(prop, ""), /HC021/);
   });
 
-  it("serializes a boolean enum member with its HTML spelling", () => {
+  it("serializes a constrained keyword with its HTML spelling", () => {
     const contract = validContract();
     contract.props = {
       current: {
-        type: "enum(true, false, 'page')",
+        type: "keyword", values: "page, step",
         target: { attribute: "aria-current" },
         description: "Current location.",
       },
     };
     const prop = defineFromButtonFile(contract).props.current!;
-    assert.deepEqual(serializePropTarget(prop, false), { kind: "attribute", name: "aria-current", value: "false" });
     assert.deepEqual(serializePropTarget(prop, "page"), { kind: "attribute", name: "aria-current", value: "page" });
+    assert.throws(() => serializePropTarget(prop, "false"), /HC021/);
   });
 
-  it("canonicalizes a numeric enum default from its HTML spelling", () => {
+  it("canonicalizes a constrained numeric default from its HTML spelling", () => {
     const contract = validContract();
     contract.props = { size: {
-      type: "enum(1, 2, 3)", default: "3", target: { attribute: "data-size" }, description: "Size.",
+      type: "integer", values: "1, 2, 3", default: "3", target: { attribute: "data-size" }, description: "Size.",
     } };
     assert.equal(defineFromButtonFile(contract).props.size!.default, 3);
   });
@@ -99,7 +100,8 @@ describe("defineContract", () => {
       nativeElement: "button",
       props: {
         variant: {
-          type: { enum: ["outline", "solid", "destructive", "ghost"] },
+          type: { kind: "terminal", name: "keyword" },
+          values: ["outline", "solid", "destructive", "ghost"],
           required: false,
           default: "outline",
           target: { attribute: "data-variant" },
@@ -109,7 +111,7 @@ describe("defineContract", () => {
     });
   });
 
-  it("handles scalar, enum, default, and required prop contracts", () => {
+  it("handles scalar, constrained, default, and required prop contracts", () => {
     const input = validContract();
     input.props = {
       title: {
@@ -131,7 +133,7 @@ describe("defineContract", () => {
         description: "Display order.",
       },
       variant: {
-        type: { enum: ["outline", "solid"] },
+        type: "keyword", values: "outline, solid",
         default: "outline",
         target: { attribute: "data-variant" },
         description: "Visual treatment.",
@@ -149,14 +151,12 @@ describe("defineContract", () => {
     assert.equal(contract.props.disabled?.required, true);
     assert.equal(contract.props.title?.required, false);
     assert.equal(contract.props.order?.default, 2);
-    assert.deepEqual(contract.props.variant?.type, {
-      enum: ["outline", "solid"],
-    });
+    assert.deepEqual(contract.props.variant?.type, { kind: "terminal", name: "keyword" });
+    assert.deepEqual(contract.props.variant?.values, ["outline", "solid"]);
   });
 
   it("rejects prop types that cannot be written as HTML attributes", () => {
-    // Props are attributes on the invocation: callbacks and opaque values have no text form, so
-    // Removed type names are rejected before a binding target is considered.
+    // Props are attributes on the invocation: callbacks and opaque values have no text form.
     const structured = validContract();
     structured.props = {
       provider: { type: { kind: "list", item: "string" }, target: { attribute: "data-provider" }, description: "Values." },
@@ -168,7 +168,7 @@ describe("defineContract", () => {
         input.props = {
           provider: { type, target, description: "Loads values." },
         } as unknown as typeof input.props;
-        expectDiagnostic("HC013", () => defineFromButtonFile(input));
+        expectDiagnostic(type === "unknown" ? "HC017" : "HC013", () => defineFromButtonFile(input));
       }
     }
   });
@@ -183,11 +183,8 @@ describe("defineContract", () => {
     expectDiagnostic("HC002", () => defineFromButtonFile(unknownProp));
 
     const unknownType = validContract();
-    unknownType.props.variant.type = {
-      enum: ["outline", "solid"],
-      typo: true,
-    } as typeof unknownType.props.variant.type;
-    expectDiagnostic("HC002", () => defineFromButtonFile(unknownType));
+    unknownType.props.variant.type = { typo: true } as typeof unknownType.props.variant.type;
+    expectDiagnostic("HC013", () => defineFromButtonFile(unknownType));
 
     const unknownTarget = validContract();
     unknownTarget.props.variant.target = {
@@ -218,8 +215,8 @@ describe("defineContract", () => {
   it("rejects invalid types, defaults, required flags, and targets", () => {
     const cases: Array<[string, (input: ReturnType<typeof validContract>) => void]> = [
       ["HC013", (input) => { input.props.variant.type = "list(" as never; }],
-      ["HC014", (input) => { input.props.variant.type = { enum: [] }; }],
-      ["HC014", (input) => { input.props.variant.type = { enum: ["a", "a"] }; }],
+      ["HC013", (input) => { input.props.variant.values = "outline, two words"; }],
+      ["HC013", (input) => { input.props.variant.values = ""; }],
       ["HC015", (input) => { input.props.variant.default = "missing"; }],
       ["HC016", (input) => { input.props.variant.required = "yes" as never; }],
       ["HC019", (input) => { input.props.variant.required = true; }],
@@ -265,12 +262,7 @@ describe("defineContract", () => {
     assert.ok(Object.isFrozen(contract.props));
     assert.ok(Object.isFrozen(contract.props.variant));
     assert.ok(Object.isFrozen(contract.props.variant?.target));
-    assert.ok(Object.isFrozen(contract.props.variant?.type));
-    assert.ok(
-      typeof contract.props.variant?.type === "object" &&
-        "enum" in contract.props.variant.type &&
-        Object.isFrozen(contract.props.variant.type.enum),
-    );
+    assert.ok(Object.isFrozen(contract.props.variant?.values));
 
     assert.throws(() => {
       (contract.props.variant as { required: boolean }).required = true;
@@ -278,7 +270,7 @@ describe("defineContract", () => {
     assert.throws(() => {
       const variant = contract.props.variant;
       assert.ok(variant !== undefined);
-      (variant.type as { enum: string[] }).enum.push("new");
+      (variant.values as string[]).push("new");
     }, TypeError);
   });
 
