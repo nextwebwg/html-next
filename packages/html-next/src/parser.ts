@@ -244,9 +244,9 @@ function readDeclaredType(
   }
   const children = directElements(element, "prop");
   let type: PropContract["type"];
-  if (written === "array") {
+  if (written === "list") {
     if (children.length !== 1 || attr(children[0]!, "name") !== undefined) {
-      fail("HC013", "An array requires one unnamed item <prop>.", source);
+      fail("HC013", "A list requires one unnamed item <prop>.", source);
     }
     type = { kind: "list", item: normalizeType(readDeclaredType(children[0]!, source, true, warnInvalidDeclaration)) };
   } else if (written === "object" && (children.length > 0 || attr(element, "open") !== undefined)) {
@@ -260,7 +260,7 @@ function readDeclaredType(
     }
     type = { kind: "object", fields, open: attr(element, "open") !== undefined };
   } else {
-    if (children.length > 0) fail("HC013", "Only object and array declarations contain nested <prop> fields.", source);
+    if (children.length > 0) fail("HC013", "Only object and list declarations contain nested <prop> fields.", source);
     type = parseTypeAttribute(written);
   }
   if (!nested) return type;
