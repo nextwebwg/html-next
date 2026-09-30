@@ -1,8 +1,8 @@
 # HTML Next implementations
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it,
-named for it and versioned independently. Shared policy and verification live at the
+`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it.
+All three packages share one version and publish together. Shared policy and verification live at the
 repository root.
 
 | Package | Role | Current scope |
