@@ -275,7 +275,12 @@ export class Lowering {
         return scope.code.get(node.name) ?? "undefined";
       case "member": {
         const object = this.#operand(node.object, scope);
-        const access = typeOf(node.object, scope).nullable ? "?." : ".";
+        const objectType = typeOf(node.object, scope);
+        const access = objectType.nullable ? "?." : ".";
+        // A closed shape still permits an absent read; the result is undefined at runtime.
+        if (objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)) {
+          return `(${object} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`;
+        }
         return /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${object}${access}${node.key}` : `${object}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
       }
       case "index": {
@@ -322,6 +327,7 @@ export class Lowering {
     }
     if (node.kind === "unary" && node.op === "not") return this.#not(node.operand, scope);
     const code = this.value(node, scope);
+    if (node.kind === "literal" && (typeof node.value === "string" || typeof node.value === "number")) return `Boolean(${code})`;
     const type = typeOf(node, scope);
     // A closed object with a required field always has keys, so only its absence makes it false.
     const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
@@ -404,8 +410,13 @@ export class Lowering {
     }
     const left = this.#operand(node.left, scope);
     const right = this.#operand(node.right, scope);
-    if (node.op === "=") return `${left} === ${right}`;
-    if (node.op === "!=") return `${left} !== ${right}`;
+    if (node.op === "=" || node.op === "!=") {
+      const leftCategory = category(typeOf(node.left, scope).type);
+      const rightCategory = category(typeOf(node.right, scope).type);
+      const compared = leftCategory !== rightCategory && leftCategory !== "unknown" && rightCategory !== "unknown"
+        ? `(${left} as unknown)` : left;
+      return `${compared} ${node.op === "=" ? "===" : "!=="} ${right}`;
+    }
     if (node.op === "^=" || node.op === "$=" || node.op === "*=") {
       const method = node.op === "^=" ? "startsWith" : node.op === "$=" ? "endsWith" : "includes";
       const strings = category(typeOf(node.left, scope).type) === "string" && category(typeOf(node.right, scope).type) === "string";

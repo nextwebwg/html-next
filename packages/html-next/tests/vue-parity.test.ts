@@ -1088,6 +1088,18 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
               };
               const [livePixels, vuePixels] = await Promise.all([capturePixels(live), capturePixels(vue)]);
               await assertPixelsEqual(vue, vuePixels, livePixels, "Vue rendered pixels differ");
+              for (const step of expectation.after ?? []) {
+                await Promise.all([live, vue].map((page) => page.evaluate((action) => Function(action)(), step.action)));
+                await Promise.all([live, vue].map((page) => page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))));
+                const [afterLivePixels, afterVuePixels] = await Promise.all([capturePixels(live), capturePixels(vue)]);
+                const [afterLive, afterVue] = await Promise.all([
+                  live.evaluate((script) => Function(script)(), program),
+                  vue.evaluate((script) => Function(script)(), program),
+                ]);
+                assert.deepEqual(afterLive, step.result, "live runtime changed after interaction");
+                assert.deepEqual(withoutStylingMarkers(afterVue), withoutStylingMarkers(afterLive), "Vue behavior differs after interaction");
+                await assertPixelsEqual(vue, afterVuePixels, afterLivePixels, "Vue pixels differ after interaction");
+              }
             } finally {
               await Promise.all([live.close(), vue.close()]);
             }

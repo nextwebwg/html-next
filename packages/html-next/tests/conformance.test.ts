@@ -24,7 +24,7 @@ const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const runtimeUrl = new URL("../src/live.ts", import.meta.url);
 
 /** The in-page runner: lower, then either capture the diagnostic code or run the success probe. */
-function pageProgram(testCase: ConformanceCase): string {
+function pageProgram(testCase: ConformanceCase, lower = true): string {
   const isDiagnostic = "code" in testCase.expect;
   const tail = isDiagnostic
     ? `return { code: __code };`
@@ -45,11 +45,11 @@ function pageProgram(testCase: ConformanceCase): string {
     const q = (s) => document.querySelector(s);
     const qa = (s) => Array.from(document.querySelectorAll(s));
     let __code = null;
-    try {
+    ${lower ? `try {
       window.HtmlRuntime.lowerDocument();
     } catch (error) {
       __code = (error && error.diagnostic && error.diagnostic.code) || ("THROWN: " + (error && error.message));
-    }
+    }` : ""}
     ${tail}
   })()`;
 }
@@ -105,6 +105,11 @@ describe.skipIf(!enabled)("conformance corpus (in-browser runtime)", () => {
             assert.deepEqual(result, { code: testCase.expect.code });
           } else {
             assert.deepEqual(result, testCase.expect.result);
+            for (const step of testCase.expect.after ?? []) {
+              await page.evaluate((action) => Function(action)(), step.action);
+              await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+              assert.deepEqual(await page.evaluate(pageProgram(testCase, false)), step.result);
+            }
           }
         });
       }

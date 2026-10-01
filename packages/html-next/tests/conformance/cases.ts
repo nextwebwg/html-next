@@ -19,6 +19,7 @@
 export interface SuccessExpect {
   readonly probe: string;
   readonly result: unknown;
+  readonly after?: readonly { readonly action: string; readonly result: unknown }[];
 }
 
 export interface DiagnosticExpect {
@@ -122,6 +123,21 @@ const successes: ConformanceCase[] = [
           { tag: "button", attributes: [["type", "button"]], children: [{ text: "Rename" }] },
         ],
       },
+      after: [{
+        action: `document.querySelector('#person button').click();`,
+        result: {
+          tag: "section",
+          attributes: [
+            ["data-component", "x-root-with"],
+            ["data-label", "Bea"],
+            ["id", "person"],
+          ],
+          children: [
+            { tag: "strong", attributes: [], children: [{ text: "Bea" }] },
+            { tag: "button", attributes: [["type", "button"]], children: [{ text: "Rename" }] },
+          ],
+        },
+      }],
     },
   },
   {
