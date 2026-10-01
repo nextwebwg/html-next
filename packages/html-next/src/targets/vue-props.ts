@@ -370,12 +370,15 @@ function propValidity(binding: PropValidityBinding): PropValidity {
 type ManagedValidity = { current: PropValidityBinding; validity: PropValidity; external: readonly ValidityError[]; interacted: boolean; cleanup: () => void };
 const validityStates = new WeakMap<Element, ManagedValidity>();
 const ariaMirrors = new WeakSet<Element>();
+// Elements given a validity API by vPropValidity. Their setCustomValidity reflects through
+// reflectValidity, so only the native one may be called from it.
+const managedValidityApis = new WeakSet<Element>();
 const REASONS: readonly ValidityReason[] = ["valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow", "rangeOverflow", "stepMismatch", "badInput", "customError", "schemaMismatch", "untrustedValue"];
 function reflectValidity(el: Element, state: ManagedValidity): void {
   const errors = [...state.validity.errors, ...state.external];
   const valid = errors.length === 0;
   if (["button", "fieldset", "input", "object", "output", "select", "textarea"].includes(el.localName) &&
-      "setCustomValidity" in el && typeof el.setCustomValidity === "function") {
+      !managedValidityApis.has(el) && "setCustomValidity" in el && typeof el.setCustomValidity === "function") {
     el.setCustomValidity(valid ? "" : errors[0]!.message);
     return;
   }
@@ -406,6 +409,7 @@ export const vPropValidity = {
     const state: ManagedValidity = { current: binding.value, validity: propValidity(binding.value), external: [], interacted: false, cleanup: () => {} };
     validityStates.set(el, state);
     if (!("validity" in el)) {
+      managedValidityApis.add(el);
       const target = el as Element & Record<string, unknown>;
       Object.defineProperties(target, {
         validity: { configurable: true, get: () => validityState(state) },

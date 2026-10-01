@@ -16,6 +16,44 @@ async function generatedChecker(): Promise<(value: unknown, type: ReturnType<typ
   return module.checkedProp;
 }
 
+async function generatedModule(): Promise<Record<string, any>> {
+  const bundle = await build({
+    stdin: { contents: vuePropsArtifact().content, loader: "ts", resolveDir: new URL("../src", import.meta.url).pathname },
+    bundle: true, write: false, platform: "node", format: "esm",
+  });
+  return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`);
+}
+
+/** A native-named element with no validity API of its own, as some DOM implementations provide. */
+function bareElement(localName: string) {
+  const attributes = new Map<string, string>();
+  return {
+    localName,
+    attributes,
+    hasAttribute: (name: string) => attributes.has(name),
+    setAttribute: (name: string, value: string) => { attributes.set(name, value); },
+    removeAttribute: (name: string) => { attributes.delete(name); },
+    toggleAttribute: (name: string, force: boolean) => { if (force) attributes.set(name, ""); else attributes.delete(name); return force; },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  };
+}
+
+describe("generated Vue prop validity", () => {
+  it("gives a native-named element without validity its own API, without calling itself", async () => {
+    const { vPropValidity } = await generatedModule();
+    const field = bareElement("fieldset") as ReturnType<typeof bareElement> & { validity: { valid: boolean }, setCustomValidity(message: string): void };
+    vPropValidity.mounted(field, { value: { contract: { props: {} }, values: {} } });
+    assert.equal(field.validity.valid, true);
+    field.setCustomValidity("Choose one.");
+    assert.equal(field.validity.valid, false);
+    assert.equal(field.attributes.has("data-invalid"), true);
+    field.setCustomValidity("");
+    assert.equal(field.validity.valid, true);
+  });
+});
+
 describe("generated Vue prop boundary", () => {
   it("accepts typed values for every declared base type", async () => {
     const checkedProp = await generatedChecker();
