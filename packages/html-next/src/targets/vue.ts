@@ -158,8 +158,7 @@ function referenceCheck(type: TypeNode, value: string): string {
     case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
     case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
     case "selected": return `(${type.options.map((option) => referenceCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return type.values === undefined ? referenceCheck(type.base, value)
-      : `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
+    case "constrained": return referenceCheck(type.base, value);
     case "keyword": return `${value} === ${quote(type.value)}`;
     case "separated-list": return `Array.isArray(${value})`;
     case "terminal":
@@ -652,6 +651,58 @@ function typeCheck(type: TypeNode, value: string): string {
   }
 }
 
+/** Handler destinations check their immediate type; nested values keep their authored input. */
+function destinationTypeCheck(type: TypeNode, value: string): string {
+  switch (type.kind) {
+    case "list": return `Array.isArray(${value})`;
+    case "record":
+    case "object": return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}))`;
+    case "union": return `(${type.members.map((member) => destinationTypeCheck(member, value)).join(" || ")})`;
+    case "selected": return `(${type.options.map((option) => destinationTypeCheck(option.type, value)).join(" || ")})`;
+    case "constrained": return destinationTypeCheck(type.base, value);
+    default: return typeCheck(type, value);
+  }
+}
+
+function handlerDestinationCheck(
+  type: TypeNode | undefined,
+  path: readonly WritablePathSegment[],
+  index: number,
+  value: string,
+  scope: Scope,
+  lowering: Lowering,
+): string | undefined {
+  if (type === undefined) return undefined;
+  if (index === path.length) return destinationTypeCheck(type, value);
+  const segment = path[index]!;
+  if (typeof segment !== "object") {
+    return handlerDestinationCheck(typeAtKey(type, segment), path, index + 1, value, scope, lowering);
+  }
+  if (type.kind === "list" || type.kind === "record") {
+    return handlerDestinationCheck(type.kind === "list" ? type.item : type.value,
+      path, index + 1, value, scope, lowering);
+  }
+  if (type.kind === "constrained") {
+    return handlerDestinationCheck(type.base, path, index, value, scope, lowering);
+  }
+  if (type.kind === "union" || type.kind === "selected") {
+    const members = type.kind === "union" ? type.members : type.options.map((option) => option.type);
+    const checks = members.flatMap((member) => {
+      const check = handlerDestinationCheck(member, path, index, value, scope, lowering);
+      return check === undefined ? [] : [check];
+    });
+    return checks.length === 0 ? undefined : `(${checks.join(" || ")})`;
+  }
+  if (type.kind !== "object") return undefined;
+  const key = `String(${lowering.value(segment.expression, scope)})`;
+  const checks = type.fields.map((field) => {
+    const check = handlerDestinationCheck(field.type, path, index + 1, value, scope, lowering) ?? "true";
+    return `(${key} === ${quote(field.name)} && ${check})`;
+  });
+  if (type.open) checks.push(`!${JSON.stringify(type.fields.map((field) => field.name))}.includes(${key})`);
+  return checks.length === 0 ? "false" : `(${checks.join(" || ")})`;
+}
+
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
   const { lowering } = context;
   const lines: string[] = [];
@@ -660,10 +711,22 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
     if (!context.refs.has(ref)) context.refs.set(ref, context.identifiers.take(`${ref}Element`, ""));
     return context.refs.get(ref)!;
   };
-  for (const step of handler.steps) {
+  for (const [index, step] of handler.steps.entries()) {
     const guard = step.guard === undefined ? "" : `if (${lowering.condition(step.guard.ast, local.script)}) `;
     if (step.kind === "set") {
-      lines.push(`  ${guard}${writableTarget(step.writablePath, local.script, lowering)} = ${lowering.value(step.value.ast, local.script)};`);
+      const target = writableTarget(step.writablePath, local.script, lowering);
+      const value = lowering.value(step.value.ast, local.script);
+      const check = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
+        step.writablePath, 1, `next${index}`, local.script, lowering);
+      if (check === undefined) {
+        lines.push(`  ${guard}${target} = ${value};`);
+      } else {
+        const next = `next${index}`;
+        lines.push(`  ${guard}{`);
+        lines.push(`    const ${next} = ${value};`);
+        lines.push(`    if (${next} === null || ${next} === undefined || ${check}) ${target} = ${next} as never;`);
+        lines.push("  }");
+      }
     } else if (step.kind === "dispatch") {
       const detail = step.value === undefined ? "" : `, ${lowering.value(step.value.ast, local.script)}`;
       const declaration = events.find((event) => event.name === step.event);

@@ -95,6 +95,16 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("compiles dotted numeric references for Vue and vanilla", async () => {
+    const outputs = generated(`<template component="x-indexed"><defs>
+      <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+    </defs><output $value="$items.0.name"></output></template>`);
+    const vue = outputs.get("vue/XIndexed.vue")!;
+    const vanilla = outputs.get("vanilla/XIndexed.js")!;
+    assert.match(vue, /\[0\]/);
+    compileVue(vue, "XIndexed.vue");
+    await transform(vanilla, { loader: "js", format: "esm" });
+  });
   it("preserves nested permitted event values in generated targets", () => {
     const outputs = generated(`<template component="x-nested-event"><defs>
       <event name="change" type="object">
@@ -167,6 +177,20 @@ describe("official target compilers", () => {
     assert.match(vue, /selectedPropNode\(mode\.value,/);
     assert.match(vue, /value: \{ type: null as unknown as PropType<(?:string \| number|number \| string) \| null>/);
     assert.match(vanilla, /value\?: (?:string \| number|number \| string) \| null/);
+  });
+
+  it("guards Vue handler writes by the selected destination type", () => {
+    const vue = generated(`<template component="x-typed-handlers"><defs>
+      <state name="count" type="number" value="2"></state>
+      <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+      <state name="index" type="integer" value="0"></state>
+      <handler name="badNumber"><set name="count" expr:value="format('%s', count)"></set></handler>
+      <handler name="badField"><set name="items[$index].name" expr:value="7"></set></handler>
+    </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
+      .get("vue/XTypedHandlers.vue")!;
+    compileVue(vue, "XTypedHandlers.vue");
+    assert.match(vue, /typeof next0 === 'number'/);
+    assert.match(vue, /typeof next0 === 'string'/);
   });
 
   it("uses a root $ref as the controller's root handle without duplicate Vue refs", () => {
@@ -326,7 +350,9 @@ describe("official target compilers", () => {
     assert.match(vue, /const hostState = computed\(\(\) =>/);
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
     assert.match(vue, /`size=\$\{encodeURIComponent\(checkedProps\.value\.size\)\}`/);
-    assert.match(vue, /function flip\(\): void \{\n  open\.value = !open\.value\n/);
+    assert.match(vue, /function flip\(\): void \{/);
+    assert.match(vue, /const next0 = !open\.value/);
+    assert.match(vue, /open\.value = next0 as never/);
     assert.match(vue, /<ul v-if="open">/);
     assert.match(vue, /v-for="\(item, index\) in uniqueKeys\(/);
     assert.match(vue, /sortBy\(\(checkedProps\.items \?\? \[\]\)\.filter\(\(item\) => item\.done\), \['name'\]\)/);

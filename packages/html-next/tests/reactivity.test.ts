@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
-import { evaluate } from "../src/expression.js";
+import { evaluate, NONCONFORMING, type Value } from "../src/expression.js";
 import {
   createComputed,
   createEffect,
@@ -10,6 +10,30 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("keeps a computed null until its first valid result, then retains its last valid result", () => {
+    const scope = new ReactiveScope([["source", "oops"]]);
+    const seen: unknown[] = [];
+    scope.defineComputed("derived", () => {
+      const source = scope.get("source");
+      return typeof source === "number" ? source * 2 : NONCONFORMING as unknown as Value;
+    });
+    createEffect(scope.scheduler, () => { seen.push(scope.get("derived")); });
+    assert.deepEqual(seen, [null]);
+
+    scope.set("source", 2);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [null, 4]);
+
+    scope.set("source", "oops");
+    scope.scheduler.flush();
+    assert.equal(scope.get("derived"), 4);
+    assert.deepEqual(seen, [null, 4]);
+
+    scope.set("source", 7);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [null, 4, 14]);
+  });
+
   it("does not notify consumers for Object.is-equal signal writes", () => {
     const scheduler = new ReactiveScope().scheduler;
     const object = {};

@@ -88,11 +88,14 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
     case "index": {
       const object = typeOf(node.object, scope);
       const type = object.type;
+      const key = node.kind === "member" ? node.key
+        : node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")
+          ? String(node.index.value) : undefined;
       let result: Static = UNKNOWN;
       if (node.kind === "member" && node.key === "length" && (type.kind === "list" || category(type) === "string")) {
         result = terminal("number");
-      } else if (node.kind === "member" && type.kind === "object") {
-        const field = type.fields.find((candidate) => candidate.name === node.key);
+      } else if (key !== undefined && type.kind === "object") {
+        const field = type.fields.find((candidate) => candidate.name === key);
         if (field !== undefined) {
           const value = present(field.type);
           result = { type: value.type, nullable: value.nullable || field.optional, null: value.null ?? false };
