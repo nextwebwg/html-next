@@ -17,9 +17,21 @@ import {
 } from "../src/expression.js";
 
 describe("expression: compilation", () => {
+  it("uses dollar-prefixed references and dotted list indexes", () => {
+    const compiled = compileExpression("$items.0.name = 'Ada' and $items.1.name != null");
+    assert.deepEqual(compiled.dependencies, ["items.0.name", "items.1.name"]);
+    const s = scope({ items: [{ name: "Ada" }, { name: "Bea" }] });
+    assert.equal(evaluate("$items.0.name", s), "Ada");
+    assert.equal(evaluate("$items.1.name", s), "Bea");
+    assert.deepEqual(getWritablePath("$items.0.name", new Set(["items"])), ["items", 0, "name"]);
+    assert.equal(evaluate("$groups.0.1.name", scope({ groups: [[{ name: "A" }, { name: "B" }]] })), "B");
+    assert.deepEqual(getWritablePath("$groups.0.1.name", new Set(["groups"])), ["groups", 0, 1, "name"]);
+    assert.throws(() => checkExpression("$items[0].name"), /Use dotted indexes/);
+    assert.throws(() => checkExpression("items[0].name"), /Use dotted indexes/);
+  });
   it("exposes a serializable AST and normalized static dependencies", () => {
     const compiled = compileExpression(
-      "cart.items[0].name = selected.name and flags[mode]",
+      "$cart.items.0.name = $selected.name and $flags[$mode]",
     );
 
     assert.equal(compiled.ast.kind, "binary");
@@ -41,19 +53,19 @@ describe("expression: compilation", () => {
   });
 
   it("accepts only state-rooted access paths as writable bindings", () => {
-    assert.deepEqual(getWritablePath("form.contacts[0].email", new Set(["form"])), [
+    assert.deepEqual(getWritablePath("$form.contacts.0.email", new Set(["form"])), [
       "form",
       "contacts",
       0,
       "email",
     ]);
-    assert.equal(getWritablePath("props.value", new Set(["form"])), undefined);
-    assert.deepEqual(getWritablePath("form.contacts[index]", new Set(["form"])), [
+    assert.equal(getWritablePath("$props.value", new Set(["form"])), undefined);
+    assert.deepEqual(getWritablePath("$form.contacts[$index]", new Set(["form"])), [
       "form",
       "contacts",
       { kind: "index", expression: { kind: "id", name: "index" } },
     ]);
-    assert.equal(getWritablePath("form.total + 1", new Set(["form"])), undefined);
+    assert.equal(getWritablePath("$form.total + 1", new Set(["form"])), undefined);
   });
 });
 
@@ -80,9 +92,9 @@ describe("expression: reads and absent value", () => {
 
   it("null literal and out-of-range index behave as absent for access", () => {
     const s = scope({ items: [10, 20, null], record: { value: null } });
-    assert.equal(evaluate("items[5]", s), ABSENT);
-    assert.equal(evaluate("items[0]", s), 10);
-    assert.equal(evaluate("items[2]", s), null);
+    assert.equal(evaluate("$items.5", s), ABSENT);
+    assert.equal(evaluate("$items.0", s), 10);
+    assert.equal(evaluate("$items.2", s), null);
     assert.equal(evaluate("record.value", s), null);
   });
 

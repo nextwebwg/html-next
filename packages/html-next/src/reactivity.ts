@@ -441,6 +441,10 @@ export class ReactiveComputed<T> implements ReactiveOwner {
       // A computation that read a value its declaration forbids has nothing to publish: keep the
       // last value and report no change, so nothing downstream recomputes from a broken contract.
       if (value === NONCONFORMING) {
+        if (!this.#initialized) {
+          this.#value = null as T;
+          this.#initialized = true;
+        }
         this.#changed = false;
         return;
       }

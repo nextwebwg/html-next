@@ -158,8 +158,7 @@ function referenceCheck(type: TypeNode, value: string): string {
     case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
     case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
     case "selected": return `(${type.options.map((option) => referenceCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return type.values === undefined ? referenceCheck(type.base, value)
-      : `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
+    case "constrained": return referenceCheck(type.base, value);
     case "keyword": return `${value} === ${quote(type.value)}`;
     case "separated-list": return `Array.isArray(${value})`;
     case "terminal":

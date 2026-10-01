@@ -636,6 +636,7 @@ function constrainedReferences(
  * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
  */
 function conformsAtReference(value: Value, type: TypeNode): boolean {
+  if (value === null) return true;
   switch (type.kind) {
     case "list":
       return Array.isArray(value);
@@ -644,9 +645,17 @@ function conformsAtReference(value: Value, type: TypeNode): boolean {
       return typeof value === "object" && value !== null && !Array.isArray(value);
     case "union":
       return type.members.some((member) => conformsAtReference(value, member));
+    case "constrained":
+      return conformsAtReference(value, type.base);
     default:
-      return parseTypedValue(value, type).ok;
+      return parseTypedValue(value, type, "$", "value").ok;
   }
+}
+
+/** Check the destination's immediate type; nested fields are checked when read. */
+function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
+  if (type === undefined || value === null || value === ABSENT) return true;
+  return type !== null && conformsAtReference(value, normalizeType(type));
 }
 
 /**
@@ -878,6 +887,9 @@ function runHandler(
     if (step.kind === "set") {
       const next = evalConforming(step.value, scope, context.definition);
       if (next === NONCONFORMING) continue;
+      const path = step.writablePath.every((part) => typeof part === "string" || typeof part === "number")
+        ? step.writablePath.join(".") : undefined;
+      if (path !== undefined && !conformsAtDestination(next, declaredTypeAt(context.definition, path))) continue;
       setWritablePath(scope, step.writablePath, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
@@ -1555,11 +1567,20 @@ function renderInstance(
         // A lowered child owns its props: write them through the same channel framework adapters
         // use, so the child re-parses the declared type and reflects the value itself.
         const lowered = loweredInvocations.get(element);
-        if (lowered !== undefined && attribute.target === undefined) {
-          const propName = propAttributeNames(lowered.instance.definition, false)[attribute.name.toLowerCase()];
+        const childDefinition = lowered?.instance.definition ?? (element.localName.includes("-")
+          ? registryFor(element.ownerDocument).definitions.get(element.localName)?.definition : undefined);
+        if (childDefinition !== undefined && attribute.target === undefined) {
+          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
           if (propName !== undefined) {
-            applyComponentProps(lowered.instance, { [propName]: value });
-            return;
+            const contract = childDefinition.contract;
+            const prop = contract.props[propName]!;
+            const selected = prop.select === undefined ? prop.type : lowered === undefined ? undefined
+              : selectedPropType(contract, prop, { [prop.select.from]: lowered.instance.scope.get(prop.select.from) });
+            if (!conformsAtDestination(value, selected)) return;
+            if (lowered !== undefined) {
+              applyComponentProps(lowered.instance, { [propName]: value });
+              return;
+            }
           }
         }
         if (attribute.target === "class") {
@@ -2565,6 +2586,11 @@ function lowerScopes(
     newDefinitions.set(tag, live);
   }
 
+  // Parent bindings can run while their child invocations are being prepared. Make every newly
+  // parsed contract available for the bound-value type check before preparing any parent.
+  const existingDefinitions = new Map(registry.definitions);
+  for (const live of definitions) registerDefinition(registry, live.definition.contract.tag, live);
+
   const roots = new Set<Element>();
   const lowered: Element[] = [];
   const prepared: PreparedInvocation[] = [];
@@ -2604,7 +2630,7 @@ function lowerScopes(
       if (accepted) roots.add(element);
     }
   };
-  collect(registry.definitions, discovered);
+  collect(existingDefinitions, discovered);
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
     const pendingSelector = [
@@ -2617,7 +2643,6 @@ function lowerScopes(
   }
 
   for (const live of definitions) {
-    registerDefinition(registry, live.definition.contract.tag, live);
     if (live.style !== undefined) {
       live.style.textContent = compileStyles(live.style.textContent ?? "", live.definition, live.wrapper!.ownerDocument);
       live.wrapper!.ownerDocument.head.append(live.style);

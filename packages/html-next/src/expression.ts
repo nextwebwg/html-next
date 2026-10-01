@@ -55,7 +55,7 @@ export type WritablePath = readonly WritablePathSegment[];
 
 type TokenKind = 0 | 1 | 2 | 3 | 4;
 
-const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.?:{}[\]-])|$)/y;
+const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d+|\.(?![A-Za-z_$\d]))?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.?:{}[\]-])|$)/y;
 const ESCAPE = /\\([\s\S])/g;
 const FORMAT_TOKEN = /%s/g;
 
@@ -85,8 +85,12 @@ function parse(source: string): ExpressionNode {
   let offset = 0;
   let kind: TokenKind = 0;
   let token: string | number = "";
+  let integerToken = false;
 
   function next(): void {
+    const previousKind = kind;
+    const previousToken = token;
+    const previousIntegerToken = integerToken;
     TOKEN.lastIndex = offset;
     const match = TOKEN.exec(source);
     if (match === null) {
@@ -97,12 +101,30 @@ function parse(source: string): ExpressionNode {
       throw new SyntaxError(`Unexpected character \`${character}\`.`);
     }
     offset = TOKEN.lastIndex;
+    if (previousKind === 4 && previousToken === "." && /^\d+\.\d+/.test(match[2] ?? "")) {
+      const digits = /^\d+/.exec(match[2]!)![0];
+      offset = match.index + match[0].indexOf(digits) + digits.length;
+      kind = 1;
+      token = Number(digits);
+      integerToken = true;
+      return;
+    }
+    // A dot after a value begins a path segment, even when the segment is an integer.
+    if (match[2]?.startsWith(".") && (previousKind === 3 || previousKind === 2
+      || previousKind === 1 && previousIntegerToken
+      || previousKind === 4 && [")", "]", "}"].includes(String(previousToken)))) {
+      offset = match.index + match[0].indexOf(".") + 1;
+      kind = 4;
+      token = ".";
+      return;
+    }
     if (match[1] !== undefined || match[5] !== undefined) {
       kind = 4;
       token = match[1] ?? match[5]!;
     } else if (match[2] !== undefined) {
       kind = 1;
       token = Number(match[2]);
+      integerToken = !match[2].includes(".");
     } else if (match[3] !== undefined) {
       kind = 2;
       token = match[3].slice(1, -1).replace(ESCAPE, "$1");
@@ -155,15 +177,20 @@ function parse(source: string): ExpressionNode {
     let object = primary();
     while (kind === 4) {
       if (eat(".")) {
-        if ((kind as TokenKind) !== 3) {
+        if ((kind as TokenKind) !== 3 && ((kind as TokenKind) !== 1 || !Number.isInteger(token))) {
           throw new SyntaxError("Expected a property name after `.`.");
         }
-        const key = token as string;
+        const key = token as string | number;
         next();
-        object = { kind: "member", object, key };
+        object = typeof key === "number"
+          ? { kind: "index", object, index: { kind: "literal", value: key } }
+          : { kind: "member", object, key };
       } else if (eat("[")) {
         const index = conditional();
         expect("]");
+        if (index.kind === "literal" && typeof index.value === "number") {
+          throw new SyntaxError("Use dotted indexes, for example `$items.0.name`.");
+        }
         object = { kind: "index", object, index };
       } else {
         break;
@@ -230,7 +257,7 @@ function parse(source: string): ExpressionNode {
         }
         return { kind: "call", fn: name, args };
       }
-      return { kind: "id", name };
+      return { kind: "id", name: name.startsWith("$") ? name.slice(1) : name };
     }
     throw new SyntaxError("Unexpected end of expression.");
   }
@@ -289,8 +316,8 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
         const value = object[index];
         return value === undefined ? ABSENT : value;
       }
-      if (typeof object === "object" && typeof index === "string") {
-        const value = (object as { readonly [key: string]: Value })[index];
+      if (typeof object === "object" && (typeof index === "string" || typeof index === "number")) {
+        const value = (object as { readonly [key: string]: Value })[String(index)];
         return value === undefined ? ABSENT : value;
       }
       return ABSENT;

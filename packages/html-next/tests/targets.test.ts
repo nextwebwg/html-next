@@ -95,6 +95,16 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("compiles dotted numeric references for Vue and vanilla", async () => {
+    const outputs = generated(`<template component="x-indexed"><defs>
+      <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+    </defs><output $value="$items.0.name"></output></template>`);
+    const vue = outputs.get("vue/XIndexed.vue")!;
+    const vanilla = outputs.get("vanilla/XIndexed.js")!;
+    assert.match(vue, /\[0\]/);
+    compileVue(vue, "XIndexed.vue");
+    await transform(vanilla, { loader: "js", format: "esm" });
+  });
   it("preserves nested permitted event values in generated targets", () => {
     const outputs = generated(`<template component="x-nested-event"><defs>
       <event name="change" type="object">

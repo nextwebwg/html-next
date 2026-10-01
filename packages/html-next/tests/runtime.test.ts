@@ -62,6 +62,191 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} keeps a typed binding's last accepted value through invalid updates`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-reading-default"><defs>
+          <prop name="amount" type="number" default="5">Reading.</prop>
+        </defs><output from:data-amount="amount"></output></template>
+        <template component="x-reading-empty"><defs>
+          <prop name="amount" type="number">Reading.</prop>
+        </defs><output from:data-amount="amount"></output></template>
+        <template component="x-reading-owner"><defs>
+          <prop name="incoming" type="number" max="100">Source value.</prop>
+        </defs><main><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
+          <x-reading-empty id="without-default" from:amount="incoming"></x-reading-empty>
+          <x-reading-default id="from-function" from:amount="format('%s', incoming)"></x-reading-default>
+        </main></template>
+        <x-reading-owner id="owner" incoming="oops"></x-reading-owner>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const owner = document.querySelector("#owner") as Element & { validity: ValidityState };
+          const read = () => {
+            const defaulted = document.querySelector("#with-default")!;
+            const empty = document.querySelector("#without-default")!;
+            const fromFunction = document.querySelector("#from-function")!;
+            return {
+              incoming: runtime.getComponentHost(owner)?.state.incoming,
+              defaulted: runtime.getComponentHost(defaulted)?.state.amount,
+              empty: runtime.getComponentHost(empty)?.state.amount,
+              fromFunction: runtime.getComponentHost(fromFunction)?.state.amount,
+              rendered: [defaulted, empty].map((element) => element.getAttribute("data-amount")),
+              badInput: owner.validity.badInput,
+              rangeOverflow: owner.validity.rangeOverflow,
+            };
+          };
+          const initial = read();
+          runtime.updateComponentProps(owner, { incoming: 2 });
+          await Promise.resolve();
+          const valid = read();
+          runtime.updateComponentProps(owner, { incoming: "oops" });
+          await Promise.resolve();
+          const rejected = read();
+          runtime.updateComponentProps(owner, { incoming: 7 });
+          await Promise.resolve();
+          const recovered = read();
+          runtime.updateComponentProps(owner, { incoming: 130 });
+          await Promise.resolve();
+          return { initial, valid, rejected, recovered, constrained: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { incoming: "oops", defaulted: 5, empty: null, fromFunction: 5,
+            rendered: ["5", null], badInput: true, rangeOverflow: false },
+          valid: { incoming: 2, defaulted: 2, empty: 2, fromFunction: 5,
+            rendered: ["2", "2"], badInput: false, rangeOverflow: false },
+          rejected: { incoming: "oops", defaulted: 2, empty: 2, fromFunction: 5,
+            rendered: ["2", "2"], badInput: true, rangeOverflow: false },
+          recovered: { incoming: 7, defaulted: 7, empty: 7, fromFunction: 5,
+            rendered: ["7", "7"], badInput: false, rangeOverflow: false },
+          constrained: { incoming: 130, defaulted: 130, empty: 130, fromFunction: 5,
+            rendered: ["130", "130"], badInput: false, rangeOverflow: true },
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} retains a user's invalid edit while a typed downstream binding stays unchanged`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-email-display"><defs>
+          <prop name="address" type="email">Address.</prop>
+        </defs><output from:data-address="address"></output></template>
+        <template component="x-email-editor"><defs>
+          <state name="address" type="email" value="ada@example.org"></state>
+        </defs><section><input type="email" bind:value="address">
+          <x-email-display id="display" from:address="address"></x-email-display>
+        </section></template><x-email-editor id="editor"></x-email-editor>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const editor = document.querySelector("#editor")!;
+          const display = document.querySelector("#display")!;
+          const input = editor.querySelector("input")!;
+          const read = () => ({ input: input.value, nativeMismatch: input.validity.typeMismatch,
+            source: runtime.getComponentHost(editor)?.state.address,
+            downstream: runtime.getComponentHost(display)?.state.address });
+          const initial = read();
+          input.value = "oops";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const invalid = read();
+          input.value = "grace@example.org";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, invalid, recovered: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { input: "ada@example.org", nativeMismatch: false,
+            source: "ada@example.org", downstream: "ada@example.org" },
+          invalid: { input: "oops", nativeMismatch: true,
+            source: "oops", downstream: "ada@example.org" },
+          recovered: { input: "grace@example.org", nativeMismatch: false,
+            source: "grace@example.org", downstream: "grace@example.org" },
+        });
+        assert.deepEqual(warnings, []);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} skips a handler write when its expression result has the wrong type`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-handler-type"><defs>
+          <state name="count" type="number" value="2"></state>
+          <handler name="bad"><set name="count" expr:value="format('%s', count)"></set></handler>
+          <handler name="good"><set name="count" value="7"></set></handler>
+        </defs><section><button class="bad" on:click="bad">Bad</button>
+          <button class="good" on:click="good">Good</button>
+          <output from:data-count="count"></output></section></template>
+        <x-handler-type id="handler-test"></x-handler-type>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#handler-test")!;
+          const read = () => ({ count: runtime.getComponentHost(root)?.state.count,
+            rendered: root.querySelector("output")?.getAttribute("data-count") });
+          const initial = read();
+          root.querySelector<HTMLButtonElement>("button.bad")!.click();
+          await Promise.resolve();
+          const rejected = read();
+          root.querySelector<HTMLButtonElement>("button.good")!.click();
+          await Promise.resolve();
+          return { initial, rejected, recovered: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { count: 2, rendered: "2" },
+          rejected: { count: 2, rendered: "2" },
+          recovered: { count: 7, rendered: "7" },
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} writes a correctly typed value even when it fails a values constraint`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-choice-state"><defs>
+          <state name="size" type="keyword" values="sm, md" value="sm"></state>
+        </defs><section><input bind:value="size"><output from:data-size="size"></output></section></template>
+        <x-choice-state id="choice-state"></x-choice-state>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#choice-state")!;
+          const input = root.querySelector("input")!;
+          const output = root.querySelector("output")!;
+          const initial = output.getAttribute("data-size");
+          input.value = "lg";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, source: runtime.getComponentHost(root)?.state.size,
+            current: output.getAttribute("data-size") };
+        });
+        assert.deepEqual(actual, { initial: "sm", source: "lg", current: "lg" });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} reports authored prop bounds through the root validity state`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -524,7 +709,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-scoped-hydrate"><defs>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
-          <handler name="rename"><set name="rows[0].name" expr:value="'Ann'"></set></handler>
+          <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
           <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"></slot>
           </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-hydrate></main>`);
@@ -601,7 +786,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-hydrated-rows"><defs>
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
-          <handler name="renameRow"><set name="rows[0].name" expr:value="'Ann'"></set></handler>
+          <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
           <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>
           <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
@@ -2257,7 +2442,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<state name="byId" type="object({ '42': object({ name: string }) })" value="{ '42': { name: 'Ann' } }"></state>` +
             `<handler name="swap"><set name="items" expr:value="[{ name: 7, 'odd key': 'y' }]"></set>` +
             `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler></defs>` +
-            `<main><output $value="items[0].name"></output><b $value="items[0]['odd key']"></b><i $value="byId['42'].name"></i>` +
+            `<main><output $value="$items.0.name"></output><b $value="$items.0['odd key']"></b><i $value="$byId.42.name"></i>` +
             `<button type="button" on:click="swap"></button></main>` +
             `</template><x-first id="first"></x-first>`,
         );
@@ -2288,8 +2473,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        // Two responses: the first satisfies the declared type, the second breaks `label` and adds
-        // a field the declaration never mentioned.
+        // The second response breaks `label`; the third shows the typed reference can recover.
         let read = 0;
         await page.route("https://api.example/**", async (route) => {
           read += 1;
@@ -2298,7 +2482,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
             headers: { "access-control-allow-origin": "*" },
             body: read === 1
               ? JSON.stringify({ label: "first", note: "kept" })
-              : JSON.stringify({ label: 42, note: "second", addedByServer: true }),
+              : read === 2
+                ? JSON.stringify({ label: 42, note: "second", addedByServer: true })
+                : JSON.stringify({ label: "third", note: "third note" }),
           });
         });
         await page.setContent(
@@ -2323,13 +2509,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.waitForFunction(() => document.querySelector("#typed .label")?.textContent === "first");
         await page.click("button.again");
         await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "second");
-        const result = await page.evaluate(() => ({
+        const afterInvalid = await page.evaluate(() => ({
           label: document.querySelector("#typed .label")?.textContent,
           note: document.querySelector("#typed .note")?.textContent,
           shouted: document.querySelector("#typed .shouted")?.textContent,
           ok: document.querySelector("#typed .ok")?.textContent,
         }));
-        assert.deepEqual(result, {
+        assert.deepEqual(afterInvalid, {
           // `label` broke its declared type, so the binding kept what it had...
           label: "first",
           // ...while the sibling reference, and the request itself, carried on.
@@ -2338,6 +2524,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // format() explicitly stringifies its argument, so the numeric value is usable here.
           shouted: "42!",
         });
+        await page.click("button.again");
+        await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "third note");
+        const recovered = await page.evaluate(() => ({
+          label: document.querySelector("#typed .label")?.textContent,
+          note: document.querySelector("#typed .note")?.textContent,
+          shouted: document.querySelector("#typed .shouted")?.textContent,
+        }));
+        assert.deepEqual(recovered, { label: "third", note: "third note", shouted: "third!" });
       } finally {
         await browser.close();
       }
