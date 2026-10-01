@@ -192,14 +192,16 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
       if (first !== undefined) steps.unshift(first);
     }
     if (type === undefined) continue;
+    let readAbsentField = false;
     for (const step of declaration?.kind === "data" ? steps.slice(1) : steps) {
+      if (type.kind === "object" && !type.fields.some((field) => field.name === step)) readAbsentField = true;
       type = typeAtKey(type, step);
       if (type === undefined) break;
     }
     if (type === undefined) continue;
     const base = scope.code.get(root!);
     if (base === undefined) continue;
-    const read = `${base}${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
+    const read = `${readAbsentField ? `(${base} as any)` : base}${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
     checks.push(`(${read} == null || ${referenceCheck(type, read)})`);
   }
   return checks.length === 0 ? undefined : checks.join(" && ");
