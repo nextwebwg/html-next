@@ -184,12 +184,77 @@ export interface GeneratedProp {
 
 const generatedPropUpdaters = new WeakMap<Element, (props: Readonly<Record<string, unknown>>) => void>();
 
+interface ChoiceIssue { readonly path: string; readonly message: string; readonly reason: "valueMissing" | "typeMismatch" }
+
+function managedChoiceValidity(element: Element, issues: () => readonly ChoiceIssue[]): { refresh(): void; stop(): void } {
+  const target = element as Element & { validity?: ValidityState; validationMessage?: string; checkValidity?: () => boolean; reportValidity?: () => boolean; setCustomValidity?: (message: string) => void };
+  const ownValidity = !('validity' in target);
+  const ownCheck = !('checkValidity' in target);
+  const ownMessage = !('validationMessage' in target);
+  const ownReport = !('reportValidity' in target);
+  let failures: readonly ChoiceIssue[] = [];
+  let mirroredAria = false;
+  if (ownValidity) Object.defineProperty(target, "validity", { configurable: true, get: () => ({
+    valid: failures.length === 0,
+    valueMissing: failures.some((failure) => failure.reason === "valueMissing"),
+    typeMismatch: failures.some((failure) => failure.reason === "typeMismatch"),
+    patternMismatch: false, tooLong: false, tooShort: false, rangeUnderflow: false,
+    rangeOverflow: false, stepMismatch: false, badInput: false, customError: false,
+    errors: failures,
+  }) });
+  if (ownCheck) Object.defineProperty(target, "checkValidity", { configurable: true, value: () => failures.length === 0 });
+  if (ownMessage) Object.defineProperty(target, "validationMessage", { configurable: true, get: () => failures[0]?.message ?? "" });
+  if (ownReport) Object.defineProperty(target, "reportValidity", { configurable: true, value: () => failures.length === 0 });
+  const refresh = (): void => {
+    failures = issues();
+    target.setCustomValidity?.(failures[0]?.message ?? "");
+    if (!('setCustomValidity' in target)) {
+      if (failures.length > 0) {
+        element.setAttribute("data-invalid", "");
+        element.removeAttribute("data-valid");
+      } else {
+        element.removeAttribute("data-invalid");
+        element.setAttribute("data-valid", "");
+      }
+      if (failures.length > 0 && (!element.hasAttribute("aria-invalid") || mirroredAria)) {
+        element.setAttribute("aria-invalid", "true");
+        mirroredAria = true;
+      } else if (failures.length === 0 && mirroredAria) {
+        element.removeAttribute("aria-invalid");
+        mirroredAria = false;
+      }
+    }
+  };
+  return { refresh, stop: () => {
+    target.setCustomValidity?.("");
+    if (ownValidity) delete target.validity;
+    if (ownCheck) delete target.checkValidity;
+    if (ownMessage) delete target.validationMessage;
+    if (ownReport) delete target.reportValidity;
+    element.removeAttribute("data-invalid");
+    element.removeAttribute("data-valid");
+    if (mirroredAria) element.removeAttribute("aria-invalid");
+  } };
+}
+
 function propValue(input: unknown, type: GeneratedPropType): unknown {
   if (type === "string" && typeof input === "string") return input;
   if (type === "boolean" && typeof input === "boolean") return input;
   if (type === "number" && typeof input === "number" && Number.isFinite(input)) return input;
-  if (Array.isArray(type) && type.includes(input as string)) return input;
-  throw new TypeError("HR002: A prop invocation value does not satisfy its declared type.");
+  if (Array.isArray(type) && typeof input === "string") return input;
+  return input;
+}
+
+function generatedPropIssues(prop: GeneratedProp, value: unknown): readonly ChoiceIssue[] {
+  if (value === null || value === undefined || value === "") {
+    return prop.required ? [{ path: prop.name, reason: "valueMissing", message: `\`${prop.name}\` is required.` }] : [];
+  }
+  const type = prop.type;
+  const valid = type === "string" ? typeof value === "string"
+    : type === "boolean" ? typeof value === "boolean"
+    : type === "number" ? typeof value === "number" && Number.isFinite(value)
+    : typeof value === "string" && (type as readonly string[]).includes(value);
+  return valid ? [] : [{ path: prop.name, reason: "typeMismatch", message: `Value does not satisfy \`${prop.name}\`.` }];
 }
 
 function assignedGeneratedProp(
@@ -197,12 +262,9 @@ function assignedGeneratedProp(
   input: unknown,
 ): unknown {
   if (input === null) {
-    if (prop.required) throw new TypeError(`HC021: Required prop \`${prop.name}\` cannot be null.`);
     return null;
   }
-  if (prop.required && input === "") throw new TypeError(`HR002: Required prop \`${prop.name}\` cannot be empty.`);
   if (input !== undefined) return propValue(input, prop.type);
-  if (prop.required) throw new TypeError(`HC020: Required prop \`${prop.name}\` was not provided.`);
   return undefined;
 }
 
@@ -220,6 +282,9 @@ export function manageGeneratedProps(
   const explicit = props.map((prop) => assignedGeneratedProp(prop, prop.value));
   const effective = (index: number): unknown => explicit[index] === undefined
     ? (props[index]!.default ?? null) : explicit[index];
+  const validity = props.length > 0
+    ? managedChoiceValidity(element, () => props.flatMap((prop, index) => generatedPropIssues(prop, effective(index))))
+    : undefined;
   const byName = new Map(props.map((prop, index) => [prop.name, index]));
   const dirty = new Set(props.map((_, index) => index));
   let connected = false;
@@ -237,6 +302,7 @@ export function manageGeneratedProps(
       apply?.(prop.name, effective(index));
     }
     dirty.clear();
+    validity?.refresh();
   };
   const schedule = (index: number): void => {
     dirty.add(index);
@@ -256,7 +322,7 @@ export function manageGeneratedProps(
     }
   });
 
-  return manageGeneratedLifecycle(
+  const stopLifecycle = manageGeneratedLifecycle(
     element,
     () => {
       connected = true;
@@ -267,6 +333,7 @@ export function manageGeneratedProps(
       connected = false;
     },
   );
+  return () => { stopLifecycle(); validity?.stop(); };
 }
 
 /** A compact equivalent of manageGeneratedProps for generated components with exactly one scalar prop. */
@@ -280,6 +347,7 @@ export function manageGeneratedProp(
   let connected = false;
   let pending = false;
   const effective = (): unknown => explicit === undefined ? (prop.default ?? null) : explicit;
+  const validity = managedChoiceValidity(element, () => generatedPropIssues(prop, effective()));
   const flush = (): void => {
     pending = false;
     if (!connected || !dirty) return;
@@ -289,6 +357,7 @@ export function manageGeneratedProp(
     if (serialized === null) element.removeAttribute(prop.attribute);
     else element.setAttribute(prop.attribute, serialized);
     apply?.(effective());
+    validity?.refresh();
   };
   const schedule = (): void => {
     dirty = true;
@@ -305,7 +374,7 @@ export function manageGeneratedProp(
       schedule();
     }
   });
-  return manageGeneratedLifecycle(
+  const stopLifecycle = manageGeneratedLifecycle(
     element,
     () => {
       connected = true;
@@ -314,6 +383,7 @@ export function manageGeneratedProp(
     },
     () => { connected = false; },
   );
+  return () => { stopLifecycle(); validity?.stop(); };
 }
 
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */

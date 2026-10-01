@@ -18,6 +18,7 @@ import { assertPixelsEqual, launchParityBrowser } from "./pixel-parity.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const livePath = new URL("../src/live.ts", import.meta.url).pathname;
+const validationAlias = { "@nextwebwg/html-next/validation": new URL("../src/validation.ts", import.meta.url).pathname };
 
 interface ParityCase {
   readonly name: string;
@@ -57,9 +58,9 @@ const cases: readonly ParityCase[] = [
     features: ["state", "computed", "$value", "handlers", "typed events"],
     definitions: {
       "x-counter": `<template component="x-counter" status="early" summary="Parity counter.">
-        <defs><state name="count" :value="0"></state><computed name="double" from="count * 2"></computed>
+        <defs><state type="number" name="count" value="0"></state><computed name="double" from="count * 2"></computed>
         <event name="count-change" type="number"></event>
-        <handler name="increment"><set name="count" :value="count + 1"></set><dispatch event="count-change" :value="count"></dispatch></handler></defs>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set><dispatch event="count-change" expr:value="count"></dispatch></handler></defs>
         <button type="button" on:click="increment" from:aria-label="format('Count %s', count)"><output $value="double"></output></button>
       </template>`,
     },
@@ -75,9 +76,9 @@ const cases: readonly ParityCase[] = [
     features: ["event capture", "event propagation", "event cancellation", "once handlers"],
     definitions: {
       "x-event-options": `<template component="x-event-options" status="early" summary="Event options parity."><defs>
-        <state name="captured" :value="0"></state><state name="pressed" :value="0"></state>
-        <handler name="captureClick"><set name="captured" :value="captured + 1"></set></handler>
-        <handler name="press"><set name="pressed" :value="pressed + 1"></set></handler>
+        <state type="number" name="captured" value="0"></state><state type="number" name="pressed" value="0"></state>
+        <handler name="captureClick"><set name="captured" expr:value="captured + 1"></set></handler>
+        <handler name="press"><set name="pressed" expr:value="pressed + 1"></set></handler>
         </defs><div on:click.capture="captureClick"><button type="button" on:click.stop.prevent.once="press">Press</button>
         <output $value="format('%s:%s', captured, pressed)"></output></div></template>`,
     },
@@ -99,11 +100,11 @@ const cases: readonly ParityCase[] = [
     features: ["self modifier", "keyboard filters", "system-key filters", "exact modifier"],
     definitions: {
       "x-event-filters": `<template component="x-event-filters" status="early" summary="Event filter parity."><defs>
-        <state name="selfHits" :value="0"></state><state name="keyHits" :value="0"></state>
-        <state name="onceHits" :value="0"></state>
-        <handler name="selfHit"><set name="selfHits" :value="selfHits + 1"></set></handler>
-        <handler name="keyHit"><set name="keyHits" :value="keyHits + 1"></set></handler>
-        <handler name="onceHit"><set name="onceHits" :value="onceHits + 1"></set></handler>
+        <state type="number" name="selfHits" value="0"></state><state type="number" name="keyHits" value="0"></state>
+        <state type="number" name="onceHits" value="0"></state>
+        <handler name="selfHit"><set name="selfHits" expr:value="selfHits + 1"></set></handler>
+        <handler name="keyHit"><set name="keyHits" expr:value="keyHits + 1"></set></handler>
+        <handler name="onceHit"><set name="onceHits" expr:value="onceHits + 1"></set></handler>
         </defs><section on:click.self="selfHit"><button type="button">Child</button>
         <input on:keydown.ctrl.enter.exact="keyHit">
         <input class="once" on:keydown.enter.once="onceHit">
@@ -128,8 +129,8 @@ const cases: readonly ParityCase[] = [
     features: ["self modifier", "stop modifier", "modifier order", "native propagation"],
     definitions: {
       "x-filter-order": `<template component="x-filter-order" status="early" summary="Event filter ordering parity."><defs>
-        <state name="hits" :value="0"></state>
-        <handler name="hit"><set name="hits" :value="hits + 1"></set></handler>
+        <state type="number" name="hits" value="0"></state>
+        <handler name="hit"><set name="hits" expr:value="hits + 1"></set></handler>
         </defs><section on:click.stop.self="hit"><button type="button">Child</button><output $value="hits"></output></section></template>`,
     },
     invocation: `<x-filter-order id="case"></x-filter-order>`,
@@ -147,7 +148,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-event-contract": `<template component="x-event-contract" status="early" summary="Event contract parity."><defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
-        <handler name="save"><dispatch event="saved" :value="7"></dispatch></handler>
+        <handler name="save"><dispatch event="saved" expr:value="7"></dispatch></handler>
         </defs><section><button type="button" on:click="save">Save</button></section></template>`,
     },
     invocation: `<x-event-contract id="case"></x-event-contract>`,
@@ -168,11 +169,11 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-event-source": `<template component="x-event-source" status="early" summary="Event source."><defs>
         <event name="saved" type="number"></event>
-        <handler name="fire"><dispatch event="saved" :value="1"></dispatch></handler>
+        <handler name="fire"><dispatch event="saved" expr:value="1"></dispatch></handler>
         </defs><button type="button" on:click="fire">Fire</button></template>`,
       "x-event-listener": `<template component="x-event-listener" status="early" summary="Event listener."><defs>
-        <state name="count" :value="0"></state>
-        <handler name="record"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="record"><set name="count" expr:value="count + 1"></set></handler>
         </defs><section on:saved="record"><x-event-source on:saved="record"></x-event-source>
         <output $value="count"></output></section></template>`,
     },
@@ -189,12 +190,12 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-stopping-source": `<template component="x-stopping-source" status="early" summary="Stopping event source."><defs>
         <event name="saved" type="number"></event>
-        <handler name="fire"><dispatch event="saved" :value="1"></dispatch></handler>
+        <handler name="fire"><dispatch event="saved" expr:value="1"></dispatch></handler>
         </defs><button type="button" on:click="fire">Fire</button></template>`,
       "x-stopping-parent": `<template component="x-stopping-parent" status="early" summary="Stopping event listener."><defs>
-        <state name="direct" :value="0"></state><state name="ancestor" :value="0"></state>
-        <handler name="recordDirect"><set name="direct" :value="direct + 1"></set></handler>
-        <handler name="recordAncestor"><set name="ancestor" :value="ancestor + 1"></set></handler>
+        <state type="number" name="direct" value="0"></state><state type="number" name="ancestor" value="0"></state>
+        <handler name="recordDirect"><set name="direct" expr:value="direct + 1"></set></handler>
+        <handler name="recordAncestor"><set name="ancestor" expr:value="ancestor + 1"></set></handler>
         </defs><section on:saved="recordAncestor"><x-stopping-source on:saved.stop="recordDirect"></x-stopping-source>
         <output $value="format('%s:%s', direct, ancestor)"></output></section></template>`,
     },
@@ -211,8 +212,8 @@ const cases: readonly ParityCase[] = [
     features: ["middle mouse button filter", "right mouse button filter", "native event type", "modifier order"],
     definitions: {
       "x-right-click": `<template component="x-right-click" status="early" summary="Right-click parity."><defs>
-        <state name="hits" :value="0"></state>
-        <handler name="hit"><set name="hits" :value="hits + 1"></set></handler>
+        <state type="number" name="hits" value="0"></state>
+        <handler name="hit"><set name="hits" expr:value="hits + 1"></set></handler>
         </defs><section><button class="right" type="button" on:click.right.stop.prevent="hit">Right</button>
         <button class="middle" type="button" on:click.middle="hit">Middle</button><output $value="hits"></output></section></template>`,
     },
@@ -236,16 +237,16 @@ const cases: readonly ParityCase[] = [
     features: ["context provision", "context consumption", "nested components", "reactive attribute bindings"],
     definitions: {
       "x-steps": `<template component="x-steps" status="early" summary="Parity steps."><defs>
-        <state name="current" :value="1" context></state>
-        <handler name="next"><set name="current" :value="current + 1"></set></handler>
+        <state type="number" name="current" value="1"></state>
+        <handler name="next"><set name="current" expr:value="current + 1"></set></handler>
         </defs><section><button type="button" on:click="next">Next</button><ol><slot></slot></ol></section></template>`,
       "x-step": `<template component="x-step" status="early" summary="Parity step."><defs>
-        <prop name="number" type="number" required>Step number.</prop>
+        <prop name="index" type="number" required>Step index.</prop>
         <context name="current" from="x-steps" as="activeStep"></context>
-        </defs><li from:aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`,
+        </defs><li from:aria-current="activeStep = index ? 'step' : null"><slot></slot></li></template>`,
     },
-    invocation: `<x-steps id="case"><x-step number="1">One</x-step><x-step number="2">Two</x-step></x-steps>`,
-    vueRender: `h(XSteps, { id: "case" }, { default: () => [h(XStep, { number: 1 }, () => "One"), h(XStep, { number: 2 }, () => "Two")] })`,
+    invocation: `<x-steps id="case"><x-step index="1">One</x-step><x-step index="2">Two</x-step></x-steps>`,
+    vueRender: `h(XSteps, { id: "case" }, { default: () => [h(XStep, { index: 1 }, () => "One"), h(XStep, { index: 2 }, () => "Two")] })`,
     root: "#case",
     probe: `({ tag: root.localName, steps: Array.from(root.querySelectorAll("li"), node => [node.textContent?.trim(), node.getAttribute("aria-current")]) })`,
     action: `root.querySelector("button").click()`,
@@ -255,8 +256,8 @@ const cases: readonly ParityCase[] = [
     features: ["$if", "$match", "$when", "$else", "$with", "ternary expressions"],
     definitions: {
       "x-choice": `<template component="x-choice" status="early" summary="Parity choice."><defs>
-        <state name="show" :value="true"></state>
-        <handler name="toggle"><set name="show" :value="not show"></set></handler>
+        <state type="boolean" name="show" value="true"></state>
+        <handler name="toggle"><set name="show" expr:value="not show"></set></handler>
         </defs><section><button type="button" on:click="toggle">Toggle</button>
         <span class="flag" $if="show" $value="show ? 'Shown' : 'Hidden'"></span>
         <template $match="show as active"><b $when="active">On</b><i $else>Off</i></template>
@@ -275,8 +276,8 @@ const cases: readonly ParityCase[] = [
     features: ["keyed list reorder", "nested components", "prop updates"],
     definitions: {
       "x-items": `<template component="x-items" status="early" summary="Keyed items."><defs>
-        <state name="rows" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
-        <handler name="reorder"><set name="rows" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }, { id: 'b', label: 'Bee' }]"></set></handler>
+        <state type="list(unknown)" name="rows" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
+        <handler name="reorder"><set name="rows" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }, { id: 'b', label: 'Bee' }]"></set></handler>
         </defs><section><button type="button" on:click="reorder">Reorder</button><ul>
         <x-item $each="row of rows" $key="row.id" from:data-id="row.id" from:label="row.label"></x-item>
         </ul></section></template>`,
@@ -296,7 +297,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-html": `<template component="x-html" status="early" summary="Sanitized markup."><defs>
         <state name="body" value="&lt;b title='safe'&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;"></state>
-        <handler name="change"><set name="body" value="&lt;i title='next'&gt;Two&lt;/i&gt;&lt;img src=x onerror=alert(1)&gt;"></set></handler>
+        <handler name="change"><set name="body" expr:value="'&lt;i title=&quot;next&quot;&gt;Two&lt;/i&gt;&lt;img src=x onerror=alert(1)&gt;'"></set></handler>
         </defs><article><div class="block" $html="body"></div>
         <p>Before <template $html="body"></template> after</p>
         <button type="button" on:click="change">Change</button></article>
@@ -341,12 +342,12 @@ const cases: readonly ParityCase[] = [
     features: ["scoped slots", "consumer lexical state", "nested component conversion", "slot repetition"],
     definitions: {
       "x-scoped-rows": `<template component="x-scoped-rows"><defs>
-        <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
-        <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+        <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+        <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
         <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>`,
       "x-scoped-consumer": `<template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
-        <handler name="rename"><set name="heading" :value="'Team'"></set></handler></defs>
+        <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
         <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
         <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
         </x-scoped-rows></main></template>`,
@@ -363,8 +364,8 @@ const cases: readonly ParityCase[] = [
     features: ["scoped slots", "slot props", "slot repetition", "slot fallback"],
     definitions: {
       "x-scoped-list": `<template component="x-scoped-list"><defs>
-        <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
-        <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+        <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+        <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
         </defs><section><button type="button" on:click="add">Add</button><ul>
         <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index">
         <li class="fallback" $value="row.name"></li></slot></ul></section></template>`,
@@ -381,9 +382,9 @@ const cases: readonly ParityCase[] = [
     features: ["native attribute binding", "dirty value", "dirty checkedness", "unrelated render"],
     definitions: {
       "x-attribute-control": `<template component="x-attribute-control" status="early" summary="Native attribute semantics."><defs>
-        <state name="label" value="first"></state><state name="enabled" :value="true"></state><state name="count" :value="0"></state>
-        <handler name="bump"><set name="count" :value="count + 1"></set></handler>
-        <handler name="advance"><set name="label" :value="'second'"></set><set name="enabled" :value="false"></set></handler>
+        <state name="label" value="first"></state><state type="boolean" name="enabled" value="true"></state><state type="number" name="count" value="0"></state>
+        <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="advance"><set name="label" expr:value="'second'"></set><set name="enabled" value="false"></set></handler>
         </defs><form><input class="text" from:value="label"><input class="property" .value="label" value="authored"><input class="check" type="checkbox" from:checked="enabled">
         <button class="bump" type="button" on:click="bump">Bump</button><button class="advance" type="button" on:click="advance">Advance</button>
         <output $value="count"></output></form></template>`,
@@ -401,7 +402,7 @@ const cases: readonly ParityCase[] = [
     features: ["form ownership", "text input", "checkbox", "radio", "select/option", "number input", "native validity", "FormData"],
     definitions: {
       "x-form": `<template component="x-form" status="early" summary="Form parity."><defs>
-        <state name="form" :value="{ text: 'a', checked: false, radio: false, choice: 'a', count: 1 }"></state>
+        <state type="object({ text: string, checked: boolean, radio: boolean, choice: string, count: number })" name="form" value="{ text: 'a', checked: false, radio: false, choice: 'a', count: 1 }"></state>
         </defs><form><input class="text" name="text" required minlength="3" maxlength="6" pattern="[a-z]+" bind:value="form.text">
         <input class="check" type="checkbox" name="check" bind:checked="form.checked">
         <input class="radio" type="radio" name="radio" bind:checked="form.radio">
@@ -421,7 +422,7 @@ const cases: readonly ParityCase[] = [
     features: ["form association", "native validation", "FormData", "component root replacement"],
     definitions: {
       "x-slug": `<template component="x-slug" status="early" summary="Slug editor."><defs>
-        <state name="slug" :value="''"></state></defs>
+        <state type="string" name="slug" value=""></state></defs>
         <fieldset><input name="slug" required pattern="[a-z-]+" bind:value="slug"><output $value="slug"></output></fieldset>
         </template>`,
     },
@@ -451,7 +452,7 @@ const cases: readonly ParityCase[] = [
     features: ["multiple select", "list binding", "option selection", "FormData"],
     definitions: {
       "x-multi": `<template component="x-multi" status="early" summary="Multiple choice."><defs>
-        <state name="choices" :value="['a']"></state><computed name="selectedCount" from="choices.length"></computed>
+        <state type="list(unknown)" name="choices" value="['a']"></state><computed name="selectedCount" from="choices.length"></computed>
         </defs><select name="choice" multiple bind:value="choices" from:data-count="selectedCount">
         <option value="a">A</option><option value="b">B</option><option value="c">C</option></select></template>`,
     },
@@ -466,8 +467,8 @@ const cases: readonly ParityCase[] = [
     features: ["reactive multiple attribute", "select value binding", "FormData"],
     definitions: {
       "x-switching-select": `<template component="x-switching-select" status="early" summary="Reactive select mode."><defs>
-        <state name="multi" :value="false"></state><state name="choices" :value="['b']"></state>
-        <handler name="toggle"><set name="multi" :value="not multi"></set></handler></defs>
+        <state type="boolean" name="multi" value="false"></state><state type="list(unknown)" name="choices" value="['b']"></state>
+        <handler name="toggle"><set name="multi" expr:value="not multi"></set></handler></defs>
         <form><select name="choice" from:multiple="multi" bind:value="choices"><option value="a">A</option><option value="b">B</option></select>
         <button type="button" on:click="toggle">Toggle</button><output $value="multi"></output></form></template>`,
     },
@@ -484,7 +485,7 @@ const cases: readonly ParityCase[] = [
     definitions: {
       "x-root-choice": `<template component="x-root-choice" status="early" summary="Root choice."><defs>
         <state name="kind" value="a"></state>
-        <handler name="toggle"><set name="kind" :value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
+        <handler name="toggle"><set name="kind" expr:value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
         <section class="choice" $match="kind as choice" from:data-kind="kind" on:click="toggle">
           <p $when="choice = 'a'" class="first">First</p>
           <p $else class="second">Second</p>
@@ -502,9 +503,9 @@ const cases: readonly ParityCase[] = [
     features: ["single select", "reactive options", "unchanged bound model"],
     definitions: {
       "x-changing-options": `<template component="x-changing-options" status="early" summary="Changing options."><defs>
-        <state name="items" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
+        <state type="list(unknown)" name="items" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
         <state name="choice" value="b"></state>
-        <handler name="change"><set name="items" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler></defs>
+        <handler name="change"><set name="items" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler></defs>
         <form><select name="choice" bind:value="choice"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
         <button type="button" on:click="change">Change</button><output $value="choice"></output></form></template>`,
     },
@@ -519,10 +520,10 @@ const cases: readonly ParityCase[] = [
     features: ["keyed options", "multiple select", "reactive selected values", "FormData"],
     definitions: {
       "x-dynamic-choice": `<template component="x-dynamic-choice" status="early" summary="Dynamic choices."><defs>
-        <state name="items" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
-        <state name="choices" :value="['b']"></state>
-        <handler name="change"><set name="items" :value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }, { id: 'a', label: 'A' }]"></set>
-        <set name="choices" :value="['c']"></set></handler></defs>
+        <state type="list(unknown)" name="items" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
+        <state type="list(unknown)" name="choices" value="['b']"></state>
+        <handler name="change"><set name="items" expr:value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }, { id: 'a', label: 'A' }]"></set>
+        <set name="choices" expr:value="['c']"></set></handler></defs>
         <form><select name="choice" multiple bind:value="choices" from:data-count="choices.length">
         <option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
         <button type="button" on:click="change">Change</button></form></template>`,
@@ -542,7 +543,7 @@ const cases: readonly ParityCase[] = [
         <data name="result" src="https://api.example/search" type="object({ label: string })">
           <param name="q" from:value="query"></param>
         </data>
-        <handler name="next"><set name="query" value="second"></set></handler>
+        <handler name="next"><set name="query" expr:value="'second'"></set></handler>
         </defs><section><button type="button" on:click="next">Next</button>
         <i $value="result.pending"></i><output $value="result.value.label"></output></section></template>`,
     },
@@ -564,7 +565,7 @@ const cases: readonly ParityCase[] = [
         <data name="result" src="https://api.example/search" type="object({ label: string })">
           <param name="q" from:value="query"></param>
         </data>
-        <handler name="next"><set name="query" value="second"></set></handler>
+        <handler name="next"><set name="query" expr:value="'second'"></set></handler>
         </defs><section><button type="button" on:click="next">Next</button>
         <i $value="result.pending"></i><output $value="result.value.label"></output></section></template>`,
     },
@@ -582,12 +583,12 @@ const cases: readonly ParityCase[] = [
     features: ["data type checks", "per-reference inert reads", "computed stability"],
     definitions: {
       "x-typed-data": `<template component="x-typed-data" status="early" summary="Parity typed data."><defs>
-        <state name="round" :value="1"></state>
+        <state type="number" name="round" value="1"></state>
         <data name="result" src="https://api.example/search" type="object({ label: string, note: string, ... })">
           <param name="round" from:value="round"></param>
         </data>
         <computed name="shouted" from="format('%s!', result.value.label)"></computed>
-        <handler name="again"><set name="round" :value="round + 1"></set></handler>
+        <handler name="again"><set name="round" expr:value="round + 1"></set></handler>
         </defs><section from:data-label="result.value.label" from:data-note="result.value.note"><button type="button" on:click="again">Again</button>
         <output class="label" $value="result.value.label"></output>
         <output class="note" $value="result.value.note"></output>
@@ -608,8 +609,8 @@ const cases: readonly ParityCase[] = [
     features: [":host", ":host-state", ":slotted", "style isolation"],
     definitions: {
       "x-painted": `<template component="x-painted" status="early" summary="Parity paint."><defs>
-        <state name="active" :value="true"></state>
-        <handler name="toggle"><set name="active" :value="not active"></set></handler>
+        <state type="boolean" name="active" value="true"></state>
+        <handler name="toggle"><set name="active" expr:value="not active"></set></handler>
         </defs><section><button type="button" on:click="toggle">Toggle</button><slot></slot><span>Own</span></section>
         <style>:host { display: block; padding: 4px; } :host-state([active]) { background: rgb(230 240 250); }
         :slotted(strong) { color: rgb(60 20 100); } span { color: rgb(20 100 60); }</style></template>`,
@@ -658,7 +659,7 @@ function vueInvocation(invocation: string, definition: ComponentDefinition): str
         : undefined;
       const name = propName ?? attribute.name;
       const type = propName === undefined ? undefined : definition.contract.props[propName]?.type;
-      attributes[name] = type === "number" ? Number(attribute.value)
+      attributes[name] = type === "number" && Number.isFinite(Number(attribute.value)) ? Number(attribute.value)
         : type === "boolean" ? attribute.value !== "false"
         : attribute.value;
     }
@@ -791,16 +792,16 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
       const entry = join(caseDirectory, "entry.ts");
       const bundle = join(caseDirectory, "vue.js");
       await writeFile(entry, `import { createApp, h } from "vue";\n${imports.join("\n")}\n${scopeAssignments.join("\n")}\nwindow.parityEvents = [];\ncreateApp({ render: () => ${testCase.vueRender} }).mount(document.querySelector("main"));\n`);
-      await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
+      await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath], alias: validationAlias });
       vueBundles.set(testCase.name, bundle);
       if (testCase.name.startsWith("sanitized HTML")) {
         const hydrateEntry = join(caseDirectory, "hydrate.ts");
         const hydrateBundle = join(caseDirectory, "hydrate.js");
         await writeFile(hydrateEntry, `import { createSSRApp, h } from "vue";\n${imports.join("\n")}\n${scopeAssignments.join("\n")}\ncreateSSRApp({ render: () => ${testCase.vueRender} }).mount(document.querySelector("main"));\n`);
-        await build({ entryPoints: [hydrateEntry], outfile: hydrateBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
+        await build({ entryPoints: [hydrateEntry], outfile: hydrateBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath], alias: validationAlias });
         const serverEntry = join(caseDirectory, "server.ts");
         await writeFile(serverEntry, `import { createSSRApp, h } from "vue";\nimport { renderToString } from "@vue/server-renderer";\n${imports.join("\n")}\n${scopeAssignments.join("\n")}\nexport const render = () => renderToString(createSSRApp({ render: () => ${testCase.vueRender} }));\n`);
-        const server = await build({ entryPoints: [serverEntry], bundle: true, format: "esm", platform: "node", write: false, nodePaths: [nodeModulesPath] });
+        const server = await build({ entryPoints: [serverEntry], bundle: true, format: "esm", platform: "node", write: false, nodePaths: [nodeModulesPath], alias: validationAlias });
         const module = await import(`data:text/javascript;base64,${Buffer.from(server.outputFiles[0]!.text).toString("base64")}`);
         htmlHydrationBundle = hydrateBundle;
         htmlServerMarkup = await module.render();
@@ -833,14 +834,14 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
       const entry = join(caseDirectory, "entry.ts");
       const bundle = join(caseDirectory, "vue.js");
       await writeFile(entry, `import { createApp, h } from "vue";\nimport ${definition.contract.name} from "./vue/${definition.contract.name}";\n${definition.contract.name}.__scopeId = "${scopeId}";\ncreateApp({ render: () => ${vueInvocation(scene.invocation, definition)} }).mount(document.querySelector("main"));\n`);
-      await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
+      await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath], alias: validationAlias });
       corpusBundles.set(testCase.name, bundle);
     }
   });
 
   it("tracks Vue conversion of every successful live-runtime conformance example", () => {
     const successes = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successes.length, 29, "review newly added conformance examples for Vue pixel and behavior coverage");
+    assert.equal(successes.length, 31, "review newly added conformance examples for Vue pixel and behavior coverage");
     for (const testCase of successes) {
       const definition = parseComponent(conformanceScene(testCase.source).definition, testCase.name);
       const gap = knownConversionGaps.get(testCase.name);

@@ -22,9 +22,9 @@ const source = `<template component="x-feed" status="early" summary="Feed."><def
 </defs><section><output class="nearby" $value="nearby.value.label"></output>
 <output class="rooted" $value="rooted.value.label"></output><output class="note" $value="note.value"></output></section></template>`;
 const lifecycleSource = `<template component="x-data-cycle" status="early" summary="Data lifecycle."><defs>
-  <state name="page" :value="1"></state>
+  <state type="number" name="page" value="1"></state>
   <data name="feed" src="/api/cycle" type="object({ label: string })" debounce="500ms" poll="1500ms"><param name="page" from:value="page"></param></data>
-  <handler name="next"><set name="page" :value="page + 1"></set></handler>
+  <handler name="next"><set name="page" expr:value="page + 1"></set></handler>
 </defs><section><button type="button" on:click="next">Next</button>
 <output class="label" $value="feed.value.label"></output>
 <output class="pending" $value="feed.pending"></output>

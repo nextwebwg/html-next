@@ -16,13 +16,13 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-form-matrix" status="early" summary="Native form model parity."><defs>
-  <state name="form" :value="{ text: 'ab', checked: false, radio: false, choice: 'b', choices: ['b'] }"></state>
-  <state name="items" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
-  <state name="ticks" :value="0"></state>
-  <handler name="unrelated"><set name="ticks" :value="ticks + 1"></set></handler>
-  <handler name="changeOptions"><set name="items" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler>
-  <handler name="chooseC"><set name="form.choice" :value="'c'"></set><set name="form.choices" :value="['c']"></set></handler>
-  <handler name="mutateChoices"><set name="form.choices[0]" :value="'a'"></set></handler>
+  <state type="object({ text: string, checked: boolean, radio: boolean, choice: string, choices: list(string) })" name="form" value="{ text: 'ab', checked: false, radio: false, choice: 'b', choices: ['b'] }"></state>
+  <state type="list(unknown)" name="items" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
+  <state type="number" name="ticks" value="0"></state>
+  <handler name="unrelated"><set name="ticks" expr:value="ticks + 1"></set></handler>
+  <handler name="changeOptions"><set name="items" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler>
+  <handler name="chooseC"><set name="form.choice" expr:value="'c'"></set><set name="form.choices" expr:value="['c']"></set></handler>
+  <handler name="mutateChoices"><set name="form.choices[0]" expr:value="'a'"></set></handler>
 </defs><form><input class="text" name="text" required minlength="3" bind:value="form.text">
   <input class="read-only" value="authored" .value="form.text">
   <input class="check" type="checkbox" name="check" bind:checked="form.checked">

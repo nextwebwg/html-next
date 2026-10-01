@@ -104,7 +104,7 @@ const successes: ConformanceCase[] = [
     name: "keeps a single native root when $with scopes the root",
     source: scene({
       tag: "x-root-with",
-      defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" :value="'Bea'"></set></handler>`,
+      defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" expr:value="'Bea'"></set></handler>`,
       root: `<section $with="label as display" from:data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
       use: `<x-root-with id="person"></x-root-with>`,
     }),
@@ -178,7 +178,7 @@ const successes: ConformanceCase[] = [
     name: "styles by camel-case props and state with :host-state()",
     source: scene({
       tag: "x-camel-state",
-      defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state name="toneName" :value="'warm'"></state>`,
+      defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state type="string" name="toneName" value="warm"></state>`,
       root: `<div></div>`,
       style: `:host-state([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
       use: `<x-camel-state id="c"></x-camel-state>`,
@@ -365,7 +365,7 @@ const successes: ConformanceCase[] = [
   {
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
-      defs: `<state name="obj" :value="{ a: 1 }"></state>`,
+      defs: `<state type="object({ a: number })" name="obj" value="{ a: 1 }"></state>`,
       root: `<div from:data-x="obj.b.c" $value="obj.missing"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
@@ -470,15 +470,14 @@ const successes: ConformanceCase[] = [
     expect: { probe: `return q('#b .who').textContent;`, result: "Ada" },
   },
   {
-    name: "reactive declarations seed once: state reads a prop, computed evaluates, data is pending",
+    name: "reactive declarations seed once: state initializes, computed evaluates, data is pending",
     source: scene({
       defs:
-        `<prop name="start" type="number" default="3">Start.</prop>` +
-        `<state name="count" :value="start"></state>` +
+        `<state name="count" type="number" value="5"></state>` +
         `<computed name="doubled" from="count * 2"></computed>` +
         `<data name="feed"></data>`,
       root: `<div from:data-count="count" from:data-doubled="doubled"><i $value="feed.pending"></i></div>`,
-      use: `<x-t id="b" start="5"></x-t>`,
+      use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
@@ -529,13 +528,16 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HT005" },
   },
   {
-    name: "HC020: a required prop is not provided",
+    name: "an absent required prop lowers with valueMissing validity",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button from:data-l="label"></button>`,
+      root: `<div from:data-l="label"></div>`,
       use: `<x-t></x-t>`,
     }),
-    expect: { code: "HC020" },
+    expect: {
+      probe: `const el = q('div'); return { missing: el.validity.valueMissing, valid: el.validity.valid };`,
+      result: { missing: true, valid: false },
+    },
   },
   {
     name: "HR001: two definitions declare the same tag",
@@ -548,7 +550,7 @@ const diagnostics: ConformanceCase[] = [
   {
     name: "HC020: a name collides in the flat component namespace (prop and state)",
     source: scene({
-      defs: `<prop name="count" type="number" default="0">Count.</prop><state name="count" :value="1"></state>`,
+      defs: `<prop name="count" type="number" default="0">Count.</prop><state type="number" name="count" value="1"></state>`,
       root: `<div from:data-c="count"></div>`,
       use: `<x-t></x-t>`,
     }),
@@ -566,7 +568,7 @@ const diagnostics: ConformanceCase[] = [
   {
     name: "HY002: structured state cannot be tested by :host-state()",
     source: scene({
-      defs: `<state name="items" type="list(string)" :value="[]"></state>`,
+      defs: `<state name="items" type="list(string)" value="[]"></state>`,
       root: `<div></div>`,
       style: `:host-state([items]) { color: red; }`,
       use: `<x-t></x-t>`,
@@ -662,13 +664,16 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HS002" },
   },
   {
-    name: "HR002: a non-finite number prop invocation value",
+    name: "an unparseable number prop retains its written value and reports badInput",
     source: scene({
       defs: `<prop name="n" type="number" default="0">N.</prop>`,
       root: `<div from:data-n="n"></div>`,
       use: `<x-t n="abc"></x-t>`,
     }),
-    expect: { code: "HR002" },
+    expect: {
+      probe: `const el = q('div'); return { value: el.getAttribute('data-n'), badInput: el.validity.badInput };`,
+      result: { value: "abc", badInput: true },
+    },
   },
   {
     name: "HT003: an undeclared name in an expression",

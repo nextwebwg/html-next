@@ -3,6 +3,7 @@
 import { deepFreeze } from "./freeze.js";
 import { compileExpression, type ExpressionNode } from "./expression.js";
 import { CSS_COLOR_KEYWORDS } from "./css-color-keywords.js";
+import { boundFailures, type ValueBounds } from "./value-constraints.js";
 
 export type TerminalTypeName =
   | "string"
@@ -58,11 +59,11 @@ export interface SelectedType {
   readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[];
 }
 
-/** A scalar type with a finite allowed set, authored with a separate values attribute. */
-export interface ConstrainedType {
+/** A scalar type with authored value constraints on a nested field. */
+export interface ConstrainedType extends ValueBounds {
   readonly kind: "constrained";
   readonly base: TypeNode;
-  readonly values: readonly (string | number | boolean)[];
+  readonly values?: readonly (string | number | boolean)[];
 }
 
 export interface ListType {
@@ -104,7 +105,8 @@ export type TypeInput =
   | "boolean"
   | "number";
 
-export type TypeIssueReason = "typeMismatch" | "badInput" | "untrustedValue";
+export type TypeIssueReason = "typeMismatch" | "badInput" | "untrustedValue" |
+  "rangeUnderflow" | "rangeOverflow" | "tooShort" | "tooLong" | "patternMismatch";
 
 export interface TypeIssue {
   readonly reason: TypeIssueReason;
@@ -313,7 +315,7 @@ export function formatType(type: TypeInput): string {
       : JSON.stringify(node.value);
     case "union": return node.members.map((member) => formatType(member)).join(" | ");
     case "selected": return `selected by ${node.from}`;
-    case "constrained": return `${formatType(node.base)} with values ${node.values.map(String).join(", ")}`;
+    case "constrained": return `${formatType(node.base)}${node.values === undefined ? "" : ` with values ${node.values.map(String).join(", ")}`}`;
     case "list": return `list(${formatType(node.item)})`;
     case "record": return `record(${formatType(node.value)})`;
     case "object": return `object({ ${[
@@ -377,7 +379,8 @@ export function typeScriptType(type: TypeInput): string {
     case "keyword": return JSON.stringify(node.value);
     case "union": return node.members.map(typeScriptType).join(" | ");
     case "selected": return [...new Set(node.options.map((option) => typeScriptType(option.type)))].join(" | ");
-    case "constrained": return node.values.map((value) => JSON.stringify(value)).join(" | ");
+    case "constrained": return node.values === undefined ? typeScriptType(node.base)
+      : node.values.map((value) => JSON.stringify(value)).join(" | ");
     case "list": return `readonly (${typeScriptType(node.item)})[]`;
     case "record": return `Readonly<Record<string, ${typeScriptType(node.value)}>>`;
     case "object": {
@@ -582,8 +585,13 @@ function parseNode(value: unknown, node: TypeNode, path: string, source: "html" 
     case "selected": return issue("typeMismatch", `Type depends on the \`${node.from}\` declaration.`, path);
     case "constrained": {
       const parsed = parseNode(value, node.base, path, source);
-      return parsed.ok && node.values.some((choice) => choice === parsed.value) ? parsed
-        : issue("typeMismatch", `Must be one of ${node.values.map(String).join(", ")}.`, path);
+      if (!parsed.ok) return parsed;
+      if (node.values !== undefined && !node.values.some((choice) => choice === parsed.value)) {
+        return issue("typeMismatch", `Must be one of ${node.values.map(String).join(", ")}.`, path);
+      }
+      const base = node.base.kind === "terminal" ? node.base.name : "";
+      const failures = boundFailures(parsed.value, base, node);
+      return failures.length === 0 ? parsed : { ok: false, issues: failures.map((failure) => ({ ...failure, path })) };
     }
     case "list": {
       const input = source === "html" ? structuredInput(value) : value;

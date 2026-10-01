@@ -58,7 +58,7 @@ const RESERVED = new Set([
   "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
-  "checkedProps", "checkedProp", "PropType", "vBindControl", "readBoundControl",
+  "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
   "SanitizedHtml",
   "String", "Boolean", "Number", "Math", "Object", "Array", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
@@ -142,6 +142,7 @@ interface Context {
   readonly rootArmRef?: string;
   /** Whether the root is a native form control bound to the component's `v-model`. */
   readonly model: boolean;
+  readonly validityValues?: string;
   readonly hostState: boolean;
   readonly guarded: string[];
   readonly globals: ReadonlySet<string>;
@@ -157,7 +158,8 @@ function referenceCheck(type: TypeNode, value: string): string {
     case "object": return `(typeof ${value} === "object" && ${value} !== null && !Array.isArray(${value}))`;
     case "union": return `(${type.members.map((member) => referenceCheck(member, value)).join(" || ")})`;
     case "selected": return `(${type.options.map((option) => referenceCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
+    case "constrained": return type.values === undefined ? referenceCheck(type.base, value)
+      : `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
     case "keyword": return `${value} === ${quote(type.value)}`;
     case "separated-list": return `Array.isArray(${value})`;
     case "terminal":
@@ -551,6 +553,9 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
     const tag = context.definition.contract.tag;
     literals.unshift(`data-component=${attributeValue(tag)}`);
     literals.push("v-bind=\"nativeAttrs($attrs)\"");
+    if (context.validityValues !== undefined) {
+      attributes.push(`v-prop-validity=${bound(`{ contract: propValidityContract, values: ${context.validityValues} }`)}`);
+    }
     for (const { propName, attributeName, existing } of reflected) {
       const value = /^[A-Za-z_$][\w$]*$/.test(propName) ? `checkedProps.${propName}` : `checkedProps[${quote(propName)}]`;
       const fallback = existing?.kind === "literal" ? quote(existing.value) : "undefined";
@@ -629,7 +634,8 @@ function typeCheck(type: TypeNode, value: string): string {
     case "selected":
       return `(${type.options.map((option) => typeCheck(option.type, value)).join(" || ")})`;
     case "constrained":
-      return `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
+      return type.values === undefined ? typeCheck(type.base, value)
+        : `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
     case "list":
       return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => ${typeCheck(type.item, "item")}))`;
     case "record":
@@ -768,7 +774,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const declaredNode = declarationTypeNode(state.type, state.shape);
     const declared = declaredNode === undefined ? undefined : present(declaredNode);
     // A declared type wins; an absent initial value keeps the state nullable.
-    const initial = declared === undefined ? inferred : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN, null: (declared.null ?? false) || inferred === UNKNOWN };
+    const initial = declared === undefined ? UNKNOWN : { type: declared.type, nullable: declared.nullable || inferred === UNKNOWN, null: (declared.null ?? false) || inferred === UNKNOWN };
     define(state.name, name, `${name}.value`, initial);
   }
   const dataNames = new Map<DataDeclaration, string>();
@@ -797,6 +803,19 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   }
   const handlerNames = new Map(handlers.map((handler) => [handler.name, identifiers.take(handler.name, "Handler")]));
 
+  const selectorStateNames = new Set(target.props.flatMap((prop) => {
+    const source = prop.contract.select?.from;
+    return source !== undefined && contract.props[source] === undefined ? [source] : [];
+  }));
+  const validityValues = target.props.length === 0 ? undefined : [
+    "{ ...checkedProps",
+    ...[...selectorStateNames].map((name) => {
+      const state = states.find((candidate) => candidate.name === name)!;
+      return `, ${propKey(name)}: ${stateNames.get(state)}`;
+    }),
+    " }",
+  ].join("");
+
   const styles = compileComponentStylesForVue(definition.css, definition);
   const controlled = definition.controller !== undefined;
   const dispatches = events.length > 0 || controlled;
@@ -813,6 +832,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(arms === undefined ? {} : { rootArmRef: "@html-next/root" }),
     hostState: styles.stateNames.length > 0,
     model: modelProp !== undefined,
+    ...(validityValues === undefined ? {} : { validityValues }),
     guarded: [],
     globals: new Set(script.code.keys()),
     usesHtml: false,
@@ -874,13 +894,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, ${prop.contract.pattern === undefined ? "undefined" : quote(prop.contract.pattern)}, ${prop.contract.values === undefined ? "undefined" : JSON.stringify(prop.contract.values)})`;
+    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)})`;
     const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;
   });
   if (modelProp !== undefined) checkedPropSources.push(
-    `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue", ${modelProp.contract.pattern === undefined ? "undefined" : quote(modelProp.contract.pattern)}, ${modelProp.contract.values === undefined ? "undefined" : JSON.stringify(modelProp.contract.values)}),`);
+    `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue"),`);
   // An event whose detail reports a prop's new value (query-change's { query }, open and close's
   // { open }) also updates that prop, so Vue consumers can write v-model:query and v-model:open.
   const modeled = target.props.filter((prop) => prop !== modelProp && events.some((event) => {
@@ -924,7 +944,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   ].join("\n");
   const stateSource = (declaration: ReactiveDeclaration): string => {
     const name = stateNames.get(declaration)!;
-    const initial = declaration.expression === undefined ? "undefined" : lowering.value(declaration.expression.ast, script);
+    const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
     if (declaration.kind === "computed") {
       const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition);
       if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
@@ -941,7 +961,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     if (declaration.source !== undefined) {
       const parameters = declaration.parameters.map((parameter) =>
         `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, script)}`).join(", ");
-      lines.push(`useDataRead(${name}, { source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: () => ({ ${parameters} }) });`);
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
+        .map((parameter) => lowering.value(parameter.expression.ast, script)).join(", ");
+      lines.push(`useDataRead(${name}, { source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`);
     }
     return lines;
   };
@@ -957,6 +979,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `provide('html-next:nested-depth', ${nestedDepthName} + 1);`,
     ]),
     ...(target.props.length === 0 ? [] : [
+      `const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })};`,
       "const props = defineProps({",
       ...propDefinitions,
       "});",
@@ -1045,7 +1068,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...computedValues.map(stateSource),
     ...(rootWith === undefined ? [] : [`const ${rootWithName} = computed(() => ${lowering.value(rootWithValue!, names.script)});`]),
     ...context.guarded,
-    ...states.filter((state) => state.context === true).map((state) =>
+    ...states.map((state) =>
       `provide(${quote(`html-next:${contract.tag}:${state.name}`)}, ${stateNames.get(state)!});`),
     ...contexts.flatMap((declaration) => {
       const name = contextNames.get(declaration)!;
@@ -1107,7 +1130,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(VUE_HTML_SPECIFIER)};`] : []),
     ...(context.usesHydrationControl ? [`import { ${[

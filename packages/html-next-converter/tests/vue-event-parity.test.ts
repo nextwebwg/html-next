@@ -70,8 +70,8 @@ const cases: readonly ModifierCase[] = [
 
 const source = `<template component="x-event-matrix" status="early" summary="Event modifier parity."><defs>
 ${cases.map(({ id }) => id === "capture_order"
-  ? `<state name="count_${id}" :value="0"></state><handler name="capture_${id}"><set name="count_${id}" :value="count_${id} + 1"></set></handler><handler name="bubble_${id}"><set name="count_${id}" :value="count_${id} * 10 + 1"></set></handler>`
-  : `<state name="count_${id}" :value="0"></state><handler name="hit_${id}"><set name="count_${id}" :value="count_${id} + 1"></set></handler>`).join("\n")}
+  ? `<state type="number" name="count_${id}" value="0"></state><handler name="capture_${id}"><set name="count_${id}" expr:value="count_${id} + 1"></set></handler><handler name="bubble_${id}"><set name="count_${id}" expr:value="count_${id} * 10 + 1"></set></handler>`
+  : `<state type="number" name="count_${id}" value="0"></state><handler name="hit_${id}"><set name="count_${id}" expr:value="count_${id} + 1"></set></handler>`).join("\n")}
 </defs><section>
 ${cases.map(({ id, event, modifiers }) => id === "capture_order"
   ? `<div data-case="${id}" on:click.capture="capture_${id}"><button type="button" on:click="bubble_${id}">${id}</button><output $value="count_${id}"></output></div>`

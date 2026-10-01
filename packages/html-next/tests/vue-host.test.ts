@@ -8,7 +8,7 @@ import { vueHostArtifact } from "../src/generate.js";
 /** The shared Vue host as a consumer receives it, with Vue itself stubbed: dispatch uses none of it. */
 async function loadHost() {
   const { code } = await transform(vueHostArtifact().content, { loader: "ts", format: "esm" });
-  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watchEffect=()=>{},Fragment={}';");
+  const stubbed = code.replace(/from\s+["']vue["'];?/, "from 'data:text/javascript,export const computed=()=>{},getCurrentInstance=()=>null,onBeforeUnmount=()=>{},onBeforeUpdate=()=>{},onMounted=()=>{},onUpdated=()=>{},shallowRef=()=>{},useSlots=()=>({}),watch=()=>{},watchEffect=()=>{},Fragment={}';");
   return import(`data:text/javascript;base64,${Buffer.from(stubbed).toString("base64")}`) as Promise<{
     createDispatch: (
       root: { value: null },

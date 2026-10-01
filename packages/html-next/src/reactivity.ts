@@ -25,6 +25,14 @@ interface Subscription {
 }
 
 let activeEffect: ReactiveEffect | undefined;
+
+/** Read the current value without adding its dependencies to the enclosing effect. */
+export function untracked<T>(read: () => T): T {
+  const previous = activeEffect;
+  activeEffect = undefined;
+  try { return read(); }
+  finally { activeEffect = previous; }
+}
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();

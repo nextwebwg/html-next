@@ -38,6 +38,14 @@ class TestElement {
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
   }
+
+  hasAttribute(name: string): boolean {
+    return this.attributes.has(name);
+  }
+
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
 }
 
 // A build is compiled for its entries. Only the live browser runtime watches the document for
@@ -59,8 +67,8 @@ describe("HTML Next unplugin", () => {
     await mkdir(join(root, "src"));
     await writeFile(join(root, "src/counter.html"), `<template component="x-counter" status="early" summary="Counter.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="count"></output></button>
     </template>`);
@@ -192,7 +200,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -246,7 +254,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child class="app-child" style="color: red" aria-label="Ready"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -300,7 +308,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child count="2"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -367,7 +375,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child><span class="projected">Projected</span></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -422,7 +430,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child><strong slot="title">Title</strong><span>Body</span></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -479,7 +487,7 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <link rel="component" href="./grandchild.html">
       <template component="x-app" status="early" summary="Read-only parent.">
-        <defs><state name="count" :value="1"></state></defs>
+        <defs><state type="number" name="count" value="1"></state></defs>
         <main from:data-count="count"><output $value="count"></output><x-child><x-grandchild title="Grandchild title"></x-grandchild></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -603,7 +611,7 @@ describe("HTML Next unplugin", () => {
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
       <template component="x-app" status="early" summary="App.">
-        <defs><state name="count" :value="0"></state></defs>
+        <defs><state type="number" name="count" value="0"></state></defs>
         <main><output $value="count + 1"></output><x-child from:label="count"></x-child></main>
       </template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
@@ -716,6 +724,22 @@ describe("HTML Next unplugin", () => {
       plugins: [htmlNext.vite({ entries: ["app.html"], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /app\.html: HC013:.*values constraint.*does not conform/);
+  });
+
+  it("rejects a range constraint whose bound does not match the prop type", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-range-"));
+    temporary.push(root);
+    await writeFile(join(root, "app.html"), `<template component="x-app"><defs>
+      <prop name="age" type="integer" min="soon">Age.</prop>
+      </defs><output from:data-age="age"></output></template>`);
+    await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
+
+    await assert.rejects(() => build({
+      root,
+      logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["app.html"], root })],
+      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
+    }), /app\.html: HC013:.*min constraint.*does not conform/);
   });
 
   it("rejects cycles in compiled component invocations", async () => {

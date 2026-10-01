@@ -17,19 +17,19 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const baseSource = `<template component="x-hydrated-field" status="early" summary="Hydration parity."><defs>
   <prop name="label" type="string">Current label.</prop>
-  <state name="count" :value="0"></state>
+  <state type="number" name="count" value="0"></state>
   <state name="text" value="server text"></state>
-  <state name="checked" :value="false"></state>
+  <state type="boolean" name="checked" value="false"></state>
   <state name="choice" value="b"></state>
-  <state name="choices" :value="['b']"></state>
-  <state name="emptyChoice" type="string" :value="null"></state>
-  <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-  <handler name="chooseB"><set name="choice" :value="'b'"></set></handler>
-  <handler name="chooseA"><set name="choice" :value="'a'"></set></handler>
-  <handler name="mutateChoices"><set name="choices[0]" :value="'c'"></set><set name="count" :value="count + 1"></set></handler>
+  <state type="list(unknown)" name="choices" value="['b']"></state>
+  <state name="emptyChoice" type="string" ></state>
+  <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+  <handler name="chooseB"><set name="choice" expr:value="'b'"></set></handler>
+  <handler name="chooseA"><set name="choice" expr:value="'a'"></set></handler>
+  <handler name="mutateChoices"><set name="choices[0]" expr:value="'c'"></set><set name="count" expr:value="count + 1"></set></handler>
 </defs><article><form><h2 $value="label"></h2><input .value="label" value="authored input"><textarea bind:value="text">authored text</textarea><input type="checkbox" checked bind:checked="checked"><select class="plain" bind:value="choice"><option value="a" selected>A</option><option value="b">B</option></select><select bind:value="choice"><option value="a">A</option><slot name="choice-option"><option value="b">B</option></slot></select><select class="projected" bind:value="choice"><option value="a">A</option><slot name="projected-option"><option value="b">Fallback B</option></slot></select><select class="multiple" multiple bind:value="choices"><option value="a" selected>A</option><option value="b">B</option><option value="c">C</option></select><select class="read-only" .value="choice"><option value="a">A</option><option value="b">B</option></select><select class="null-bind" bind:value="emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><select class="null-read-only" .value="emptyChoice"><option value="">Empty</option><option value="null">Null</option></select><button type="button" on:click="increment">Increment</button><button type="button" class="choose-b" on:click="chooseB">B</button><button type="button" class="choose-a" on:click="chooseA">A</button><button type="button" class="mutate-choices" on:click="mutateChoices">Mutate choices</button><output $value="count"></output><output class="text-state" $value="text"></output><output class="checked-state" $value="checked"></output><output class="choice-state" $value="choice"></output></form></article></template>`;
 const source = baseSource
-  .replace("</defs>", `<state name="combined" :value="['b', 'c']"></state></defs>`)
+  .replace("</defs>", `<state type="list(unknown)" name="combined" value="['b', 'c']"></state></defs>`)
   .replace("</form>", `<select class="null-multiple" multiple bind:value="emptyChoice"><option value="">Empty</option><option value="a">A</option></select>
     <select class="single-array" bind:value="combined"><option value="a">A</option><option value="b">B</option><option value="c">C</option><option value="b,c">Combined</option></select>
     <select class="multiple-property" multiple .value="choice"><option value="a">A</option><option value="b">B</option></select></form>`);

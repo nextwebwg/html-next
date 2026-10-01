@@ -51,6 +51,18 @@ describe("generateComponent", () => {
     assert.equal(JSON.stringify(definition), before, "generation must not mutate or enrich the core IR");
   });
 
+  it("carries authored bounds into generated runtime definitions", () => {
+    const definition = parseComponent(`<template component="x-bounded"><defs>
+      <prop name="amount" type="number" min="1" max="10">Amount.</prop>
+      <prop name="label" type="string" minlength="2" maxlength="8">Label.</prop>
+    </defs><div from:data-amount="amount" from:data-label="label"></div></template>`);
+    const artifacts = generateComponent(definition);
+    const vanilla = artifacts.find((artifact) => artifact.path === "vanilla/XBounded.js")!.content;
+    assert.match(vanilla, /"min":1,"max":10/);
+    assert.match(vanilla, /"minLength":2,"maxLength":8/);
+    assert.match(vanilla, /html-next\/runtime/);
+  });
+
   it("keeps the primitive native and makes owned values win over native spreads", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const artifacts = generateComponent(parseComponent(source, "x-button.html"));
@@ -100,10 +112,10 @@ describe("generateComponent", () => {
   it("keeps dynamic-format computed expressions on the full-runtime fallback", () => {
     const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
       <defs>
-        <state name="count" :value="0"></state>
-        <state name="pattern" :value="'%s'"></state>
+        <state type="number" name="count" value="0"></state>
+        <state type="string" name="pattern" value="%s"></state>
         <computed name="label" from="format(pattern, count)"></computed>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button type="button" on:click="increment"><output $value="label"></output></button>
     </template>`;
@@ -114,13 +126,13 @@ describe("generateComponent", () => {
     assert.match(vanilla, /@nextwebwg\/html-next\/runtime/);
   });
 
-  it("publishes and reads context in generated targets and lowers conditional values", () => {
+  it("provides and reads ancestor state in generated targets and lowers conditional values", () => {
     const provider = parseComponent(`<template component="x-steps"><defs>` +
-      `<state name="current" :value="1" context></state></defs><ol><slot></slot></ol></template>`);
+      `<state type="number" name="current" value="1"></state></defs><ol><slot></slot></ol></template>`);
     const reader = parseComponent(`<template component="x-step"><defs>` +
-      `<prop name="number" type="number" required>Step number.</prop>` +
+      `<prop name="index" type="number" required>Step index.</prop>` +
       `<context name="current" from="x-steps" as="activeStep"></context></defs>` +
-      `<li from:aria-current="activeStep = number ? 'step' : null"><slot></slot></li></template>`);
+      `<li from:aria-current="activeStep = index ? 'step' : null"><slot></slot></li></template>`);
     const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
     const providerOutput = artifacts(provider);
     const readerOutput = artifacts(reader);
@@ -129,7 +141,14 @@ describe("generateComponent", () => {
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
-    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === checkedProps\.number \? 'step' : null/);
+    assert.match(readerOutput.get("vue/XStep.vue")!, /activeStep === checkedProps\.index \? 'step' : null/);
+
+    const nestedProvider = parseComponent(`<template component="x-steps"><defs>` +
+      `<state type="number" name="current" value="1"></state></defs><section><x-step></x-step></section></template>`);
+    assert.match(artifacts(nestedProvider).get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
+    const closedGraphOutput = new Map(generateComponent(nestedProvider, { noContextReaders: true })
+      .map((item) => [item.path, item.content]));
+    assert.doesNotMatch(closedGraphOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
   });
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {

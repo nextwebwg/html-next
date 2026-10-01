@@ -16,10 +16,10 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const rows = `<template component="x-scoped-rows"><defs>
-  <state name="rows" :value="[{ id: 'a', name: 'Ada' }]"></state>
-  <state name="alternate" :value="false"></state>
-  <handler name="add"><set name="rows" :value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
-  <handler name="switch"><set name="alternate" :value="not alternate"></set></handler>
+  <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+  <state type="boolean" name="alternate" value="false"></state>
+  <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+  <handler name="switch"><set name="alternate" expr:value="not alternate"></set></handler>
 </defs><template $match><ol $when="alternate"><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
   <slot name="row" $each="row of rows" $key="row.id" from:index="loop.index"><li>Missing</li></slot></ol>
   <ul $else><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
@@ -27,9 +27,9 @@ const rows = `<template component="x-scoped-rows"><defs>
 </template></template>`;
 const consumer = `<link rel="component" href="./rows.html">
 <template component="x-scoped-consumer"><defs>
-  <state name="item" :value="{ name: 'Parent' }"></state>
+  <state type="object({ name: string })" name="item" value="{ name: 'Parent' }"></state>
   <state name="heading" value="Team"></state>
-  <handler name="rename"><set name="heading" value="Group"></set></handler>
+  <handler name="rename"><set name="heading" expr:value="'Group'"></set></handler>
 </defs><main><button type="button" class="rename" on:click="rename">Rename</button>
   <output class="parent" $value="item.name"></output><x-scoped-rows><template slot="row">
     <li><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small></li>

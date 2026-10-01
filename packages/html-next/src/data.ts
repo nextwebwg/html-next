@@ -11,6 +11,8 @@ export interface DataRequestOptions<T = unknown> {
   readonly type?: string;
   readonly debounce?: number;
   readonly poll?: number;
+  /** Sample request-only parameters at each send without subscribing to their inputs. */
+  readonly sampleParameters?: () => Readonly<Record<string, unknown>>;
   readonly fetch?: typeof fetch;
   readonly setTimer?: (callback: () => void, delay: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
@@ -90,6 +92,7 @@ export class DataResource<T = unknown> {
 
   async #request(generation: number): Promise<void> {
     if (this.#stale(generation)) return;
+    const parameters = this.options.sampleParameters?.() ?? this.#parameters;
     const abort = new AbortController();
     this.#abort = abort;
     const previous = this.options;
@@ -98,7 +101,7 @@ export class DataResource<T = unknown> {
     previous.onState({ pending: true, value: this.#value, error: null, ok: false });
     try {
       const response = await this.#fetch(
-        requestURL(previous.source, previous.baseURL, this.#parameters),
+        requestURL(previous.source, previous.baseURL, parameters),
         { signal: abort.signal },
       );
       if (!response.ok) throw new TypeError(`Request failed with ${response.status}.`);

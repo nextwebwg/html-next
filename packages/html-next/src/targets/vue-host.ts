@@ -16,7 +16,7 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watchEffect } from "vue";
+import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
 
 interface DataReadOptions {
   readonly source: string;
@@ -24,6 +24,7 @@ interface DataReadOptions {
   readonly type?: string;
   readonly debounce?: number;
   readonly poll?: number;
+  readonly sources: () => readonly unknown[];
   readonly parameters: () => Readonly<Record<string, unknown>>;
 }
 
@@ -46,7 +47,6 @@ function dataURL(source: string, baseURL: string, parameters: Readonly<Record<st
 /** A Vue-owned declared read; no request is made during SSR. */
 export function useDataRead(state: { value: any }, options: DataReadOptions): void {
   let value: unknown = null;
-  let parameters: Readonly<Record<string, unknown>> = {};
   let abort: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
@@ -69,7 +69,7 @@ export function useDataRead(state: { value: any }, options: DataReadOptions): vo
         try { return new URL(options.definition, document.baseURI).href; }
         catch { return document.baseURI; }
       })();
-      const response = await fetch(dataURL(options.source, definition, parameters), { signal: controller.signal });
+      const response = await fetch(dataURL(options.source, definition, options.parameters()), { signal: controller.signal });
       if (!response.ok) throw new TypeError(\`Request failed with \${response.status}.\`);
       const next = options.type === "text" || options.type === "string" ? await response.text() : await response.json();
       if (stale(current)) return;
@@ -85,15 +85,14 @@ export function useDataRead(state: { value: any }, options: DataReadOptions): vo
       }
     }
   };
-  const update = (next: Readonly<Record<string, unknown>>): void => {
-    parameters = { ...next };
+  const update = (): void => {
     connected = true;
     cancel();
     const current = ++generation;
     if ((options.debounce ?? 0) > 0) timer = setTimeout(() => { void request(current); }, options.debounce);
     else void request(current);
   };
-  onMounted(() => { stop = watchEffect(() => update(options.parameters())); });
+  onMounted(() => { stop = watch(options.sources, update, { immediate: true, deep: true }); });
   onBeforeUnmount(() => {
     stop?.();
     connected = false;

@@ -16,8 +16,8 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", import.meta.url).pathname;
 const component = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
-  <state name="count" :value="0"></state>
-  <state name="arm" type="keyword" :value="'section'"></state>
+  <state type="number" name="count" value="0"></state>
+  <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <method name="focusButton" export="focusButton" returns="promise(undefined)"></method>
   <method name="loadHelper" export="loadHelper" returns="promise(number)"></method>

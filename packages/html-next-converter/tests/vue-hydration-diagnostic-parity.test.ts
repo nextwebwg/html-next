@@ -15,7 +15,7 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const staticSource = `<template component="x-hydration-static" status="early" summary="Fixed-root hydration diagnostic."><button type="button">Ready</button></template>`;
 const switchSource = `<template component="x-hydration-switch" status="early" summary="Conditional-root hydration diagnostic."><defs>
-  <state name="alternate" :value="false"></state>
+  <state type="boolean" name="alternate" value="false"></state>
 </defs><template $match><article $when="alternate">Alternate</article><section $else>Initial</section></template></template>`;
 
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };

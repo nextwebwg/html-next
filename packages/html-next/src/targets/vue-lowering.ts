@@ -163,7 +163,8 @@ export function typeScript(value: Static): string {
       case "separated-list": return "string[]";
       case "union": return type.members.map(source).join(" | ");
       case "selected": return [...new Set(type.options.map((option) => source(option.type)))].join(" | ");
-      case "constrained": return type.values.map((value) => JSON.stringify(value)).join(" | ");
+      case "constrained": return type.values === undefined ? source(type.base)
+        : type.values.map((value) => JSON.stringify(value)).join(" | ");
       case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;
       case "object": {

@@ -31,6 +31,8 @@ export interface ElementInternalsValidity {
 export interface ManageValidityOptions {
   readonly internals?: ElementInternalsValidity;
   readonly value?: () => unknown;
+  /** A component can derive several declared prop failures into one root validity state. */
+  readonly derive?: () => Validity;
 }
 
 interface ManagedState {
@@ -39,6 +41,7 @@ interface ManagedState {
   external: readonly ValidityError[];
   interacted: boolean;
   readonly value: () => unknown;
+  readonly derive?: () => Validity;
   readonly internals?: ElementInternalsValidity;
   readonly cleanup: Array<() => void>;
 }
@@ -132,7 +135,7 @@ function reflect(el: Element, state: ManagedState | undefined): void {
   const validity = current(el);
   const message = firstMessage(validity);
   if (nativeControl(el)) {
-    const needsBridge = state === undefined || state.external.length > 0 || Object.keys(state.constraint).length > 0;
+    const needsBridge = state === undefined || state.derive !== undefined || state.external.length > 0 || Object.keys(state.constraint).length > 0;
     if (needsBridge) {
       el.setCustomValidity(message);
       if (message === "") nativeBridgeMessages.delete(el);
@@ -315,6 +318,7 @@ function dispatchInvalid(el: Element, validity: Validity): void {
 }
 
 function derive(el: Element, state: ManagedState): Validity {
+  if (state.derive !== undefined) return state.derive();
   if (nativeControl(el) && Object.keys(state.constraint).length === 0) {
     const priorBridge = nativeBridgeMessages.get(el);
     if (priorBridge !== undefined && el.validationMessage === priorBridge) el.setCustomValidity("");
@@ -426,6 +430,7 @@ export function manageElementValidity(
     nativeControl(el) &&
     Object.keys(constraint).length === 0 &&
     options.value === undefined &&
+    options.derive === undefined &&
     options.internals === undefined
   ) {
     installFacade(el);
@@ -437,6 +442,7 @@ export function manageElementValidity(
     external: externalStore.get(el) ?? [],
     interacted: false,
     value: options.value ?? (() => readValueUnmanaged(el)),
+    ...(options.derive === undefined ? {} : { derive: options.derive }),
     ...(options.internals === undefined ? {} : { internals: options.internals }),
     cleanup: [],
   };

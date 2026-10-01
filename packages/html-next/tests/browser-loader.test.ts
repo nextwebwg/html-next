@@ -158,7 +158,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           headers: { "access-control-allow-origin": "*" },
           body:
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
-            `<defs><state name="count" :value="1"></state>` +
+            `<defs><state type="number" name="count" value="1"></state>` +
             `<method name="focusInput" export="focusInput" returns="promise(undefined)"></method></defs>` +
             `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
         });

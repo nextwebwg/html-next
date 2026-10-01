@@ -17,22 +17,22 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-required-number" status="early" summary="Required numeric prop."><defs>
   <prop name="n" type="number" required>Number.</prop>
-</defs><output $value="n + 1"></output></template>`;
+</defs><div><output $value="n + 1"></output></div></template>`;
 
 interface Case {
   readonly name: string;
   readonly attribute?: string;
   readonly vueValue?: number;
-  readonly code?: string;
-  readonly vueCode?: string;
+  readonly liveValid: boolean;
+  readonly vueValid: boolean;
   readonly output?: string;
 }
 
 const cases: readonly Case[] = [
-  { name: "missing required", code: "HC020" },
-  { name: "invalid number", attribute: "abc", code: "HR002" },
-  { name: "numeric Vue string", attribute: "42", vueCode: "HR002" },
-  { name: "numeric Vue binding", attribute: "42", vueValue: 42, output: "43" },
+  { name: "missing required", liveValid: false, vueValid: false },
+  { name: "invalid number", attribute: "abc", liveValid: false, vueValid: false },
+  { name: "numeric Vue string", attribute: "42", liveValid: true, vueValid: false },
+  { name: "numeric Vue binding", attribute: "42", vueValue: 42, liveValid: true, vueValid: true, output: "43" },
 ];
 
 async function observe(page: Page): Promise<{ readonly output: string | null; readonly pixels: Buffer | null }> {
@@ -118,9 +118,15 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
                 catch (error) { window.vueDiagnostic = (error as { diagnostic?: { code?: string }; message?: string }).diagnostic?.code ?? `THROWN: ${(error as Error).message}`; }
                 return window.vueDiagnostic;
               }, testCase.vueValue ?? testCase.attribute ?? null);
-              assert.equal(liveCode, testCase.code ?? null, `${testCase.name}: live diagnostic changed`);
-              assert.equal(vueCode, testCase.vueCode ?? testCase.code ?? null, `${testCase.name}: Vue diagnostic differs`);
-              assert.deepEqual(await vue.evaluate(() => window.vueErrors), vueCode === null ? [] : [vueCode], `${testCase.name}: additional Vue errors`);
+              assert.equal(liveCode, null, `${testCase.name}: live invocation threw`);
+              assert.equal(vueCode, null, `${testCase.name}: Vue invocation threw`);
+              assert.deepEqual(await vue.evaluate(() => window.vueErrors), [], `${testCase.name}: Vue error handler ran`);
+              const [liveValid, vueValid] = await Promise.all([
+                live.evaluate(() => (document.querySelector("#case") as HTMLElement & { validity: ValidityState }).validity.valid),
+                vue.evaluate(() => (document.querySelector("#case") as HTMLElement & { validity: ValidityState }).validity.valid),
+              ]);
+              assert.equal(liveValid, testCase.liveValid, `${testCase.name}: live validity differs`);
+              assert.equal(vueValid, testCase.vueValid, `${testCase.name}: Vue validity differs`);
               if (testCase.output !== undefined) {
                 const [liveResult, vueResult] = await Promise.all([observe(live), observe(vue)]);
                 assert.equal(liveResult.output, testCase.output);
@@ -145,17 +151,16 @@ window.setCase = async (value) => { current.value = value; await nextTick(); };\
               catch (error) { return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? "THROWN"; }
             });
             await vue.evaluate(() => window.setCase("bad"));
-            assert.equal(liveCode, "HR002");
-            assert.deepEqual(await vue.evaluate(() => window.vueErrors), [liveCode], "invalid update diagnostic differs");
-            await assertObservedEqual(vue, await observe(vue), await observe(live), "invalid update changed rendered output");
+            assert.equal(liveCode, null);
+            assert.deepEqual(await vue.evaluate(() => window.vueErrors), [], "invalid update raised a Vue error");
 
             const nullCode = await live.evaluate(() => {
               try { (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: null }); return null; }
               catch (error) { return (error as { diagnostic?: { code?: string } }).diagnostic?.code ?? "THROWN"; }
             });
             await vue.evaluate(() => window.setCase(null));
-            assert.equal(nullCode, "HC021");
-            assert.deepEqual(await vue.evaluate(() => window.vueErrors), ["HR002", nullCode], "required null diagnostic differs");
+            assert.equal(nullCode, null);
+            assert.deepEqual(await vue.evaluate(() => window.vueErrors), [], "required null raised a Vue error");
 
             await live.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { updateComponentProps(element: Element, props: Record<string, unknown>): void }).updateComponentProps(document.querySelector("#case")!, { n: 43 }));
             await vue.evaluate(() => window.setCase(43));

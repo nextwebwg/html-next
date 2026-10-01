@@ -16,17 +16,17 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const provider = `<template component="x-steps" status="early" summary="Context provider."><defs>
-  <state name="current" :value="1" context></state>
-  <handler name="next"><set name="current" :value="current + 1"></set></handler>
+  <state type="number" name="current" value="1"></state>
+  <handler name="next"><set name="current" expr:value="current + 1"></set></handler>
 </defs><section><button type="button" on:click="next">Next</button><slot></slot></section></template>`;
 const reader = `<template component="x-step" status="early" summary="Context reader."><defs>
-  <prop name="number" type="number" required>Step number.</prop>
+  <prop name="index" type="number" required>Step index.</prop>
   <context name="current" from="x-steps" as="activeStep"></context>
-</defs><p from:data-active="activeStep = number ? 'yes' : 'no'"><slot></slot></p></template>`;
-const invocation = `<x-steps id="case"><x-step id="outer-one" number="1">Outer one</x-step>
-  <x-step id="outer-two" number="2">Outer two</x-step>
-  <x-steps id="inner"><x-step id="inner-one" number="1">Inner one</x-step>
-    <x-step id="inner-two" number="2">Inner two</x-step></x-steps></x-steps>`;
+</defs><p from:data-active="activeStep = index ? 'yes' : 'no'"><slot></slot></p></template>`;
+const invocation = `<x-steps id="case"><x-step id="outer-one" index="1">Outer one</x-step>
+  <x-step id="outer-two" index="2">Outer two</x-step>
+  <x-steps id="inner"><x-step id="inner-one" index="1">Inner one</x-step>
+    <x-step id="inner-two" index="2">Inner two</x-step></x-steps></x-steps>`;
 
 type Behavior = { readonly outer: readonly (string | null)[]; readonly inner: readonly (string | null)[] };
 
@@ -87,7 +87,7 @@ export default Object.assign(Component, { ssrRender });
       const bundle = join(outDirectory, "vue.js");
       await writeFile(entry, `import { createApp, h } from "vue";
 import { XSteps, XStep } from "./vue/${mode === "application" ? "application" : "index"}";
-const step = (id, number, text) => h(XStep, { id, number }, () => text);
+const step = (id, index, text) => h(XStep, { id, index }, () => text);
 createApp({ render: () => h(XSteps, { id: "case" }, { default: () => [
   step("outer-one", 1, "Outer one"), step("outer-two", 2, "Outer two"),
   h(XSteps, { id: "inner" }, { default: () => [step("inner-one", 1, "Inner one"), step("inner-two", 2, "Inner two")] }),
@@ -103,7 +103,7 @@ createApp({ render: () => h(XSteps, { id: "case" }, { default: () => [
       const hydrate = join(outDirectory, "hydrate.js");
       await writeFile(hydrateEntry, `import { createSSRApp, h } from "vue";
 import { XSteps, XStep } from "./vue/${mode === "application" ? "application" : "index"}";
-const step = (id, number, text) => h(XStep, { id, number }, () => text);
+const step = (id, index, text) => h(XStep, { id, index }, () => text);
 createSSRApp({ render: () => h(XSteps, { id: "case" }, { default: () => [
   step("outer-one", 1, "Outer one"), step("outer-two", 2, "Outer two"),
   h(XSteps, { id: "inner" }, { default: () => [step("inner-one", 1, "Inner one"), step("inner-two", 2, "Inner two")] }),
@@ -119,7 +119,7 @@ createSSRApp({ render: () => h(XSteps, { id: "case" }, { default: () => [
       await writeFile(serverEntry, `import { createSSRApp, h } from "vue";
 import { renderToString } from "@vue/server-renderer";
 import { XSteps, XStep } from "./vue/${mode === "application" ? "application" : "index"}";
-const step = (id, number, text) => h(XStep, { id, number }, () => text);
+const step = (id, index, text) => h(XStep, { id, index }, () => text);
 export const render = () => renderToString(createSSRApp({ render: () => h(XSteps, { id: "case" }, { default: () => [
   step("outer-one", 1, "Outer one"), step("outer-two", 2, "Outer two"),
   h(XSteps, { id: "inner" }, { default: () => [step("inner-one", 1, "Inner one"), step("inner-two", 2, "Inner two")] }),
@@ -149,7 +149,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XSteps
         const errors: string[] = [];
         const warnings: string[] = [];
         try {
-          for (const page of pages) page.on("pageerror", (error) => errors.push(error.message));
+          for (const page of pages) page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
           hydrated.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
           await live.setContent(`${provider}${reader}<main>${invocation}</main>`);
           await live.addScriptTag({ path: liveBundle });
