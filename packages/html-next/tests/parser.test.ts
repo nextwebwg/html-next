@@ -39,6 +39,12 @@ describe("parseComponent", () => {
     expectDiagnostic("HT010", `<template component="x-old"><defs><prop name="label" type="string">Label.</prop></defs><output :aria-label="label"></output></template>`);
   });
 
+  it("rejects bracketed numeric indexes in authored expressions", () => {
+    expectDiagnostic("HT013", `<template component="x-old-index"><defs>
+      <state name="items" type="list(string)" value="['Ada']"></state>
+    </defs><output $value="$items[0]"></output></template>`);
+  });
+
   it("reads an inline type selected by a prop's permitted values", () => {
     const definition = parseComponent(`<template component="x-inline-type"><defs>
       <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
