@@ -28,6 +28,19 @@ describe("expression: compilation", () => {
     assert.deepEqual(getWritablePath("$groups.0.1.name", new Set(["groups"])), ["groups", 0, 1, "name"]);
     assert.throws(() => checkExpression("$items[0].name"), /Use dotted indexes/);
     assert.throws(() => checkExpression("items[0].name"), /Use dotted indexes/);
+    assert.throws(() => checkExpression("$items[-0].name"), /Use dotted indexes/);
+  });
+  it("preserves the exact spelling of numeric object keys", () => {
+    const byId = {
+      "9007199254740992": { name: "wrong" },
+      "9007199254740993": { name: "right" },
+      "01": { name: "leading zero" },
+    };
+    assert.equal(evaluate("$byId.9007199254740993.name", scope({ byId })), "right");
+    assert.equal(evaluate("$byId.01.name", scope({ byId })), "leading zero");
+    assert.deepEqual(compileExpression("$byId.9007199254740993.name").dependencies, ["byId.9007199254740993.name"]);
+    assert.deepEqual(getWritablePath("$byId.9007199254740993.name", new Set(["byId"])),
+      ["byId", "9007199254740993", "name"]);
   });
   it("exposes a serializable AST and normalized static dependencies", () => {
     const compiled = compileExpression(

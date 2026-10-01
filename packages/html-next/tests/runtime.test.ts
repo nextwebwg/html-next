@@ -218,6 +218,35 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} checks the selected field type for dynamic handler paths`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-dynamic-handler"><defs>
+          <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+          <state name="index" type="integer" value="0"></state>
+          <handler name="bad"><set name="items[$index].name" expr:value="7"></set></handler>
+          <handler name="good"><set name="items[$index].name" value="Bea"></set></handler>
+        </defs><main><button class="bad" on:click="bad"></button>
+          <button class="good" on:click="good"></button><output $value="$items.0.name"></output></main>
+        </template><x-dynamic-handler id="dynamic-handler"></x-dynamic-handler>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#dynamic-handler")!;
+          const read = () => root.querySelector("output")?.textContent;
+          const initial = read();
+          root.querySelector<HTMLButtonElement>("button.bad")!.click();
+          await Promise.resolve();
+          const rejected = read();
+          root.querySelector<HTMLButtonElement>("button.good")!.click();
+          await Promise.resolve();
+          return { initial, rejected, recovered: read() };
+        });
+        assert.deepEqual(actual, { initial: "Ada", rejected: "Ada", recovered: "Bea" });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} writes a correctly typed value even when it fails a values constraint`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

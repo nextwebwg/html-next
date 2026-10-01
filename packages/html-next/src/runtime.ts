@@ -537,21 +537,23 @@ const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode 
  * or a `<data>` read (whose declared type describes `.value`). A loop alias or an untyped
  * declaration says nothing, so references through it are unconstrained.
  */
-function declaredTypeAt(definition: ComponentDefinition, path: string): TypeNode | undefined {
+function declaredTypeAt(definition: ComponentDefinition, path: string | readonly (string | number)[]): TypeNode | undefined {
   let cache = declaredPathTypes.get(definition);
   if (cache === undefined) {
     cache = new Map();
     declaredPathTypes.set(definition, cache);
   }
-  if (cache.has(path)) return cache.get(path);
+  const segments = typeof path === "string" ? path.split(".") : path.map(String);
+  const cacheKey = JSON.stringify(segments);
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
 
-  const [root, ...steps] = path.split(".");
+  const [root, ...steps] = segments;
   let type = rootDeclaredType(definition, root!, steps);
   for (const step of type === undefined ? [] : steps) {
     if (type === undefined) break;
     type = typeAtKey(type, step);
   }
-  cache.set(path, type);
+  cache.set(cacheKey, type);
   return type;
 }
 
@@ -802,6 +804,16 @@ function ownEffect(
   context.owned.effects.push(createEffect(scope.scheduler, run, priority));
 }
 
+function resolveWritablePath(scope: ReactiveScope, path: WritablePath): (string | number)[] | undefined {
+  const resolved: (string | number)[] = [];
+  for (const segment of path) {
+    const key = typeof segment === "object" ? evaluateCompiled(segment.expression, scope) : segment;
+    if (typeof key !== "string" && typeof key !== "number") return undefined;
+    resolved.push(key);
+  }
+  return resolved;
+}
+
 function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value): void {
   const [root, ...segments] = path;
   if (typeof root !== "string") return;
@@ -887,10 +899,9 @@ function runHandler(
     if (step.kind === "set") {
       const next = evalConforming(step.value, scope, context.definition);
       if (next === NONCONFORMING) continue;
-      const path = step.writablePath.every((part) => typeof part === "string" || typeof part === "number")
-        ? step.writablePath.join(".") : undefined;
-      if (path !== undefined && !conformsAtDestination(next, declaredTypeAt(context.definition, path))) continue;
-      setWritablePath(scope, step.writablePath, next);
+      const path = resolveWritablePath(scope, step.writablePath);
+      if (path === undefined || !conformsAtDestination(next, declaredTypeAt(context.definition, path))) continue;
+      setWritablePath(scope, path, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
       const detail = step.value === undefined ? undefined : evaluateCompiled(step.value, scope);

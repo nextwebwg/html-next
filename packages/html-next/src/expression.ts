@@ -86,6 +86,7 @@ function parse(source: string): ExpressionNode {
   let kind: TokenKind = 0;
   let token: string | number = "";
   let integerToken = false;
+  let numericLexeme = "";
 
   function next(): void {
     const previousKind = kind;
@@ -107,6 +108,7 @@ function parse(source: string): ExpressionNode {
       kind = 1;
       token = Number(digits);
       integerToken = true;
+      numericLexeme = digits;
       return;
     }
     // A dot after a value begins a path segment, even when the segment is an integer.
@@ -125,6 +127,7 @@ function parse(source: string): ExpressionNode {
       kind = 1;
       token = Number(match[2]);
       integerToken = !match[2].includes(".");
+      numericLexeme = match[2];
     } else if (match[3] !== undefined) {
       kind = 2;
       token = match[3].slice(1, -1).replace(ESCAPE, "$1");
@@ -177,10 +180,12 @@ function parse(source: string): ExpressionNode {
     let object = primary();
     while (kind === 4) {
       if (eat(".")) {
-        if ((kind as TokenKind) !== 3 && ((kind as TokenKind) !== 1 || !Number.isInteger(token))) {
+        if ((kind as TokenKind) !== 3 && ((kind as TokenKind) !== 1 || !/^\d+$/.test(numericLexeme))) {
           throw new SyntaxError("Expected a property name after `.`.");
         }
-        const key = token as string | number;
+        const numeric = (kind as TokenKind) === 1;
+        const key = numeric && Number.isSafeInteger(token) && String(token) === numericLexeme
+          ? token : numeric ? numericLexeme : token;
         next();
         object = typeof key === "number"
           ? { kind: "index", object, index: { kind: "literal", value: key } }
@@ -188,7 +193,9 @@ function parse(source: string): ExpressionNode {
       } else if (eat("[")) {
         const index = conditional();
         expect("]");
-        if (index.kind === "literal" && typeof index.value === "number") {
+        if (index.kind === "literal" && typeof index.value === "number"
+          || index.kind === "unary" && index.op === "-" && index.operand.kind === "literal"
+            && typeof index.operand.value === "number") {
           throw new SyntaxError("Use dotted indexes, for example `$items.0.name`.");
         }
         object = { kind: "index", object, index };
