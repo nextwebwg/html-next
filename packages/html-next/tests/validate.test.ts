@@ -51,6 +51,21 @@ describe("shared validation", () => {
     assert.equal(validate("12", { type: "number", min: 2, step: 5 }).valid, true);
   });
 
+  it("compares temporal bounds in their declared order and counts HTML text length", () => {
+    for (const [type, value, min, max] of [
+      ["date", "2026-09-29", "2026-09-30", "2026-10-01"],
+      ["month", "2026-09", "2026-10", "2026-12"],
+      ["week", "2026-W39", "2026-W40", "2026-W52"],
+      ["time", "12:30", "13:00", "18:00"],
+      ["datetime-local", "2026-09-29 12:30", "2026-09-29T13:00", "2026-10-01T00:00"],
+      ["datetime", "2026-09-29T12:30Z", "2026-09-29T13:00Z", "2026-10-01T00:00Z"],
+    ] as const) {
+      assert.deepEqual(reasons(validate(value, { type, min })), ["rangeUnderflow"], type);
+      assert.equal(validate(value, { type, max }).valid, true, type);
+    }
+    assert.deepEqual(reasons(validate("😀", { type: "string", maxLength: 1 })), ["tooLong"]);
+  });
+
   it("returns multiple failures with stable paths", () => {
     const validity = validate({ contact: 42, count: 1.5, extra: true }, {
       type: "object({ contact: string, count: integer })",

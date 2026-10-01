@@ -44,6 +44,10 @@ export interface PropContract {
     readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[];
   };
   readonly pattern?: string;
+  readonly min?: number | string;
+  readonly max?: number | string;
+  readonly minLength?: number;
+  readonly maxLength?: number;
   readonly required: boolean;
   readonly default?: PropValue;
   readonly target: PropTarget;

@@ -35,8 +35,6 @@ export type ComponentDeclaration =
 export interface ReactiveDeclaration {
   readonly kind: "state" | "computed";
   readonly name: string;
-  /** A state exposed to descendant components through a matching <context>. */
-  readonly context?: boolean;
   /** A state's declared type, in the type-expression syntax props use. */
   readonly type?: string;
   /** Parsed nested fields and their values constraints, when authored. */
@@ -66,6 +64,8 @@ export interface DataDeclaration {
 
 export interface DataParameter {
   readonly name: string;
+  /** Live dependencies trigger the resource; sampled expressions do not. */
+  readonly mode: "from" | "expr";
   readonly expression: CompiledExpression;
 }
 

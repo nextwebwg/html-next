@@ -502,12 +502,21 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     dynamicBoundaries.set(boundary.tag, Object.freeze({ ...boundary }));
   }
   const invocations = collectInvocationEdges(graph.nodes, graph.tags, dynamicBoundaries);
+  const contextProviders = new Set(
+    [...graph.nodes.values()].flatMap((node) =>
+      (node.definition.declarations ?? [])
+        .filter((declaration) => declaration.kind === "context")
+        .map((declaration) => declaration.from),
+    ),
+  );
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const definition: ComponentDefinition = node.controller === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
-    const artifact = generateComponent(definition)
+    const artifact = generateComponent(definition, {
+      noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+    })
       .find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
     const encodedURL = encodeURIComponent(node.url);

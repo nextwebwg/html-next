@@ -64,11 +64,11 @@ const featureSource = `<template component="x-feature" status="experimental" sum
     <prop name="label" type="string" default="Items">Heading.</prop>
     <prop name="items" type="list(object({ id: string, name: string, done: boolean }))">Rows.</prop>
     <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
-    <state name="open" :value="false"></state>
-    <state name="query" :value="''"></state>
+    <state type="boolean" name="open" value="false"></state>
+    <state type="string" name="query" value=""></state>
     <computed name="count" from="items.length"></computed>
     <event name="toggle" type="object({ open: boolean })"></event>
-    <handler name="flip"><set name="open" :value="not open"></set><dispatch event="toggle" :detail="{ open: open }"></dispatch></handler>
+    <handler name="flip"><set name="open" expr:value="not open"></set><dispatch event="toggle" expr:value="{ open: open }"></dispatch></handler>
     <method name="focusSearch" export="focusSearch" returns="promise(undefined)"></method>
   </defs>
   <section class="panel" class:compact="size = 'sm'" style:--gap="size">
@@ -157,9 +157,9 @@ describe("official target compilers", () => {
 
   it("generates a reactive state-selected prop for Vue and vanilla", () => {
     const outputs = generated(`<template component="x-state-dependent"><defs>
-      <state name="mode" type="keyword" values="text, number" :value="'text'"></state>
+      <state name="mode" type="keyword" values="text, number" value="text"></state>
       <prop name="value">Value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-      <handler name="toggle"><set name="mode" :value="mode = 'text' ? 'number' : 'text'"></set></handler>
+      <handler name="toggle"><set name="mode" expr:value="mode = 'text' ? 'number' : 'text'"></set></handler>
     </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>`);
     const vue = outputs.get("vue/XStateDependent.vue")!;
     const vanilla = outputs.get("vanilla/XStateDependent.d.ts")!;
@@ -267,13 +267,13 @@ describe("official target compilers", () => {
   });
 
   it("converts a consumer's scoped-slot template with its lexical state", () => {
-    const vue = generated(`<template component="x-consumer"><defs><state name="heading" value="People"></state></defs>` +
+    const vue = generated(`<template component="x-consumer"><defs><state name="heading" type="string" value="People"></state></defs>` +
       `<section><x-row-list><template slot="row"><b $value="item.name"></b><i $value="heading"></i></template></x-row-list></section></template>`)
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
     assert.match(vue, /\{\{ text\(item\?\.name\) \}\}/);
-    assert.match(vue, /\{\{ heading \}\}/);
+    assert.match(vue, /\{\{ guarded \}\}/);
   });
 
   it("keeps logical operators readable in Vue attribute values", () => {
@@ -313,7 +313,7 @@ describe("official target compilers", () => {
     compileVue(vue, "XFeature.vue");
     assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./control", "./host", "./props", "vue", "vue"]);
     assert.match(vue, /\(\) => import\('\.\/x-feature\.js'\)/);
-    assert.doesNotMatch(vue, /@nextwebwg|html-next|attachComponent|manageGeneratedProps/);
+    assert.doesNotMatch(vue, /@nextwebwg|attachComponent|manageGeneratedProps/);
   });
 
   it("maps each construct to Vue's own facility, as a Vue author writes it", () => {
@@ -347,7 +347,7 @@ describe("official target compilers", () => {
 
   it("reads a typed state list's items plainly while checking its keys", () => {
     const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
-      `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" :value="[]"></state></defs>` +
+      `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" value="[]"></state></defs>` +
       `<div><button $each="tab of tabs" $key="tab.id" from:id="tab.id" from:aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
@@ -359,8 +359,8 @@ describe("official target compilers", () => {
 
   it("types optional fields, open objects, and nullable records in state", () => {
     const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
-      `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" :value="null"></state>` +
-      `<state name="issues" type="list(object({ message: string }))" :value="[]"></state></defs>` +
+      `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" ></state>` +
+      `<state name="issues" type="list(object({ message: string }))" value="[]"></state></defs>` +
       `<div><span $if="hovered" from:title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
@@ -385,7 +385,7 @@ describe("official target compilers", () => {
 
   it("rejects a state type that does not parse", () => {
     assert.throws(() => generated(`<template component="x-bad" status="experimental" summary="Bad state type.">` +
-      `<defs><state name="rows" type="list(" :value="[]"></state></defs><div></div></template>`), /HC013/);
+      `<defs><state name="rows" type="list(" value="[]"></state></defs><div></div></template>`), /HC013/);
   });
 
   it("renders $value text, including a wrapper-less <template $value> slot fallback", () => {
@@ -496,7 +496,7 @@ describe("official target compilers", () => {
     ))), /HT021/);
     // $html is supported through a generated, feature-specific sanitizer helper.
     const source = `<template component="demo-html" status="experimental" summary="Html.">
-      <defs><state name="markup" :value="'<b>x</b>'"></state></defs><div $html="markup"></div></template>`;
+      <defs><state name="markup" type="string" value="<b>x</b>"></state></defs><div $html="markup"></div></template>`;
     const artifacts = generated(source);
     assert.match(artifacts.get("vue/DemoHtml.vue")!, /from '\.\/html'/);
     assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
@@ -541,10 +541,10 @@ describe("official target compilers", () => {
   it("compiles simple numeric state directly to native browser primitives", async () => {
     const module = generated(`<template component="demo-counter" status="experimental" summary="Counter.">
       <defs>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <handler name="increment">
-          <set name="count" :value="count + 1"></set>
-          <set name="count" :value="count + 1"></set>
+          <set name="count" expr:value="count + 1"></set>
+          <set name="count" expr:value="count + 1"></set>
         </handler>
       </defs>
       <button type="button" on:click="increment"><output $value="count"></output></button>
@@ -561,14 +561,14 @@ describe("official target compilers", () => {
   it("prunes directly compiled numeric updates by their static dependencies", async () => {
     const module = generated(`<template component="demo-split" status="experimental" summary="Split state.">
       <defs>
-        <state name="left" :value="1"></state>
-        <state name="right" :value="10"></state>
+        <state type="number" name="left" value="1"></state>
+        <state type="number" name="right" value="10"></state>
         <computed name="left1" from="left + 1"></computed>
         <computed name="left2" from="left1 + 1"></computed>
         <computed name="left3" from="left2 + 1"></computed>
         <computed name="total" from="left3 + right"></computed>
-        <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
       </defs>
       <section><button on:click="increaseLeft"><output $value="left3"></output></button><button on:click="increaseRight"><output $value="total"></output></button></section>
     </template>`).get("vanilla/DemoSplit.js")!;
@@ -584,14 +584,14 @@ describe("official target compilers", () => {
   it("removes unused direct numeric branches from generated output", async () => {
     const module = generated(`<template component="demo-live" status="experimental" summary="Live direct branch.">
       <defs>
-        <state name="left" :value="1"></state>
-        <state name="right" :value="10"></state>
+        <state type="number" name="left" value="1"></state>
+        <state type="number" name="right" value="10"></state>
         <computed name="visible" from="right + 1"></computed>
         <computed name="unused1" from="left + 1"></computed>
         <computed name="unused2" from="unused1 + 1"></computed>
         <computed name="unused3" from="unused2 + 1"></computed>
-        <handler name="increaseLeft"><set name="left" :value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" :value="right + 1"></set></handler>
+        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
       </defs>
       <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="visible"></output></button></section>
     </template>`).get("vanilla/DemoLive.js")!;
@@ -607,9 +607,9 @@ describe("official target compilers", () => {
   it("suppresses repeated direct rounded DOM output", async () => {
     const module = generated(`<template component="demo-round" status="experimental" summary="Rounded direct value.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance"><output $value="bucket"></output></button>
     </template>`).get("vanilla/DemoRound.js")!;
@@ -622,9 +622,9 @@ describe("official target compilers", () => {
   it("gates only stabilizing direct bindings in a mixed output", async () => {
     const module = generated(`<template component="demo-mixed" status="experimental" summary="Mixed direct value.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
     </template>`).get("vanilla/DemoMixed.js")!;
@@ -638,9 +638,9 @@ describe("official target compilers", () => {
   it("compiles numeric data attributes with the direct native emitter", async () => {
     const module = generated(`<template component="demo-data" status="experimental" summary="Direct data binding.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoData.js")!;
@@ -654,9 +654,9 @@ describe("official target compilers", () => {
   it("compiles numeric ARIA attributes with the direct native emitter", async () => {
     const module = generated(`<template component="demo-aria" status="experimental" summary="Direct ARIA binding.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoAria.js")!;
@@ -670,9 +670,9 @@ describe("official target compilers", () => {
   it("compiles numeric ordinary HTML attributes with the direct native emitter", async () => {
     const module = generated(`<template component="demo-title" status="experimental" summary="Direct HTML attribute binding.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance" from:title="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoTitle.js")!;
@@ -685,9 +685,9 @@ describe("official target compilers", () => {
   it("compiles numeric native HTML properties with the direct emitter", async () => {
     const module = generated(`<template component="demo-value" status="experimental" summary="Direct HTML property binding.">
       <defs>
-        <state name="position" :value="0"></state>
+        <state type="number" name="position" value="0"></state>
         <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" :value="position + 0.1"></set></handler>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
       </defs>
       <button on:click="advance"><input type="number" .value="bucket"><output $value="position"></output></button>
     </template>`).get("vanilla/DemoValue.js")!;
@@ -700,9 +700,9 @@ describe("official target compilers", () => {
   it("compiles primitive boolean state, attributes, and properties with the direct emitter", async () => {
     const module = generated(`<template component="demo-toggle" status="experimental" summary="Direct primitive toggle.">
       <defs>
-        <state name="open" :value="false"></state>
+        <state type="boolean" name="open" value="false"></state>
         <computed name="closed" from="not open"></computed>
-        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
       </defs>
       <button on:click="toggle" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
     </template>`).get("vanilla/DemoToggle.js")!;
@@ -718,8 +718,8 @@ describe("official target compilers", () => {
   it("compiles primitive class tokens with the direct emitter", async () => {
     const module = generated(`<template component="demo-class-toggle" status="experimental" summary="Direct primitive class toggle.">
       <defs>
-        <state name="open" :value="false"></state>
-        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+        <state type="boolean" name="open" value="false"></state>
+        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
       </defs>
       <button on:click="toggle" class:open="open"><output $value="open"></output></button>
     </template>`).get("vanilla/DemoClassToggle.js")!;
@@ -732,8 +732,8 @@ describe("official target compilers", () => {
   it("compiles primitive HTML style values with the direct emitter", async () => {
     const module = generated(`<template component="demo-style-counter" status="experimental" summary="Direct primitive style counter.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment" style:--count="count"><output $value="count"></output></button>
     </template>`).get("vanilla/DemoStyleCounter.js")!;
@@ -746,8 +746,8 @@ describe("official target compilers", () => {
   it("compiles primitive SVG style values with the direct emitter", async () => {
     const module = generated(`<template component="demo-svg-style-counter" status="experimental" summary="Direct primitive SVG style counter.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
     </template>`).get("vanilla/DemoSvgStyleCounter.js")!;
@@ -759,7 +759,7 @@ describe("official target compilers", () => {
 
   it("compiles direct text input bindings with the native dirty-value guard", async () => {
     const module = generated(`<template component="demo-bound-text" status="experimental" summary="Direct native text binding.">
-      <defs><state name="draft" :value="'Ready'"></state></defs>
+      <defs><state type="string" name="draft" value="Ready"></state></defs>
       <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
     </template>`).get("vanilla/DemoBoundText.js")!;
 
@@ -771,7 +771,7 @@ describe("official target compilers", () => {
 
   it("keeps numeric two-way controls on the live runtime", () => {
     const module = generated(`<template component="demo-bound-number" status="experimental" summary="Numeric binding fallback.">
-      <defs><state name="count" :value="0"></state></defs>
+      <defs><state type="number" name="count" value="0"></state></defs>
       <section><input type="number" bind:value="count"><output $value="count"></output></section>
     </template>`).get("vanilla/DemoBoundNumber.js")!;
 
@@ -780,7 +780,7 @@ describe("official target compilers", () => {
 
   it("compiles direct checkbox bindings with native checked synchronization", async () => {
     const module = generated(`<template component="demo-bound-check" status="experimental" summary="Direct native checkbox binding.">
-      <defs><state name="done" :value="false"></state></defs>
+      <defs><state type="boolean" name="done" value="false"></state></defs>
       <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
     </template>`).get("vanilla/DemoBoundCheck.js")!;
 
@@ -792,7 +792,7 @@ describe("official target compilers", () => {
 
   it("keeps radio two-way controls on the live runtime", () => {
     const module = generated(`<template component="demo-bound-radio" status="experimental" summary="Radio binding fallback.">
-      <defs><state name="selected" :value="false"></state></defs>
+      <defs><state type="boolean" name="selected" value="false"></state></defs>
       <section><input type="radio" bind:checked="selected"><output $value="selected"></output></section>
     </template>`).get("vanilla/DemoBoundRadio.js")!;
 
@@ -801,7 +801,7 @@ describe("official target compilers", () => {
 
   it("compiles direct textarea and single-select bindings", async () => {
     const module = generated(`<template component="demo-bound-choice" status="experimental" summary="Direct native choice bindings.">
-      <defs><state name="choice" :value="'one'"></state></defs>
+      <defs><state type="string" name="choice" value="one"></state></defs>
       <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
     </template>`).get("vanilla/DemoBoundChoice.js")!;
 
@@ -813,7 +813,7 @@ describe("official target compilers", () => {
 
   it("keeps multi-select bindings on the live runtime", () => {
     const module = generated(`<template component="demo-bound-many" status="experimental" summary="Multi-select binding fallback.">
-      <defs><state name="choice" :value="'one'"></state></defs>
+      <defs><state type="string" name="choice" value="one"></state></defs>
       <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
     </template>`).get("vanilla/DemoBoundMany.js")!;
 
@@ -822,7 +822,7 @@ describe("official target compilers", () => {
 
   it("compiles direct range bindings with native numeric synchronization", async () => {
     const module = generated(`<template component="demo-bound-range" status="experimental" summary="Direct native range binding.">
-      <defs><state name="position" :value="0"></state></defs>
+      <defs><state type="number" name="position" value="0"></state></defs>
       <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
     </template>`).get("vanilla/DemoBoundRange.js")!;
 
@@ -834,7 +834,7 @@ describe("official target compilers", () => {
 
   it("compiles static prevent and stop handlers with native event calls", async () => {
     const module = generated(`<template component="demo-event-modifier" status="experimental" summary="Direct native event modifiers.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section><button on:click.prevent.stop="increment"><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoEventModifier.js")!;
 
@@ -846,7 +846,7 @@ describe("official target compilers", () => {
 
   it("compiles static self handlers with a native target identity guard", async () => {
     const module = generated(`<template component="demo-event-self" status="experimental" summary="Direct native self modifier.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section><button on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoEventSelf.js")!;
 
@@ -857,7 +857,7 @@ describe("official target compilers", () => {
 
   it("compiles static filtered handlers with native event guards", async () => {
     const module = generated(`<template component="demo-event-filter" status="experimental" summary="Direct native event filter.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoEventFilter.js")!;
 
@@ -873,7 +873,7 @@ describe("official target compilers", () => {
 
   it("compiles static capture and passive listeners with native options", async () => {
     const module = generated(`<template component="demo-event-options" status="experimental" summary="Direct native event options.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoEventOptions.js")!;
 
@@ -885,7 +885,7 @@ describe("official target compilers", () => {
 
   it("compiles static once listeners through the generated lifecycle coordinator", async () => {
     const module = generated(`<template component="demo-event-once" status="experimental" summary="Native once fallback.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <button on:keydown.enter.once="increment"><output $value="count"></output></button>
     </template>`).get("vanilla/DemoEventOnce.js")!;
 
@@ -909,8 +909,8 @@ describe("official target compilers", () => {
     const module = generated(`<template component="demo-event-dispatch" status="experimental" summary="Direct declared event dispatch.">
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
-        <state name="count" :value="0"></state>
-        <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="count"></dispatch></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
       </defs>
       <button on:click="save">Save</button>
     </template>`).get("vanilla/DemoEventDispatch.js")!;
@@ -925,7 +925,7 @@ describe("official target compilers", () => {
     const vue = generated(`<template component="demo-vue-event" status="experimental" summary="Typed Vue event.">
       <defs>
         <event name="select" type="object"><prop name="value" type="keyword" values="small, large" required></prop></event>
-        <handler name="choose"><dispatch event="select" :value="{ value: 'small' }"></dispatch></handler>
+        <handler name="choose"><dispatch event="select" expr:value="{ value: 'small' }"></dispatch></handler>
       </defs>
       <button on:click="choose">Choose</button>
     </template>`).get("vue/DemoVueEvent.vue")!;
@@ -937,9 +937,9 @@ describe("official target compilers", () => {
     const module = generated(`<template component="demo-guarded-handler" status="experimental" summary="Direct guarded handler.">
       <defs>
         <event name="saved" type="number"></event>
-        <state name="enabled" :value="true"></state>
-        <state name="count" :value="0"></state>
-        <handler name="advance"><set name="count" :value="count + 1" $if="enabled"></set><dispatch event="saved" :value="count" $if="enabled"></dispatch><set name="enabled" :value="not enabled"></set></handler>
+        <state type="boolean" name="enabled" value="true"></state>
+        <state type="number" name="count" value="0"></state>
+        <handler name="advance"><set name="count" expr:value="count + 1" $if="enabled"></set><dispatch event="saved" expr:value="count" $if="enabled"></dispatch><set name="enabled" expr:value="not enabled"></set></handler>
       </defs>
       <button on:click="advance"><output $value="count"></output></button>
     </template>`).get("vanilla/DemoGuardedHandler.js")!;
@@ -955,10 +955,10 @@ describe("official target compilers", () => {
   it("pulls static primitive computed handler guards before each guarded step", async () => {
     const module = generated(`<template component="demo-computed-guard" status="experimental" summary="Computed guard direct path.">
       <defs>
-        <state name="count" :value="0"></state>
-        <state name="hits" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
+        <state type="number" name="hits" value="0"></state>
         <computed name="even" from="count % 2 = 0"></computed>
-        <handler name="advance"><set name="count" :value="count + 1"></set><set name="hits" :value="hits + 1" $if="even"></set></handler>
+        <handler name="advance"><set name="count" expr:value="count + 1"></set><set name="hits" expr:value="hits + 1" $if="even"></set></handler>
       </defs>
       <button on:click="advance"><output $value="count"></output><output $value="hits"></output></button>
     </template>`).get("vanilla/DemoComputedGuard.js")!;
@@ -971,8 +971,8 @@ describe("official target compilers", () => {
   it("compiles static refs with native validation and focus handler steps", async () => {
     const module = generated(`<template component="demo-ref-action" status="experimental" summary="Direct static ref action.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="count"></output></section>
     </template>`).get("vanilla/DemoRefAction.js")!;
@@ -985,7 +985,7 @@ describe("official target compilers", () => {
 
   it("compiles dependency-free primitive `$value` beside dynamic direct output", async () => {
     const module = generated(`<template component="demo-literal-text" status="experimental" summary="Direct literal text.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoLiteralText.js")!;
 
@@ -996,7 +996,7 @@ describe("official target compilers", () => {
 
   it("compiles dependency-free primitive native bindings beside dynamic direct output", async () => {
     const module = generated(`<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
-      <defs><state name="count" :value="0"></state><handler name="increment"><set name="count" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
       <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
     </template>`).get("vanilla/DemoLiteralNative.js")!;
 
@@ -1014,11 +1014,11 @@ describe("official target compilers", () => {
     const module = generated(`<template component="demo-static-computed" status="experimental" summary="Static computed direct construction.">
       <defs>
         <event name="saved" type="string"></event>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="prefix" from="'Ready'"></computed>
         <computed name="label" from="format('%s!', prefix)"></computed>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
-        <handler name="save"><dispatch event="saved" :value="label"></dispatch></handler>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
       </defs>
       <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
     </template>`).get("vanilla/DemoStaticComputed.js")!;
@@ -1037,9 +1037,9 @@ describe("official target compilers", () => {
     const module = generated(`<template component="demo-computed-event-dispatch" status="experimental" summary="Direct computed declared event dispatch.">
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="savedValue" from="count * 2"></computed>
-        <handler name="save"><set name="count" :value="count + 1"></set><dispatch event="saved" :value="savedValue"></dispatch></handler>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="savedValue"></dispatch></handler>
       </defs>
       <button on:click="save">Save <output $value="savedValue"></output></button>
     </template>`).get("vanilla/DemoComputedEventDispatch.js")!;
@@ -1054,8 +1054,8 @@ describe("official target compilers", () => {
   it("compiles a static primitive `$value` expression without the live runtime", async () => {
     const module = generated(`<template component="demo-inline-expression" status="experimental" summary="Direct inline text expression.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="count + 1"></output></button>
     </template>`).get("vanilla/DemoInlineExpression.js")!;
@@ -1068,8 +1068,8 @@ describe("official target compilers", () => {
   it("compiles static primitive attribute, property, class, and style expressions directly", async () => {
     const module = generated(`<template component="demo-inline-attributes" status="experimental" summary="Direct inline native expressions.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
     </template>`).get("vanilla/DemoInlineAttributes.js")!;
@@ -1085,8 +1085,8 @@ describe("official target compilers", () => {
   it("compiles dependency-free primitive `$value` expressions as direct text", async () => {
     const module = generated(`<template component="demo-static-directive" status="experimental" summary="Static directive text.">
       <defs>
-        <state name="count" :value="0"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="'fixed'"></output></button>
     </template>`).get("vanilla/DemoStaticDirective.js")!;
@@ -1099,8 +1099,8 @@ describe("official target compilers", () => {
   it("keeps a type-incompatible direct primitive state on the conforming runtime", () => {
     const module = generated(`<template component="demo-inert" status="experimental" summary="Typed direct primitive fallback.">
       <defs>
-        <state name="open" type="string" :value="false"></state>
-        <handler name="toggle"><set name="open" :value="not open"></set></handler>
+        <state name="open" type="string" value="false"></state>
+        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
       </defs>
       <button on:click="toggle" from:aria-expanded="open"><output $value="open"></output></button>
     </template>`).get("vanilla/DemoInert.js")!;
@@ -1108,18 +1108,31 @@ describe("official target compilers", () => {
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
   });
 
-  it("keeps mutable typed numeric state on the conforming runtime", () => {
+  it("guards direct mutable numeric state against non-finite writes", () => {
     const module = generated(`<template component="demo-typed-number" status="experimental" summary="Typed numeric state.">
-      <defs><state name="count" type="number" :value="1"></state><handler name="divide"><set name="count" :value="count / 0"></set></handler></defs>
+      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler></defs>
       <button on:click="divide"><output $value="count"></output></button>
     </template>`).get("vanilla/DemoTypedNumber.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /Number\.isFinite\(next0\)/);
+  });
+
+  it("subscribes Vue data reads only to from:value parameters", () => {
+    const vue = generated(`<template component="x-param-modes"><defs>
+      <state name="query" type="string" value="first"></state>
+      <state name="token" type="string" value="a"></state>
+      <data name="result" src="/api/search" type="string">
+        <param name="q" from:value="query"></param>
+        <param name="token" expr:value="token"></param>
+      </data></defs><output $value="result.value"></output></template>`).get("vue/XParamModes.vue")!;
+    compileVue(vue, "XParamModes.vue");
+    assert.match(vue, /sources: \(\) => \[query\.value\]/);
+    assert.match(vue, /parameters: \(\) => \(\{ q: query\.value, token: token\.value \}\)/);
   });
 
   it("includes set value dependencies even when they are not rendered", async () => {
     const module = generated(`<template component="demo-set-input" status="experimental" summary="Set input dependency.">
-      <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><handler name="save"><set name="snapshot" :value="count + 1"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="count + 1"></set></handler></defs>
       <button on:click="save"><output $value="snapshot"></output></button>
     </template>`).get("vanilla/DemoSetInput.js")!;
 
@@ -1131,7 +1144,7 @@ describe("official target compilers", () => {
 
   it("refreshes a computed before a later set reads it", async () => {
     const module = generated(`<template component="demo-sequential-sets" status="experimental" summary="Sequential sets.">
-      <defs><state name="count" :value="0"></state><state name="snapshot" :value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" :value="count + 1"></set><set name="snapshot" :value="double"></set></handler></defs>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" expr:value="count + 1"></set><set name="snapshot" expr:value="double"></set></handler></defs>
       <button on:click="advance"><output $value="snapshot"></output></button>
     </template>`).get("vanilla/DemoSequentialSets.js")!;
 
@@ -1140,26 +1153,26 @@ describe("official target compilers", () => {
     await transform(module, { loader: "js" });
   });
 
-  it("keeps a state initializer that reads a computed declaration on the live runtime", () => {
-    const module = generated(`<template component="demo-initial-order" status="experimental" summary="State initialization order fallback.">
+  it("rejects a derived state initializer in favor of a computed declaration", () => {
+    const source = `<template component="demo-initial-order" status="experimental" summary="State initialization order fallback.">
       <defs>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="derived" from="count + 1"></computed>
-        <state name="snapshot" :value="derived"></state>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <state name="snapshot" from:value="derived"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="snapshot"></output></button>
-    </template>`).get("vanilla/DemoInitialOrder.js")!;
+    </template>`;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.throws(() => generated(source), /uses a literal `value`/);
   });
 
   it("compiles static string modes to direct native text, attributes, and properties", async () => {
     const module = generated(`<template component="demo-tabs" status="experimental" summary="Direct string tabs.">
       <defs>
-        <state name="tab" :value="'one'"></state>
-        <handler name="showOne"><set name="tab" :value="'one'"></set></handler>
-        <handler name="showTwo"><set name="tab" :value="'two'"></set></handler>
+        <state type="string" name="tab" value="one"></state>
+        <handler name="showOne"><set name="tab" expr:value="'one'"></set></handler>
+        <handler name="showTwo"><set name="tab" expr:value="'two'"></set></handler>
       </defs>
       <section from:data-tab="tab" from:title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
     </template>`).get("vanilla/DemoTabs.js")!;
@@ -1174,8 +1187,8 @@ describe("official target compilers", () => {
   it("keeps string URL attributes on the sanitizing live runtime", () => {
     const module = generated(`<template component="demo-link" status="experimental" summary="String URL fallback.">
       <defs>
-        <state name="destination" :value="'/start'"></state>
-        <handler name="change"><set name="destination" :value="'javascript:alert(1)'"></set></handler>
+        <state type="string" name="destination" value="/start"></state>
+        <handler name="change"><set name="destination" expr:value="'javascript:alert(1)'"></set></handler>
       </defs>
       <a on:click="change" from:href="destination"><output $value="destination"></output></a>
     </template>`).get("vanilla/DemoLink.js")!;
@@ -1186,9 +1199,9 @@ describe("official target compilers", () => {
   it("compiles literal primitive format expressions to direct string concatenation", async () => {
     const module = generated(`<template component="demo-label" status="experimental" summary="Direct formatted label.">
       <defs>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="label" from="format('Step %s', count)"></computed>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
     </template>`).get("vanilla/DemoLabel.js")!;
@@ -1201,9 +1214,9 @@ describe("official target compilers", () => {
   it("preserves missing format placeholders in the direct primitive subset", () => {
     const module = generated(`<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
       <defs>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="label" from="format('%s/%s', count)"></computed>
-        <handler name="increment"><set name="count" :value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="label"></output></button>
     </template>`).get("vanilla/DemoMissingFormat.js")!;
@@ -1215,8 +1228,8 @@ describe("official target compilers", () => {
   it("retains the live runtime for ordinary SVG attributes that need name adjustment", () => {
     const module = generated(`<template component="demo-svg-bound" status="experimental" summary="Bound SVG attribute.">
       <defs>
-        <state name="size" :value="24"></state>
-        <handler name="grow"><set name="size" :value="size + 1"></set></handler>
+        <state type="number" name="size" value="24"></state>
+        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
       </defs>
       <button on:click="grow"><svg from:viewBox="size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgBound.js")!;
@@ -1227,8 +1240,8 @@ describe("official target compilers", () => {
   it("keeps numeric SVG data attributes on the direct native emitter", async () => {
     const module = generated(`<template component="demo-svg-data" status="experimental" summary="Direct SVG data binding.">
       <defs>
-        <state name="size" :value="24"></state>
-        <handler name="grow"><set name="size" :value="size + 1"></set></handler>
+        <state type="number" name="size" value="24"></state>
+        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
       </defs>
       <button on:click="grow"><svg from:data-size="size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgData.js")!;
@@ -1303,7 +1316,7 @@ describe("official target compilers", () => {
 
   it("compiles a read-only primitive reactive leaf without the full runtime", async () => {
     const module = generated(`<template component="demo-derived" status="experimental" summary="Derived output.">
-      <defs><state name="count" :value="0"></state></defs>
+      <defs><state type="number" name="count" value="0"></state></defs>
       <output $value="count + 1"></output>
     </template>`).get("vanilla/DemoDerived.js")!;
 
@@ -1339,6 +1352,6 @@ describe("official target compilers", () => {
   it("rejects :scope and undeclared or structured :host-state() names", () => {
     assert.throws(() => generated(componentSource("demo-a", "", `<div></div><style>:scope { color: red; }</style>`)), /HY003/);
     assert.throws(() => generated(componentSource("demo-b", "", `<div></div><style>:host-state([missing]) { color: red; }</style>`)), /HY001/);
-    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" :value="[]"></state></defs><div></div><style>:host-state([items]) { color: red; }</style>`)), /HY002/);
+    assert.throws(() => generated(componentSource("demo-c", "", `<defs><state name="items" type="list(string)" value="[]"></state></defs><div></div><style>:host-state([items]) { color: red; }</style>`)), /HY002/);
   });
 });

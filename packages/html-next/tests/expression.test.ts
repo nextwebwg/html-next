@@ -181,6 +181,8 @@ describe("expression: operators, comparison, functions", () => {
 
   it("formats dynamic slot names with the standard format function", () => {
     assert.equal(evaluate("format('row-%s-%s', 'alpha', 2)", s), "row-alpha-2");
+    assert.equal(evaluate("format('%s%', 42)", s), "42%");
+    assert.equal(evaluate("42 + '%'", s), ABSENT);
     assert.equal(evaluate("format(1, 'alpha')", s), ABSENT);
     assert.throws(() => evaluate("format(1, undeclared)", s), UndeclaredName);
   });

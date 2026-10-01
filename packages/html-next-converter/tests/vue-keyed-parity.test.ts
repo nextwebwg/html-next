@@ -25,11 +25,11 @@ const controller = `export default function connect(host) {
 }`;
 const parent = `<link rel="component" href="./item.html">
 <template component="x-keyed-list" status="early" summary="Keyed parent."><defs>
-  <state name="rows" :value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
-  <handler name="reorder"><set name="rows" :value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }, { id: 'b', label: 'Bee' }]"></set></handler>
-  <handler name="remove"><set name="rows" :value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }]"></set></handler>
-  <handler name="restore"><set name="rows" :value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }, { id: 'a', label: 'Again' }]"></set></handler>
-  <handler name="duplicate"><set name="rows" :value="[{ id: 'a', label: 'One' }, { id: 'a', label: 'Two' }]"></set></handler>
+  <state type="list(unknown)" name="rows" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
+  <handler name="reorder"><set name="rows" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }, { id: 'b', label: 'Bee' }]"></set></handler>
+  <handler name="remove"><set name="rows" expr:value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }]"></set></handler>
+  <handler name="restore"><set name="rows" expr:value="[{ id: 'c', label: 'C' }, { id: 'b', label: 'Bee' }, { id: 'a', label: 'Again' }]"></set></handler>
+  <handler name="duplicate"><set name="rows" expr:value="[{ id: 'a', label: 'One' }, { id: 'a', label: 'Two' }]"></set></handler>
 </defs><section><button type="button" class="reorder" on:click="reorder">Reorder</button>
   <button type="button" class="remove" on:click="remove">Remove</button>
   <button type="button" class="restore" on:click="restore">Restore</button>

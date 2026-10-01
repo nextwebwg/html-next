@@ -32,7 +32,7 @@ describe("parseComponent", () => {
   it("reads from: bindings and rejects the former bare-colon spelling", () => {
     const definition = parseComponent(`<template component="x-from"><defs>
       <prop name="label" type="string">Label.</prop>
-      <state name="count" :value="0"></state>
+      <state type="number" name="count" value="0"></state>
     </defs><output from:aria-label="label" from:data-count="count"></output></template>`);
     assert.deepEqual(definition.template.attributes.filter((entry) => entry.kind === "attribute").map((entry) => entry.name), ["aria-label", "data-count"]);
     expectDiagnostic("HT010", `<template component="x-old"><defs><prop name="label" type="string">Label.</prop></defs><output :aria-label="label"></output></template>`);
@@ -77,11 +77,12 @@ describe("parseComponent", () => {
 
   it("resolves a selected type from a declared state by name", () => {
     const definition = parseComponent(`<template component="x-state-type"><defs>
-      <state name="mode" type="keyword" values="text, number" :value="'text'"></state>
+      <state name="mode" type="keyword" values="text, number" value="text"></state>
       <prop name="value">Value.<type from="mode">
         <option value="text" type="string"></option>
         <option value="number" type="number"></option>
       </type></prop>
+      <handler name="useNumber"><set name="mode" value="number"></set></handler>
     </defs><output from:data-value="value"></output></template>`);
     assert.deepEqual(definition.contract.props.value?.select, {
       from: "mode",
@@ -90,6 +91,50 @@ describe("parseComponent", () => {
         { value: "number", type: { kind: "terminal", name: "number" } },
       ],
     });
+    const handler = definition.declarations?.find((declaration) => declaration.kind === "handler");
+    assert.equal(handler?.kind, "handler");
+    assert.deepEqual(handler.steps[0]?.kind === "set" ? handler.steps[0].value.ast : undefined,
+      { kind: "literal", value: "number" });
+  });
+
+  it("distinguishes typed constants from action-time expressions", () => {
+    const definition = parseComponent(`<template component="x-values"><defs>
+      <state name="count" type="number" value="1"></state>
+      <event name="saved" type="number"></event>
+      <handler name="run">
+        <set name="count" value="2"></set>
+        <set name="count" expr:value="count + 1"></set>
+        <dispatch event="saved" value="3"></dispatch>
+        <dispatch event="saved" expr:value="count"></dispatch>
+      </handler></defs><button on:click="run"></button></template>`);
+    const handler = definition.declarations?.find((declaration) => declaration.kind === "handler");
+    assert.equal(handler?.kind, "handler");
+    assert.deepEqual(handler.steps.map((step) => (step.kind === "set" || step.kind === "dispatch") ? step.value?.ast : undefined), [
+      { kind: "literal", value: 2 },
+      { kind: "binary", op: "+", left: { kind: "id", name: "count" }, right: { kind: "literal", value: 1 } },
+      { kind: "literal", value: 3 },
+      { kind: "id", name: "count" },
+    ]);
+    expectDiagnostic("HC023", `<template component="x-bad"><defs><state name="count" type="number" value="0"></state><handler name="run"><set name="count" value="abc"></set></handler></defs><button></button></template>`);
+  });
+
+  it("marks data parameters as reactive sources or request-time expressions", () => {
+    const definition = parseComponent(`<template component="x-request"><defs>
+      <state name="query" type="string" value="initial"></state>
+      <state name="token" type="string" value="one"></state>
+      <data name="result" src="/api/search" type="string">
+        <param name="q" from:value="query"></param>
+        <param name="token" expr:value="token"></param>
+      </data></defs><output $value="result.value"></output></template>`);
+    const data = definition.declarations?.find((declaration) => declaration.kind === "data");
+    assert.equal(data?.kind, "data");
+    assert.deepEqual(data.parameters.map(({ name, mode }) => [name, mode]), [["q", "from"], ["token", "expr"]]);
+    expectDiagnostic("HC024", `<template component="x-bad"><defs><data name="result" src="/api/search"><param name="q" from:value="x" expr:value="x"></param></data></defs><output $value="result.value"></output></template>`);
+  });
+
+  it("rejects the former expression prefix on setter steps", () => {
+    expectDiagnostic("HC023", `<template component="x-counter"><defs><state name="count" type="number" value="0"></state>` +
+      `<handler name="increment"><set name="count" from:value="count + 1"></set></handler></defs><button></button></template>`);
   });
 
   it("rejects a values constraint containing an item outside the declared type", () => {
@@ -125,7 +170,7 @@ describe("parseComponent", () => {
 
   it("constrains nested event and state fields with their own declared types", () => {
     const definition = parseComponent(`<template component="x-events"><defs>
-      <state name="history" type="list" :value="[]" nullable>
+      <state name="history" type="list" value="[]" nullable>
         <prop type="object">
           <prop name="trigger" type="keyword" values="keyboard, pointer" required></prop>
         </prop>
@@ -158,12 +203,50 @@ describe("parseComponent", () => {
     ));
     assert.equal(definition.contract.props.sku?.pattern, "[A-Z]{3}-[0-9]{4}");
   });
+
+  it("reads numeric, temporal, and text bounds from prop declarations", () => {
+    const definition = parseComponent(componentSource(
+      `<output from:data-count="count" from:data-date="date" from:data-code="code"></output>`,
+      `<prop name="count" type="integer" min="1" max="9" default="3">Count.</prop>
+       <prop name="date" type="date" min="2026-01-01" max="2026-12-31">Date.</prop>
+       <prop name="code" type="string" minlength="2" maxlength="5">Code.</prop>`,
+    ));
+    assert.deepEqual([definition.contract.props.count?.min, definition.contract.props.count?.max], [1, 9]);
+    assert.deepEqual([definition.contract.props.date?.min, definition.contract.props.date?.max], ["2026-01-01", "2026-12-31"]);
+    assert.deepEqual([definition.contract.props.code?.minLength, definition.contract.props.code?.maxLength], [2, 5]);
+  });
+
+  it("rejects incompatible or malformed authored bounds and invalid defaults", () => {
+    const output = `<output from:data-value="value"></output>`;
+    for (const declaration of [
+      `<prop name="value" type="string" min="1">Value.</prop>`,
+      `<prop name="value" type="number" min="oops">Value.</prop>`,
+      `<prop name="value" type="number" maxlength="3">Value.</prop>`,
+      `<prop name="value" type="string" minlength="-1">Value.</prop>`,
+      `<prop name="value" type="integer" min="2" default="1">Value.</prop>`,
+      `<prop name="value" type="string" minlength="3" default="ab">Value.</prop>`,
+    ]) expectDiagnostic(declaration.includes("default=") ? "HC015" : "HC013", componentSource(output, declaration));
+  });
+
+  it("checks bounds on nested fields", () => {
+    const definition = parseComponent(`<template component="x-bounded"><defs>
+      <event name="change" type="object">
+        <prop name="amount" type="number" min="0" max="100" required></prop>
+        <prop name="label" type="string" minlength="2" maxlength="8" required></prop>
+      </event>
+    </defs><output></output></template>`);
+    const event = definition.declarations!.find((item) => item.kind === "event");
+    assert.ok(event?.kind === "event" && event.shape !== undefined);
+    assert.equal(parseTypedValue({ amount: 20, label: "okay" }, event.shape, "$", "value").ok, true);
+    assert.equal(parseTypedValue({ amount: 101, label: "okay" }, event.shape, "$", "value").ok, false);
+    assert.equal(parseTypedValue({ amount: 20, label: "x" }, event.shape, "$", "value").ok, false);
+  });
   it("normalizes the full component interface and named slot shapes", () => {
     const definition = parseComponent(
       `<template component="ui-combobox" status="early" summary="A composed field." controller="./combobox.js">` +
         `<defs>` +
         `<prop name="config" type="string">Property-only configuration.</prop>` +
-        `<state name="query" :value="''"></state>` +
+        `<state type="string" name="query" value=""></state>` +
         `<computed name="empty" from="not query"></computed>` +
         `<event name="value-change" type="string"></event>` +
         `<method name="validate" returns="string" export="validate"></method>` +
@@ -217,7 +300,7 @@ describe("parseComponent", () => {
   it("retains every scoped prop when root alternatives expose the same slot", () => {
     const definition = parseComponent(`<template component="x-alternate-slots"><defs>` +
       `<state name="first" value="First"></state><state name="second" value="Second"></state>` +
-      `<state name="alternate" :value="false"></state></defs>` +
+      `<state type="boolean" name="alternate" value="false"></state></defs>` +
       `<template $match><section $when="alternate"><slot name="item" from:first="first"></slot></section>` +
       `<article $else><slot name="item" from:second="second"></slot></article></template></template>`);
     assert.deepEqual(definition.slots, [{ name: "item", dynamic: false, required: true, props: ["first", "second"] }]);
@@ -262,9 +345,9 @@ describe("parseComponent", () => {
     );
   });
 
-  it("parses published state and aliased read-only context", () => {
+  it("parses ancestor state and aliased read-only context", () => {
     const provider = parseComponent(
-      `<template component="x-steps"><defs><state name="current" :value="1" context></state></defs>` +
+      `<template component="x-steps"><defs><state type="number" name="current" value="1"></state></defs>` +
         `<ol><slot></slot></ol></template>`,
     );
     const reader = parseComponent(
@@ -273,7 +356,6 @@ describe("parseComponent", () => {
     );
     assert.equal(provider.declarations?.[0]?.kind, "state");
     assert.equal(provider.declarations?.[0]?.name, "current");
-    assert.equal(provider.declarations?.[0]?.kind === "state" && provider.declarations[0].context, true);
     assert.deepEqual(reader.declarations?.[0], {
       kind: "context",
       name: "current",
@@ -284,6 +366,7 @@ describe("parseComponent", () => {
   });
 
   it("requires a context source and keeps context reads out of writable paths", () => {
+    expectDiagnostic("HC013", `<template component="x-steps"><defs><state name="current" context></state></defs><ol></ol></template>`);
     expectDiagnostic("HC013", `<template component="x-step"><defs><context name="current"></context></defs><li></li></template>`);
     expectDiagnostic("HC020", `<template component="x-step"><defs><state name="active"></state>` +
       `<context name="current" from="x-steps" as="active"></context></defs><li></li></template>`);
@@ -428,7 +511,7 @@ describe("parseComponent", () => {
   it("parses state-rooted two-way bindings, flow, content, refs, and events", () => {
     const definition = parseComponent(
       `<template component="demo-example" status="early" summary="Bindings.">` +
-        `<defs><state name="form" :value="{ email: '' }"></state>` +
+        `<defs><state type="object({ email: string })" name="form" value="{ email: '' }"></state>` +
         `<handler name="save"></handler></defs>` +
         `<form><input bind:value="form.email" $ref="email" on:input.passive="save">` +
         `<output $if="form.email" $value="form.email"></output></form></template>`,
@@ -453,7 +536,7 @@ describe("parseComponent", () => {
   it("preserves native forms as component markup without creating component declarations", () => {
     const definition = parseComponent(
       `<template component="x-editor" status="early" summary="Editor.">` +
-        `<defs><state name="draft" :value="{ title: 'Draft' }"></state></defs>` +
+        `<defs><state type="object({ title: string })" name="draft" value="{ title: 'Draft' }"></state></defs>` +
         `<form name="editor" method="post" action="/api/posts/42">` +
         `<input name="title" bind:value="draft.title"><button>Save</button></form></template>`,
     );
@@ -472,16 +555,16 @@ describe("parseComponent", () => {
       `<template component="x-results" status="experimental" summary="Search results." controller="./results.js">` +
         `<defs>` +
         `<prop name="query" type="string" required>Search query.</prop>` +
-        `<state name="form" :value="{ selected: 0 }"></state>` +
+        `<state type="object({ selected: number })" name="form" value="{ selected: 0 }"></state>` +
         `<computed name="hasQuery" from="query != ''"></computed>` +
         `<data name="results" src="/api/search" type="object" debounce="150ms" poll="30s">` +
         `<param name="q" from:value="query"></param></data>` +
         `<event name="selection-change" type="number" bubbles="false" composed="false" cancelable="true"></event>` +
         `<method name="refresh" export="refresh" returns="promise(undefined)"></method>` +
         `<handler name="select">` +
-        `<set name="form.selected" :value="form.selected + 1" $if="hasQuery"></set>` +
+        `<set name="form.selected" expr:value="form.selected + 1" $if="hasQuery"></set>` +
         `<validate target="search"></validate><focus ref="search"></focus>` +
-        `<dispatch event="selection-change" :value="form.selected"></dispatch>` +
+        `<dispatch event="selection-change" expr:value="form.selected"></dispatch>` +
         `</handler></defs>` +
         `<section from:data-ready="hasQuery" class:active="hasQuery" style:opacity="hasQuery" $ref="root">` +
         `<input .value="query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
@@ -558,7 +641,7 @@ describe("parseComponent", () => {
     // Arms read props, state, and computed values, like any expression.
     assert.deepEqual(parseComponent(button(
       `<template $match><details $when="open"></details><a $when="linked"></a><button $else></button></template>`,
-      `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop><state name="open" :value="false"></state>` +
+      `<prop name="as" type="keyword" values="button, a" default="button">Root.</prop><state type="boolean" name="open" value="false"></state>` +
         `<computed name="linked" from="as = 'a'"></computed>`,
     )).root, { kind: "native", element: "button", choices: ["details", "a", "button"] });
     // A slot required by any arm is required; arms' dynamic slots merge by position.
@@ -642,8 +725,8 @@ describe("parseComponent", () => {
   });
 
   it("rejects deferred declarative connection lifecycle bindings", () => {
-    const declarations = `<defs><state name="ready" :value="false"></state>` +
-      `<handler name="markReady"><set name="ready" :value="true"></set></handler></defs>`;
+    const declarations = `<defs><state type="boolean" name="ready" value="false"></state>` +
+      `<handler name="markReady"><set name="ready" value="true"></set></handler></defs>`;
     for (const attribute of ["on:connect", "on:disconnect"]) {
       expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section ${attribute}="markReady"></section></template>`);
       expectDiagnostic("HT010", `<template component="demo-example">${declarations}<section><span ${attribute}="markReady"></span></section></template>`);

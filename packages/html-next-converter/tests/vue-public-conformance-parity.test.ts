@@ -51,7 +51,7 @@ function consumer(invocation: string, tag: string, componentName: string, props:
       const propName = component ? Object.keys(props).find((name) => name.toLowerCase() === attribute.name) : undefined;
       const name = propName ?? attribute.name;
       const type = propName === undefined ? undefined : props[propName]?.type;
-      attributes[name] = type === "number" ? Number(attribute.value)
+      attributes[name] = type === "number" && attribute.value.trim() !== "" && Number.isFinite(Number(attribute.value)) ? Number(attribute.value)
         : type === "boolean" ? attribute.value !== "false" : attribute.value;
     }
     const children = (node.childNodes ?? []).map(render).filter((child): child is string => child !== undefined);
@@ -197,10 +197,16 @@ export const render = () => renderToString(createSSRApp({ render: () => ${consum
                 const q = (s) => document.querySelector(s);
                 const qa = (s) => Array.from(document.querySelectorAll(s));
                 ${testCase.expect.probe}`;
-              const [liveResult, vueResult, serverResult] = await Promise.all([live.evaluate((script) => Function(script)(), program), vue.evaluate((script) => Function(script)(), program), hydrated.evaluate((script) => Function(script)(), program)]);
+              // Ordinary SSR markup has no JavaScript validity facade until hydration.
+              const requiresHydration = testCase.expect.probe.includes(".validity.");
+              const [liveResult, vueResult, serverResult] = await Promise.all([
+                live.evaluate((script) => Function(script)(), program),
+                vue.evaluate((script) => Function(script)(), program),
+                requiresHydration ? Promise.resolve(undefined) : hydrated.evaluate((script) => Function(script)(), program),
+              ]);
               assert.deepEqual(liveResult, testCase.expect.result, "live runtime characterization changed");
               assert.deepEqual(withoutStylingMarkers(vueResult), withoutStylingMarkers(liveResult), "public Vue browser behavior differs");
-              assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), `public Vue server behavior differs: ${serverDOM}`);
+              if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), `public Vue server behavior differs: ${serverDOM}`);
               await assertPixelsEqual(vue, await capturePixels(vue), await capturePixels(live), "public Vue rendered pixels differ", live);
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Vue server-rendered pixels differ", live);
               await hydrated.evaluate(() => { window.hydrateVue = true; });

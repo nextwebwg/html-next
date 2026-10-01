@@ -62,6 +62,39 @@ describe("declared data resource", () => {
     assert.deepEqual(aborted, []);
   });
 
+  it("samples request-only parameters on a poll without treating their change as a trigger", async () => {
+    const callbacks: Array<() => void> = [];
+    const requests: string[] = [];
+    let token = "a";
+    const resource = new DataResource({
+      source: "/search",
+      baseURL: "https://api.example/",
+      poll: 20,
+      sampleParameters: () => ({ q: "first", token }),
+      setTimer: (callback) => { callbacks.push(callback); return callback; },
+      clearTimer: (handle) => {
+        const index = callbacks.indexOf(handle as () => void);
+        if (index >= 0) callbacks.splice(index, 1);
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return new Response("{}", { status: 200 });
+      },
+      onState() {},
+    });
+    resource.update({ q: "first" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    token = "b";
+    assert.equal(requests.length, 1);
+    callbacks.shift()!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(requests, [
+      "https://api.example/search?q=first&token=a",
+      "https://api.example/search?q=first&token=b",
+    ]);
+    resource.disconnect();
+  });
+
   it("adapts decoded responses before publishing them", async () => {
     const states: DataState[] = [];
     const resource = new DataResource({

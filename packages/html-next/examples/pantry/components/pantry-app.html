@@ -26,15 +26,15 @@
     </data>
 
     <!-- The controller keeps these in step with the fetched data and the search box. -->
-    <state name="rows" :value="[]"></state>
-    <state name="lowCount" :value="0"></state>
-    <state name="visible" :value="0"></state>
-    <state name="query" :value="''"></state>
-    <state name="catalogQuery" :value="''"></state>
-    <state name="draftLabel" :value="''"></state>
-    <state name="draftQuantity" :value="1"></state>
+    <state type="list(unknown)" name="rows" value="[]"></state>
+    <state type="number" name="lowCount" value="0"></state>
+    <state type="number" name="visible" value="0"></state>
+    <state type="string" name="query" value=""></state>
+    <state type="string" name="catalogQuery" value=""></state>
+    <state type="string" name="draftLabel" value=""></state>
+    <state type="number" name="draftQuantity" value="1"></state>
 
-    <state name="total" :value="0"></state>
+    <state type="number" name="total" value="0"></state>
     <computed name="loading" from="stock.pending"></computed>
     <computed name="failed" from="not stock.pending and not stock.ok"></computed>
 

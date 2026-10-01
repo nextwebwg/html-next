@@ -159,13 +159,11 @@ describe("framework converter", () => {
 
   it("retains every static conformance diagnostic with its source and writes no output", async () => {
     const runtimeOnly = new Set([
-      "HC020: a required prop is not provided",
       "HR001: two definitions declare the same tag",
-      "HR002: a non-finite number prop invocation value",
     ]);
     const diagnostics = conformanceCases.filter((testCase): testCase is ConformanceCase & { readonly expect: DiagnosticExpect } =>
       "code" in testCase.expect);
-    assert.equal(diagnostics.length, 29, "review new diagnostic cases for converter coverage");
+    assert.equal(diagnostics.length, 27, "review new diagnostic cases for converter coverage");
     const staticDiagnostics = diagnostics.filter((testCase) => !runtimeOnly.has(testCase.name));
     assert.equal(staticDiagnostics.length, 26);
     const root = await mkdtemp(join(tmpdir(), "html-next-converter-diagnostics-"));
@@ -200,7 +198,7 @@ describe("framework converter", () => {
       { code: "HT019", body: '<template component="x-card" status="early" summary="Card."><article $ref="invalid name"></article></template>' },
       { code: "HT020", body: '<template component="x-card" status="early" summary="Card."><article style:1bad="true"></article></template>' },
       { code: "HY001", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:host-state([missing]) { color: red; }</style></template>' },
-      { code: "HY002", body: '<template component="x-card" status="early" summary="Card."><defs><state name="items" type="list(string)" :value="[]"></state></defs><article></article><style>:host-state([items]) { color: red; }</style></template>' },
+      { code: "HY002", body: '<template component="x-card" status="early" summary="Card."><defs><state name="items" type="list(string)" value="[]"></state></defs><article></article><style>:host-state([items]) { color: red; }</style></template>' },
       { code: "HY003", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:scope { color: red; }</style></template>' },
     ] as const;
 
@@ -256,12 +254,12 @@ describe("framework converter", () => {
     temporary.push(root);
     await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
       <defs>
-        <state name="count" :value="0"></state>
+        <state type="number" name="count" value="0"></state>
         <computed name="double" from="count * 2"></computed>
         <event name="count-change" type="number"></event>
         <handler name="increment">
-          <set name="count" :value="count + 1"></set>
-          <dispatch event="count-change" :value="count"></dispatch>
+          <set name="count" expr:value="count + 1"></set>
+          <dispatch event="count-change" expr:value="count"></dispatch>
         </handler>
       </defs>
       <button from:data-count="count" on:click="increment"><output $value="double"></output></button>
@@ -277,10 +275,10 @@ describe("framework converter", () => {
     assert.match(await readFile(join(outDirectory, "vue", "host.ts"), "utf8"), /function useComponentHost/);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
+    assert.match(source, /const double = cycleCheckedComputed\(\(\) => \{[\s\S]*return doublePrevious = count\.value \* 2/);
     assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1\n  dispatch\('count-change', count\.value\)\n/);
     assert.match(source, /const isCountChangeDetail = \(detail: unknown\): boolean =>\n  typeof detail === 'number' && Number\.isFinite\(detail\)/);
-    assert.match(source, /:data-count="count"/);
+    assert.match(source, /:data-count="guarded"/);
   });
 
   it("keeps root-relative data requests on the browser origin", async () => {
@@ -326,7 +324,7 @@ describe("framework converter", () => {
     await mkdir(join(root, "components", "x-toggle"), { recursive: true });
     await mkdir(join(root, "components", "shared"), { recursive: true });
     await writeFile(join(root, "components", "x-toggle", "x-toggle.html"), `<template component="x-toggle" status="early" summary="Toggle." controller="./x-toggle.js">
-      <defs><state name="on" :value="false"></state></defs>
+      <defs><state type="boolean" name="on" value="false"></state></defs>
       <button type="button"><slot></slot></button>
     </template>`);
     await writeFile(join(root, "components", "x-toggle", "x-toggle.js"), 'import { flip } from "../shared/flip.js";\nexport default function controller(host) { const root = host.root; const onClick = () => { host.state.on = flip(host.state.on); }; root.addEventListener("click", onClick); return () => root.removeEventListener("click", onClick); }\n');

@@ -1,5 +1,5 @@
 import type { ControllerModule } from "./controller.js";
-import { matchesPropPattern, selectedPropType } from "./contract.js";
+import { selectedPropType } from "./contract.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
@@ -24,6 +24,7 @@ import {
   createEffect,
   createSignal,
   ReactiveScope,
+  untracked,
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
@@ -62,6 +63,8 @@ import type {
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropContract, PropType, PropValue } from "./types.js";
+import { validateComponentProps, type Validity } from "./validate.js";
+import { manageElementValidity, setElementValidity } from "./validity.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
@@ -118,6 +121,7 @@ interface RuntimeInstance {
   readonly followers: ((root: Element) => void)[];
   /** What the current rendering of the root owns. */
   owned: RenderOwned;
+  validityCleanup?: () => void;
 }
 
 interface DocumentRegistry {
@@ -292,30 +296,28 @@ export function installComponentGraph(
 }
 
 function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue {
-  if (input === null) {
-    if (prop.required) fail("HC021", "A required prop cannot be null.");
-    return null;
-  }
-  if (type === null) fail("HR002", "A dependent prop needs a non-null selecting prop.");
+  if (input === null) return null;
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
-  if (prop.required && candidate === "") fail("HR002", "A required prop cannot be empty.");
+  if (type === null) return candidate as PropValue;
   const parsed = parseTypedValue(candidate, type, "$", source);
-  if (!parsed.ok) {
-    const detail = parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
-    fail("HR002", `A prop invocation value does not satisfy its declared type. ${detail}`);
-  }
-  if (!matchesPropPattern(parsed.value, prop.pattern)) fail("HR002", "A prop invocation value does not match its pattern.");
-  if (prop.values !== undefined && !prop.values.some((choice) => choice === parsed.value)) {
-    fail("HR002", "A prop invocation value is not among its permitted values.");
-  }
-  return parsed.value as PropValue;
+  return (parsed.ok ? parsed.value : candidate) as PropValue;
 }
 
-function assignedPropValue(name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value {
+function propValidity(instance: RuntimeInstance): Validity {
+  return validateComponentProps(instance.definition.contract, (name) => instance.scope.get(name));
+}
+
+function reflectedPropValue(value: unknown, type: PropType | null): string {
+  if (type !== null && parseTypedValue(value, type, "$", "value").ok) {
+    return serializeTypedValue(value, type);
+  }
+  return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+}
+
+function assignedPropValue(_name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value {
   if (input !== undefined) return invocationValue(prop, input, "value", false, type) as Value;
-  if (prop.required) fail("HC020", `Required prop \`${name}\` was not provided.`);
   return (prop.default === undefined ? null : prop.default) as Value;
 }
 
@@ -347,10 +349,6 @@ function componentScope(
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
   for (const [name, prop] of Object.entries(definition.contract.props)) {
-    if (prop.required && (values[name] === undefined || values[name] === null) &&
-        (prop.select === undefined || definition.contract.props[prop.select.from] !== undefined)) {
-      fail("HC020", `Required prop \`${name}\` was not provided.`);
-    }
     // The effective value seen by expressions: passed value, default, or null.
     scope.set(
       name,
@@ -384,7 +382,7 @@ function componentScope(
       while (provider !== undefined && (
         provider.definition.contract.tag !== declaration.from ||
         !provider.definition.declarations?.some((candidate) =>
-          candidate.kind === "state" && candidate.context === true && candidate.name === declaration.name)
+          candidate.kind === "state" && candidate.name === declaration.name)
       )) provider = provider.parent;
       if (provider === undefined) {
         fail("HR009", `<${definition.contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`);
@@ -470,8 +468,6 @@ function readInvocation(
       const type = selectedPropType(contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
       values[name] = invocationValue(prop, item.value, item.source, item.attributePresent, type);
       scope.set(name, values[name] as Value);
-    } else if (prop.required) {
-      fail("HC020", `Required prop \`${name}\` was not provided.`);
     }
   }
   const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined && values[name] !== null));
@@ -490,13 +486,18 @@ function readInvocation(
       ...(data.type === undefined ? {} : { type: data.type }),
       ...(data.debounce === undefined ? {} : { debounce: parseDuration(data.debounce) ?? 0 }),
       ...(data.poll === undefined ? {} : { poll: parseDuration(data.poll) ?? 0 }),
+      sampleParameters: () => Object.fromEntries(data.parameters.map((parameter) => [
+        parameter.name, untracked(() => evaluateCompiled(parameter.expression, scope)),
+      ])),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
     effects.push(createEffect(scope.scheduler, () => {
       const parameters = Object.fromEntries(
         data.parameters.map((parameter) => [
           parameter.name,
-          evaluateCompiled(parameter.expression, scope),
+          parameter.mode === "from"
+            ? evaluateCompiled(parameter.expression, scope)
+            : untracked(() => evaluateCompiled(parameter.expression, scope)),
         ]),
       );
       resource.update(parameters);
@@ -648,10 +649,8 @@ function conformsAtReference(value: Value, type: TypeNode): boolean {
   }
 }
 
-const reportedViolations = new Set<string>();
-
 /**
- * Evaluates a binding expression, or reports that a reference broke its declared type.
+ * Evaluates a binding expression, or leaves it inert when a reference fails its declared type.
  *
  * A reference is checked where it is read, not where its value arrived, so a payload stays exactly
  * as it came back and only the references into its offending part go inert. Callers keep whatever
@@ -669,15 +668,6 @@ function evalConforming(
     // Absence is not a violation: a value that is not there yet has nothing to conform to.
     if (value === ABSENT || value === undefined) continue;
     if (conformsAtReference(value, type)) continue;
-    const key = `${definition.contract.tag}:${path}`;
-    if (!reportedViolations.has(key)) {
-      reportedViolations.add(key);
-      console.warn(
-        `[html-next] <${definition.contract.tag}> read \`${path}\`, whose value does not satisfy its ` +
-          "declared type. That reference is inert: bindings and computed values reading it keep " +
-          "their previous result.",
-      );
-    }
     return NONCONFORMING;
   }
   return typeof expression === "string"
@@ -2081,15 +2071,8 @@ function installPropReflection(instance: RuntimeInstance): void {
       // writing text that would not parse back.
       const selected = selectedPropType(instance.definition.contract, prop,
         prop.select === undefined ? {} : { [prop.select.from]: instance.scope.get(prop.select.from) });
-      if (selected === null && value !== undefined && value !== ABSENT && value !== null) {
-        fail("HR002", `Prop \`${name}\` has no selected type.`);
-      }
-      if (selected !== null && value !== undefined && value !== ABSENT && value !== null &&
-          !parseTypedValue(value, selected, "$", "value").ok) {
-        fail("HR002", `Prop \`${name}\` does not satisfy its selected type.`);
-      }
       const serialized = value === undefined || value === ABSENT || value === null
-        ? null : serializeTypedValue(value, selected!);
+        ? null : reflectedPropValue(value, selected);
       if (serialized === null) root.removeAttribute(attributeName);
       else root.setAttribute(attributeName, serialized);
     }, 2));
@@ -2193,6 +2176,12 @@ function prepareRuntimeInvocation(
     rootElement: createSignal<Element | undefined>(undefined),
     projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
   };
+  if (Object.keys(definition.contract.props).length > 0) {
+    instance.effects.push(createEffect(scope.scheduler, () => {
+      const root = instance.rootElement.get();
+      if (root !== undefined) setElementValidity(root, propValidity(instance));
+    }, 2));
+  }
   const context: RuntimeRenderContext = {
     definition,
     owned: instance.owned,
@@ -2276,6 +2265,10 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
     documentState(element.ownerDocument).move?.(previous, element);
   }
   instance.element = element;
+  instance.validityCleanup?.();
+  if (Object.keys(instance.definition.contract.props).length > 0) {
+    instance.validityCleanup = manageElementValidity(element, {}, { derive: () => propValidity(instance) });
+  }
   for (const delegate of instance.delegates) delegate.element = element;
   runtimeInstances.set(element, instance);
   installPublicMethods(element, instance);
@@ -2870,8 +2863,7 @@ export function attachComponent(
       if (value !== undefined && value !== null) {
         if (prop.select !== undefined && definition.contract.props[prop.select.from] === undefined) continue;
         const selected = selectedPropType(definition.contract, prop, options.props ?? {});
-        if (selected === null) fail("HR002", `Prop \`${name}\` has no selected type.`);
-        element.setAttribute(`data-${kebabCase(name)}`, serializeTypedValue(value, selected));
+        element.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(value, selected));
       }
     }
     const attaching = [
@@ -2945,14 +2937,6 @@ function applyComponentProps(
       next[name] = assignedPropValue(name, prop, input, selectedPropType(contract, prop, next));
     }
   }
-  for (const [name, prop] of Object.entries(contract.props)) {
-    if (prop.select === undefined || props[name] !== undefined || next[name] === null) continue;
-    const type = selectedPropType(contract, prop, next);
-    if (type === null || !parseTypedValue(next[name], type, "$", "value").ok ||
-        (prop.values !== undefined && !prop.values.some((choice) => choice === next[name]))) {
-      fail("HR002", `Prop \`${name}\` does not satisfy its selected type.`);
-    }
-  }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop === undefined) continue;
@@ -2969,8 +2953,7 @@ function applyComponentProps(
     } else {
       instance.explicit.add(name);
       const selected = selectedPropType(contract, prop, next);
-      if (selected === null) fail("HR002", `Prop \`${name}\` has no selected type.`);
-      element.setAttribute(attributeName, serializeTypedValue(input, selected));
+      element.setAttribute(attributeName, reflectedPropValue(input, selected));
     }
     if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
   }

@@ -7,6 +7,9 @@ import {
   type TypeIssue,
 } from "./type-system.js";
 import type { PropType } from "./types.js";
+import type { ComponentContract } from "./types.js";
+import { selectedPropType } from "./contract.js";
+import { boundFailures } from "./value-constraints.js";
 
 /** One normalized validation failure. Structured values always include a stable path. */
 export interface ValidityError {
@@ -84,7 +87,7 @@ function terminalName(type: TypeInput | undefined): ValidationTypeName | undefin
 
 function typeErrors(issues: readonly TypeIssue[], type: string | undefined): ValidityError[] {
   return issues.map((item) => ({
-    reason: item.reason === "untrustedValue"
+    reason: item.reason !== "badInput" && item.reason !== "typeMismatch"
       ? item.reason
       : item.reason === "badInput" && !["email", "url"].includes(type ?? "")
         ? "badInput"
@@ -165,14 +168,7 @@ export function validate(value: unknown, constraint: Constraint = {}): Validity 
 
   const numeric = comparable(parsedValue, terminal);
   const minimum = parsedComparable(constraint.min, terminal);
-  const maximum = parsedComparable(constraint.max, terminal);
   if (numeric !== undefined) {
-    if (minimum !== undefined && numeric < minimum) {
-      errors.push({ reason: "rangeUnderflow", message: `Value must be at least ${constraint.min}.` });
-    }
-    if (maximum !== undefined && numeric > maximum) {
-      errors.push({ reason: "rangeOverflow", message: `Value must be at most ${constraint.max}.` });
-    }
     if (constraint.step !== undefined && constraint.step !== "any" && constraint.step > 0) {
       const base = minimum ?? 0;
       const offset = Math.abs(numeric - base) % constraint.step;
@@ -182,27 +178,39 @@ export function validate(value: unknown, constraint: Constraint = {}): Validity 
     }
   }
 
-  if (typeof value === "string") {
-    if (constraint.minLength !== undefined && value.length < constraint.minLength) {
-      errors.push({ reason: "tooShort", message: `Use at least ${constraint.minLength} characters.` });
-    }
-    if (constraint.maxLength !== undefined && value.length > constraint.maxLength) {
-      errors.push({ reason: "tooLong", message: `Use no more than ${constraint.maxLength} characters.` });
-    }
-    if (constraint.pattern !== undefined) {
-      let expression: RegExp | undefined;
-      try { expression = new RegExp(`^(?:${constraint.pattern})$`, "v"); }
-      catch {
-        try { expression = new RegExp(`^(?:${constraint.pattern})$`, "u"); }
-        catch { expression = undefined; }
-      }
-      if (expression !== undefined && !expression.test(value)) {
-        errors.push({ reason: "patternMismatch", message: "Value does not match the required format." });
-      }
-    }
-  }
+  errors.push(...boundFailures(parsedValue, terminal ?? "", constraint));
 
   return errors.length === 0 ? VALID : { valid: false, errors };
+}
+
+/** Validate declared prop values through one read surface, shared by live and generated targets. */
+export function validateComponentProps(contract: ComponentContract, read: (name: string) => unknown): Validity {
+  const errors: ValidityError[] = [];
+  for (const [name, prop] of Object.entries(contract.props)) {
+    const value = read(name);
+    const selected = selectedPropType(contract, prop, prop.select === undefined ? {}
+      : { [prop.select.from]: read(prop.select.from) });
+    if (selected === null) {
+      if (value !== null && value !== undefined && value !== "") errors.push({
+        reason: "typeMismatch", message: `No type option matches the value of \`${prop.select!.from}\`.`, path: name,
+      });
+      continue;
+    }
+    const result = validate(value, {
+      type: selected, required: prop.required,
+      ...(prop.min === undefined ? {} : { min: prop.min }),
+      ...(prop.max === undefined ? {} : { max: prop.max }),
+      ...(prop.minLength === undefined ? {} : { minLength: prop.minLength }),
+      ...(prop.maxLength === undefined ? {} : { maxLength: prop.maxLength }),
+      ...(prop.pattern === undefined ? {} : { pattern: prop.pattern }),
+    });
+    errors.push(...result.errors.map((error) => ({ ...error, path: name })));
+    if (value !== null && value !== undefined && value !== "" && prop.values !== undefined &&
+        !prop.values.some((choice) => choice === value)) {
+      errors.push({ reason: "typeMismatch", message: `Value must be one of ${prop.values.map(String).join(", ")}.`, path: name });
+    }
+  }
+  return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
 }
 
 const NATIVE_REASONS: ReadonlyArray<Exclude<ValidityReason, "schemaMismatch" | "untrustedValue">> = [

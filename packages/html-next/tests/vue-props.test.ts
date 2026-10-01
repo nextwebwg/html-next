@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
-import { transform } from "esbuild";
+import { build } from "esbuild";
 
 import { vuePropsArtifact } from "../src/generate.js";
 import { parseTypedValue, parseTypeExpression } from "../src/type-system.js";
 
 async function generatedChecker(): Promise<(value: unknown, type: ReturnType<typeof parseTypeExpression>, required: boolean, name: string, pattern?: string) => unknown> {
-  const { code } = await transform(vuePropsArtifact().content, { loader: "ts", format: "esm" });
+  const bundle = await build({
+    stdin: { contents: vuePropsArtifact().content, loader: "ts", resolveDir: new URL("../src", import.meta.url).pathname },
+    bundle: true, write: false, platform: "node", format: "esm",
+  });
+  const code = bundle.outputFiles[0]!.text;
   const module = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
   return module.checkedProp;
 }
@@ -30,28 +34,25 @@ describe("generated Vue prop boundary", () => {
 
   it("reads a bare boolean attribute as true, as HTML does", async () => {
     const checkedProp = await generatedChecker();
-    // Vue passes a bare attribute (<Avatar decorative>) as an empty string.
     assert.equal(checkedProp("", parseTypeExpression("boolean"), false, "decorative"), true);
     assert.equal(checkedProp("", parseTypeExpression("boolean"), true, "decorative"), true);
     assert.equal(checkedProp(false, parseTypeExpression("boolean"), false, "decorative"), false);
     assert.equal(checkedProp(undefined, parseTypeExpression("boolean"), false, "decorative"), null);
-    // Other types keep their rules for an empty value.
-    assert.throws(() => checkedProp("", parseTypeExpression("number"), false, "count"), /HR002/);
-    assert.throws(() => checkedProp("", parseTypeExpression("string"), true, "label"), /HR002/);
+    assert.equal(checkedProp("", parseTypeExpression("number"), false, "count"), "");
   });
 
-  it("rejects malformed functional colors in the server fallback", async () => {
+  it("preserves malformed functional colors for validity reporting", async () => {
     const checkedProp = await generatedChecker();
-    assert.throws(() => checkedProp("rgb(garbage)", parseTypeExpression("color"), false, "color"), /HR002/);
-    assert.throws(() => checkedProp("color-mix(in srgb, red, blue)", parseTypeExpression("color"), false, "color"), /HR002/);
+    assert.equal(checkedProp("rgb(garbage)", parseTypeExpression("color"), false, "color"), "rgb(garbage)");
+    assert.equal(checkedProp("color-mix(in srgb, red, blue)", parseTypeExpression("color"), false, "color"), "color-mix(in srgb, red, blue)");
     assert.equal(checkedProp("rgb(102 51 153)", parseTypeExpression("color"), false, "color"), "rgb(102 51 153)");
   });
 
-  it("enforces pattern constraints on Vue's typed string values", async () => {
+  it("passes typed strings to the component validity boundary", async () => {
     const checkedProp = await generatedChecker();
     const type = parseTypeExpression("string");
-    assert.equal(checkedProp("ABC-1234", type, false, "sku", "[A-Z]{3}-[0-9]{4}"), "ABC-1234");
-    assert.throws(() => checkedProp("xABC-1234", type, false, "sku", "[A-Z]{3}-[0-9]{4}"), /HR002/);
+    assert.equal(checkedProp("ABC-1234", type, false, "sku"), "ABC-1234");
+    assert.equal(checkedProp("xABC-1234", type, false, "sku"), "xABC-1234");
   });
 
   it("checks Vue values as typed values without HTML attribute coercion", async () => {
@@ -70,12 +71,7 @@ describe("generated Vue prop boundary", () => {
       const node = parseTypeExpression(type);
       const canonical = parseTypedValue(value, node, "$", "value");
       if (canonical.ok) assert.deepEqual(checkedProp(value, node, false, "value"), canonical.value, `${type}: valid value`);
-      else assert.throws(
-        () => checkedProp(value, node, false, "value"),
-        (error) => error instanceof Error && error.name === "HtmlDiagnosticError" &&
-          error.message.startsWith("HR002: A prop invocation value does not satisfy its declared type."),
-        `${type}: invalid value`,
-      );
+      else assert.deepEqual(checkedProp(value, node, false, "value"), value, `${type}: invalid value is retained`);
     }
   });
 
@@ -84,14 +80,7 @@ describe("generated Vue prop boundary", () => {
     const type = parseTypeExpression("number");
     assert.equal(checkedProp(undefined, type, false, "count"), null);
     assert.equal(checkedProp(null, type, false, "count"), null);
-    assert.throws(
-      () => checkedProp(undefined, type, true, "count"),
-      (error) => error instanceof Error && error.name === "HtmlDiagnosticError" &&
-        error.message === "HC020: Required prop `count` was not provided.",
-    );
-    assert.throws(
-      () => checkedProp(null, type, true, "count"),
-      (error) => error instanceof Error && error.message === "HC021: A required prop cannot be null.",
-    );
+    assert.equal(checkedProp(undefined, type, true, "count"), null);
+    assert.equal(checkedProp(null, type, true, "count"), null);
   });
 });

@@ -15,11 +15,11 @@
     <event name="adjust" type="object({ id: string, delta: integer })">Stock was adjusted by the row.</event>
     <event name="remove" type="string">The row asked to be removed; detail is its id.</event>
 
-    <handler name="increase"><dispatch event="adjust" :value="{ id: itemId, delta: 1 }"></dispatch></handler>
+    <handler name="increase"><dispatch event="adjust" expr:value="{ id: itemId, delta: 1 }"></dispatch></handler>
     <handler name="decrease">
-      <dispatch event="adjust" :value="{ id: itemId, delta: -1 }" $if="quantity > 0"></dispatch>
+      <dispatch event="adjust" expr:value="{ id: itemId, delta: -1 }" $if="quantity > 0"></dispatch>
     </handler>
-    <handler name="discard"><dispatch event="remove" :value="itemId"></dispatch></handler>
+    <handler name="discard"><dispatch event="remove" expr:value="itemId"></dispatch></handler>
   </defs>
 
   <li class="item" from:data-low="low">

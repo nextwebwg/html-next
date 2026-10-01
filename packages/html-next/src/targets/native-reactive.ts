@@ -7,6 +7,7 @@ import type {
   ReactiveDeclaration,
   TemplateNode,
 } from "../template.js";
+import { definitionMayInvokeComponents } from "../template.js";
 
 export interface NativeState {
   readonly name: string;
@@ -157,7 +158,7 @@ export function nativeReactivePlan(
   const declarations = definition.declarations ?? [];
   if (declarations.length === 0) return undefined;
   if (declarations.some((declaration) =>
-    (declaration.kind === "state" && declaration.context === true) ||
+    (declaration.kind === "state" && definitionMayInvokeComponents(definition)) ||
     declaration.kind !== "state" && declaration.kind !== "computed" &&
     declaration.kind !== "event" && declaration.kind !== "handler"
   )) return undefined;

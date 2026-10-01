@@ -12,7 +12,7 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "../template.js";
-import { rootArms } from "../template.js";
+import { definitionMayInvokeComponents, rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
 import { parseTypeExpression, parseTypedValue } from "../type-system.js";
 import { isUrlAttribute } from "../sanitize.js";
@@ -724,7 +724,7 @@ function hasDirectDisconnectEvent(node: TemplateNode): boolean {
   );
 }
 
-function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan | undefined {
+function directReactivePlan(definition: ComponentDefinition, noContextReaders = false): DirectReactivePlan | undefined {
   if (definition.controller !== undefined || Object.keys(definition.contract.props).length > 0) return undefined;
   const declarations = definition.declarations ?? [];
   const reactive = declarations.filter(
@@ -738,6 +738,9 @@ function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan
   );
   if (reactive.length === 0 && handlers.length === 0) return undefined;
   if (reactive.length + handlers.length + events.length !== declarations.length) return undefined;
+  // A nested component may read any named state through <context>; the direct
+  // path does not create the provider scope needed for that lookup.
+  if (!noContextReaders && reactive.some((declaration) => declaration.kind === "state") && definitionMayInvokeComponents(definition)) return undefined;
   const refs = directTemplateRefs(definition.template);
 
   const states = new Map<string, DirectState>();
@@ -806,9 +809,10 @@ function directReactivePlan(definition: ComponentDefinition): DirectReactivePlan
     return undefined;
   }
   const readOnly = handlerPlans.size === 0 && !hasTwoWayBinding(definition.template);
-  // Mutable declared types are checked when read by the live runtime. The direct path cannot
-  // publish an invalid intermediate value (for example, a numeric division by zero) instead.
-  if (!readOnly && reactive.some((declaration) => declaration.kind === "state" && declaration.type !== undefined)) {
+  // The direct path guards numeric writes. Other typed states with constraints still use the
+  // live runtime, which owns their validity behavior.
+  if (!readOnly && reactive.some((declaration) => declaration.kind === "state" && declaration.type !== undefined &&
+    (!["number", "integer", "boolean", "string"].includes(declaration.type) || declaration.shape !== undefined))) {
     return undefined;
   }
   if (readOnly && hasNonBareComponentInvocation(definition.template)) {
@@ -931,7 +935,8 @@ function usesSelectiveDirectUpdates(
 }
 
 function directPropType(prop: PropContract): "string" | "boolean" | "number" | readonly string[] | undefined {
-  if (prop.pattern !== undefined) return undefined;
+  if (prop.pattern !== undefined || prop.min !== undefined || prop.max !== undefined ||
+      prop.minLength !== undefined || prop.maxLength !== undefined) return undefined;
   if (prop.values !== undefined) return prop.values.every((value) => typeof value === "string")
     ? prop.values as readonly string[] : undefined;
   if (prop.type === "string" || prop.type === "boolean" || prop.type === "number") return prop.type;
@@ -1223,6 +1228,7 @@ function renderAttributes(
 export function generateVanilla(
   definition: ComponentDefinition,
   version: string,
+  noContextReaders = false,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -1234,7 +1240,7 @@ export function generateVanilla(
   const hasRequired = props.some(([, prop]) => prop.required);
   // A root `$match` renders the arm the props choose; the runtime makes that choice, as it does in HTML.
   const arms = rootArms(template);
-  const direct = directReactivePlan(definition);
+  const direct = directReactivePlan(definition, noContextReaders);
   const directHasLifecycle = direct !== undefined && hasDirectLifecycleEvent(template);
   const directHasDisconnect = direct !== undefined && hasDirectDisconnectEvent(template);
   const directDispatches = directHasDispatch(direct);
@@ -1502,8 +1508,12 @@ export function generateVanilla(
         )!;
         const nextVariable = `next${stepIndex}`;
         lines.push(`${indent}const ${nextVariable} = ${next};`);
+        const stateDeclaration = definition.declarations?.find((declaration) => declaration.kind === "state" && declaration.name === state);
+        const stateType = stateDeclaration?.kind === "state" ? stateDeclaration.type : undefined;
+        const validNext = stateType === "integer" ? `Number.isInteger(${nextVariable})`
+          : stateType === "number" ? `Number.isFinite(${nextVariable})` : undefined;
         lines.push(
-          `${indent}if (!Object.is(${stateVariable}, ${nextVariable})) { ${stateVariable} = ${nextVariable};` +
+          `${indent}if (${validNext === undefined ? "" : `${validNext} && `}!Object.is(${stateVariable}, ${nextVariable})) { ${stateVariable} = ${nextVariable};` +
           `${selective ? ` dirty |= ${directPlan.states.get(state)!.bit};` : ""}${directHasBindings ? " schedule();" : ""} }`,
         );
         if (guard !== undefined) lines.push("    }");

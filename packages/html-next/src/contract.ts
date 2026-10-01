@@ -5,6 +5,7 @@ import {
   formatType,
   isAttributeType,
   isTypeNode,
+  normalizeType,
   parseTypedValue,
   parseTypeExpression,
   serializeTypedValue,
@@ -20,6 +21,7 @@ import type {
   PropValue,
   SerializedPropTarget,
 } from "./types.js";
+import { boundFailures, rangeType, textType, type ValueBounds } from "./value-constraints.js";
 
 export { componentName as deriveName } from "./names.js";
 
@@ -33,6 +35,10 @@ const PROP_FIELDS = [
   "type",
   "values",
   "pattern",
+  "min",
+  "max",
+  "minLength",
+  "maxLength",
   "default",
   "required",
   "target",
@@ -150,11 +156,44 @@ function accepts(type: PropType, value: unknown): value is PropValue {
   return parseTypedValue(value, type).ok;
 }
 
-export function matchesPropPattern(value: unknown, pattern: string | undefined): boolean {
-  if (pattern === undefined || value === null || value === undefined || value === "") return true;
-  if (typeof value !== "string") return false;
-  try { return new RegExp(`^(?:${pattern})$`, "v").test(value); }
-  catch { return new RegExp(`^(?:${pattern})$`, "u").test(value); }
+/** Parse each optional bound independently, so a live definition can ignore only bad bounds. */
+export function parseValueBounds(
+  type: PropType,
+  raw: Readonly<Record<keyof ValueBounds, unknown>>,
+): { readonly bounds: ValueBounds; readonly invalid: readonly string[] } {
+  const node = typeof type === "string" ? normalizeType(type) : type;
+  const name = node.kind === "terminal" ? node.name : undefined;
+  const bounds: { min?: number | string; max?: number | string; minLength?: number; maxLength?: number; pattern?: string } = {};
+  const invalid: string[] = [];
+  for (const key of ["min", "max"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    const parsed = name !== undefined && rangeType(name) ? parseTypedValue(value, node) : undefined;
+    if (parsed?.ok && (typeof parsed.value === "number" || typeof parsed.value === "string")) bounds[key] = parsed.value;
+    else invalid.push(key);
+  }
+  for (const key of ["minLength", "maxLength"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    const number = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+    if (name !== undefined && textType(name) && Number.isSafeInteger(number) && number >= 0) bounds[key] = number;
+    else invalid.push(key);
+  }
+  if (raw.pattern !== undefined) {
+    if (name !== undefined && textType(name) && typeof raw.pattern === "string") {
+      try { new RegExp(`^(?:${raw.pattern})$`, "v"); bounds.pattern = raw.pattern; }
+      catch {
+        try { new RegExp(`^(?:${raw.pattern})$`, "u"); bounds.pattern = raw.pattern; }
+        catch { invalid.push("pattern"); }
+      }
+    } else invalid.push("pattern");
+  }
+  return { bounds, invalid };
+}
+
+export function matchesPropBounds(value: unknown, type: PropType, bounds: ValueBounds): boolean {
+  const node = typeof type === "string" ? normalizeType(type) : type;
+  return node.kind !== "terminal" || boundFailures(value, node.name, bounds).length === 0;
 }
 
 /** Invalid entries invalidate the whole optional constraint, as if it were absent. */
@@ -183,8 +222,7 @@ export function selectedPropType(
   const value = supplied === undefined ? selector?.default ?? null : supplied;
   if (value === null) return null;
   const option = prop.select.options.find((candidate) => candidate.value === value);
-  if (option === undefined) fail("HR002", `No type option matches \`${prop.select.from}\` value \`${String(value)}\`.`);
-  return option.type;
+  return option?.type ?? null;
 }
 
 function parseProp(name: string, value: unknown, source?: string): PropContract {
@@ -200,15 +238,11 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   if (object.values !== undefined && values === undefined) {
     fail("HC013", `Values for prop \`${name}\` do not conform to its type.`, source);
   }
-  const pattern = object.pattern;
-  if (pattern !== undefined) {
-    if (typeof pattern !== "string") fail("HC013", `Pattern for prop \`${name}\` must be a string.`, source);
-    try { new RegExp(`^(?:${pattern})$`, "v"); }
-    catch {
-      try { new RegExp(`^(?:${pattern})$`, "u"); }
-      catch { fail("HC013", `Pattern for prop \`${name}\` is invalid.`, source); }
-    }
-  }
+  const { bounds, invalid } = parseValueBounds(type, {
+    min: object.min, max: object.max, minLength: object.minLength,
+    maxLength: object.maxLength, pattern: object.pattern,
+  });
+  if (invalid.length > 0) fail("HC013", `Prop \`${name}\` has invalid ${invalid.join(", ")} constraints.`, source);
   const required = object.required ?? false;
   if (typeof required !== "boolean") {
     fail("HC016", `Prop \`${name}\` has a non-boolean \`required\` value.`, source);
@@ -219,7 +253,7 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
   const parsedDefault = "default" in object && object.default !== null
     ? parseTypedValue(object.default, type) : undefined;
   if ("default" in object && object.default !== null &&
-      (parsedDefault === undefined || !parsedDefault.ok || !matchesPropPattern(parsedDefault.value, pattern) || !matchesPropValues(parsedDefault.value, values))) {
+      (parsedDefault === undefined || !parsedDefault.ok || !matchesPropBounds(parsedDefault.value, type, bounds) || !matchesPropValues(parsedDefault.value, values))) {
     fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
   }
 
@@ -236,13 +270,17 @@ function parseProp(name: string, value: unknown, source?: string): PropContract 
     type: PropType;
     values?: readonly (string | number | boolean)[];
     pattern?: string;
+    min?: number | string;
+    max?: number | string;
+    minLength?: number;
+    maxLength?: number;
     required: boolean;
     default?: PropValue;
     target: PropTarget;
     description: string;
   } = { type, required, target, description };
   if (values !== undefined) normalized.values = values;
-  if (pattern !== undefined) normalized.pattern = pattern;
+  Object.assign(normalized, bounds);
   if ("default" in object) {
     if (object.default === null) normalized.default = null;
     else if (parsedDefault?.ok) normalized.default = parsedDefault.value as PropValue;
@@ -331,7 +369,7 @@ export function serializePropTarget(
     return { kind: "property", name: prop.target.property, value: null };
   }
   if ((prop.required && value === "") || !accepts(prop.type, value) ||
-      !matchesPropPattern(value, prop.pattern) || !matchesPropValues(value, prop.values)) {
+      !matchesPropBounds(value, prop.type, prop) || !matchesPropValues(value, prop.values)) {
     fail("HC021", "A prop value does not satisfy its declared type.");
   }
   const parsed = parseTypedValue(value, prop.type);

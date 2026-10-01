@@ -1,6 +1,6 @@
 import type { DefaultTreeAdapterTypes } from "parse5";
 
-import { matchesPropPattern, matchesPropValues, parseTypeAttribute, parseValuesConstraint } from "./contract.js";
+import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail } from "./diagnostics.js";
 import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import { parseDuration } from "./duration.js";
@@ -23,7 +23,7 @@ import type {
   TemplateAttribute,
   TemplateNode,
 } from "./template.js";
-import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
+import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
 
 type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
@@ -265,15 +265,27 @@ function readDeclaredType(
   }
   if (!nested) return type;
   const rawValues = attr(element, "values");
+  let values: readonly (string | number | boolean)[] | undefined;
   if (rawValues !== undefined) {
-    const values = parseValuesConstraint(type, rawValues);
+    values = parseValuesConstraint(type, rawValues);
     if (values === undefined) {
       const message = `A nested values constraint does not conform to type \`${written}\`; the constraint is ignored.`;
       if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
       warnInvalidDeclaration(message, source);
-    } else {
-      type = { kind: "constrained", base: normalizeType(type), values };
     }
+  }
+  const { bounds, invalid } = parseValueBounds(type, {
+    min: attr(element, "min"), max: attr(element, "max"),
+    minLength: attr(element, "minlength"), maxLength: attr(element, "maxlength"),
+    pattern: attr(element, "pattern"),
+  });
+  for (const key of invalid) {
+    const message = `A nested ${key} constraint does not conform to type \`${written}\`; the constraint is ignored.`;
+    if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+    warnInvalidDeclaration(message, source);
+  }
+  if (values !== undefined || Object.keys(bounds).length > 0) {
+    type = { kind: "constrained", base: normalizeType(type), ...(values === undefined ? {} : { values }), ...bounds };
   }
   return attr(element, "nullable") === undefined ? type
     : { kind: "union", members: [normalizeType(type), { kind: "terminal", name: "null" }] };
@@ -384,13 +396,15 @@ function readProps(
       if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
       warnInvalidDeclaration(message, source);
     }
-    const pattern = attr(element, "pattern");
-    if (pattern !== undefined) {
-      try { new RegExp(`^(?:${pattern})$`, "v"); }
-      catch {
-        try { new RegExp(`^(?:${pattern})$`, "u"); }
-        catch { fail("HC013", `Pattern for prop \`${name}\` is invalid.`, source); }
-      }
+    const { bounds, invalid } = parseValueBounds(type, {
+      min: attr(element, "min"), max: attr(element, "max"),
+      minLength: attr(element, "minlength"), maxLength: attr(element, "maxlength"),
+      pattern: attr(element, "pattern"),
+    });
+    for (const key of invalid) {
+      const message = `Prop \`${name}\` has a ${key} constraint that does not conform to its type; the constraint is ignored.`;
+      if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+      warnInvalidDeclaration(message, source);
     }
     const description = textContent(element).trim();
     if (description === "") {
@@ -412,6 +426,10 @@ function readProps(
       values?: readonly (string | number | boolean)[];
       select?: NonNullable<PropContract["select"]>;
       pattern?: string;
+      min?: number | string;
+      max?: number | string;
+      minLength?: number;
+      maxLength?: number;
       required: boolean;
       default?: PropValue;
       target: PropTarget;
@@ -419,7 +437,7 @@ function readProps(
     } = { type, required, target, description };
     if (values !== undefined) spec.values = values;
     if (select !== undefined) spec.select = select;
-    if (pattern !== undefined) spec.pattern = pattern;
+    Object.assign(spec, bounds);
     if (defaultValue !== undefined) {
       let defaultType = type;
       if (select !== undefined) {
@@ -436,7 +454,7 @@ function readProps(
         defaultType = select.options.find((option) => option.value === selected.value)!.type;
       }
       const parsed = parseTypedValue(defaultValue, defaultType);
-      if (!parsed.ok || !matchesPropPattern(parsed.value, pattern) || !matchesPropValues(parsed.value, values)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
+      if (!parsed.ok || !matchesPropBounds(parsed.value, defaultType, bounds) || !matchesPropValues(parsed.value, values)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
       spec.default = parsed.value as PropValue;
     }
     props[name] = spec;
@@ -494,6 +512,8 @@ function readHandlerSteps(
   handler: Element,
   scope: ParseScope,
   source: string,
+  stateTypes: ReadonlyMap<string, TypeNode>,
+  eventTypes: ReadonlyMap<string, TypeNode>,
 ): HandlerStep[] {
   const steps: HandlerStep[] = [];
   for (const step of significant(sourceChildren(handler))) {
@@ -503,15 +523,26 @@ function readHandlerSteps(
       guardSource === undefined ? undefined : compileScopedExpression(guardSource, scope, source);
     if (sourceTag(step) === "set") {
       const path = attr(step, "name") ?? "";
-      const expressionSource = attr(step, ":value");
+      if (attr(step, ":value") !== undefined || attr(step, "from:value") !== undefined) {
+        fail("HC023", "Use `expr:value` for an expression on <set>.", source);
+      }
       const literal = attr(step, "value");
-      if (path === "" || (expressionSource === undefined) === (literal === undefined)) {
-        fail("HC023", "A <set> requires `name` and exactly one of `value` or `:value`.", source);
+      const expressionSource = attr(step, "expr:value");
+      if (path === "" || (literal === undefined) === (expressionSource === undefined)) {
+        fail("HC023", "A <set> requires `name` and exactly one of `value` or `expr:value`.", source);
       }
       compileScopedExpression(path, scope, source);
       const writablePath = getWritablePath(path, scope.writableRoots);
       if (writablePath === undefined) {
         fail("HT005", `Handler write \`${path}\` is not rooted in declared state.`, source);
+      }
+      let type = stateTypes.get(String(writablePath[0]));
+      for (const key of writablePath.slice(1)) {
+        type = type === undefined || typeof key === "object" ? undefined : typeAtKey(type, key);
+      }
+      const parsedLiteral = literal === undefined || type === undefined ? undefined : parseTypedValue(literal, type);
+      if (parsedLiteral !== undefined && !parsedLiteral.ok) {
+        fail("HC023", `<set name="${path}"> has a value that does not satisfy its state type.`, source);
       }
       const parsed: {
         kind: "set";
@@ -523,11 +554,7 @@ function readHandlerSteps(
         kind: "set",
         path,
         writablePath,
-        value: compileScopedExpression(
-          expressionSource ?? JSON.stringify(literal),
-          scope,
-          source,
-        ),
+        value: compileScopedExpression(expressionSource ?? JSON.stringify(parsedLiteral?.ok ? parsedLiteral.value : literal), scope, source),
       };
       if (guard !== undefined) parsed.guard = guard;
       steps.push(parsed);
@@ -538,15 +565,23 @@ function readHandlerSteps(
       if (!EVENT_PART_RE.test(event)) {
         fail("HC023", "A <dispatch> requires a valid `event` name.", source);
       }
-      const expressionSource = attr(step, ":value");
+      if (attr(step, ":value") !== undefined || attr(step, ":detail") !== undefined || attr(step, "from:value") !== undefined) {
+        fail("HC023", "Use `expr:value` for an expression on <dispatch>.", source);
+      }
+      const expressionSource = attr(step, "expr:value");
       const literal = attr(step, "value");
       if (expressionSource !== undefined && literal !== undefined) {
-        fail("HC023", "A <dispatch> may declare only one of `value` or `:value`.", source);
+        fail("HC023", "A <dispatch> may declare only one of `value` or `expr:value`.", source);
+      }
+      const eventType = eventTypes.get(event);
+      const parsedLiteral = literal === undefined || eventType === undefined ? undefined : parseTypedValue(literal, eventType);
+      if (parsedLiteral !== undefined && !parsedLiteral.ok) {
+        fail("HC023", `<dispatch event="${event}"> has a value that does not satisfy its event type.`, source);
       }
       const value =
         expressionSource === undefined && literal === undefined
           ? undefined
-          : compileScopedExpression(expressionSource ?? JSON.stringify(literal), scope, source);
+          : compileScopedExpression(expressionSource ?? JSON.stringify(parsedLiteral?.ok ? parsedLiteral.value : literal), scope, source);
       const parsed: {
         kind: "dispatch";
         event: string;
@@ -595,6 +630,8 @@ function readDeclarations(
   const handlers = new Set<string>();
   if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers } };
   const elements: Element[] = [];
+  const stateTypes = new Map<string, TypeNode>();
+  const eventTypes = new Map<string, TypeNode>();
   const names = new Set<string>();
   const eventNames = new Set<string>();
   for (const node of sourceChildren(group)) {
@@ -611,6 +648,11 @@ function readDeclarations(
     if (kind === "event") {
       if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
       eventNames.add(name);
+      const eventType = attr(element, "type") ?? "object";
+      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
+        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
+        : normalizeType(parseTypeAttribute(eventType));
+      eventTypes.set(name, shape);
       continue;
     }
     const localName = kind === "context" ? attr(element, "as") ?? name : name;
@@ -624,6 +666,13 @@ function readDeclarations(
     roots.add(localName);
     if (kind === "state") writableRoots.add(name);
     else if (kind === "handler") handlers.add(name);
+    if (kind === "state" && attr(element, "type") !== undefined) {
+      const stateType = attr(element, "type")!;
+      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
+        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
+        : normalizeType(parseTypeAttribute(stateType));
+      stateTypes.set(name, shape);
+    }
   }
 
   const scope = { roots, writableRoots, handlers };
@@ -643,28 +692,24 @@ function readDeclarations(
     }
 
     if (kind === "state") {
-      const expressionSource = attr(element, ":value");
-      const literal = attr(element, "value");
-      if (expressionSource !== undefined && literal !== undefined) {
-        fail("HC013", `<state name="${name}"> may declare only one of \`value\` or \`:value\`.`, source);
+      if (attr(element, ":value") !== undefined || attr(element, "from:value") !== undefined) {
+        fail("HC013", `<state name="${name}"> uses a literal \`value\`; use <computed from> for a derived value.`, source);
       }
-      const expression =
-        expressionSource === undefined && literal === undefined
-          ? undefined
-          : compileScopedExpression(expressionSource ?? JSON.stringify(literal), scope, source);
+      const literal = attr(element, "value");
       const declaration: {
         kind: "state";
         name: string;
         type?: string;
         shape?: TypeNode;
-        context?: boolean;
         value?: string;
         expression?: CompiledExpression;
       } = {
         kind,
         name,
       };
-      if (attr(element, "context") !== undefined) declaration.context = true;
+      if (attr(element, "context") !== undefined) {
+        fail("HC013", `<state name="${name}"> does not use a \`context\` attribute; descendant <context> declarations can read any named ancestor state.`, source);
+      }
       // A declared type states what the state holds, as a prop's does.
       const stateType = attr(element, "type");
       if (stateType !== undefined) {
@@ -675,6 +720,15 @@ function readDeclarations(
       } else if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined) {
         fail("HC013", `<state name="${name}"> needs a type for its nested fields or values.`, source);
       }
+      let initial: unknown = literal;
+      if (literal !== undefined && stateType !== undefined) {
+        const parsed = parseTypedValue(literal, declaration.shape ?? parseTypeExpression(stateType), "$", "html");
+        if (!parsed.ok) fail("HC013", `<state name="${name}"> has a value that does not satisfy its type.`, source);
+        initial = parsed.value;
+      }
+      const expression = literal === undefined
+        ? undefined
+        : compileScopedExpression(JSON.stringify(initial), scope, source);
       if (literal !== undefined) declaration.value = literal;
       if (expression !== undefined) declaration.expression = expression;
       declarations.push(declaration);
@@ -711,9 +765,10 @@ function readDeclarations(
       const parameterNames = new Set<string>();
       for (const parameter of directElements(element, "param")) {
         const parameterName = attr(parameter, "name") ?? "";
-        const expressionSource = attr(parameter, "from:value");
-        if (!NAME_RE.test(parameterName) || expressionSource === undefined) {
-          fail("HC024", "A data <param> requires a valid `name` and a `from:value` expression.", source);
+        const from = attr(parameter, "from:value");
+        const expr = attr(parameter, "expr:value");
+        if (!NAME_RE.test(parameterName) || (from === undefined) === (expr === undefined)) {
+          fail("HC024", "A data <param> requires a valid `name` and exactly one of `from:value` or `expr:value`.", source);
         }
         if (parameterNames.has(parameterName)) {
           fail("HC024", `Data source \`${name}\` repeats a parameter name.`, source);
@@ -721,7 +776,8 @@ function readDeclarations(
         parameterNames.add(parameterName);
         parameters.push({
           name: parameterName,
-          expression: compileScopedExpression(expressionSource, scope, source),
+          mode: from === undefined ? "expr" as const : "from" as const,
+          expression: compileScopedExpression(from ?? expr!, scope, source),
         });
       }
       const declaration: {
@@ -772,7 +828,7 @@ function readDeclarations(
     declarations.push({
       kind: "handler",
       name,
-      steps: readHandlerSteps(element, scope, source),
+      steps: readHandlerSteps(element, scope, source, stateTypes, eventTypes),
     });
   }
   for (const declaration of declarations) {

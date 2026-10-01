@@ -9,17 +9,23 @@ import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.14";
+export const GENERATOR_VERSION = "1.0.0-alpha.15";
 
 export interface GeneratedArtifact {
   readonly path: string;
   readonly content: string;
 }
 
+export interface GenerationOptions {
+  /** A closed component graph proves no descendant reads this definition's state through <context>. */
+  readonly noContextReaders?: boolean;
+}
+
 export function generateComponent(
   definition: ComponentDefinition,
+  options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
