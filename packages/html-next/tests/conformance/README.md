@@ -13,12 +13,17 @@ runtime (`src/runtime.ts`, entry point `lowerDocument(root = document)`).
     `deepEqual` `result`.
   - **Diagnostic** — `{ code }`: `lowerDocument()` must throw an `HtmlDiagnosticError` whose
     `.diagnostic.code` equals `code`.
+  - A success case may also declare `after` steps. Each step runs a browser action, then repeats
+    the same probe against a new expected result. The Vue parity suites run those steps too.
 - **`../conformance.test.ts`** — the harness. It bundles the runtime once with esbuild (iife,
   global `HtmlRuntime`) and runs the whole table against **Chromium, Firefox, and WebKit**.
+- **`../../../html-next-converter/tests/vue-type-parity.test.ts`** — converts every success case
+  to a Vue SFC, typechecks the generated SFC and its public prop calls with `vue-tsc`, and checks
+  representative invalid prop values with TypeScript errors.
 
 ## Coverage
 
-Components/props/slots, `:attr` and `bind:` bindings and attribute serialization, consumed inert
+Components/props/slots, `from:attr` and `bind:` bindings and attribute serialization, consumed inert
 `on:` bindings, `$value`/`$html` output (including `$html` sanitization),
 value semantics (typed equality, numeric-only arithmetic, boolean `and`/`or`, truthiness, absent
 fault tolerance), control flow (`$if`, `$each` with `$where`/`$sort`/`$limit`/`loop`,
