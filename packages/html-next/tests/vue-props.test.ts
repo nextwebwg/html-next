@@ -9,7 +9,6 @@ import { parseTypedValue, parseTypeExpression } from "../src/type-system.js";
 async function generatedChecker(): Promise<(value: unknown, type: ReturnType<typeof parseTypeExpression>, required: boolean, name: string, pattern?: string) => unknown> {
   const bundle = await build({
     stdin: { contents: vuePropsArtifact().content, loader: "ts", resolveDir: new URL("../src", import.meta.url).pathname },
-    alias: { "@nextwebwg/html-next/validation": new URL("../src/validation.ts", import.meta.url).pathname },
     bundle: true, write: false, platform: "node", format: "esm",
   });
   const code = bundle.outputFiles[0]!.text;
@@ -31,6 +30,15 @@ describe("generated Vue prop boundary", () => {
     for (const [name, value] of samples) {
       assert.equal(checkedProp(value, parseTypeExpression(name), false, "value"), value, name);
     }
+  });
+
+  it("reads a bare boolean attribute as true, as HTML does", async () => {
+    const checkedProp = await generatedChecker();
+    assert.equal(checkedProp("", parseTypeExpression("boolean"), false, "decorative"), true);
+    assert.equal(checkedProp("", parseTypeExpression("boolean"), true, "decorative"), true);
+    assert.equal(checkedProp(false, parseTypeExpression("boolean"), false, "decorative"), false);
+    assert.equal(checkedProp(undefined, parseTypeExpression("boolean"), false, "decorative"), null);
+    assert.equal(checkedProp("", parseTypeExpression("number"), false, "count"), "");
   });
 
   it("preserves malformed functional colors for validity reporting", async () => {

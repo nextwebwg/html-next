@@ -292,6 +292,8 @@ export function checkedProp<T>(value: unknown, type: TypeNode, required: true, n
 export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string): T | null;
 export function checkedProp<T>(value: unknown, type: TypeNode, _required: boolean, _name: string): T | null {
   if (value === undefined || value === null) return null;
+  // Vue passes a bare boolean attribute as an empty string. HTML reads its presence as true.
+  if (value === "" && type.kind === "terminal" && type.name === "boolean") value = true;
   const result = parse(value, type, "$");
   return (result.ok ? result.value : value) as T;
 }
