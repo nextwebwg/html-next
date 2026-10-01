@@ -276,7 +276,10 @@ describe("framework converter", () => {
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
     assert.match(source, /const double = cycleCheckedComputed\(\(\) => \{[\s\S]*return doublePrevious = count\.value \* 2/);
-    assert.match(source, /function increment\(\): void \{\n  count\.value = count\.value \+ 1\n  dispatch\('count-change', count\.value\)\n/);
+    assert.match(source, /function increment\(\): void \{/);
+    assert.match(source, /const next0 = count\.value \+ 1/);
+    assert.match(source, /count\.value = next0 as never/);
+    assert.match(source, /dispatch\('count-change', count\.value\)/);
     assert.match(source, /const isCountChangeDetail = \(detail: unknown\): boolean =>\n  typeof detail === 'number' && Number\.isFinite\(detail\)/);
     assert.match(source, /:data-count="guarded"/);
   });

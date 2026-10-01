@@ -36,6 +36,19 @@ function audioSource(): string {
 }
 
 describe("generateComponent", () => {
+  it("lowers dollar-prefixed indexed references in both generated targets", () => {
+    const definition = parseComponent(`<template component="x-first-item"><defs>
+      <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+      <state name="byId" type="object({ '42': object({ name: string }) })" value="{ '42': { name: 'Bea' } }"></state>
+    </defs><div><output $value="$items.0.name"></output><b $value="$byId.42.name"></b></div></template>`);
+    const artifacts = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
+    const vanilla = artifacts.get("vanilla/XFirstItem.js")!;
+    const vue = artifacts.get("vue/XFirstItem.vue")!;
+    assert.match(vanilla, /items\.0\.name/);
+    assert.match(vanilla, /byId\.42\.name/);
+    assert.match(vue, /\[0\]/);
+    assert.match(vue, /\[42\]/);
+  });
   it("snapshots every deterministic projection", async () => {
     const source = await readFile(fixtureUrl, "utf8");
     const definition = parseComponent(source, "x-button.html");
