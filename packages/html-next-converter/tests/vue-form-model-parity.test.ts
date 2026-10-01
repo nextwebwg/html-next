@@ -22,7 +22,7 @@ const source = `<template component="x-form-matrix" status="early" summary="Nati
   <handler name="unrelated"><set name="ticks" expr:value="ticks + 1"></set></handler>
   <handler name="changeOptions"><set name="items" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler>
   <handler name="chooseC"><set name="form.choice" expr:value="'c'"></set><set name="form.choices" expr:value="['c']"></set></handler>
-  <handler name="mutateChoices"><set name="form.choices[0]" expr:value="'a'"></set></handler>
+  <handler name="mutateChoices"><set name="form.choices.0" expr:value="'a'"></set></handler>
 </defs><form><input class="text" name="text" required minlength="3" bind:value="form.text">
   <input class="read-only" value="authored" .value="form.text">
   <input class="check" type="checkbox" name="check" bind:checked="form.checked">
