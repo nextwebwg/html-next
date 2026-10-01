@@ -28,6 +28,18 @@ describe("generated Vue prop boundary", () => {
     }
   });
 
+  it("reads a bare boolean attribute as true, as HTML does", async () => {
+    const checkedProp = await generatedChecker();
+    // Vue passes a bare attribute (<Avatar decorative>) as an empty string.
+    assert.equal(checkedProp("", parseTypeExpression("boolean"), false, "decorative"), true);
+    assert.equal(checkedProp("", parseTypeExpression("boolean"), true, "decorative"), true);
+    assert.equal(checkedProp(false, parseTypeExpression("boolean"), false, "decorative"), false);
+    assert.equal(checkedProp(undefined, parseTypeExpression("boolean"), false, "decorative"), null);
+    // Other types keep their rules for an empty value.
+    assert.throws(() => checkedProp("", parseTypeExpression("number"), false, "count"), /HR002/);
+    assert.throws(() => checkedProp("", parseTypeExpression("string"), true, "label"), /HR002/);
+  });
+
   it("rejects malformed functional colors in the server fallback", async () => {
     const checkedProp = await generatedChecker();
     assert.throws(() => checkedProp("rgb(garbage)", parseTypeExpression("color"), false, "color"), /HR002/);

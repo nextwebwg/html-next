@@ -263,6 +263,8 @@ export function checkedProp<T>(value: unknown, type: TypeNode, required: boolean
     if (required) throw new HtmlDiagnosticError("HC021", "A required prop cannot be null.");
     return null;
   }
+  // A bare boolean attribute is true, as in HTML and the HTML runtime. Vue passes one as "".
+  if (value === "" && type.kind === "terminal" && type.name === "boolean") value = true;
   if (required && value === "") throw new HtmlDiagnosticError("HR002", "A required prop cannot be empty.");
   const result = parse(value, type, "$");
   if (!result.ok) throw new HtmlDiagnosticError("HR002", "A prop invocation value does not satisfy its declared type. " + result.issues.join("; "));
