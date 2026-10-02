@@ -47,6 +47,7 @@ function dataURL(source: string, baseURL: string, parameters: Readonly<Record<st
 /** A Vue-owned declared read; no request is made during SSR. */
 export function useDataRead(state: { value: any }, options: DataReadOptions): void {
   let value: unknown = null;
+  const acceptedParameters: Record<string, unknown> = {};
   let abort: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
@@ -69,7 +70,13 @@ export function useDataRead(state: { value: any }, options: DataReadOptions): vo
         try { return new URL(options.definition, document.baseURI).href; }
         catch { return document.baseURI; }
       })();
-      const response = await fetch(dataURL(options.source, definition, options.parameters()), { signal: controller.signal });
+      const sampled = options.parameters();
+      const parameters = Object.fromEntries(Object.entries(sampled).map(([name, input]) => {
+        if (input === Symbol.for("html-next.invalid-result")) return [name, acceptedParameters[name] ?? null];
+        acceptedParameters[name] = input;
+        return [name, input];
+      }));
+      const response = await fetch(dataURL(options.source, definition, parameters), { signal: controller.signal });
       if (!response.ok) throw new TypeError(\`Request failed with \${response.status}.\`);
       const next = options.type === "text" || options.type === "string" ? await response.text() : await response.json();
       if (stale(current)) return;
@@ -85,7 +92,8 @@ export function useDataRead(state: { value: any }, options: DataReadOptions): vo
       }
     }
   };
-  const update = (): void => {
+  const update = (sources: readonly unknown[]): void => {
+    if (sources.includes(Symbol.for("html-next.invalid-result"))) return;
     connected = true;
     cancel();
     const current = ++generation;

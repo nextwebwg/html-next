@@ -61,7 +61,7 @@ const cases: readonly ParityCase[] = [
         <defs><state type="number" name="count" value="0"></state><computed name="double" from="count * 2"></computed>
         <event name="count-change" type="number"></event>
         <handler name="increment"><set name="count" expr:value="count + 1"></set><dispatch event="count-change" expr:value="count"></dispatch></handler></defs>
-        <button type="button" on:click="increment" from:aria-label="format('Count %s', count)"><output $value="double"></output></button>
+        <button type="button" on:click="increment" from:aria-label="concat('Count ', count)"><output $value="double"></output></button>
       </template>`,
     },
     invocation: `<x-counter id="case"></x-counter>`,
@@ -72,6 +72,96 @@ const cases: readonly ParityCase[] = [
     expectedAfter: { tag: "button", label: "Count 1", output: "2", events: [1] },
   },
   {
+    name: "expression functions preserve written units and update reactively",
+    features: ["dimension math", "default", "concat", "join"],
+    definitions: {
+      "x-measure": `<template component="x-measure" status="early" summary="Expression parity fixture.">
+        <defs>
+          <prop name="label" type="string">Optional label.</prop>
+          <state name="width" type="length" value="8.8px"></state>
+          <state name="parts" type="list(string)" value="['a', 'b']"></state>
+          <computed name="rounded" from="round(width)"></computed>
+          <computed name="description" from="concat(default(label, 'Size'), ': ', rounded, '/', round(width, 0.5px), '/', min(rounded, 10px), '/', max(width, 1px), '/', clamp(1px, width, 4px), '/', abs(-2px), ' / ', join(parts, ', '))"></computed>
+          <handler name="change"><set name="width" value="2.2px"></set></handler>
+        </defs>
+        <button type="button" on:click="change"><output $value="description"></output></button>
+      </template>`,
+    },
+    invocation: `<x-measure id="case"></x-measure>`,
+    vueRender: `h(XMeasure, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output")?.textContent })`,
+    action: `root.click()`,
+    expectedAfter: { output: "Size: 2px/2px/2px/2.2px/2.2px/2px / a, b" },
+  },
+  {
+    name: "a mismatched reactive unit keeps the last accepted result",
+    features: ["dimension validation", "live binding retention"],
+    definitions: {
+      "x-unit-guard": `<template component="x-unit-guard" status="early" summary="Unit validation fixture.">
+        <defs>
+          <state name="width" type="length" value="8.8px"></state>
+          <state name="step" type="length" value="1px"></state>
+          <state name="saved" type="length" value="5px"></state>
+          <computed name="snapped" from="round(width, step)"></computed>
+          <handler name="badStep"><set name="step" value="1rem"></set></handler>
+          <handler name="goodStep"><set name="step" value="2px"></set></handler>
+          <handler name="save"><set name="saved" expr:value="round(width, step)"></set></handler>
+        </defs>
+        <section style:--snapped="round(width, step)" class:valid="round(width, step)"><button class="bad" on:click="badStep">Bad</button><button class="good" on:click="goodStep">Good</button><button class="save" on:click="save">Save</button>
+          <output class="computed" $value="snapped"></output><output class="direct" $value="round(width, step)"></output><output class="fallback" $value="default(round(width, step), 1px)"></output><output class="saved" $value="saved"></output><output class="comparison" $value="round(width, step) = 9px"></output><i $if="round(width, step) = 9px">Ready</i><template $match><em $when="round(width, step) = 9px">Nine</em><b $else>Other</b></template></section>
+      </template>`,
+    },
+    invocation: `<x-unit-guard id="case"></x-unit-guard>`,
+    vueRender: `h(XUnitGuard, { id: "case" })`,
+    root: "#case",
+    probe: `({ computed: root.querySelector(".computed")?.textContent, direct: root.querySelector(".direct")?.textContent, fallback: root.querySelector(".fallback")?.textContent, saved: root.querySelector(".saved")?.textContent, comparison: root.querySelector(".comparison")?.textContent, ready: root.querySelector("i")?.textContent ?? null, match: root.querySelector("em, b")?.textContent, style: root.style.getPropertyValue('--snapped'), valid: root.classList.contains('valid'), trace: window.unitTrace ?? [] })`,
+    action: `return (async () => {
+      root.querySelector('.bad').click();
+      root.querySelector('.save').click();
+      await new Promise(requestAnimationFrame);
+      window.unitTrace = [root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid')];
+      root.querySelector('.good').click();
+      root.querySelector('.save').click();
+      await new Promise(requestAnimationFrame);
+      window.unitTrace.push(root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid'));
+    })()`,
+    expectedAfter: { computed: "8px", direct: "8px", fallback: "8px", saved: "8px", comparison: "false", ready: null, match: "Other", style: "8px", valid: true, trace: ["9px/9px/9px/5px/true/Ready/Nine/9px/true", "8px/8px/8px/8px/false/undefined/Other/8px/true"] },
+  },
+  {
+    name: "a missing function operand clears its previous binding",
+    features: ["function absence", "live binding removal"],
+    definitions: {
+      "x-optional-name": `<template component="x-optional-name" status="early" summary="Missing operand fixture."><defs>
+        <state name="user" type="object({ ... })" value="{ name: 'Ada' }"></state>
+        <handler name="clear"><set name="user" expr:value="{}"></set></handler>
+      </defs><section><button on:click="clear">Clear</button><output $value="concat(user.name)"></output></section></template>`,
+    },
+    invocation: `<x-optional-name id="case"></x-optional-name>`,
+    vueRender: `h(XOptionalName, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output")?.textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { output: "" },
+  },
+  {
+    name: "a typed loop alias supplies a dimension to a function",
+    features: ["typed loop aliases", "dimensional functions"],
+    definitions: {
+      "x-row-width": `<template component="x-row-width" status="early" summary="Typed loop fixture."><defs>
+        <state name="rows" type="list(object({ width: length }))" value="[{ width: '8.8px' }]"></state>
+        <state name="step" type="length" value="1px"></state>
+        <handler name="change"><set name="step" value="2px"></set></handler>
+      </defs><section><button on:click="change">Change</button><output $each="row of rows" $value="round(row.width, step)"></output></section></template>`,
+    },
+    invocation: `<x-row-width id="case"></x-row-width>`,
+    vueRender: `h(XRowWidth, { id: "case" })`,
+    root: "#case",
+    probe: `({ output: root.querySelector("output")?.textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { output: "8px" },
+  },
+  {
     name: "event capture, stop, prevent, and once preserve native dispatch behavior",
     features: ["event capture", "event propagation", "event cancellation", "once handlers"],
     definitions: {
@@ -80,7 +170,7 @@ const cases: readonly ParityCase[] = [
         <handler name="captureClick"><set name="captured" expr:value="captured + 1"></set></handler>
         <handler name="press"><set name="pressed" expr:value="pressed + 1"></set></handler>
         </defs><div on:click.capture="captureClick"><button type="button" on:click.stop.prevent.once="press">Press</button>
-        <output $value="format('%s:%s', captured, pressed)"></output></div></template>`,
+        <output $value="concat(captured, ':', pressed)"></output></div></template>`,
     },
     invocation: `<x-event-options id="case"></x-event-options>`,
     vueRender: `h(XEventOptions, { id: "case" })`,
@@ -108,7 +198,7 @@ const cases: readonly ParityCase[] = [
         </defs><section on:click.self="selfHit"><button type="button">Child</button>
         <input on:keydown.ctrl.enter.exact="keyHit">
         <input class="once" on:keydown.enter.once="onceHit">
-        <output $value="format('%s:%s:%s', selfHits, keyHits, onceHits)"></output></section></template>`,
+        <output $value="concat(selfHits, ':', keyHits, ':', onceHits)"></output></section></template>`,
     },
     invocation: `<x-event-filters id="case"></x-event-filters>`,
     vueRender: `h(XEventFilters, { id: "case" })`,
@@ -197,7 +287,7 @@ const cases: readonly ParityCase[] = [
         <handler name="recordDirect"><set name="direct" expr:value="direct + 1"></set></handler>
         <handler name="recordAncestor"><set name="ancestor" expr:value="ancestor + 1"></set></handler>
         </defs><section on:saved="recordAncestor"><x-stopping-source on:saved.stop="recordDirect"></x-stopping-source>
-        <output $value="format('%s:%s', direct, ancestor)"></output></section></template>`,
+        <output $value="concat(direct, ':', ancestor)"></output></section></template>`,
     },
     invocation: `<x-stopping-parent id="case"></x-stopping-parent>`,
     vueRender: `h(XStoppingParent, { id: "case" })`,
@@ -557,6 +647,31 @@ const cases: readonly ParityCase[] = [
     afterReady: `document.querySelector("#case output")?.textContent === "Result second"`,
   },
   {
+    name: "an invalid calculated data parameter keeps the accepted request",
+    features: ["data parameters", "invalid function retention"],
+    definitions: {
+      "x-data-width": `<template component="x-data-width" status="early" summary="Calculated request fixture."><defs>
+        <state name="width" type="length" value="8.8px"></state>
+        <state name="step" type="length" value="1px"></state>
+        <data name="result" src="https://api.example/search" type="object({ label: string })">
+          <param name="q" from:value="round(width, step)"></param>
+        </data>
+        <handler name="bad"><set name="step" value="1rem"></set></handler>
+        <handler name="good"><set name="step" value="2px"></set></handler>
+      </defs><section><button class="bad" on:click="bad">Bad</button><button class="good" on:click="good">Good</button>
+        <output $value="result.value.label"></output></section></template>`,
+    },
+    invocation: `<x-data-width id="case"></x-data-width>`,
+    vueRender: `h(XDataWidth, { id: "case" })`,
+    root: "#case",
+    probe: `({ label: root.querySelector("output")?.textContent, badLabel: window.badLabel ?? null })`,
+    action: `return (async () => { root.querySelector(".bad").click(); await new Promise(resolve => setTimeout(resolve, 100)); window.badLabel = root.querySelector("output")?.textContent; root.querySelector(".good").click(); })()`,
+    expectedAfter: { label: "Result 8px", badLabel: "Result 9px" },
+    mockData: "instant",
+    beforeReady: `document.querySelector("#case output")?.textContent === "Result 9px"`,
+    afterReady: `document.querySelector("#case output")?.textContent === "Result 8px"`,
+  },
+  {
     name: "stale data response cannot replace the latest request",
     features: ["data cancellation", "stale response", "pending state"],
     definitions: {
@@ -587,13 +702,13 @@ const cases: readonly ParityCase[] = [
         <data name="result" src="https://api.example/search" type="object({ label: string, note: string, ... })">
           <param name="round" from:value="round"></param>
         </data>
-        <computed name="shouted" from="format('%s!', result.value.label)"></computed>
+        <computed name="shouted" from="concat(result.value.label, '!')"></computed>
         <handler name="again"><set name="round" expr:value="round + 1"></set></handler>
         </defs><section from:data-label="result.value.label" from:data-note="result.value.note"><button type="button" on:click="again">Again</button>
         <output class="label" $value="result.value.label"></output>
         <output class="note" $value="result.value.note"></output>
         <output class="shouted" $value="shouted"></output>
-        <output class="combined" $value="format('%s/%s', result.value.label, result.value.note)"></output></section></template>`,
+        <output class="combined" $value="concat(result.value.label, '/', result.value.note)"></output></section></template>`,
     },
     invocation: `<x-typed-data id="case"></x-typed-data>`,
     vueRender: `h(XTypedData, { id: "case" })`,
