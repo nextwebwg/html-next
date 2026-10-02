@@ -288,14 +288,21 @@ function boundProblem(value: unknown, type: string, bounds: Bounds): string | un
   return undefined;
 }
 
-export function checkedProp<T>(value: unknown, type: TypeNode, required: true, name: string): T;
-export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string): T | null;
-export function checkedProp<T>(value: unknown, type: TypeNode, _required: boolean, _name: string): T | null {
-  if (value === undefined || value === null) return null;
+export function checkedProp<T>(value: unknown, type: TypeNode, required: true, name: string, accepted?: Record<string, unknown>): T;
+export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string, accepted?: Record<string, unknown>): T | null;
+export function checkedProp<T>(value: unknown, type: TypeNode, _required: boolean, name: string, accepted?: Record<string, unknown>): T | null {
+  if (value === undefined || value === null) {
+    if (accepted !== undefined) accepted[name] = null;
+    return null;
+  }
   // Vue passes a bare boolean attribute as an empty string. HTML reads its presence as true.
   if (value === "" && type.kind === "terminal" && type.name === "boolean") value = true;
   const result = parse(value, type, "$");
-  return (result.ok ? result.value : value) as T;
+  if (result.ok) {
+    if (accepted !== undefined) accepted[name] = result.value;
+    return result.value as T;
+  }
+  return (accepted?.[name] ?? null) as T | null;
 }
 
 type ValidityReason = "valueMissing" | "typeMismatch" | "patternMismatch" | "tooLong" | "tooShort" |
@@ -303,7 +310,7 @@ type ValidityReason = "valueMissing" | "typeMismatch" | "patternMismatch" | "too
 type ValidityError = { readonly reason: ValidityReason; readonly message: string; readonly path?: string };
 type PropValidity = { readonly valid: boolean; readonly errors: readonly ValidityError[] };
 type ValidatedProp = {
-  readonly type: TypeNode;
+  readonly type: TypeNode | { readonly kind: "selected"; readonly from: string; readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[] };
   readonly required: boolean;
   readonly values?: readonly (string | number | boolean)[];
   readonly select?: { readonly from: string; readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[] };
@@ -321,8 +328,9 @@ type PropValidityBinding = {
 function propValidity(binding: PropValidityBinding): PropValidity {
   const errors: ValidityError[] = [];
   for (const [name, prop] of Object.entries(binding.contract.props)) {
-    const value = binding.values[name];
-    const selected = prop.select === undefined ? prop.type : selectedPropNode(binding.values[prop.select.from], prop.select.options);
+    const selected = prop.select === undefined ? prop.type as TypeNode : selectedPropNode(binding.values[prop.select.from], prop.select.options);
+    const incoming = binding.values[name];
+    const value = incoming === "" && selected.kind === "terminal" && selected.name === "boolean" ? true : incoming;
     if (value === null || value === undefined || value === "") {
       if (prop.required) errors.push({ reason: "valueMissing", message: "This field is required.", path: name });
       continue;
@@ -367,6 +375,11 @@ function propValidity(binding: PropValidityBinding): PropValidity {
   return { valid: errors.length === 0, errors };
 }
 
+export function propValidityState(binding: PropValidityBinding, name: string) {
+  const errors = propValidity(binding).errors.filter((error) => error.path === name);
+  return validityFromErrors(errors);
+}
+
 type ManagedValidity = { current: PropValidityBinding; validity: PropValidity; external: readonly ValidityError[]; interacted: boolean; cleanup: () => void };
 const validityStates = new WeakMap<Element, ManagedValidity>();
 const ariaMirrors = new WeakSet<Element>();
@@ -395,14 +408,16 @@ function reflectValidity(el: Element, state: ManagedValidity): void {
     ariaMirrors.add(el);
   }
 }
-function validityState(state: ManagedValidity) {
-  const errors = [...state.validity.errors, ...state.external];
+function validityFromErrors(errors: readonly ValidityError[]) {
   const reasons = new Set(errors.map((error) => error.reason));
   return Object.freeze({
     valid: errors.length === 0,
     ...Object.fromEntries(REASONS.map((reason) => [reason, reasons.has(reason)])),
     errors,
   });
+}
+function validityState(state: ManagedValidity) {
+  return validityFromErrors([...state.validity.errors, ...state.external]);
 }
 export const vPropValidity = {
   mounted(el: Element, binding: { value: PropValidityBinding }): void {

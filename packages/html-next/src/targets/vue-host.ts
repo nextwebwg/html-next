@@ -167,14 +167,22 @@ export interface ComponentHostOptions {
   readonly dispatch: (name: string, detail?: unknown) => boolean;
   /** The authored controller edge, retained for the live loader's module diagnostic. */
   readonly controllerSource?: { readonly specifier: string; readonly definition: string };
-  /** The component's props, which a controller reads through \`host.state\`. */
+  /** Accepted component props, which a controller reads through \`host.props\`. */
   readonly props?: Readable<Readonly<Record<string, unknown>>>;
+  /** Raw Vue prop inputs before the declared type is applied. */
+  readonly propInputs?: (name: string) => unknown;
+  readonly propNames?: readonly string[];
+  readonly propValidity?: (name: string) => Readonly<Record<string, unknown>>;
   /** Template refs, by the ref name the component declared. Vue collects a \`v-for\` ref into an array. */
   readonly refs?: Readonly<Record<string, Readable<HTMLElement | HTMLElement[] | null>>>;
   /** Declared state, which a controller reads and writes. */
   readonly state?: Readonly<Record<string, { value: any }>>;
   /** Declared computed values, which a controller reads. */
   readonly computed?: Readonly<Record<string, Readable<unknown>>>;
+  /** Declared data resources, which a controller reads. */
+  readonly data?: Readonly<Record<string, Readable<unknown>>>;
+  /** Values inherited through declared context, which a controller reads. */
+  readonly context?: Readonly<Record<string, Readable<unknown>>>;
 }
 
 /** Vue does not promise a \`v-for\` ref array in source order, and the host does. */
@@ -202,7 +210,7 @@ export function useComponentHost(
   controllerLoader: () => Promise<unknown>,
   options: ComponentHostOptions,
 ) {
-  const { root, dispatch, props, refs = {}, state = {}, computed: computedValues = {} } = options;
+  const { root, dispatch, props, propInputs = () => null, propNames = [], refs = {}, state = {}, computed: computedValues = {}, data = {}, context = {} } = options;
   const vueSlots = useSlots();
   const component = getCurrentInstance();
   const report = (error: unknown): void => {
@@ -236,12 +244,26 @@ export function useComponentHost(
       throw controllerDiagnostic("HJ001", error);
     });
   const stops: Array<() => void> = [];
-  const read = (name: string): unknown =>
+  const readState = (name: string): unknown =>
     Object.hasOwn(state, name)
       ? state[name]!.value
       : Object.hasOwn(computedValues, name)
       ? computedValues[name]!.value
-      : props?.value[name];
+      : Object.hasOwn(data, name)
+      ? data[name]!.value
+      : Object.hasOwn(context, name)
+      ? context[name]!.value
+      : undefined;
+  const propHandles = Object.create(null) as Record<string, unknown>;
+  for (const name of propNames) {
+    const validity = () => options.propValidity?.(name);
+    propHandles[name] = Object.freeze({
+      get value() { return props?.value[name]; },
+      get inputValue() { return propInputs(name); },
+      get validity() { return validity(); },
+      validate: validity,
+    });
+  }
   const host = {
     get element(): Element {
       return root.value as Element;
@@ -250,7 +272,7 @@ export function useComponentHost(
       return root.value as Element;
     },
     state: new Proxy({} as Record<string, unknown>, {
-      get: (_target, name) => typeof name === "string" ? read(name) : undefined,
+      get: (_target, name) => typeof name === "string" ? readState(name) : undefined,
       set: (_target, name, value) => {
         if (typeof name !== "string" || !Object.hasOwn(state, name)) {
           throw new TypeError(\`Only declared state is writable; \\\`\${String(name)}\\\` is not.\`);
@@ -258,7 +280,10 @@ export function useComponentHost(
         state[name]!.value = value;
         return true;
       },
+      has: (_target, name) => typeof name === "string" &&
+        (Object.hasOwn(state, name) || Object.hasOwn(computedValues, name) || Object.hasOwn(data, name) || Object.hasOwn(context, name)),
     }),
+    props: Object.freeze(propHandles),
     refs: Object.defineProperties(
       {},
       Object.fromEntries(

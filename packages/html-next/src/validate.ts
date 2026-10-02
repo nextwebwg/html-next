@@ -140,7 +140,7 @@ function parsedComparable(bound: number | string | undefined, type: ValidationTy
  * after requiredness, matching the Constraint Validation API. All other applicable failures
  * are returned rather than hiding later failures behind the first message.
  */
-export function validate(value: unknown, constraint: Constraint = {}): Validity {
+export function validate(value: unknown, constraint: Constraint = {}, source: "html" | "value" = "html"): Validity {
   if (isEmpty(value, constraint.multiple)) {
     return constraint.required
       ? { valid: false, errors: [{ reason: "valueMissing", message: "This field is required." }] }
@@ -155,13 +155,13 @@ export function validate(value: unknown, constraint: Constraint = {}): Validity 
   if (terminal === "email" && constraint.multiple && typeof value === "string") {
     const addresses = value.split(",").map((address) => address.trim());
     const failures = addresses.flatMap((address, index) => {
-      const result = parseTypedValue(address, parseTypeExpression("email"), `$[${index}]`);
+      const result = parseTypedValue(address, parseTypeExpression("email"), `$[${index}]`, source);
       return result.ok ? [] : typeErrors(result.issues, terminal);
     });
     errors.push(...failures);
     if (failures.length === 0) parsedValue = addresses;
   } else if (type !== undefined) {
-    const result = parseTypedValue(value, type);
+    const result = parseTypedValue(value, type, "$", source);
     if (result.ok) parsedValue = result.value;
     else errors.push(...typeErrors(result.issues, terminal));
   }
@@ -184,12 +184,17 @@ export function validate(value: unknown, constraint: Constraint = {}): Validity 
 }
 
 /** Validate declared prop values through one read surface, shared by live and generated targets. */
-export function validateComponentProps(contract: ComponentContract, read: (name: string) => unknown): Validity {
+export function validateComponentProps(
+  contract: ComponentContract,
+  read: (name: string) => unknown,
+  readSelector: (name: string) => unknown = read,
+  readSource: (name: string) => "html" | "value" = () => "html",
+): Validity {
   const errors: ValidityError[] = [];
   for (const [name, prop] of Object.entries(contract.props)) {
     const value = read(name);
     const selected = selectedPropType(contract, prop, prop.select === undefined ? {}
-      : { [prop.select.from]: read(prop.select.from) });
+      : { [prop.select.from]: readSelector(prop.select.from) });
     if (selected === null) {
       if (value !== null && value !== undefined && value !== "") errors.push({
         reason: "typeMismatch", message: `No type option matches the value of \`${prop.select!.from}\`.`, path: name,
@@ -203,10 +208,12 @@ export function validateComponentProps(contract: ComponentContract, read: (name:
       ...(prop.minLength === undefined ? {} : { minLength: prop.minLength }),
       ...(prop.maxLength === undefined ? {} : { maxLength: prop.maxLength }),
       ...(prop.pattern === undefined ? {} : { pattern: prop.pattern }),
-    });
+    }, readSource(name));
     errors.push(...result.errors.map((error) => ({ ...error, path: name })));
+    const parsed = parseTypedValue(value, selected, "$", readSource(name));
+    const compared = parsed.ok ? parsed.value : value;
     if (value !== null && value !== undefined && value !== "" && prop.values !== undefined &&
-        !prop.values.some((choice) => choice === value)) {
+        !prop.values.some((choice) => choice === compared)) {
       errors.push({ reason: "typeMismatch", message: `Value must be one of ${prop.values.map(String).join(", ")}.`, path: name });
     }
   }

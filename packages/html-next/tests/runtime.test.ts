@@ -83,7 +83,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown; validity: ValidityState; validate(): ValidityState }> } | undefined;
             updateComponentProps(element: Element, props: Record<string, unknown>): void;
           } }).HtmlRuntime;
           runtime.lowerDocument();
@@ -92,11 +92,19 @@ describe.skipIf(!enabled)("browser runtime", () => {
             const defaulted = document.querySelector("#with-default")!;
             const empty = document.querySelector("#without-default")!;
             const fromFunction = document.querySelector("#from-function")!;
+            const ownerHost = runtime.getComponentHost(owner)!;
             return {
-              incoming: runtime.getComponentHost(owner)?.state.incoming,
-              defaulted: runtime.getComponentHost(defaulted)?.state.amount,
-              empty: runtime.getComponentHost(empty)?.state.amount,
-              fromFunction: runtime.getComponentHost(fromFunction)?.state.amount,
+              incoming: ownerHost.props.incoming!.value,
+              stateHasIncoming: "incoming" in ownerHost.state,
+              inputValue: ownerHost.props.incoming!.inputValue,
+              propValue: ownerHost.props.incoming!.value,
+              propBadInput: ownerHost.props.incoming!.validity.badInput,
+              checkedBadInput: ownerHost.props.incoming!.validate().badInput,
+              defaultInput: runtime.getComponentHost(defaulted)?.props.amount?.inputValue,
+              defaultValid: runtime.getComponentHost(defaulted)?.props.amount?.validity.valid,
+              defaulted: runtime.getComponentHost(defaulted)?.props.amount?.value,
+              empty: runtime.getComponentHost(empty)?.props.amount?.value,
+              fromFunction: runtime.getComponentHost(fromFunction)?.props.amount?.value,
               rendered: [defaulted, empty].map((element) => element.getAttribute("data-amount")),
               badInput: owner.validity.badInput,
               rangeOverflow: owner.validity.rangeOverflow,
@@ -117,15 +125,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return { initial, valid, rejected, recovered, constrained: read() };
         });
         assert.deepEqual(actual, {
-          initial: { incoming: "oops", defaulted: 5, empty: null, fromFunction: 5,
+          initial: { incoming: null, stateHasIncoming: false, inputValue: "oops", propValue: null, propBadInput: true, checkedBadInput: true, defaultInput: null, defaultValid: true, defaulted: 5, empty: null, fromFunction: 5,
             rendered: ["5", null], badInput: true, rangeOverflow: false },
-          valid: { incoming: 2, defaulted: 2, empty: 2, fromFunction: 5,
+          valid: { incoming: 2, stateHasIncoming: false, inputValue: 2, propValue: 2, propBadInput: false, checkedBadInput: false, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
             rendered: ["2", "2"], badInput: false, rangeOverflow: false },
-          rejected: { incoming: "oops", defaulted: 2, empty: 2, fromFunction: 5,
+          rejected: { incoming: 2, stateHasIncoming: false, inputValue: "oops", propValue: 2, propBadInput: true, checkedBadInput: true, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
             rendered: ["2", "2"], badInput: true, rangeOverflow: false },
-          recovered: { incoming: 7, defaulted: 7, empty: 7, fromFunction: 5,
+          recovered: { incoming: 7, stateHasIncoming: false, inputValue: 7, propValue: 7, propBadInput: false, checkedBadInput: false, defaultInput: 7, defaultValid: true, defaulted: 7, empty: 7, fromFunction: 5,
             rendered: ["7", "7"], badInput: false, rangeOverflow: false },
-          constrained: { incoming: 130, defaulted: 130, empty: 130, fromFunction: 5,
+          constrained: { incoming: 130, stateHasIncoming: false, inputValue: 130, propValue: 130, propBadInput: false, checkedBadInput: false, defaultInput: 130, defaultValid: true, defaulted: 130, empty: 130, fromFunction: 5,
             rendered: ["130", "130"], badInput: false, rangeOverflow: true },
         });
       } finally { await browser.close(); }
@@ -149,7 +157,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const editor = document.querySelector("#editor")!;
@@ -157,7 +165,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const input = editor.querySelector("input")!;
           const read = () => ({ input: input.value, nativeMismatch: input.validity.typeMismatch,
             source: runtime.getComponentHost(editor)?.state.address,
-            downstream: runtime.getComponentHost(display)?.state.address });
+            downstream: runtime.getComponentHost(display)?.props.address?.value });
           const initial = read();
           input.value = "oops";
           input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -196,7 +204,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, unknown> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#handler-test")!;
@@ -208,9 +216,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const rejected = read();
           root.querySelector<HTMLButtonElement>("button.good")!.click();
           await Promise.resolve();
-          return { initial, rejected, recovered: read() };
+          return { initial, rejected, recovered: read(), noPropHandleForState: runtime.getComponentHost(root)?.props.count === undefined };
         });
         assert.deepEqual(actual, {
+          noPropHandleForState: true,
           initial: { count: 2, rendered: "2" },
           rejected: { count: 2, rendered: "2" },
           recovered: { count: 7, rendered: "7" },
@@ -259,7 +268,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#choice-state")!;
@@ -291,12 +300,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
             updateComponentProps(element: Element, props: Record<string, unknown>): void;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#bounded") as HTMLDivElement & { validity: ValidityState };
-          const initial = { amount: runtime.getComponentHost(root)?.state.amount,
+          const initial = { amount: runtime.getComponentHost(root)?.props.amount?.value,
             rangeUnderflow: root.validity.rangeUnderflow, tooShort: root.validity.tooShort };
           runtime.updateComponentProps(root, { amount: 6, code: "abcde" });
           await Promise.resolve();
@@ -365,12 +374,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
             updateComponentProps(element: Element, props: Record<string, unknown>): void;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const button = document.querySelector<HTMLButtonElement>("#test")!;
-          const read = () => ({ mode: runtime.getComponentHost(button)?.state.mode, value: runtime.getComponentHost(button)?.state.value });
+          const read = () => ({ mode: runtime.getComponentHost(button)?.state.mode, value: runtime.getComponentHost(button)?.props.value?.value });
           runtime.updateComponentProps(button, { value: "2.5" });
           const textValue = read();
           runtime.updateComponentProps(button, { value: undefined });
@@ -411,12 +420,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const parent = document.querySelector("#parent")!;
           const child = document.querySelector("#child")!;
-          const read = () => ({ type: runtime.getComponentHost(child)?.state.type, value: runtime.getComponentHost(child)?.state.value });
+          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value });
           const initial = read();
           parent.querySelector("button")!.click();
           await Promise.resolve();
@@ -449,20 +458,20 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const actual = await page.evaluate(() => {
             const runtime = (window as unknown as { HtmlRuntime: {
               lowerDocument(): void;
-              getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
               updateComponentProps(element: Element, props: Record<string, unknown>): void;
             } }).HtmlRuntime;
             runtime.lowerDocument();
             const numeric = document.querySelector("#numeric")!;
             const text = document.querySelector("#text")!;
             const empty = document.querySelector("#empty")!;
-            const initial = [numeric, text, empty].map((element) => runtime.getComponentHost(element)?.state.value);
+            const initial = [numeric, text, empty].map((element) => runtime.getComponentHost(element)?.props.value?.value);
             runtime.updateComponentProps(numeric, { type: "text", value: "2.5" });
-            const changed = runtime.getComponentHost(numeric)?.state.value;
+            const changed = runtime.getComponentHost(numeric)?.props.value?.value;
             let rejected = false;
             try { runtime.updateComponentProps(numeric, { type: "number", value: "2.5" }); }
             catch (error) { rejected = String(error).includes("HR002"); }
-            return { initial, changed, rejected, typeAfterRejection: runtime.getComponentHost(numeric)?.state.type };
+            return { initial, changed, rejected, typeAfterRejection: runtime.getComponentHost(numeric)?.props.type?.value };
           });
           assert.deepEqual(actual, { initial: [2.5, "2.5", null], changed: "2.5", rejected: false, typeAfterRejection: "number" });
         } finally {
@@ -485,10 +494,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const size = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: { size: unknown } } | undefined;
+            getComponentHost(element: Element): { state: { size: unknown }; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
-          return runtime.getComponentHost(document.querySelector("#choice")!)?.state.size;
+          return runtime.getComponentHost(document.querySelector("#choice")!)?.props.size?.value;
         });
         assert.equal(size, "lg");
         assert.ok(warnings.some((message) => message.includes("HC013") && message.includes("values constraint")));
@@ -526,11 +535,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const actual = await page.evaluate((count) => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
-          const state = runtime.getComponentHost(document.querySelector("#typed")!)!.state;
-          return Array.from({ length: count }, (_, index) => state[`v${index}`]);
+          const props = runtime.getComponentHost(document.querySelector("#typed")!)!.props;
+          return Array.from({ length: count }, (_, index) => props[`v${index}`]?.value);
         }, cases.length);
         assert.deepEqual(actual, cases.map(([, , expected]) => expected));
       } finally {
@@ -581,19 +590,21 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: { current: unknown } } | undefined;
+            getComponentHost(element: Element): { state: { current: unknown }; props: { current: { inputValue: unknown; value: unknown; validity: ValidityState } } } | undefined;
             updateComponentProps(element: Element, props: Record<string, unknown>): void;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#current")!;
-          const fromHtml = runtime.getComponentHost(root)?.state.current;
+          const fromHtml = runtime.getComponentHost(root)?.props.current.value;
           runtime.updateComponentProps(root, { current: "2" });
-          const invalidValue = runtime.getComponentHost(root)?.state.current;
+          const invalidValue = runtime.getComponentHost(root)?.props.current.value;
+          const invalidInput = runtime.getComponentHost(root)?.props.current.inputValue;
+          const propBadInput = runtime.getComponentHost(root)?.props.current.validity.badInput;
           const invalidValidity = (root as HTMLDivElement & { checkValidity(): boolean }).checkValidity();
           runtime.updateComponentProps(root, { current: 3 });
-          return { fromHtml, invalidValue, invalidValidity, fromValue: runtime.getComponentHost(root)?.state.current };
+          return { fromHtml, invalidValue, invalidInput, propBadInput, invalidValidity, fromValue: runtime.getComponentHost(root)?.props.current.value };
         });
-        assert.deepEqual(result, { fromHtml: 2, invalidValue: "2", invalidValidity: false, fromValue: 3 });
+        assert.deepEqual(result, { fromHtml: 2, invalidValue: 2, invalidInput: "2", propBadInput: true, invalidValidity: false, fromValue: 3 });
       } finally {
         await browser.close();
       }
@@ -638,13 +649,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate((parsed) => {
           const runtime = (window as unknown as { HtmlRuntime: {
             attachComponent(element: Element, definition: unknown, options?: { props?: Record<string, unknown> }): () => void;
-            getComponentHost(element: Element): { state: { choice: unknown } } | undefined;
+            getComponentHost(element: Element): { state: { choice: unknown }; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           const nullRoot = document.querySelector("#null")!;
           const defaultRoot = document.querySelector("#default")!;
           const disposeNull = runtime.attachComponent(nullRoot, parsed, { props: { choice: null } });
           const disposeDefault = runtime.attachComponent(defaultRoot, parsed);
-          const values = [runtime.getComponentHost(nullRoot)?.state.choice, runtime.getComponentHost(defaultRoot)?.state.choice];
+          const values = [runtime.getComponentHost(nullRoot)?.props.choice?.value, runtime.getComponentHost(defaultRoot)?.props.choice?.value];
           disposeNull();
           disposeDefault();
           return values;
@@ -666,11 +677,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: { value: unknown } } | undefined;
+            getComponentHost(element: Element): { state: { value: unknown }; props: Record<string, { value: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#missing")!;
-          return runtime.getComponentHost(root)?.state.value;
+          return runtime.getComponentHost(root)?.props.value?.value;
         });
         assert.equal(result, null);
       } finally {
@@ -1186,12 +1197,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
             const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
-              getComponentHost(element: Element): { root: Element; element: Element; state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { root: Element; element: Element; state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
             };
             const host = runtime.getComponentHost(document.querySelector("section.frame")!);
             return host === undefined
               ? "no host"
-              : `${host.element === host.root}:${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+              : `${host.element === host.root}:${host.root.localName}:count=${String(host.state.count)}:label=${String(host.props.label?.value)}`;
           })(),
         }));
         assert.deepEqual(result, {
