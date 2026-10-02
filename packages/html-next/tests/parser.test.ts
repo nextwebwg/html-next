@@ -47,6 +47,16 @@ describe("parseComponent", () => {
       ?.expressionPlan?.dependencies, ["items.0"]);
   });
 
+  it("accepts dimensional scaling and rejects incompatible literal arithmetic", () => {
+    assert.doesNotThrow(() => parseComponent(`<template component="x-scale"><defs>
+      <state name="width" type="length" value="100px"></state>
+      <computed name="half" from="$width / 2"></computed>
+    </defs><output $value="half"></output></template>`));
+    for (const expression of ["1px + 1", "1px + 1ms", "1px + 1rem", "1px * 1px", "1px / 1px", "1px / 0", "1 / 1px", "1px % 1px"]) {
+      expectDiagnostic("HT013", `<template component="x-bad-scale"><output $value="${expression}"></output></template>`);
+    }
+  });
+
   it("reports built-in calls whose literal arguments cannot work", () => {
     for (const expression of [
       "concat()", "join(['a'], 1)", "round(8.8px, 1rem)",
