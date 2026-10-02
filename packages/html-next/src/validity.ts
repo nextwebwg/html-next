@@ -91,7 +91,7 @@ function current(el: Element): Validity {
   return nativeControl(el) ? validityFromNative(el.validity, el.validationMessage) : VALID;
 }
 
-function validityState(validity: Validity): GeneralizedValidityState {
+export function validityState(validity: Validity): GeneralizedValidityState {
   const reasons = new Set(validity.errors.map((error) => error.reason));
   return Object.freeze({
     valid: validity.valid,

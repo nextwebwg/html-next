@@ -64,7 +64,7 @@ import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "./tem
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropContract, PropType, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
-import { manageElementValidity, setElementValidity } from "./validity.js";
+import { manageElementValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
@@ -91,12 +91,20 @@ interface SlotInsertion {
   readonly nodes: readonly Node[];
 }
 
+interface PropInput {
+  readonly value: unknown;
+  readonly source: "html" | "value";
+  readonly present: boolean;
+}
+
 interface RuntimeInstance {
   element?: Element;
   /** Stable component ownership, captured when invoked rather than inferred from later DOM position. */
   readonly parent?: RuntimeInstance;
   readonly definition: ComponentDefinition;
   readonly scope: ReactiveScope;
+  /** Latest direct input for each prop, kept apart from the accepted value in scope. */
+  readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
   readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
   connected: boolean;
@@ -295,18 +303,24 @@ export function installComponentGraph(
   return installed;
 }
 
-function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue {
+function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue | undefined {
   if (input === null) return null;
   // Bare boolean attributes retain HTML presence semantics. Explicit values
   // are invocation strings and must still pass through the declared type.
   const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
   if (type === null) return candidate as PropValue;
   const parsed = parseTypedValue(candidate, type, "$", source);
-  return (parsed.ok ? parsed.value : candidate) as PropValue;
+  return parsed.ok ? parsed.value as PropValue : undefined;
 }
 
 function propValidity(instance: RuntimeInstance): Validity {
-  return validateComponentProps(instance.definition.contract, (name) => instance.scope.get(name));
+  return validateComponentProps(instance.definition.contract,
+    (name) => {
+      const input = instance.propInputs[name]?.get();
+      return input?.present ? input.value : instance.scope.get(name);
+    },
+    (name) => instance.scope.get(name),
+    (name) => instance.propInputs[name]?.get().source ?? "value");
 }
 
 function reflectedPropValue(value: unknown, type: PropType | null): string {
@@ -316,8 +330,8 @@ function reflectedPropValue(value: unknown, type: PropType | null): string {
   return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
 }
 
-function assignedPropValue(_name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value {
-  if (input !== undefined) return invocationValue(prop, input, "value", false, type) as Value;
+function assignedPropValue(_name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value | undefined {
+  if (input !== undefined) return invocationValue(prop, input, "value", false, type) as Value | undefined;
   return (prop.default === undefined ? null : prop.default) as Value;
 }
 
@@ -438,6 +452,7 @@ function readInvocation(
   readonly passThrough: readonly RootAttribute[];
   readonly effects: ReactiveOwner[];
   readonly explicit: Set<string>;
+  readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
 } {
   const contract = definition.contract;
   const names = propAttributeNames(definition, hydration);
@@ -457,6 +472,13 @@ function readInvocation(
   }
 
   const values = parseIncomingProps(contract, incoming);
+  const propInputs = Object.create(null) as Record<string, ReactiveSignal<PropInput>>;
+  for (const name of Object.keys(contract.props)) {
+    const item = incoming[name];
+    propInputs[name] = createSignal(item === undefined
+      ? { value: null, source: "value", present: false }
+      : { value: item.value, source: item.source, present: true });
+  }
 
   // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
   // author's explicit attributes). They are never read from JavaScript properties.
@@ -467,10 +489,10 @@ function readInvocation(
     if (item !== undefined) {
       const type = selectedPropType(contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
       values[name] = invocationValue(prop, item.value, item.source, item.attributePresent, type);
-      scope.set(name, values[name] as Value);
+      if (values[name] !== undefined) scope.set(name, values[name] as Value);
     }
   }
-  const explicit = new Set(Object.keys(values).filter((name) => values[name] !== undefined && values[name] !== null));
+  const explicit = new Set(Object.keys(incoming).filter((name) => incoming[name]?.value !== null));
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
@@ -504,7 +526,7 @@ function readInvocation(
       return () => resource.disconnect();
     }, 0));
   }
-  return { scope, passThrough, effects, explicit };
+  return { scope, passThrough, effects, explicit, propInputs };
 }
 
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
@@ -2152,7 +2174,7 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  const { scope, passThrough, effects, explicit, propInputs } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -2196,6 +2218,7 @@ function prepareRuntimeInvocation(
     definition,
     ...(parent === undefined ? {} : { parent }),
     scope,
+    propInputs,
     refs: {},
     effects: instanceEffects,
     connected: false,
@@ -2965,17 +2988,22 @@ function applyComponentProps(
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
-    if (prop !== undefined && prop.select === undefined) next[name] = assignedPropValue(name, prop, input);
+    if (prop !== undefined && prop.select === undefined) {
+      const accepted = assignedPropValue(name, prop, input);
+      if (accepted !== undefined) next[name] = accepted;
+    }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select !== undefined) {
-      next[name] = assignedPropValue(name, prop, input, selectedPropType(contract, prop, next));
+      const accepted = assignedPropValue(name, prop, input, selectedPropType(contract, prop, next));
+      if (accepted !== undefined) next[name] = accepted;
     }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop === undefined) continue;
+    instance.propInputs[name]!.set({ value: input === undefined ? null : input, source: "value", present: input !== undefined });
     const attributeName = `data-${kebabCase(name)}`;
     const value = next[name] as Value;
     // Null has no attribute form, but remains the effective in-memory prop value.
@@ -3004,7 +3032,10 @@ export interface ComponentHost {
   readonly root: Element;
   /** Alias for the rendered root used by generated component controllers. */
   readonly element: Element;
+  /** Component-owned state, computed values, and data resources; never declared props. */
   readonly state: Record<string, unknown>;
+  /** Per-prop handles for accepted values, latest input, and validity. */
+  readonly props: Readonly<Record<string, ComponentProp>>;
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
   /**
    * The elements a consumer projected, by slot name, in document order; `default` reads the
@@ -3032,6 +3063,17 @@ export interface ComponentHost {
    */
   effect(run: () => void | (() => void)): () => void;
   dispatch(event: string, detail?: unknown): boolean;
+}
+
+export interface ComponentProp {
+  /** The accepted typed value read by template expressions. */
+  readonly value: unknown;
+  /** The latest directly supplied input, before type conversion. */
+  readonly inputValue: unknown;
+  /** Validity of that input against this prop's declared type and constraints. */
+  readonly validity: GeneralizedValidityState;
+  /** Recompute and return this prop's current validity. */
+  validate(): GeneralizedValidityState;
 }
 
 export interface ControllerComputed<T> {
@@ -3073,9 +3115,10 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       .filter((declaration) => declaration.kind === "state")
       .map((declaration) => declaration.name),
   );
+  const propNames = new Set(Object.keys(instance.definition.contract.props));
   const state = new Proxy({}, {
     get: (_target, key) => {
-      if (typeof key !== "string") return undefined;
+      if (typeof key !== "string" || propNames.has(key)) return undefined;
       const value = instance.scope.get(key);
       return value === ABSENT ? undefined : value;
     },
@@ -3086,8 +3129,21 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       instance.scope.set(key, value as Value);
       return true;
     },
-    has: (_target, key) => typeof key === "string" && instance.scope.has(key),
+    has: (_target, key) => typeof key === "string" && !propNames.has(key) && instance.scope.has(key),
   });
+  const props = Object.create(null) as Record<string, ComponentProp>;
+  for (const name of Object.keys(instance.definition.contract.props)) {
+    const validity = (): GeneralizedValidityState => {
+      const errors = propValidity(instance).errors.filter((error) => error.path === name);
+      return validityState(errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors });
+    };
+    props[name] = Object.freeze({
+      get value() { return instance.scope.get(name); },
+      get inputValue() { return instance.propInputs[name]!.get().value; },
+      get validity() { return validity(); },
+      validate: validity,
+    });
+  }
   const projectedInto = (key: string): readonly Element[] => {
     const projection = instance.projection;
     if (projection === undefined) return [];
@@ -3122,6 +3178,7 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
+    props: Object.freeze(props),
     refs,
     slots,
     signal(initialValue) {

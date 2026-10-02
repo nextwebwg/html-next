@@ -680,7 +680,7 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HS002" },
   },
   {
-    name: "an unparseable number prop retains its written value and reports badInput",
+    name: "an unparseable number prop renders its default and reports badInput",
     source: scene({
       defs: `<prop name="n" type="number" default="0">N.</prop>`,
       root: `<div from:data-n="n"></div>`,
@@ -688,7 +688,7 @@ const diagnostics: ConformanceCase[] = [
     }),
     expect: {
       probe: `const el = q('div'); return { value: el.getAttribute('data-n'), badInput: el.validity.badInput };`,
-      result: { value: "abc", badInput: true },
+      result: { value: "0", badInput: true },
     },
   },
   {

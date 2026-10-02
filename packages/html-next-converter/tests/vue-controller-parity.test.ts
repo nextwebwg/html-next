@@ -16,7 +16,9 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", import.meta.url).pathname;
 const component = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
+  <prop name="amount" type="number" default="5">The amount.</prop>
   <state type="number" name="count" value="0"></state>
+  <computed name="double" from="count * 2"></computed>
   <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <method name="focusButton" export="focusButton" returns="promise(undefined)"></method>
@@ -34,6 +36,12 @@ const controller = `export default function connect(host) {
   const stop = host.effect(() => {
     window.trace.effects++;
     host.root.setAttribute("data-local", String(doubled.get()));
+    host.root.setAttribute("data-amount", String(host.props.amount.value));
+    host.root.setAttribute("data-input", String(host.props.amount.inputValue));
+    host.root.setAttribute("data-valid", String(host.props.amount.validity.valid));
+    host.root.setAttribute("data-state-has-amount", String("amount" in host.state));
+    host.root.setAttribute("data-state-has-count", String("count" in host.state));
+    host.root.setAttribute("data-double", String(host.state.double));
     return () => { window.trace.effectCleanups++; };
   });
   const stopListening = host.effect(() => {
@@ -61,7 +69,7 @@ export async function loadHelper() {
 }`;
 const helper = "export const answer = 42;\n";
 
-type Snapshot = { tag: string | null; count: string | null; local: string | null; trace: Record<string, number>; focused: boolean };
+type Snapshot = { tag: string | null; count: string | null; local: string | null; amount: string | null; input: string | null; valid: string | null; stateHasAmount: string | null; stateHasCount: string | null; double: string | null; trace: Record<string, number>; focused: boolean };
 
 async function snapshot(page: Page): Promise<{ behavior: Snapshot; pixels: Buffer }> {
   await page.waitForFunction(() => document.querySelector("#case")?.getAttribute("data-local") !== null);
@@ -71,6 +79,12 @@ async function snapshot(page: Page): Promise<{ behavior: Snapshot; pixels: Buffe
       tag: document.querySelector("#case")?.localName ?? null,
       count: document.querySelector("#case output")?.textContent ?? null,
       local: document.querySelector("#case")?.getAttribute("data-local") ?? null,
+      amount: document.querySelector("#case")?.getAttribute("data-amount") ?? null,
+      input: document.querySelector("#case")?.getAttribute("data-input") ?? null,
+      valid: document.querySelector("#case")?.getAttribute("data-valid") ?? null,
+      stateHasAmount: document.querySelector("#case")?.getAttribute("data-state-has-amount") ?? null,
+      stateHasCount: document.querySelector("#case")?.getAttribute("data-state-has-count") ?? null,
+      double: document.querySelector("#case")?.getAttribute("data-double") ?? null,
       trace: { ...window.trace },
       focused: document.activeElement === document.querySelector("#case button"),
     })),
@@ -245,6 +259,11 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => window.trace.effects === 1)));
         const [initialLive, initialVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(initialVue.behavior, initialLive.behavior, "initial controller behavior differs");
+        assert.deepEqual({ amount: initialVue.behavior.amount, input: initialVue.behavior.input, valid: initialVue.behavior.valid },
+          { amount: "5", input: "null", valid: "true" }, "defaulted prop handle differs");
+        assert.deepEqual({ amount: initialVue.behavior.stateHasAmount, count: initialVue.behavior.stateHasCount },
+          { amount: "false", count: "true" }, "controller prop and state namespaces overlap");
+        assert.equal(initialVue.behavior.double, "0", "derived state is unavailable to the controller");
         await assertPixelsEqual(vue, initialVue.pixels, initialLive.pixels, "initial controller pixels differ");
 
         await Promise.all([live, vue].map((page) => page.locator("#case button").focus()));

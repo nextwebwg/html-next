@@ -19,7 +19,7 @@ const child = `<template component="x-keyed-item" status="early" summary="Keyed 
   <prop name="label" type="string">Item label.</prop>
 </defs><li from:data-id="itemId"><input><span $value="label"></span></li></template>`;
 const controller = `export default function connect(host) {
-  const id = host.state.itemId;
+  const id = host.props.itemId.value;
   window.keyedLifecycle.push("connect:" + id);
   return () => window.keyedLifecycle.push("disconnect:" + id);
 }`;

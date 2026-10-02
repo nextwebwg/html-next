@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-converter",
-  "version": "1.0.0-alpha.18",
+  "version": "1.0.0-alpha.19",
   "description": "Vue conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",

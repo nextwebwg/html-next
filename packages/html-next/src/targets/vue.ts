@@ -790,7 +790,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? JSON.stringify(normalizeType(prop.contract.type))
       : `selectedPropNode(${contract.props[prop.contract.select.from] === undefined
         ? `${stateNames.get(states.find((state) => state.name === prop.contract.select!.from)!)}.value`
-        : `props[${quote(prop.contract.select.from)}]`}, ${JSON.stringify(prop.contract.select.options)})`;
+        : `checkedProp<unknown>(props[${quote(prop.contract.select.from)}], ${JSON.stringify(normalizeType(contract.props[prop.contract.select.from]!.type))}, ${contract.props[prop.contract.select.from]!.required}, ${quote(prop.contract.select.from)}, acceptedProps)`}, ${JSON.stringify(prop.contract.select.options)})`;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const hasStateSelected = target.props.some((prop) => prop.contract.select !== undefined &&
@@ -872,8 +872,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const source = prop.contract.select?.from;
     return source !== undefined && contract.props[source] === undefined ? [source] : [];
   }));
+  const selectorPropNames = new Set(target.props.flatMap((prop) => {
+    const source = prop.contract.select?.from;
+    return source !== undefined && contract.props[source] !== undefined ? [source] : [];
+  }));
   const validityValues = target.props.length === 0 ? undefined : [
-    "{ ...checkedProps",
+    "{ ...props",
+    ...[...selectorPropNames].map((name) => `, ${propKey(name)}: checkedProps[${quote(name)}]`),
     ...[...selectorStateNames].map((name) => {
       const state = states.find((candidate) => candidate.name === name)!;
       return `, ${propKey(name)}: ${stateNames.get(state)}`;
@@ -959,13 +964,13 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       ? parameters.get(prop.name) ?? (prop.contract.values === undefined ? typeSource(prop.contract.type)
         : prop.contract.values.map((value) => JSON.stringify(value)).join(" | "))
       : propType(prop);
-    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)})`;
+    const checked = `checkedProp<${type}>(props[${quote(prop.name)}], ${selectedNode(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps)`;
     const value = !prop.contract.required && "default" in prop.contract ? `${checked} as ${type}` : checked;
     return hasStateSelected ? `  get ${propKey(prop.name)}() { return ${value}; },`
       : `  ${propKey(prop.name)}: ${value},`;
   });
   if (modelProp !== undefined) checkedPropSources.push(
-    `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue"),`);
+    `  modelValue: checkedProp<${propType(modelProp)}>(props.modelValue, ${selectedNode(modelProp)}, false, "modelValue", acceptedProps),`);
   // An event whose detail reports a prop's new value (query-change's { query }, open and close's
   // { open }) also updates that prop, so Vue consumers can write v-model:query and v-model:open.
   const modeled = target.props.filter((prop) => prop !== modelProp && events.some((event) => {
@@ -1044,10 +1049,12 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       `provide('html-next:nested-depth', ${nestedDepthName} + 1);`,
     ]),
     ...(target.props.length === 0 ? [] : [
-      `const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })};`,
+      `const propValidityContract = ${JSON.stringify({ props: Object.fromEntries(Object.entries(contract.props).map(([name, prop]) => [name, { ...prop, type: normalizeType(prop.type) }])) })} as const;`,
       "const props = defineProps({",
       ...propDefinitions,
       "});",
+      `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) =>
+        `${propKey(prop.name)}: ${"default" in prop.contract ? defaultSource(prop.contract.default) : "null"}`).join(", ")} };`,
       "const checkedProps = computed(() => ({",
       ...checkedPropSources,
       "}));",
@@ -1173,6 +1180,9 @@ export function generateVue(definition: ComponentDefinition, version: string, op
       refs: context.refs,
       state: new Map(states.map((state) => [state.name, stateNames.get(state)!])),
       computed: new Map(computedValues.map((value) => [value.name, stateNames.get(value)!])),
+      data: new Map(data.map((value) => [value.name, dataNames.get(value)!])),
+      context: new Map(contexts.map((value) => [value.as ?? value.name, contextNames.get(value)!])),
+      hydrationInstanceName,
     }, options.controllerSpecifier ?? definition.controller),
     ...lowering.fallbacks().flatMap((source) => ["", source]),
   );
@@ -1195,7 +1205,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
+    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(VUE_HTML_SPECIFIER)};`] : []),
     ...(context.usesHydrationControl ? [`import { ${[
@@ -1233,6 +1243,9 @@ function hostSource(
     readonly refs: ReadonlyMap<string, string>;
     readonly state: ReadonlyMap<string, string>;
     readonly computed: ReadonlyMap<string, string>;
+    readonly data: ReadonlyMap<string, string>;
+    readonly context: ReadonlyMap<string, string>;
+    readonly hydrationInstanceName: string;
   },
   controllerSpecifier?: string,
 ): string[] {
@@ -1248,10 +1261,26 @@ function hostSource(
     "  root,",
     "  dispatch,",
     `  controllerSource: { specifier: ${quote(controllerSpecifier ?? definition.controller!)}, definition: ${quote(definition.source.file)} },`,
-    ...(values.props ? ["  props: checkedProps,"] : []),
+    ...(values.props ? [
+      "  props: checkedProps,",
+      "  propInputs: (name: string) => {",
+      `    const incoming = ${values.hydrationInstanceName}?.vnode.props;`,
+      "    const kebab = name.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase());",
+      "    return incoming !== null && incoming !== undefined ? (incoming[name] ?? incoming[kebab] ?? null) : null;",
+      "  },",
+      `  propNames: ${JSON.stringify(Object.keys(definition.contract.props))},`,
+      `  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...props${[...new Set(Object.values(definition.contract.props).flatMap((prop) =>
+        prop.select !== undefined ? [prop.select.from] : []))]
+        .filter((name) => definition.contract.props[name] !== undefined)
+        .map((name) => `, ${propKey(name)}: checkedProps.value[${quote(name)}]`).join("")}${[...new Set(Object.values(definition.contract.props).flatMap((prop) =>
+        prop.select !== undefined && definition.contract.props[prop.select.from] === undefined ? [prop.select.from] : []))]
+        .map((name) => `, ${propKey(name)}: ${values.state.get(name)}.value`).join("")} } }, name),`,
+    ] : []),
     ...(values.refs.size === 0 ? [] : [`  refs: ${record(values.refs)},`]),
     ...(values.state.size === 0 ? [] : [`  state: ${record(values.state)},`]),
     ...(values.computed.size === 0 ? [] : [`  computed: ${record(values.computed)},`]),
+    ...(values.data.size === 0 ? [] : [`  data: ${record(values.data)},`]),
+    ...(values.context.size === 0 ? [] : [`  context: ${record(values.context)},`]),
     "})",
   ].join("\n");
   if (methods.length === 0) return [`${call};`];

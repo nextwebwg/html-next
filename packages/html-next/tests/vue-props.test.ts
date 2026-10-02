@@ -76,13 +76,13 @@ describe("generated Vue prop boundary", () => {
     assert.equal(checkedProp("", parseTypeExpression("boolean"), true, "decorative"), true);
     assert.equal(checkedProp(false, parseTypeExpression("boolean"), false, "decorative"), false);
     assert.equal(checkedProp(undefined, parseTypeExpression("boolean"), false, "decorative"), null);
-    assert.equal(checkedProp("", parseTypeExpression("number"), false, "count"), "");
+    assert.equal(checkedProp("", parseTypeExpression("number"), false, "count"), null);
   });
 
-  it("preserves malformed functional colors for validity reporting", async () => {
+  it("keeps malformed functional colors out of the accepted value", async () => {
     const checkedProp = await generatedChecker();
-    assert.equal(checkedProp("rgb(garbage)", parseTypeExpression("color"), false, "color"), "rgb(garbage)");
-    assert.equal(checkedProp("color-mix(in srgb, red, blue)", parseTypeExpression("color"), false, "color"), "color-mix(in srgb, red, blue)");
+    assert.equal(checkedProp("rgb(garbage)", parseTypeExpression("color"), false, "color"), null);
+    assert.equal(checkedProp("color-mix(in srgb, red, blue)", parseTypeExpression("color"), false, "color"), null);
     assert.equal(checkedProp("rgb(102 51 153)", parseTypeExpression("color"), false, "color"), "rgb(102 51 153)");
   });
 
@@ -109,7 +109,7 @@ describe("generated Vue prop boundary", () => {
       const node = parseTypeExpression(type);
       const canonical = parseTypedValue(value, node, "$", "value");
       if (canonical.ok) assert.deepEqual(checkedProp(value, node, false, "value"), canonical.value, `${type}: valid value`);
-      else assert.deepEqual(checkedProp(value, node, false, "value"), value, `${type}: invalid value is retained`);
+      else assert.deepEqual(checkedProp(value, node, false, "value"), null, `${type}: invalid value is rejected`);
     }
   });
 
@@ -120,5 +120,21 @@ describe("generated Vue prop boundary", () => {
     assert.equal(checkedProp(null, type, false, "count"), null);
     assert.equal(checkedProp(undefined, type, true, "count"), null);
     assert.equal(checkedProp(null, type, true, "count"), null);
+  });
+
+  it("keeps the last accepted value while an invalid Vue prop input remains inspectable", async () => {
+    const { checkedProp, propValidityState } = await generatedModule();
+    const type = parseTypeExpression("number");
+    const accepted: Record<string, unknown> = { count: 5 };
+    assert.equal(checkedProp(2, type, false, "count", accepted), 2);
+    assert.equal(checkedProp("oops", type, false, "count", accepted), 2);
+    assert.equal(accepted.count, 2);
+    const validity = propValidityState({
+      contract: { props: { count: { type, required: false } } },
+      values: { count: "oops" },
+    }, "count");
+    assert.equal(validity.badInput, true);
+    assert.equal(checkedProp(7, type, false, "count", accepted), 7);
+    assert.equal(accepted.count, 7);
   });
 });
