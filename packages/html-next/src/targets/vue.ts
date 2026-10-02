@@ -8,7 +8,7 @@ import { parseFragment } from "parse5";
 
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
-import { hasBuiltinCall, typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
+import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -34,7 +34,7 @@ import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
-import { category, Lowering, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
+import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
@@ -213,7 +213,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
     return !context.globals.has(root) || names.locals?.has(root);
   })) return undefined;
   const guard = expressionGuard(plan, names.script, context.definition);
-  const retains = hasBuiltinCall(plan.ast);
+  const retains = mayProduceInvalidResult(plan.ast, names.script);
   if (guard === undefined && !retains) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
   if (!retains) {
@@ -409,7 +409,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
         const when = armFlow?.kind === "when" ? armFlow : undefined;
         const testNode = when === undefined ? undefined : ast(when.testPlan, when.test);
         const test = testNode === undefined ? undefined :
-          (when?.testPlan === undefined || !hasBuiltinCall(when.testPlan.ast) ? undefined : guardedBinding(when.testPlan, local, context, (scope) => lowering.condition(testNode, scope)))
+          (when?.testPlan === undefined || !mayProduceInvalidResult(when.testPlan.ast, local.script) ? undefined : guardedBinding(when.testPlan, local, context, (scope) => lowering.condition(testNode, scope)))
           ?? lowering.condition(testNode, local.template);
         const directive = test === undefined ? "v-else" : `${index === 0 ? "v-if" : "v-else-if"}=${bound(test)}`;
         return wrap(armBody, [directive], local, context);
@@ -421,7 +421,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
   if (flow?.kind === "if") {
     const { flow: _flow, ...body } = node;
     const test = ast(flow.testPlan, flow.test);
-    const guarded = flow.testPlan === undefined || !hasBuiltinCall(flow.testPlan.ast) ? undefined : guardedBinding(flow.testPlan, names, context, (scope) => lowering.condition(test, scope));
+    const guarded = flow.testPlan === undefined || !mayProduceInvalidResult(flow.testPlan.ast, names.script) ? undefined : guardedBinding(flow.testPlan, names, context, (scope) => lowering.condition(test, scope));
     return wrap(body, [`v-if=${bound(guarded ?? lowering.condition(test, names.template))}`], names, context);
   }
   return renderElement(node, names, context, false);
@@ -732,12 +732,12 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
     return context.refs.get(ref)!;
   };
   for (const [index, step] of handler.steps.entries()) {
-    const guard = step.guard === undefined ? "" : `if (${hasBuiltinCall(step.guard.ast)
+    const guard = step.guard === undefined ? "" : `if (${mayProduceInvalidResult(step.guard.ast, local.script)
       ? `${lowering.value(step.guard.ast, local.script)} !== Symbol.for("html-next.invalid-result") && ` : ""}${lowering.condition(step.guard.ast, local.script)}) `;
     if (step.kind === "set") {
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
-      const mayBeInvalid = hasBuiltinCall(step.value.ast);
+      const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
       const check = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, `next${index}`, local.script, lowering);
       if (check === undefined && !mayBeInvalid) {
@@ -752,7 +752,7 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
-      if (step.value !== undefined && hasBuiltinCall(step.value.ast)) {
+      if (step.value !== undefined && mayProduceInvalidResult(step.value.ast, local.script)) {
         const detail = `detail${index}`;
         lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}); }`);
       } else {
@@ -952,7 +952,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ? arms.map((arm, index) => {
       const flow = arm.flow!;
       const test = flow.kind === "when" ? ast(flow.testPlan, flow.test) : undefined;
-      const guarded = flow.kind === "when" && flow.testPlan !== undefined && hasBuiltinCall(flow.testPlan.ast)
+      const guarded = flow.kind === "when" && flow.testPlan !== undefined && mayProduceInvalidResult(flow.testPlan.ast, names.script)
         ? guardedBinding(flow.testPlan, names, context, (scope) => lowering.condition(test!, scope)) : undefined;
       const directive = flow.kind === "when"
         ? `${index === 0 ? "v-if" : "v-else-if"}=${bound(guarded ?? lowering.condition(test!, names.template))}`
@@ -1045,7 +1045,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
     if (declaration.kind === "computed") {
       const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition);
-      const retains = declaration.expression !== undefined && hasBuiltinCall(declaration.expression.ast);
+      const retains = declaration.expression !== undefined && mayProduceInvalidResult(declaration.expression.ast, script);
       if (retains) return `let ${name}Previous: any = null;\nconst ${name} = cycleCheckedComputed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}const next: any = ${initial}; if (next === Symbol.for("html-next.invalid-result")) return ${name}Previous; return ${name}Previous = next; });`;
       if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
       return `const ${name} = cycleCheckedComputed(() => ${initial});`;
