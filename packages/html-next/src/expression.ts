@@ -195,14 +195,21 @@ function parse(source: string): ExpressionNode {
           ? { kind: "index", object, index: { kind: "literal", value: key } }
           : { kind: "member", object, key };
       } else if (eat("[")) {
+        const integerLexeme = (kind as TokenKind) === 1 && /^\d+$/.test(numericLexeme)
+          ? numericLexeme : undefined;
         const index = conditional();
         expect("]");
-        if (index.kind === "literal" && typeof index.value === "number"
-          || index.kind === "unary" && index.op === "-" && index.operand.kind === "literal"
-            && typeof index.operand.value === "number") {
-          throw new SyntaxError("Use dotted indexes, for example `$items.0.name`.");
+        // A directly written integer uses the same exact key as a dotted integer path.
+        // Preserve large and noncanonical object keys instead of rounding them as JS numbers.
+        if (integerLexeme !== undefined && index.kind === "literal" && typeof index.value === "number") {
+          const key = Number.isSafeInteger(index.value) && String(index.value) === integerLexeme
+            ? index.value : integerLexeme;
+          object = typeof key === "number"
+            ? { kind: "index", object, index: { kind: "literal", value: key } }
+            : { kind: "member", object, key };
+        } else {
+          object = { kind: "index", object, index };
         }
-        object = { kind: "index", object, index };
       } else {
         break;
       }

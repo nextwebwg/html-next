@@ -72,6 +72,26 @@ const cases: readonly ParityCase[] = [
     expectedAfter: { tag: "button", label: "Count 1", output: "2", events: [1] },
   },
   {
+    name: "literal and computed bracket indexes update after Vue conversion",
+    features: ["bracketed indexes", "computed indexes", "state"],
+    definitions: {
+      "x-bracket-index": `<template component="x-bracket-index" status="early" summary="Index parity fixture.">
+        <defs>
+          <state name="items" type="list(string)" value="['Ada', 'Bea']"></state>
+          <state name="selected" type="integer" value="0"></state>
+          <handler name="next"><set name="selected" value="1"></set></handler>
+        </defs>
+        <button type="button" on:click="next"><output $value="concat($items[0], '/', $items[$selected])"></output></button>
+      </template>`,
+    },
+    invocation: `<x-bracket-index id="case"></x-bracket-index>`,
+    vueRender: `h(XBracketIndex, { id: "case" })`,
+    root: "#case",
+    probe: `({ text: root.querySelector("output")?.textContent })`,
+    action: `root.click()`,
+    expectedAfter: { text: "Ada/Bea" },
+  },
+  {
     name: "expression functions preserve written units and update reactively",
     features: ["dimension math", "default", "concat", "join"],
     definitions: {
