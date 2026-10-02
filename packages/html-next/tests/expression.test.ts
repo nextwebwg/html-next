@@ -270,6 +270,29 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate("round(8.8px, 1rem)", empty), ABSENT);
     assert.equal(evaluate("round(8px, 0px)", empty), ABSENT);
   });
+  it("preserves written units when arithmetic combines a dimension with a number", () => {
+    const empty = scope({});
+    assert.equal(evaluate("100px / 100", empty), "1px");
+    assert.equal(evaluate("2.5 * 100px", empty), "250px");
+    assert.equal(evaluate("100px * 0.25", empty), "25px");
+    assert.equal(evaluate("200ms / 2", empty), "100ms");
+    assert.equal(evaluate("1.5s + 0.5s", empty), "2s");
+    assert.equal(evaluate("25% * 0.5", empty), "12.5%");
+    assert.equal(evaluate("1px + 2px", empty), "3px");
+    assert.equal(evaluate("3px - 1px", empty), "2px");
+    assert.equal(evaluate("round(8.8px / 2)", empty), "4px");
+    assert.equal(evaluate("($flag ? 1px : 2px) * 2", scope({ flag: true })), "2px");
+    assert.equal(evaluate("($flag ? 1px : 2px) * 2", scope({ flag: false })), "4px");
+    assert.equal(evaluate("1px + 1", empty), ABSENT);
+    assert.equal(evaluate("1px + 1ms", empty), ABSENT);
+    assert.equal(evaluate("1px + 1rem", empty), ABSENT);
+    assert.equal(evaluate("1px * 1px", empty), ABSENT);
+    assert.equal(evaluate("1px / 1px", empty), ABSENT);
+    assert.equal(evaluate("1 / 1px", empty), ABSENT);
+    assert.equal(evaluate("1px / 0", empty), ABSENT);
+    assert.equal(evaluateCompiled(compileExpression("1px + 1rem"), empty), NONCONFORMING);
+    assert.equal(evaluateCompiled(compileExpression("1px / 0"), empty), NONCONFORMING);
+  });
   it("requires a dimension declaration for referenced dimensional strings", () => {
     const values = new Map<string, Value>([["width", "8.8px"], ["label", "8.8px"]]);
     const typed: Scope = {

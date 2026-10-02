@@ -410,6 +410,39 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
     return left.includes(right);
   }
 
+  if ((op === "+" || op === "-" || op === "*" || op === "/") &&
+    (typeof left !== "number" || typeof right !== "number")) {
+    const leftDimension = dimensionType(node.left, scope);
+    const rightDimension = dimensionType(node.right, scope);
+    if (leftDimension !== undefined || rightDimension !== undefined) {
+      if (isAbsent(left) || isAbsent(right)) return ABSENT;
+      const leftQuantity = leftDimension !== undefined && typeof left === "string" ? parseQuantity(left) : undefined;
+      const rightQuantity = rightDimension !== undefined && typeof right === "string" ? parseQuantity(right) : undefined;
+      if (leftDimension !== undefined && leftQuantity?.dimension !== leftDimension ||
+        rightDimension !== undefined && rightQuantity?.dimension !== rightDimension) return NONCONFORMING;
+      let result: number;
+      let unit: string;
+      if (op === "+" || op === "-") {
+        if (leftQuantity === undefined || rightQuantity === undefined ||
+          leftQuantity.dimension !== rightQuantity.dimension || leftQuantity.unit !== rightQuantity.unit) return NONCONFORMING;
+        result = op === "+" ? leftQuantity.value + rightQuantity.value : leftQuantity.value - rightQuantity.value;
+        unit = leftQuantity.unit;
+      } else if (op === "*") {
+        const quantity = leftQuantity ?? rightQuantity;
+        const factor = leftQuantity === undefined ? asNumber(left) : asNumber(right);
+        if (quantity === undefined || leftQuantity !== undefined && rightQuantity !== undefined || factor === ABSENT) return NONCONFORMING;
+        result = quantity.value * factor;
+        unit = quantity.unit;
+      } else {
+        const divisor = asNumber(right);
+        if (leftQuantity === undefined || rightDimension !== undefined || divisor === ABSENT || divisor === 0) return NONCONFORMING;
+        result = leftQuantity.value / divisor;
+        unit = leftQuantity.unit;
+      }
+      return Number.isFinite(result) ? `${result}${unit}` : NONCONFORMING;
+    }
+  }
+
   const a = asNumber(left);
   const b = asNumber(right);
   if (a === ABSENT || b === ABSENT) return ABSENT;
@@ -510,6 +543,20 @@ export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "
   if (node === undefined) return undefined;
   if (node.kind === "literal") return node.dimension;
   if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope);
+  if (node.kind === "binary") {
+    const left = dimensionType(node.left, scope);
+    const right = dimensionType(node.right, scope);
+    if (node.op === "+" || node.op === "-") return left !== undefined && left === right ? left : undefined;
+    if (node.op === "*") return left === undefined ? right : right === undefined ? left : undefined;
+    if (node.op === "/") return right === undefined ? left : undefined;
+  }
+  if (node.kind === "conditional") {
+    const consequent = dimensionType(node.consequent, scope);
+    const alternate = dimensionType(node.alternate, scope);
+    if (node.consequent.kind === "literal" && node.consequent.value === null) return alternate;
+    if (node.alternate.kind === "literal" && node.alternate.value === null) return consequent;
+    return consequent !== undefined && consequent === alternate ? consequent : undefined;
+  }
   if (node.kind === "call" && (node.fn === "round" || node.fn === "min" || node.fn === "max" ||
     node.fn === "clamp" || node.fn === "abs")) {
     return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope);
@@ -629,15 +676,42 @@ export function checkExpression(source: string): void {
   compileExpression(source);
 }
 
-/** Reject calls whose argument count or literal types make them invalid at authoring time. */
-export function checkBuiltinCalls(node: ExpressionNode): void {
+/** Reject operations whose known literal types make them invalid at authoring time. */
+export function checkExpressionSemantics(node: ExpressionNode): void {
   type Known = { kind: "number" | "string" | "boolean" | "length" | "percentage" | "duration" | "list" | "object" | "null"; unit?: string | undefined };
+  const dimensional = (type: Known | undefined): boolean => type !== undefined &&
+    (type.kind === "length" || type.kind === "percentage" || type.kind === "duration");
+  const arithmetic = (op: string, left: Known, right: Known): Known | undefined => {
+    if (op === "+" || op === "-") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && left.kind === right.kind &&
+        (left.unit === undefined || right.unit === undefined || left.unit === right.unit)) {
+        return { kind: left.kind, unit: left.unit ?? right.unit };
+      }
+    }
+    if (op === "*") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && right.kind === "number") return left;
+      if (left.kind === "number" && dimensional(right)) return right;
+    }
+    if (op === "/") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && right.kind === "number") return left;
+    }
+    if (op === "%" && left.kind === "number" && right.kind === "number") return { kind: "number" };
+    return undefined;
+  };
   const known = (value: ExpressionNode): Known | undefined => {
     if (value.kind === "literal") {
       if (value.dimension !== undefined) return { kind: value.dimension, unit: parseQuantity(value.value as string)?.unit };
       return { kind: value.value === null ? "null" : typeof value.value === "number" ? "number" : typeof value.value === "boolean" ? "boolean" : "string" };
     }
     if (value.kind === "unary" && value.op === "-") return known(value.operand);
+    if (value.kind === "binary" && ["+", "-", "*", "/", "%"].includes(value.op)) {
+      const left = known(value.left);
+      const right = known(value.right);
+      return left === undefined || right === undefined ? undefined : arithmetic(value.op, left, right);
+    }
     if (value.kind === "array") return { kind: "list" };
     if (value.kind === "object") return { kind: "object" };
     if (value.kind === "call") {
@@ -679,8 +753,6 @@ export function checkBuiltinCalls(node: ExpressionNode): void {
           throw new SyntaxError("default() requires values of one type.");
         }
         if (["abs", "round", "min", "max", "clamp"].includes(fn)) {
-          const dimensional = (type: Known | undefined): boolean => type !== undefined &&
-            (type.kind === "length" || type.kind === "percentage" || type.kind === "duration");
           const typed = types.filter((type): type is Known => type !== undefined);
           if (typed.some((type) => type.kind !== "number" && !dimensional(type))) {
             throw new SyntaxError(`${fn}() requires numeric or dimensional values.`);
@@ -698,7 +770,21 @@ export function checkBuiltinCalls(node: ExpressionNode): void {
         return;
       }
       case "unary": visit(value.operand); return;
-      case "binary": visit(value.left); visit(value.right); return;
+      case "binary": {
+        visit(value.left);
+        visit(value.right);
+        if (["+", "-", "*", "/", "%"].includes(value.op)) {
+          const left = known(value.left);
+          const right = known(value.right);
+          if (value.op === "/" && dimensional(left) && value.right.kind === "literal" && value.right.value === 0) {
+            throw new SyntaxError("A dimension cannot be divided by zero.");
+          }
+          if (left !== undefined && right !== undefined && arithmetic(value.op, left, right) === undefined) {
+            throw new SyntaxError(`${value.op} has incompatible operand types or written units.`);
+          }
+        }
+        return;
+      }
       case "conditional": visit(value.test); visit(value.consequent); visit(value.alternate); return;
       case "member": visit(value.object); return;
       case "index": visit(value.object); visit(value.index); return;
