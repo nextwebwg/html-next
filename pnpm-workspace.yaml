@@ -12,7 +12,7 @@ minimumReleaseAgeExclude:
 catalog:
   '@amadeus-it-group/tansu': 2.0.0
   '@angular/compiler': 22.2.1
-  '@angular/core': 20.3.20
+  '@angular/core': 22.2.1
   '@preact/signals-core': 1.14.4
   '@reactively/core': 0.0.8
   '@reatom/core': 1001.3.0
@@ -31,7 +31,7 @@ catalog:
   parse5: 8.0.1
   postcss: 8.5.28
   playwright: 1.63.0
-  pota: 0.22.235
+  pota: 0.7.82
   reactive-framework-test-suite: 0.1.0
   react: 19.3.0
   react-dom: 19.3.0
