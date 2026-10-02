@@ -141,19 +141,8 @@ function directLiteral(node: ExpressionNode): DirectExpression | undefined {
   };
 }
 
-function directFormatSource(pattern: string, values: readonly DirectExpression[]): string {
-  const parts = pattern.split("%s");
-  const source = [js(parts[0]!)];
-  for (let index = 1; index < parts.length; index += 1) {
-    source.push(index <= values.length ? `String(${values[index - 1]!.source})` : js("%s"));
-    source.push(js(parts[index]!));
-  }
-  return `(${source.join(" + ")})`;
-}
-
-function directFormatValue(pattern: string, values: readonly DirectPrimitive[]): string {
-  let index = 0;
-  return pattern.replace(/%s/g, () => index < values.length ? String(values[index++]!) : "%s");
+function directConcatSource(values: readonly DirectExpression[]): string {
+  return `(${values.map((value) => value.kind === "string" ? value.source : `String(${value.source})`).join(" + ")})`;
 }
 
 function directSetExpression(
@@ -219,21 +208,25 @@ function directPrimitiveExpression(
     }
     return undefined;
   }
-  if (node.kind === "call" && node.fn === "format") {
-    const pattern = node.args[0];
-    if (pattern?.kind !== "literal" || typeof pattern.value !== "string") return undefined;
-    const args = node.args.slice(1).map((argument) => directPrimitiveExpression(argument, values));
-    if (args.some((argument) => argument === undefined)) return undefined;
-    return { source: directFormatSource(pattern.value, args as DirectExpression[]), kind: "string" };
+  if (node.kind === "call" && node.fn === "concat") {
+    const args = node.args.map((argument) => directPrimitiveExpression(argument, values));
+    if (args.length === 0 || args.some((argument) => argument === undefined)) return undefined;
+    return { source: directConcatSource(args as DirectExpression[]), kind: "string" };
   }
   if (node.kind !== "call" || !["abs", "round", "min", "max", "clamp"].includes(node.fn)) return undefined;
   const args = node.args.map((argument) => directPrimitiveExpression(argument, values));
   if (args.some((argument) => argument?.kind !== "number")) return undefined;
-  if ((node.fn === "abs" || node.fn === "round") && args.length !== 1) return undefined;
+  if (node.fn === "abs" && args.length !== 1) return undefined;
+  if (node.fn === "round" && (args.length < 1 || args.length > 2)) return undefined;
+  if (node.fn === "round" && args.length === 2 && finiteNumber(node.args[1]!) === undefined) return undefined;
+  if (node.fn === "round" && args.length === 2 && finiteNumber(node.args[1]!) === 0) return undefined;
   if ((node.fn === "min" || node.fn === "max") && args.length === 0) return undefined;
   if (node.fn === "clamp" && args.length !== 3) return undefined;
   if (node.fn === "clamp") {
-    return { source: `Math.min(Math.max(${args[0]!.source}, ${args[1]!.source}), ${args[2]!.source})`, kind: "number" };
+    return { source: `Math.max(${args[0]!.source}, Math.min(${args[1]!.source}, ${args[2]!.source}))`, kind: "number" };
+  }
+  if (node.fn === "round" && args.length === 2) {
+    return { source: `(Math.round(${args[0]!.source} / Math.abs(${args[1]!.source})) * Math.abs(${args[1]!.source}))`, kind: "number" };
   }
   return { source: `Math.${node.fn}(${args.map((argument) => argument!.source).join(", ")})`, kind: "number" };
 }
@@ -329,13 +322,11 @@ function directPrimitiveValue(
       default: return undefined;
     }
   }
-  if (node.kind === "call" && node.fn === "format") {
-    const pattern = node.args[0];
-    if (pattern?.kind !== "literal" || typeof pattern.value !== "string") return undefined;
-    const args = node.args.slice(1).map((argument) => directPrimitiveValue(argument, values));
-    return args.some((argument) => argument === undefined)
+  if (node.kind === "call" && node.fn === "concat") {
+    const args = node.args.map((argument) => directPrimitiveValue(argument, values));
+    return args.length === 0 || args.some((argument) => argument === undefined)
       ? undefined
-      : directFormatValue(pattern.value, args as DirectPrimitive[]);
+      : (args as DirectPrimitive[]).map(String).join("");
   }
   if (node.kind !== "call") return undefined;
   const args = node.args.map((argument) => directPrimitiveValue(argument, values));
@@ -343,9 +334,12 @@ function directPrimitiveValue(
   const numbers = args as number[];
   if (node.fn === "abs" && numbers.length === 1) return Math.abs(numbers[0]!);
   if (node.fn === "round" && numbers.length === 1) return Math.round(numbers[0]!);
+  if (node.fn === "round" && numbers.length === 2 && numbers[1] !== 0) {
+    return Math.round(numbers[0]! / Math.abs(numbers[1]!)) * Math.abs(numbers[1]!);
+  }
   if (node.fn === "min" && numbers.length > 0) return Math.min(...numbers);
   if (node.fn === "max" && numbers.length > 0) return Math.max(...numbers);
-  if (node.fn === "clamp" && numbers.length === 3) return Math.min(Math.max(numbers[0]!, numbers[1]!), numbers[2]!);
+  if (node.fn === "clamp" && numbers.length === 3) return Math.max(numbers[0]!, Math.min(numbers[1]!, numbers[2]!));
   return undefined;
 }
 

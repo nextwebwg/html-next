@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail } from "./diagnostics.js";
-import { compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
+import { checkBuiltinCalls, compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -502,7 +502,9 @@ function readContract(
 
 function compileDeclarationExpression(value: string, source: string) {
   try {
-    return compileExpression(value);
+    const expression = compileExpression(value);
+    checkBuiltinCalls(expression.ast);
+    return expression;
   } catch {
     fail("HT013", `Malformed expression \`${value}\`.`, source);
   }

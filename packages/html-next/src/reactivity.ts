@@ -1,4 +1,5 @@
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
+import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
 
 type Cleanup = void | (() => void);
@@ -502,6 +503,8 @@ export function createEffect(
 /** A scope layer whose root reads and nested object/array paths are dependency tracked. */
 export class ReactiveScope implements Scope {
   readonly #cells = new Map<string, ReactiveCell>();
+  typeOfPath?: Scope["typeOfPath"];
+  typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
   #cachedName: string | undefined;
   #cachedCell: ReactiveCell | undefined;
 
@@ -568,7 +571,10 @@ export class ReactiveScope implements Scope {
   }
 
   fork(values: Iterable<readonly [string, Value]> = []): ReactiveScope {
-    return new ReactiveScope(values, this.scheduler, this);
+    const child = new ReactiveScope(values, this.scheduler, this);
+    child.typeOfPath = this.typeOfPath;
+    child.typeOfDeclaredPath = this.typeOfDeclaredPath;
+    return child;
   }
 
   #local(name: string): ReactiveCell | undefined {

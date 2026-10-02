@@ -14,7 +14,7 @@ const definitions = `
 <template component="x-adj" status="early" summary="t."><p>Hello <slot></slot>!</p></template>
 <template component="x-wrap" status="early" summary="t."><section><x-card><span slot="title"><slot name="heading"></slot></span><slot></slot></x-card></section></template>
 <template component="x-list" status="early" summary="t."><defs><prop name="rows" type="list(string)" default="[]">R.</prop></defs>
-  <ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>
+  <ul><li $each="row of rows" $key="row"><slot :name="concat('row-', row)">Unnamed</slot></li></ul></template>
 <template component="x-named" status="early" summary="t."><p><slot name="fallback"></slot>|<slot name="b"></slot></p></template>
 <template component="x-deleg" status="early" summary="t."><x-card><b slot="title">D</b><slot></slot></x-card></template>
 <template component="x-if" status="early" summary="t."><defs><prop name="open" type="boolean" default="false">O.</prop></defs>

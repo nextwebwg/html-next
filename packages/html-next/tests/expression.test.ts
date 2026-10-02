@@ -7,7 +7,9 @@ import {
   checkExpression,
   compileExpression,
   evaluate,
+  evaluateCompiled,
   getWritablePath,
+  NONCONFORMING,
   toAttribute,
   toText,
   typeCheckedDependencies,
@@ -57,11 +59,10 @@ describe("expression: compilation", () => {
     assert.deepEqual(JSON.parse(JSON.stringify(compiled.ast)), compiled.ast);
   });
 
-  it("lets format stringify direct arguments without erasing reactive dependencies", () => {
-    const compiled = compileExpression("format('%s/%s', result.value.label, result.value.note)");
+  it("checks the declared type of every concat argument", () => {
+    const compiled = compileExpression("concat(result.value.label, '/', result.value.note)");
     assert.deepEqual(compiled.dependencies, ["result.value.label", "result.value.note"]);
-    assert.deepEqual(typeCheckedDependencies(compiled), []);
-    assert.deepEqual(typeCheckedDependencies("format('%s', result.value.label + 1)"), ["result.value.label"]);
+    assert.deepEqual(typeCheckedDependencies(compiled), ["result.value.label", "result.value.note"]);
     assert.deepEqual(typeCheckedDependencies("result.value.label"), ["result.value.label"]);
   });
 
@@ -153,6 +154,9 @@ describe("expression: typed equality and no coercion", () => {
   it("arithmetic is numeric only: no string concatenation via +", () => {
     assert.equal(evaluate('"1" + 1', s), ABSENT); // never "11"
     assert.equal(evaluate("2 + 3", s), 5);
+    assert.equal(evaluate("8%3", s), 2);
+    assert.equal(evaluate("8% 3", s), 2);
+    assert.equal(evaluate("8 % 3", s), 2);
   });
   it("arithmetic with an absent operand propagates absent", () => {
     const s2 = scope({ cart: { total: 10 } });
@@ -204,12 +208,31 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate('p.name ^= "x"', s), false);
   });
 
-  it("formats dynamic slot names with the standard format function", () => {
-    assert.equal(evaluate("format('row-%s-%s', 'alpha', 2)", s), "row-alpha-2");
-    assert.equal(evaluate("format('%s%', 42)", s), "42%");
+  it("assembles scalar text and joins typed lists", () => {
+    assert.equal(evaluate("concat('row-', 'alpha', '-', 2)", s), "row-alpha-2");
+    assert.equal(evaluate("concat(42, '%')", s), "42%");
+    assert.equal(evaluate("concat(true)", s), "true");
+    assert.equal(evaluate("join(['red', null, 'blue'], ', ')", s), "red, , blue");
+    assert.equal(evaluate("join([], ', ')", s), "");
+    assert.equal(evaluate("join([1, 'two'], ', ')", s), ABSENT);
     assert.equal(evaluate("42 + '%'", s), ABSENT);
-    assert.equal(evaluate("format(1, 'alpha')", s), ABSENT);
-    assert.throws(() => evaluate("format(1, undeclared)", s), UndeclaredName);
+    assert.equal(evaluate("concat()", s), ABSENT);
+    assert.equal(evaluate("join(['red'], 1)", s), ABSENT);
+    assert.throws(() => checkExpression("format('%s', 1)"), SyntaxError);
+  });
+  it("uses absent-or-null fallback without evaluating an unused arm", () => {
+    const data = scope({ data: { present: 0 } });
+    assert.equal(evaluate("default($data.missing, 5)", data), 5);
+    assert.equal(evaluate("default(null, 5)", data), 5);
+    assert.equal(evaluate("default($data.present, 5)", data), 0);
+    assert.equal(evaluate("default(false, true)", data), false);
+    assert.equal(evaluate("default('', 'fallback')", data), "");
+    assert.equal(evaluate("default(2, $undeclared)", data), 2);
+    assert.equal(evaluateCompiled(compileExpression("concat($data.missing)"), data), ABSENT);
+    assert.equal(evaluateCompiled(compileExpression("default(round(8px, $step), 1px)"), {
+      get: (name) => name === "step" ? "0px" : undefined,
+      typeOfPath: (name) => name === "step" ? "length" : undefined,
+    }), NONCONFORMING);
   });
   it("ordered comparison and precedence", () => {
     assert.equal(evaluate("(2 + 3) * 2 > 9", scope({})), true);
@@ -219,8 +242,35 @@ describe("expression: operators, comparison, functions", () => {
   it("the fixed CSS-style function set", () => {
     assert.equal(evaluate("abs(-4)", scope({})), 4);
     assert.equal(evaluate("clamp(0, 12, 10)", scope({})), 10);
+    assert.equal(evaluate("clamp(10, 5, 0)", scope({})), 10);
     assert.equal(evaluate("min(3, 9, 1)", scope({})), 1);
     assert.equal(evaluate("round(2.6)", scope({})), 3);
+    assert.equal(evaluate("round(2.6, 0.5)", scope({})), 2.5);
+    assert.equal(evaluate("round(-2.5)", scope({})), -2);
+  });
+  it("calculates with dimensional literals only in their written unit", () => {
+    const empty = scope({});
+    assert.equal(evaluate("round(8.8px)", empty), "9px");
+    assert.equal(evaluate("round(25.5%)", empty), "26%");
+    assert.equal(evaluate("round(1.6s)", empty), "2s");
+    assert.equal(evaluate("round(1600ms)", empty), "1600ms");
+    assert.equal(evaluate("round(8.8px, 0.5px)", empty), "9px");
+    assert.equal(evaluate("min(1px, 2px)", empty), "1px");
+    assert.equal(evaluate("max(200ms, 500ms)", empty), "500ms");
+    assert.equal(evaluate("clamp(0px, 5px, 3px)", empty), "3px");
+    assert.equal(evaluate("abs(-2rem)", empty), "2rem");
+    assert.equal(evaluate("min(1in, 100px)", empty), ABSENT);
+    assert.equal(evaluate("round(8.8px, 1rem)", empty), ABSENT);
+    assert.equal(evaluate("round(8px, 0px)", empty), ABSENT);
+  });
+  it("requires a dimension declaration for referenced dimensional strings", () => {
+    const values = new Map<string, Value>([["width", "8.8px"], ["label", "8.8px"]]);
+    const typed: Scope = {
+      get: (name) => values.get(name),
+      typeOfPath: (path) => path === "width" ? "length" : undefined,
+    };
+    assert.equal(evaluate("round($width)", typed), "9px");
+    assert.equal(evaluate("round($label)", typed), ABSENT);
   });
 });
 

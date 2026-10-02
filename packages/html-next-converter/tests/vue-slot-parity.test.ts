@@ -19,7 +19,7 @@ const panelBody = `<button type="button" class="expand" on:click="expand">Expand
   <button type="button" class="switch" on:click="switchRoot">Switch</button>
   <header><slot name="title"><h2>Untitled</h2></slot></header>
   <main><slot><p>Empty</p></slot></main>
-  <ul><li $each="row of rows" $key="row"><slot from:name="format('row-%s', row)"><span class="missing">Missing</span></slot></li></ul>
+  <ul><li $each="row of rows" $key="row"><slot from:name="concat('row-', row)"><span class="missing">Missing</span></slot></li></ul>
   <div class="extra" $if="open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
 const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs>
   <state name="branch" type="keyword" value="section"></state>

@@ -45,9 +45,8 @@ A definition declares its public interface, an optional controller, and one root
 ```html title="counter.html"
 <template component="x-counter" controller="./counter.js">
   <defs>
-    <prop name="start" type="number" default="0">Initial count.</prop>
-    <state name="count" :value="start"></state>
-    <computed name="label" :value="format('Count: {0}', count)"></computed>
+    <state name="count" type="number" value="0"></state>
+    <computed name="label" from="concat('Count: ', count)"></computed>
   </defs>
 
   <button $ref="button" type="button">

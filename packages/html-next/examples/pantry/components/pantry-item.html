@@ -24,18 +24,18 @@
 
   <li class="item" from:data-low="low">
     <span class="item__label" $value="label"></span>
-    <span class="item__count" $value="format('%s %s', quantity, unit)"></span>
+    <span class="item__count" $value="concat(quantity, ' ', unit)"></span>
     <template $match>
       <ui-badge $when="low" label="Low" tone="warning"></ui-badge>
       <ui-badge $else label="Stocked" tone="neutral"></ui-badge>
     </template>
     <span class="item__controls">
       <button type="button" class="item__step" on:click="decrease" from:disabled="quantity <= 0"
- from:aria-label="format('Remove one %s', label)">−</button>
+ from:aria-label="concat('Remove one ', label)">−</button>
       <button type="button" class="item__step" on:click="increase"
- from:aria-label="format('Add one %s', label)">+</button>
+ from:aria-label="concat('Add one ', label)">+</button>
       <button type="button" class="item__discard" on:click="discard"
- from:aria-label="format('Discard %s', label)">Discard</button>
+ from:aria-label="concat('Discard ', label)">Discard</button>
     </span>
   </li>
 

@@ -8,6 +8,8 @@ import {
   ABSENT,
   NONCONFORMING,
   UndeclaredName,
+  compileExpression,
+  dimensionType,
   evaluate,
   type CompiledExpression,
   evaluateCompiled,
@@ -362,6 +364,20 @@ function componentScope(
   parent?: RuntimeInstance,
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
+  const resolvingDimensions = new Set<string>();
+  scope.typeOfDeclaredPath = (path) => declaredTypeAt(definition, path);
+  scope.typeOfPath = (path) => {
+    const type = scope.typeOfDeclaredPath?.(path);
+    if (type?.kind === "terminal" && (type.name === "length" || type.name === "percentage" || type.name === "duration")) {
+      return type.name;
+    }
+    if (path.includes(".") || resolvingDimensions.has(path)) return undefined;
+    const computed = definition.declarations?.find((item) => item.kind === "computed" && item.name === path);
+    if (computed?.kind !== "computed" || computed.expression === undefined) return undefined;
+    resolvingDimensions.add(path);
+    try { return dimensionType(computed.expression.ast, scope); }
+    finally { resolvingDimensions.delete(path); }
+  };
   for (const [name, prop] of Object.entries(definition.contract.props)) {
     // The effective value seen by expressions: passed value, default, or null.
     scope.set(
@@ -502,6 +518,14 @@ function readInvocation(
     if (declaration.kind !== "data" || declaration.source === undefined) continue;
     const data = declaration as DataDeclaration;
     const dataSource = declaration.source;
+    const acceptedParameters = new Map<string, Value>();
+    const readParameter = (parameter: DataDeclaration["parameters"][number]): { value: Value; valid: boolean } => {
+      const evaluated = evalConforming(parameter.expression, scope, definition);
+      if (evaluated === NONCONFORMING) return { value: acceptedParameters.get(parameter.name) ?? null, valid: false };
+      const value = evaluated === ABSENT ? null : evaluated;
+      acceptedParameters.set(parameter.name, value);
+      return { value, valid: true };
+    };
     const resource = new DataResource({
       source: dataSource,
       baseURL: definitionBase,
@@ -509,21 +533,22 @@ function readInvocation(
       ...(data.debounce === undefined ? {} : { debounce: parseDuration(data.debounce) ?? 0 }),
       ...(data.poll === undefined ? {} : { poll: parseDuration(data.poll) ?? 0 }),
       sampleParameters: () => Object.fromEntries(data.parameters.map((parameter) => [
-        parameter.name, untracked(() => evaluateCompiled(parameter.expression, scope)),
+        parameter.name, untracked(() => readParameter(parameter).value),
       ])),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
+    effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0));
     effects.push(createEffect(scope.scheduler, () => {
-      const parameters = Object.fromEntries(
-        data.parameters.map((parameter) => [
-          parameter.name,
-          parameter.mode === "from"
-            ? evaluateCompiled(parameter.expression, scope)
-            : untracked(() => evaluateCompiled(parameter.expression, scope)),
-        ]),
-      );
+      let valid = true;
+      const parameters = Object.fromEntries(data.parameters.map((parameter) => {
+        const result = parameter.mode === "from"
+          ? readParameter(parameter)
+          : untracked(() => readParameter(parameter));
+        if (parameter.mode === "from" && !result.valid) valid = false;
+        return [parameter.name, result.value];
+      }));
+      if (!valid) return;
       resource.update(parameters);
-      return () => resource.disconnect();
     }, 0));
   }
   return { scope, passThrough, effects, explicit, propInputs };
@@ -532,6 +557,41 @@ function readInvocation(
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
 function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveScope {
   return parent.fork(Object.entries(locals));
+}
+
+function declaredExpressionType(expression: string | CompiledExpression, scope: ReactiveScope): TypeNode | undefined {
+  let node = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
+  const path: string[] = [];
+  while (node.kind === "member" || node.kind === "index") {
+    if (node.kind === "member") path.unshift(node.key);
+    else if (node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")) {
+      path.unshift(String(node.index.value));
+    } else return undefined;
+    node = node.object;
+  }
+  if (node.kind !== "id") return undefined;
+  path.unshift(node.name);
+  return scope.typeOfDeclaredPath?.(path.join("."));
+}
+
+function typedLayer(parent: ReactiveScope, locals: Record<string, Value>, types: Readonly<Record<string, TypeNode | undefined>>): ReactiveScope {
+  const child = layer(parent, locals);
+  child.typeOfDeclaredPath = (path) => {
+    const [root, ...keys] = path.split(".");
+    if (!Object.hasOwn(types, root!)) return parent.typeOfDeclaredPath?.(path);
+    let type = types[root!];
+    for (const key of keys) {
+      if (type === undefined) break;
+      type = typeAtKey(type, key);
+    }
+    return type;
+  };
+  child.typeOfPath = (path) => {
+    const type = child.typeOfDeclaredPath?.(path);
+    return type?.kind === "terminal" && (type.name === "length" || type.name === "percentage" || type.name === "duration")
+      ? type.name : parent.typeOfPath?.(path);
+  };
+  return child;
 }
 
 function evalValue(expression: string, scope: Scope): Value {
@@ -703,9 +763,12 @@ function evalConforming(
     if (conformsAtReference(value, type)) continue;
     return NONCONFORMING;
   }
-  return typeof expression === "string"
-    ? evalValue(expression, scope)
-    : evaluateCompiled(expression, scope);
+  try {
+    return evaluateCompiled(typeof expression === "string" ? compileExpression(expression) : expression, scope);
+  } catch (error) {
+    if (error instanceof UndeclaredName) fail("HB001", error.message);
+    throw error;
+  }
 }
 
 /**
@@ -926,7 +989,8 @@ function runHandler(
       setWritablePath(scope, path, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
-      const detail = step.value === undefined ? undefined : evaluateCompiled(step.value, scope);
+      const detail = step.value === undefined ? undefined : evalConforming(step.value, scope, context.definition);
+      if (detail === NONCONFORMING) continue;
       dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
     } else {
       const recorded = context.refs[step.target];
@@ -1164,6 +1228,10 @@ function renderDynamicNode(
   let childEffects: ReactiveOwner[] = [];
   let adopting = existing !== undefined;
   ownEffect(context, scope, () => {
+    const test = node.flow?.kind === "if" ? evalConforming(node.flow.test, scope, context.definition) : undefined;
+    const aliased = node.flow?.kind === "with" ? evalConforming(node.flow.expr, scope, context.definition) : undefined;
+    const match = node.flow?.kind === "match" ? prepareMatch(node, scope, context.definition) : undefined;
+    if (test === NONCONFORMING || aliased === NONCONFORMING || match === NONCONFORMING) return;
     for (const effect of childEffects) effect.stop();
     childEffects = [];
     const previous = adopting ? rangeNodes(start, end).slice(1, -1) : [];
@@ -1171,20 +1239,18 @@ function renderDynamicNode(
     const effectsStart = context.owned.effects.length;
     let rendered: Node[] = [];
     if (node.flow?.kind === "if") {
-      const test = evalConforming(node.flow.test, scope, context.definition);
-      if (test === NONCONFORMING) return;
-      if (truthy(test)) {
+      if (truthy(test!)) {
         const { flow: _flow, ...body } = node;
         rendered = renderInstance(body, scope, document, passThrough, context, previous[0]);
       }
     } else if (node.flow?.kind === "with") {
-      const aliased = evalConforming(node.flow.expr, scope, context.definition);
-      if (aliased === NONCONFORMING) return;
-      const local = scope.fork([[node.flow.alias, aliased]]);
+      const local = typedLayer(scope, { [node.flow.alias]: aliased! }, {
+        [node.flow.alias]: declaredExpressionType(node.flow.expressionPlan ?? node.flow.expr, scope),
+      });
       const { flow: _flow, ...body } = node;
       rendered = renderInstance(body, local, document, passThrough, context, previous[0]);
     } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(node, scope, document, context, previous[0]);
+      rendered = renderMatch(match!, document, context, previous[0]);
     }
     childEffects = context.owned.effects.slice(effectsStart);
     const output = materialize(rendered, document);
@@ -1280,6 +1346,8 @@ function renderEachRegion(
   context: RuntimeRenderContext,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "each" }>;
+  const listType = declaredExpressionType(flow.listPlan ?? flow.list, scope);
+  const itemType = listType?.kind === "list" ? listType.item : undefined;
   const start = document.createComment("html-next:each-start");
   const end = document.createComment("html-next:each-end");
   const fragment = document.createDocumentFragment();
@@ -1310,13 +1378,13 @@ function renderEachRegion(
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = scope.fork(Object.entries(locals));
+        local = typedLayer(scope, locals, { [flow.item]: itemType });
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= scope.fork(Object.entries(locals));
+        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const effectsStart = context.owned.effects.length;
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, context)
@@ -1418,34 +1486,39 @@ export function componentRootIndex(
   }
 }
 
-function renderMatch(
+function prepareMatch(
   node: ElementNode,
   scope: ReactiveScope,
+  definition: ComponentDefinition,
+): { chosen: ElementNode | undefined; scope: ReactiveScope } | typeof NONCONFORMING {
+  const flow = node.flow as Extract<Flow, { kind: "match" }>;
+  const value = flow.expr === undefined ? undefined : evalConforming(flow.expr, scope, definition);
+  if (value === NONCONFORMING) return NONCONFORMING;
+  const matchScope = flow.expr === undefined ? scope : layer(scope, { [flow.alias!]: value! });
+
+  for (const child of node.children) {
+    if (child.kind !== "element") continue;
+    if (child.flow?.kind === "when") {
+      const test = evalConforming(child.flow.test, matchScope, definition);
+      if (test === NONCONFORMING) return NONCONFORMING;
+      if (truthy(test)) return { chosen: child, scope: matchScope };
+    }
+    if (child.flow?.kind === "else") return { chosen: child, scope: matchScope };
+  }
+  return { chosen: undefined, scope: matchScope };
+}
+
+function renderMatch(
+  match: { chosen: ElementNode | undefined; scope: ReactiveScope },
   document: Document,
   context: RuntimeRenderContext,
   candidate?: Node,
 ): Node[] {
-  const flow = node.flow as Extract<Flow, { kind: "match" }>;
-  const matchScope =
-    flow.expr !== undefined ? layer(scope, { [flow.alias!]: evalValue(flow.expr, scope) }) : scope;
-
-  let chosen: ElementNode | undefined;
-  for (const child of node.children) {
-    if (child.kind !== "element") continue;
-    if (child.flow?.kind === "when" && truthy(evalValue(child.flow.test, matchScope))) {
-      chosen = child;
-      break;
-    }
-    if (child.flow?.kind === "else") {
-      chosen = child;
-      break;
-    }
-  }
-  if (chosen === undefined) return [];
+  if (match.chosen === undefined) return [];
 
   // Render the winning arm, ignoring its own $when/$else marker.
-  const { flow: _armFlow, ...armNode } = chosen;
-  return renderInstance(armNode, matchScope, document, [], context, candidate);
+  const { flow: _armFlow, ...armNode } = match.chosen;
+  return renderInstance(armNode, match.scope, document, [], context, candidate);
 }
 
 /** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */

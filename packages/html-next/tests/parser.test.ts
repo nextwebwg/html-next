@@ -45,6 +45,24 @@ describe("parseComponent", () => {
     </defs><output $value="$items[0]"></output></template>`);
   });
 
+  it("reports built-in calls whose literal arguments cannot work", () => {
+    for (const expression of [
+      "concat()", "join(['a'], 1)", "round(8.8px, 1rem)",
+      "min(1in, 100px)", "round(8px, 0px)", "default('x', 1)", "join([1, 'two'], ', ')",
+    ]) {
+      expectDiagnostic("HT013", `<template component="x-invalid-call"><defs>
+        <computed name="result" from="${expression.replaceAll('"', '&quot;')}"></computed>
+      </defs><output $value="result"></output></template>`);
+    }
+  });
+
+  it("uses a guaranteed default fallback when checking nested call types", () => {
+    const definition = parseComponent(`<template component="x-default-call"><defs>
+      <computed name="result" from="round(default(null, 2px))"></computed>
+    </defs><output $value="result"></output></template>`);
+    assert.equal(definition.contract.tag, "x-default-call");
+  });
+
   it("reads an inline type selected by a prop's permitted values", () => {
     const definition = parseComponent(`<template component="x-inline-type"><defs>
       <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>

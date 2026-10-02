@@ -16,7 +16,7 @@ const definitions = `
   <handler name="toggle"><set name="open" :value="not open"></set></handler></defs>
   <div><button type="button" on:click="toggle">More</button><section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>
 <template component="x-list" status="early" summary="t."><defs><prop name="rows" type="list(string)" default="[]">R.</prop></defs>
-  <ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>
+  <ul><li $each="row of rows" $key="row"><slot :name="concat('row-', row)">Unnamed</slot></li></ul></template>
 <template component="x-wrap" status="early" summary="t."><section><x-card><span slot="title"><slot name="heading"></slot></span><slot></slot></x-card></section></template>
 <template component="x-bound" status="early" summary="t."><defs><prop name="tone" type="string" default="info">T.</prop></defs>
   <article :data-tone="tone"><slot></slot></article></template>`;
