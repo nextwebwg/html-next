@@ -34,9 +34,9 @@ const parent = `<link rel="component" href="./item.html">
     <handler name="recordRight"><set name="rightHits" expr:value="rightHits + 1"></set></handler>
   </defs>
   <section on:click.stop.self="rootClick" on:saved="recordAncestorSaved"><button type="button" on:click="increment">Increment</button>
-    <ul><x-graph-item from:label="format('Item %s', count)" on:saved.stop="recordSaved" on:click.right="recordRight"><strong>Child: </strong></x-graph-item></ul>
+    <ul><x-graph-item from:label="concat('Item ', count)" on:saved.stop="recordSaved" on:click.right="recordRight"><strong>Child: </strong></x-graph-item></ul>
     <output class="root-hits" $value="rootHits"></output>
-    <output class="saved-hits" $value="format('%s:%s', saved, ancestorSaved)"></output>
+    <output class="saved-hits" $value="concat(saved, ':', ancestorSaved)"></output>
     <output class="right-hits" $value="rightHits"></output>
   </section>
   <style>:host { display: block; padding: 8px; background: rgb(225 235 245); } :host-state([active]) { background: rgb(200 220 240); }</style>

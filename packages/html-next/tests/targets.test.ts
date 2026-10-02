@@ -184,7 +184,7 @@ describe("official target compilers", () => {
       <state name="count" type="number" value="2"></state>
       <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
       <state name="index" type="integer" value="0"></state>
-      <handler name="badNumber"><set name="count" expr:value="format('%s', count)"></set></handler>
+      <handler name="badNumber"><set name="count" expr:value="concat(count)"></set></handler>
       <handler name="badField"><set name="items[$index].name" expr:value="7"></set></handler>
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
@@ -457,7 +457,7 @@ describe("official target compilers", () => {
     <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>
   </defs>
   <template $match>
-    <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[format('%s', disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
+    <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
     <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
   </template>
   <style>:host { display: inline-flex; }</style>
@@ -1042,7 +1042,7 @@ describe("official target compilers", () => {
         <event name="saved" type="string"></event>
         <state type="number" name="count" value="0"></state>
         <computed name="prefix" from="'Ready'"></computed>
-        <computed name="label" from="format('%s!', prefix)"></computed>
+        <computed name="label" from="concat(prefix, '!')"></computed>
         <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
         <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
       </defs>
@@ -1222,33 +1222,33 @@ describe("official target compilers", () => {
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
   });
 
-  it("compiles literal primitive format expressions to direct string concatenation", async () => {
+  it("compiles literal primitive concat expressions to direct string concatenation", async () => {
     const module = generated(`<template component="demo-label" status="experimental" summary="Direct formatted label.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="format('Step %s', count)"></computed>
+        <computed name="label" from="concat('Step ', count)"></computed>
         <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
     </template>`).get("vanilla/DemoLabel.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /"Step " \+ String\(state0\) \+ ""/);
+    assert.match(module, /"Step " \+ String\(state0\)/);
     await transform(module, { loader: "js" });
   });
 
-  it("preserves missing format placeholders in the direct primitive subset", () => {
+  it("preserves literal percent characters in direct concatenation", () => {
     const module = generated(`<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="format('%s/%s', count)"></computed>
+        <computed name="label" from="concat(count, '/%s')"></computed>
         <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="label"></output></button>
     </template>`).get("vanilla/DemoMissingFormat.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
-    assert.match(module, /String\(state0\) \+ "\/" \+ "%s"/);
+    assert.match(module, /String\(state0\) \+ "\/%s"/);
   });
 
   it("retains the live runtime for ordinary SVG attributes that need name adjustment", () => {

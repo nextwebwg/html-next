@@ -296,7 +296,7 @@ const staticComputedSource = `<template component="static-computed" status="expe
     <event name="saved" type="string"></event>
     <state type="number" name="count" value="0"></state>
     <computed name="prefix" from="'Ready'"></computed>
-    <computed name="label" from="format('%s!', prefix)"></computed>
+    <computed name="label" from="concat(prefix, '!')"></computed>
     <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
     <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
   </defs>
@@ -306,7 +306,7 @@ const staticComputedSource = `<template component="static-computed" status="expe
 const readOnlySource = `<template component="read-only-label" status="experimental" summary="Read-only direct leaf fixture.">
   <defs>
     <state type="number" name="count" value="1"></state>
-    <computed name="label" from="format('Ready %s', count)"></computed>
+    <computed name="label" from="concat('Ready ', count)"></computed>
   </defs>
   <section from:data-label="label" class:ready="count = 1"><input .value="label"><output $value="label"></output><article class="child" aria-label="Ready child"><span class="projected">Projected<strong title="Ready grandchild"></strong></span></article></section>
 </template>`;
@@ -323,7 +323,7 @@ const stringSource = `<template component="string-tabs" status="experimental" su
 const formatSource = `<template component="format-counter" status="experimental" summary="Direct primitive format fixture.">
   <defs>
     <state type="number" name="count" value="0"></state>
-    <computed name="label" from="format('Step %s', count)"></computed>
+    <computed name="label" from="concat('Step ', count)"></computed>
     <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
   </defs>
   <section from:aria-label="label"><button type="button" on:click="increment">Increment</button><input .value="label"><output $value="label"></output></section>
@@ -3005,7 +3005,7 @@ const actionSource = `<template component="x-action" status="early" summary="But
     <computed name="linked" from="as = 'a'"></computed>
   </defs>
   <template $match>
-    <a $when="linked" from:href="{ true: null, false: href }[format('%s', disabled)]"><slot></slot></a>
+    <a $when="linked" from:href="{ true: null, false: href }[concat(disabled)]"><slot></slot></a>
     <button $else type="button" from:disabled="disabled"><slot></slot></button>
   </template>
 </template>`;

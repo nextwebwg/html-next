@@ -8,7 +8,7 @@ import { parseFragment } from "parse5";
 
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
-import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
+import { hasBuiltinCall, typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
 import type {
@@ -56,7 +56,7 @@ function svgAttributeName(name: string): string {
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
   "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
-  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
+  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
@@ -213,9 +213,17 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
     return !context.globals.has(root) || names.locals?.has(root);
   })) return undefined;
   const guard = expressionGuard(plan, names.script, context.definition);
-  if (guard === undefined) return undefined;
+  const retains = hasBuiltinCall(plan.ast);
+  if (guard === undefined && !retains) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
-  context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
+  if (!retains) {
+    context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
+    return name;
+  }
+  const output = emit(names.script);
+  const raw = retains ? context.lowering.value(plan.ast, names.script) : undefined;
+  const next = raw === undefined ? output : raw === output ? "candidate" : output;
+  context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = ${next}; });`);
   return name;
 }
 
@@ -398,7 +406,11 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       .filter((child): child is ElementNode => child.kind === "element" && (child.flow?.kind === "when" || child.flow?.kind === "else"))
       .map((arm, index) => {
         const { flow: armFlow, ...armBody } = arm;
-        const test = armFlow?.kind === "when" ? lowering.condition(ast(armFlow.testPlan, armFlow.test), local.template) : undefined;
+        const when = armFlow?.kind === "when" ? armFlow : undefined;
+        const testNode = when === undefined ? undefined : ast(when.testPlan, when.test);
+        const test = testNode === undefined ? undefined :
+          (when?.testPlan === undefined || !hasBuiltinCall(when.testPlan.ast) ? undefined : guardedBinding(when.testPlan, local, context, (scope) => lowering.condition(testNode, scope)))
+          ?? lowering.condition(testNode, local.template);
         const directive = test === undefined ? "v-else" : `${index === 0 ? "v-if" : "v-else-if"}=${bound(test)}`;
         return wrap(armBody, [directive], local, context);
       }).join("\n");
@@ -408,7 +420,9 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
   }
   if (flow?.kind === "if") {
     const { flow: _flow, ...body } = node;
-    return wrap(body, [`v-if=${bound(lowering.condition(ast(flow.testPlan, flow.test), names.template))}`], names, context);
+    const test = ast(flow.testPlan, flow.test);
+    const guarded = flow.testPlan === undefined || !hasBuiltinCall(flow.testPlan.ast) ? undefined : guardedBinding(flow.testPlan, names, context, (scope) => lowering.condition(test, scope));
+    return wrap(body, [`v-if=${bound(guarded ?? lowering.condition(test, names.template))}`], names, context);
   }
   return renderElement(node, names, context, false);
 }
@@ -487,14 +501,18 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       const type = typeOf(value, names.template);
       // DOM property types are narrower than an absent or untyped HTML Next value.
       const code = lowering.value(value, names.template);
+      const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.value(value, scope));
       const nativeProperty = nativeControl && ["value", "checked"].includes(attribute.name);
-      if (!nativeProperty) attributes.push(`:${attribute.name}.prop=${bound(type.nullable || category(type.type) === "unknown" ? `${code} as any` : code)}`);
+      if (!nativeProperty) attributes.push(`:${attribute.name}.prop=${bound(guarded ?? (type.nullable || category(type.type) === "unknown" ? `${code} as any` : code))}`);
     } else if (attribute.target === "class") {
-      classes.push(`${quote(attribute.name)}: ${lowering.condition(ast(attribute.expressionPlan, attribute.expression), names.template)}`);
+      const value = ast(attribute.expressionPlan, attribute.expression);
+      const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.condition(value, scope));
+      classes.push(`${quote(attribute.name)}: ${guarded ?? lowering.condition(value, names.template)}`);
     } else if (attribute.target === "style") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const code = lowering.text(value, names.template);
-      styles.push(`${quote(attribute.name)}: ${typeOf(value, names.template).nullable ? `(${code} ?? undefined)` : code}`);
+      const guarded = attribute.expressionPlan === undefined ? undefined : guardedBinding(attribute.expressionPlan, names, context, (scope) => lowering.text(value, scope));
+      styles.push(`${quote(attribute.name)}: ${guarded ?? (typeOf(value, names.template).nullable ? `(${code} ?? undefined)` : code)}`);
     } else if (attribute.twoWay === true && attribute.writablePath !== undefined) {
       const writable = writableTarget(attribute.writablePath, names.template, lowering);
       if (nativeControl && ["value", "checked"].includes(attribute.name)) {
@@ -714,26 +732,33 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
     return context.refs.get(ref)!;
   };
   for (const [index, step] of handler.steps.entries()) {
-    const guard = step.guard === undefined ? "" : `if (${lowering.condition(step.guard.ast, local.script)}) `;
+    const guard = step.guard === undefined ? "" : `if (${hasBuiltinCall(step.guard.ast)
+      ? `${lowering.value(step.guard.ast, local.script)} !== Symbol.for("html-next.invalid-result") && ` : ""}${lowering.condition(step.guard.ast, local.script)}) `;
     if (step.kind === "set") {
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
+      const mayBeInvalid = hasBuiltinCall(step.value.ast);
       const check = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, `next${index}`, local.script, lowering);
-      if (check === undefined) {
+      if (check === undefined && !mayBeInvalid) {
         lines.push(`  ${guard}${target} = ${value};`);
       } else {
         const next = `next${index}`;
         lines.push(`  ${guard}{`);
-        lines.push(`    const ${next} = ${value};`);
-        lines.push(`    if (${next} === null || ${next} === undefined || ${check}) ${target} = ${next} as never;`);
+        lines.push(`    const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`);
+        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${next} === null || ${next} === undefined || ${check})`}) ${target} = ${next} as never;`);
         lines.push("  }");
       }
     } else if (step.kind === "dispatch") {
-      const detail = step.value === undefined ? "" : `, ${lowering.value(step.value.ast, local.script)}`;
       const declaration = events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
-      lines.push(`  ${guard}dispatch(${quote(step.event)}${detail});`);
+      if (step.value !== undefined && hasBuiltinCall(step.value.ast)) {
+        const detail = `detail${index}`;
+        lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}); }`);
+      } else {
+        const detail = step.value === undefined ? "" : `, ${lowering.value(step.value.ast, local.script)}`;
+        lines.push(`  ${guard}dispatch(${quote(step.event)}${detail});`);
+      }
     } else if (step.kind === "focus") {
       lines.push(`  ${guard}${element(step.target)}.value?.focus();`);
     } else {
@@ -926,8 +951,11 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const rootMarkup = arms !== undefined
     ? arms.map((arm, index) => {
       const flow = arm.flow!;
+      const test = flow.kind === "when" ? ast(flow.testPlan, flow.test) : undefined;
+      const guarded = flow.kind === "when" && flow.testPlan !== undefined && hasBuiltinCall(flow.testPlan.ast)
+        ? guardedBinding(flow.testPlan, names, context, (scope) => lowering.condition(test!, scope)) : undefined;
       const directive = flow.kind === "when"
-        ? `${index === 0 ? "v-if" : "v-else-if"}=${bound(lowering.condition(ast(flow.testPlan, flow.test), names.template))}`
+        ? `${index === 0 ? "v-if" : "v-else-if"}=${bound(guarded ?? lowering.condition(test!, names.template))}`
         : "v-else";
       return renderElement(arm, names, context, true, [directive]);
     }).join("\n")
@@ -1017,6 +1045,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
     if (declaration.kind === "computed") {
       const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition);
+      const retains = declaration.expression !== undefined && hasBuiltinCall(declaration.expression.ast);
+      if (retains) return `let ${name}Previous: any = null;\nconst ${name} = cycleCheckedComputed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}const next: any = ${initial}; if (next === Symbol.for("html-next.invalid-result")) return ${name}Previous; return ${name}Previous = next; });`;
       if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
       return `const ${name} = cycleCheckedComputed(() => ${initial});`;
     }

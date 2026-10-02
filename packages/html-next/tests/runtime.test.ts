@@ -76,7 +76,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <prop name="incoming" type="number" max="100">Source value.</prop>
         </defs><main><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
           <x-reading-empty id="without-default" from:amount="incoming"></x-reading-empty>
-          <x-reading-default id="from-function" from:amount="format('%s', incoming)"></x-reading-default>
+          <x-reading-default id="from-function" from:amount="concat(incoming)"></x-reading-default>
         </main></template>
         <x-reading-owner id="owner" incoming="oops"></x-reading-owner>`);
         await page.addScriptTag({ path: bundlePath });
@@ -194,7 +194,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-handler-type"><defs>
           <state name="count" type="number" value="2"></state>
-          <handler name="bad"><set name="count" expr:value="format('%s', count)"></set></handler>
+          <handler name="bad"><set name="count" expr:value="concat(count)"></set></handler>
           <handler name="good"><set name="count" value="7"></set></handler>
         </defs><section><button class="bad" on:click="bad">Bad</button>
           <button class="good" on:click="good">Good</button>
@@ -977,7 +977,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
           '<li class="row"><x-chip from:label="tone"></x-chip><slot></slot></li></template>' +
           '<template component="x-bar" status="early" summary="Bar.">' +
-          '<main><ul><x-row $each="index of [1, 2]" from:tone="format(\'t%s\', index)">' +
+          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'t\', index)">' +
           '<b>projected</b></x-row></ul></main></template>' +
           '<x-bar></x-bar>',
         );
@@ -1175,7 +1175,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<state type="number" name="count" value="1"></state>' +
           '<data name="feed" src="https://api.example/feed" type="object({ label: string })"></data>' +
           '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
-          '<x-frame from:heading="format(\'count %s\', count)">' +
+          '<x-frame from:heading="concat(\'count \', count)">' +
           '<span slot="body"><button type="button" class="bump" on:click="bump"></button>' +
           '<i class="own" $value="count"></i>' +
           '<output class="feed" $value="feed.value.label"></output></span></x-frame></template>' +
@@ -1316,7 +1316,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><state type="number" name="count" value="1"></state>' +
           '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
           '<main><button type="button" class="bump" on:click="bump"></button>' +
-          '<x-child from:label="format(\'count %s\', count)"></x-child></main></template>' +
+          '<x-child from:label="concat(\'count \', count)"></x-child></main></template>' +
           '<x-parent></x-parent>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -1362,7 +1362,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-list" status="early" summary="Rendered form fixture.">' +
           '<defs><prop name="rows" type="list(string)" default="[]">Rows.</prop></defs>' +
-          `<ul><li $each="row of rows" $key="row"><slot from:name="format('row-%s', row)">Unnamed</slot></li></ul></template>` +
+          `<ul><li $each="row of rows" $key="row"><slot from:name="concat('row-', row)">Unnamed</slot></li></ul></template>` +
           '<template component="rf-wrap" status="early" summary="Rendered form fixture.">' +
           '<section><rf-card><span slot="title"><slot name="heading"></slot></span><slot></slot></rf-card></section></template>',
         );
@@ -2469,6 +2469,41 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} keeps the accepted data request when a calculated parameter becomes invalid`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        await page.route("https://api.example/**", async (route) => {
+          const query = new URL(route.request().url()).searchParams.get("width") ?? "";
+          requests.push(query);
+          await route.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: query }) });
+        });
+        await page.setContent(`<template component="x-data-unit"><defs>
+          <state name="width" type="length" value="8.8px"></state>
+          <state name="step" type="length" value="1px"></state>
+          <data name="result" src="https://api.example/search" type="object({ label: string })">
+            <param name="width" from:value="round(width, step)"></param>
+          </data>
+          <handler name="bad"><set name="step" value="1rem"></set></handler>
+          <handler name="good"><set name="step" value="2px"></set></handler>
+        </defs><section><button class="bad" on:click="bad">Bad</button><button class="good" on:click="good">Good</button>
+          <output $value="result.value.label"></output></section></template><x-data-unit id="case"></x-data-unit>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "9px");
+        await page.locator("#case .bad").click();
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        assert.deepEqual(requests, ["9px"]);
+        await page.locator("#case .good").click();
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "8px");
+        assert.deepEqual(requests, ["9px", "8px"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} checks a typed reference read by index, as ui-combobox reads its first item`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -2533,7 +2568,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<data name="result" src="https://api.example/search"` +
             ` type="object({ label: string, note: string, ... })">` +
             `<param name="round" from:value="round"></param></data>` +
-            `<computed name="shouted" from="format('%s!', result.value.label)"></computed>` +
+            `<computed name="shouted" from="concat(result.value.label, '!')"></computed>` +
             `<handler name="again"><set name="round" expr:value="round + 1"></set></handler></defs>` +
             `<main><output class="label" $value="result.value.label"></output>` +
             `<output class="note" $value="result.value.note"></output>` +
@@ -2561,8 +2596,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // ...while the sibling reference, and the request itself, carried on.
           note: "second",
           ok: "true",
-          // format() explicitly stringifies its argument, so the numeric value is usable here.
-          shouted: "42!",
+          shouted: "first!",
         });
         await page.click("button.again");
         await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "third note");
@@ -2743,7 +2777,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // A root `$match` chooses the native root, and each arm declares the same slots.
         const panelBody = `<header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
           `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
-          `<ul><li $each="row of rows" $key="row.id"><slot from:name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
+          `<ul><li $each="row of rows" $key="row.id"><slot from:name="concat('row-', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
             `<defs><state type="list(unknown)" name="rows" value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
@@ -3003,7 +3037,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-host" status="early" summary="Parent.">` +
             `<defs><state type="boolean" name="linked" value="false"></state><state type="number" name="clicks" value="0"></state>` +
             `<handler name="flip"><set name="clicks" expr:value="clicks + 1"></set><set name="linked" expr:value="not linked"></set></handler></defs>` +
-            `<section><x-choice id="choice" type="submit" from:as="{ true: 'a', false: 'button' }[format('%s', linked)]" on:click="flip">Go</x-choice>` +
+            `<section><x-choice id="choice" type="submit" from:as="{ true: 'a', false: 'button' }[concat(linked)]" on:click="flip">Go</x-choice>` +
             `<output $value="clicks"></output></section>` +
           `</template>` +
           `<x-host></x-host>`,

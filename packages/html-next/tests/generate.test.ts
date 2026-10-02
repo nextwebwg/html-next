@@ -122,13 +122,13 @@ describe("generateComponent", () => {
     );
   });
 
-  it("keeps dynamic-format computed expressions on the full-runtime fallback", () => {
+  it("keeps list-joining computed expressions on the full-runtime fallback", () => {
     const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
       <defs>
-        <state type="number" name="count" value="0"></state>
-        <state type="string" name="pattern" value="%s"></state>
-        <computed name="label" from="format(pattern, count)"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <state type="list(string)" name="parts" value="['a', 'b']"></state>
+        <state type="string" name="separator" value=", "></state>
+        <computed name="label" from="join(parts, separator)"></computed>
+        <handler name="increment"><set name="separator" value=" / "></set></handler>
       </defs>
       <button type="button" on:click="increment"><output $value="label"></output></button>
     </template>`;

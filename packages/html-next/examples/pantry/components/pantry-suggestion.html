@@ -17,7 +17,7 @@
   <li class="suggestion">
     <span class="suggestion__label" $value="label"></span>
     <span class="suggestion__unit" $value="unit"></span>
-    <button type="button" on:click="choose" from:aria-label="format('Add %s to the pantry', label)">Add</button>
+    <button type="button" on:click="choose" from:aria-label="concat('Add ', label, ' to the pantry')">Add</button>
   </li>
 
   <style>
