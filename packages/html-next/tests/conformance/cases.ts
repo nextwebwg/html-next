@@ -344,11 +344,12 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "value semantics: typed equality, numeric-only arithmetic, boolean and/or",
+    name: "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
     source: scene({
+      defs: `<state name="textNumber" type="string" value="1"></state>`,
       root:
         `<div><i class="eq" $value="1 = '1'"></i>` +
-        `<i class="arith" $value="'1' + 1"></i>` +
+        `<i class="arith" $value="$textNumber + 1"></i>` +
         `<i class="and" $value="'a' and 0"></i>` +
         `<i class="or" $value="0 or 'x'"></i></div>`,
       use: `<x-t id="b"></x-t>`,
@@ -359,6 +360,36 @@ const successes: ConformanceCase[] = [
         `arith: r.querySelector('.arith').textContent, and: r.querySelector('.and').textContent, ` +
         `or: r.querySelector('.or').textContent };`,
       result: { eq: "false", arith: "", and: "false", or: "true" },
+    },
+  },
+  {
+    name: "dimensional arithmetic scales numeric parts and preserves written units",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<state name="factor" type="number" value="2"></state>` +
+        `<state name="flag" type="boolean" value="true"></state>` +
+        `<computed name="half" from="$width / $factor"></computed>` +
+        `<computed name="padded" from="$width + 2px"></computed>` +
+        `<computed name="chosen" from="($flag ? 1px : 2px) * 2"></computed>` +
+        `<handler name="scale"><set name="factor" value="4"></set><set name="flag" value="false"></set></handler>` +
+        `<handler name="changeUnit"><set name="width" value="8rem"></set></handler>` +
+        `<handler name="restoreUnit"><set name="width" value="12px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="scale">Scale</button>` +
+        `<button type="button" on:click="changeUnit">Change unit</button>` +
+        `<button type="button" on:click="restoreUnit">Restore unit</button>` +
+        `<output $value="concat(round($half), '/', $factor * $width, '/', $padded, '/', $chosen)"></output></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#b output').textContent;`,
+      result: "4px/16px/10px/2px",
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: "2px/32px/10px/4px" },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: "2rem/32rem/10px/4px" },
+        { action: `document.querySelectorAll('#b button')[2].click();`, result: "3px/48px/14px/4px" },
+      ],
     },
   },
   {

@@ -8,7 +8,7 @@
  * type chooses the inline form. Only a value whose type cannot be known falls back to a small named
  * function in the component, emitted when used.
  */
-import { hasBuiltinCall, isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
+import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
 import type { TypeNode } from "../type-system.js";
 import { quote } from "./shared.js";
 
@@ -116,8 +116,22 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       }
       return { ...terminal("number"), nullable: true };
     }
-    case "binary":
+    case "binary": {
+      if (["+", "-", "*", "/"].includes(node.op)) {
+        const left = typeOf(node.left, scope);
+        const right = typeOf(node.right, scope);
+        const leftName = left.type.kind === "terminal" ? left.type.name : undefined;
+        const rightName = right.type.kind === "terminal" ? right.type.name : undefined;
+        const leftDimensional = leftName === "length" || leftName === "percentage" || leftName === "duration";
+        const rightDimensional = rightName === "length" || rightName === "percentage" || rightName === "duration";
+        if ((node.op === "+" || node.op === "-") && leftDimensional && leftName === rightName ||
+          node.op === "*" && (leftDimensional && !rightDimensional || rightDimensional && !leftDimensional) ||
+          node.op === "/" && leftDimensional && !rightDimensional) {
+          return { type: (leftDimensional ? left : right).type, nullable: true };
+        }
+      }
       return ["+", "-", "*", "/", "%"].includes(node.op) ? { ...terminal("number"), nullable: true } : terminal("boolean");
+    }
     case "conditional": {
       const consequent = typeOf(node.consequent, scope);
       const alternate = typeOf(node.alternate, scope);
@@ -169,6 +183,35 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       const same = first !== undefined && items.every((item) => category(item.type) === category(first.type));
       return { type: { kind: "list", item: same && first !== undefined ? first.type : UNKNOWN.type }, nullable: false };
     }
+  }
+}
+
+/** Whether a generated expression can produce an invalid result that must retain its destination. */
+export function mayProduceInvalidResult(node: ExpressionNode, scope: Scope): boolean {
+  switch (node.kind) {
+    case "call": return true;
+    case "binary": {
+      if (["+", "-", "*", "/"].includes(node.op)) {
+        const dimensional = (operand: ExpressionNode): boolean => {
+          const type = typeOf(operand, scope).type;
+          return type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name);
+        };
+        if (dimensional(node.left) || dimensional(node.right)) return true;
+      }
+      return mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope);
+    }
+    case "unary": {
+      const type = typeOf(node.operand, scope).type;
+      return node.op === "-" && type.kind === "terminal" &&
+        ["length", "percentage", "duration"].includes(type.name) || mayProduceInvalidResult(node.operand, scope);
+    }
+    case "conditional": return mayProduceInvalidResult(node.test, scope) ||
+      mayProduceInvalidResult(node.consequent, scope) || mayProduceInvalidResult(node.alternate, scope);
+    case "member": return mayProduceInvalidResult(node.object, scope);
+    case "index": return mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope);
+    case "array": return node.items.some((item) => mayProduceInvalidResult(item, scope));
+    case "object": return node.pairs.some((pair) => mayProduceInvalidResult(pair.value, scope));
+    default: return false;
   }
 }
 
@@ -287,6 +330,40 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   }
   return !Number.isFinite(result) ? Symbol.for("html-next.invalid-result") : unit === undefined ? result : String(result) + unit;
 }`,
+  arithmetic: `function arithmetic(op: string, leftKind: string, rightKind: string, left: unknown, right: unknown): string | symbol | undefined {
+  const invalid = Symbol.for("html-next.invalid-result");
+  if (left === invalid || right === invalid) return invalid;
+  if (left === null || left === undefined || right === null || right === undefined) return undefined;
+  const isDimension = (kind: string): boolean => kind === "length" || kind === "percentage" || kind === "duration";
+  const parse = (value: unknown, kind: string): { number: number; unit: string } | undefined => {
+    if (typeof value !== "string" || !isDimension(kind)) return undefined;
+    const match = /^(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%)$/.exec(value);
+    if (match === null) return undefined;
+    const unit = match[2]!;
+    if ((unit === "%" ? "percentage" : unit === "ms" || unit === "s" ? "duration" : "length") !== kind) return undefined;
+    const number = Number(match[1]);
+    return Number.isFinite(number) ? { number, unit } : undefined;
+  };
+  const x = parse(left, leftKind), y = parse(right, rightKind);
+  if (isDimension(leftKind) && x === undefined || isDimension(rightKind) && y === undefined) return invalid;
+  let value: number, unit: string;
+  if (op === "+" || op === "-") {
+    if (x === undefined || y === undefined || leftKind !== rightKind || x.unit !== y.unit) return invalid;
+    value = op === "+" ? x.number + y.number : x.number - y.number;
+    unit = x.unit;
+  } else if (op === "*") {
+    const quantity = x ?? y;
+    const factor = x === undefined ? left : right;
+    if (quantity === undefined || x !== undefined && y !== undefined || typeof factor !== "number" || !Number.isFinite(factor)) return invalid;
+    value = quantity.number * factor;
+    unit = quantity.unit;
+  } else {
+    if (op !== "/" || x === undefined || y !== undefined || typeof right !== "number" || !Number.isFinite(right) || right === 0) return invalid;
+    value = x.number / right;
+    unit = x.unit;
+  }
+  return Number.isFinite(value) ? String(value) + unit : invalid;
+}`,
   sortBy: `function sortBy(items: any[], keys: readonly string[]): any[] {
   const field = (item: any, path: string): unknown => item !== null && typeof item === "object" && !Array.isArray(item)
     ? path.split(".").reduce((value, key) => value?.[key], item)
@@ -387,7 +464,7 @@ export class Lowering {
       case "binary":
         return this.#binary(node, scope);
       case "conditional":
-        if (hasBuiltinCall(node.test)) {
+        if (mayProduceInvalidResult(node.test, scope)) {
           const test = this.condition(node.test, scope);
           return `(() => { const condition: any = ${test}; if (condition === Symbol.for("html-next.invalid-result")) return condition; return condition ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}; })()`;
         }
@@ -404,7 +481,7 @@ export class Lowering {
   /** The expression as a condition, where JavaScript truthiness is enough. */
   condition(node: ExpressionNode, scope: Scope): string {
     if (node.kind === "binary" && (node.op === "and" || node.op === "or")) {
-      if (hasBuiltinCall(node.left) || hasBuiltinCall(node.right)) {
+      if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
         const left = this.condition(node.left, scope);
         const right = this.condition(node.right, scope);
         const shortCircuit = node.op === "and" ? "!left" : "left";
@@ -490,7 +567,7 @@ export class Lowering {
   }
 
   #not(node: ExpressionNode, scope: Scope): string {
-    if (hasBuiltinCall(node)) {
+    if (mayProduceInvalidResult(node, scope)) {
       const value = this.condition(node, scope);
       return `(() => { const operand: any = ${value}; return operand === Symbol.for("html-next.invalid-result") ? operand : !operand; })()`;
     }
@@ -508,7 +585,7 @@ export class Lowering {
     }
     const left = this.#operand(node.left, scope);
     const right = this.#operand(node.right, scope);
-    if (hasBuiltinCall(node.left) || hasBuiltinCall(node.right)) {
+    if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
       const body = this.#binaryOperands(node, scope, "left", "right");
       return `(() => { const left: any = ${left}; if (left === Symbol.for("html-next.invalid-result")) return left; const right: any = ${right}; if (right === Symbol.for("html-next.invalid-result")) return right; return ${body}; })()`;
     }
@@ -529,6 +606,16 @@ export class Lowering {
       const strings = category(typeOf(node.left, scope).type) === "string" && category(typeOf(node.right, scope).type) === "string";
       if (strings && !typeOf(node.right, scope).nullable) return `${left}${typeOf(node.left, scope).nullable ? "?." : "."}${method}(${right})`;
       return `(typeof ${left} === "string" && typeof ${right} === "string" ? ${left}.${method}(${right}) : undefined)`;
+    }
+    if (["+", "-", "*", "/"].includes(op)) {
+      const leftType = typeOf(node.left, scope).type;
+      const rightType = typeOf(node.right, scope).type;
+      const leftKind = leftType.kind === "terminal" ? leftType.name : "unknown";
+      const rightKind = rightType.kind === "terminal" ? rightType.name : "unknown";
+      if (["length", "percentage", "duration"].includes(leftKind) ||
+        ["length", "percentage", "duration"].includes(rightKind)) {
+        return `(${this.#use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}) as string | symbol | undefined)`;
+      }
     }
     const x = this.#numeric(node.left, scope);
     const y = this.#numeric(node.right, scope);
