@@ -39,10 +39,12 @@ describe("parseComponent", () => {
     expectDiagnostic("HT010", `<template component="x-old"><defs><prop name="label" type="string">Label.</prop></defs><output :aria-label="label"></output></template>`);
   });
 
-  it("rejects bracketed numeric indexes in authored expressions", () => {
-    expectDiagnostic("HT013", `<template component="x-old-index"><defs>
+  it("accepts bracketed numeric indexes in authored expressions", () => {
+    const definition = parseComponent(`<template component="x-index"><defs>
       <state name="items" type="list(string)" value="['Ada']"></state>
     </defs><output $value="$items[0]"></output></template>`);
+    assert.deepEqual(definition.template.attributes.find((entry) => entry.kind === "directive")
+      ?.expressionPlan?.dependencies, ["items.0"]);
   });
 
   it("reports built-in calls whose literal arguments cannot work", () => {

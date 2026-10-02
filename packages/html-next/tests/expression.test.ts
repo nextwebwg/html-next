@@ -19,7 +19,7 @@ import {
 } from "../src/expression.js";
 
 describe("expression: compilation", () => {
-  it("uses dollar-prefixed references and dotted list indexes", () => {
+  it("uses dollar-prefixed references and dotted or bracketed list indexes", () => {
     const compiled = compileExpression("$items.0.name = 'Ada' and $items.1.name != null");
     assert.deepEqual(compiled.dependencies, ["items.0.name", "items.1.name"]);
     const s = scope({ items: [{ name: "Ada" }, { name: "Bea" }] });
@@ -28,9 +28,13 @@ describe("expression: compilation", () => {
     assert.deepEqual(getWritablePath("$items.0.name", new Set(["items"])), ["items", 0, "name"]);
     assert.equal(evaluate("$groups.0.1.name", scope({ groups: [[{ name: "A" }, { name: "B" }]] })), "B");
     assert.deepEqual(getWritablePath("$groups.0.1.name", new Set(["groups"])), ["groups", 0, 1, "name"]);
-    assert.throws(() => checkExpression("$items[0].name"), /Use dotted indexes/);
-    assert.throws(() => checkExpression("items[0].name"), /Use dotted indexes/);
-    assert.throws(() => checkExpression("$items[-0].name"), /Use dotted indexes/);
+    assert.equal(evaluate("$items[0].name", s), "Ada");
+    assert.equal(evaluate("$items[1].name", s), "Bea");
+    assert.equal(evaluate("$groups[0][1].name", scope({ groups: [[{ name: "A" }, { name: "B" }]] })), "B");
+    assert.deepEqual(compileExpression("$items[0].name").dependencies, ["items.0.name"]);
+    assert.deepEqual(getWritablePath("$items[0].name", new Set(["items"])), ["items", 0, "name"]);
+    assert.doesNotThrow(() => checkExpression("items[0].name"));
+    assert.equal(evaluate("$items[-0].name", s), "Ada");
   });
   it("preserves the exact spelling of numeric object keys", () => {
     const byId = {
@@ -40,7 +44,10 @@ describe("expression: compilation", () => {
     };
     assert.equal(evaluate("$byId.9007199254740993.name", scope({ byId })), "right");
     assert.equal(evaluate("$byId.01.name", scope({ byId })), "leading zero");
+    assert.equal(evaluate("$byId[9007199254740993].name", scope({ byId })), "right");
+    assert.equal(evaluate("$byId[01].name", scope({ byId })), "leading zero");
     assert.deepEqual(compileExpression("$byId.9007199254740993.name").dependencies, ["byId.9007199254740993.name"]);
+    assert.deepEqual(compileExpression("$byId[9007199254740993].name").dependencies, ["byId.9007199254740993.name"]);
     assert.deepEqual(getWritablePath("$byId.9007199254740993.name", new Set(["byId"])),
       ["byId", "9007199254740993", "name"]);
   });
