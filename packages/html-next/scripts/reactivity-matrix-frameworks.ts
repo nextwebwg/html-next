@@ -4,7 +4,7 @@ import { createWatch, type Watch } from "@angular/core/primitives/signals";
 import { computed as preactComputed, effect as preactEffect, signal as preactSignal } from "@preact/signals-core";
 import { reactive, stabilize } from "@reactively/core";
 import { abortVar, atom, batch as reatomBatch, computed as reatomComputed, context, effect as reatomEffect } from "@reatom/core";
-import { createEffect as xEffect, createMemo as xMemo, createRoot as xRoot, createSignal as xSignal, flushSync } from "@solidjs/signals";
+import { createEffect as xEffect, createMemo as xMemo, createRoot as xRoot, createSignal as xSignal, flush as xFlush } from "@solidjs/signals";
 import { computed as alienComputed, effect as alienEffect, effectScope, signal as alienSignal } from "alien-signals";
 import { c as anodFactory, root as anodRoot, signal as anodSignal } from "anod";
 import { autorun, computed as mobxComputed, observable, runInAction } from "mobx";
@@ -303,7 +303,7 @@ function solidXSignals(): BenchmarkFramework {
         read: read as () => typeof initialValue,
         write(value) {
           (write as (value: typeof initialValue) => void)(value);
-          try { flushSync(); } catch { /* no pending work */ }
+          try { xFlush(); } catch { /* no pending work */ }
         },
       };
     },
@@ -318,12 +318,12 @@ function solidXSignals(): BenchmarkFramework {
           run();
           return undefined;
         }, () => undefined);
-        flushSync();
+        xFlush();
       });
       return dispose;
     },
     run(run) {
-      xRoot((dispose) => { run(); flushSync(); dispose(); });
+      xRoot((dispose) => { run(); xFlush(); dispose(); });
     },
   };
 }
