@@ -16,7 +16,7 @@ async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
     behavior: await page.evaluate(() => {
-      const globals = window as unknown as { refsEffects: number; refsHost: {
+      const globals = window as unknown as { refsEffects: number; refsInvalid: number; refsHost: {
         refs: Record<string, Element | readonly Element[] | undefined>;
       } };
       const refs = globals.refsHost.refs;
@@ -27,6 +27,7 @@ async function snapshot(page: Page) {
           : { single: (value as Element).textContent, connected: (value as Element).isConnected };
       };
       return { row: read("row"), later: read("later"), single: read("single"),
+        invalid: globals.refsInvalid, focusedRow: document.activeElement?.localName === "li" ? document.activeElement.textContent : null,
         hasRow: "row" in refs, hasLater: "later" in refs, hasSingle: "single" in refs, effects: globals.refsEffects };
     }),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
@@ -107,13 +108,25 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               assert.equal(native.behavior.effects, 1, "reading refs does not subscribe to membership changes");
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte ref pixels differ", live);
             };
+            const validate = async () => {
+              await Promise.all(pages.map((page) => page.evaluate(() => {
+                const globals = window as unknown as { refsInvalid: number; refsHost: { refs: { field: Element } } };
+                globals.refsHost.refs.field.addEventListener("invalid", (event) => { event.preventDefault(); globals.refsInvalid++; }, { once: true });
+              })));
+              await Promise.all(pages.map((page) => page.locator('[data-action="validate"]').click()));
+              await compare();
+            };
             await compare();
+            await validate();
             for (const rows of [[3, 2], [2, 3], [2], []]) {
+              await Promise.all(pages.map((page) => page.locator('[data-action="focus"]').focus()));
               await Promise.all(pages.map((page) => page.evaluate((value) => {
                 (window as unknown as { refsHost: { state: { rows: number[] } } }).refsHost.state.rows = value;
               }, rows)));
               await Promise.all(pages.map((page) => page.waitForFunction((expected) =>
                 Array.from(document.querySelectorAll("#case ul li")).map((element) => element.textContent).join(",") === expected, rows.join(","))));
+              await compare();
+              await Promise.all(pages.map((page) => page.locator('[data-action="focus"]').click()));
               await compare();
             }
             for (const later of [[7], []]) {
@@ -129,8 +142,9 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 (window as unknown as { refsHost: { state: { visible: boolean } } }).refsHost.state.visible = value;
               }, visible)));
               await Promise.all(pages.map((page) => page.waitForFunction((expected) =>
-                (document.querySelector("#case button") !== null) === expected, visible)));
+                (document.querySelector("#case input") !== null) === expected, visible)));
               await compare();
+              await validate();
             }
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);

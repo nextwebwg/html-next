@@ -52,8 +52,9 @@ function literalPropValue(value: string, contract: PropContract): string {
   return parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`;
 }
 
-function checkSupported(definition: ComponentDefinition): ReadonlySet<string> {
+function checkSupported(definition: ComponentDefinition): { importedNames: ReadonlySet<string>; refs: Set<string> } {
   const importedNames = new Set<string>();
+  const refs = new Set<string>();
   for (const declaration of definition.declarations ?? []) {
     if (!["state", "computed", "handler", "data", "event", "method", "context"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
@@ -66,6 +67,7 @@ function checkSupported(definition: ComponentDefinition): ReadonlySet<string> {
       return;
     }
     if (node.name.includes("-")) importedNames.add(componentName(node.name));
+    if (node.ref !== undefined) refs.add(node.ref);
     if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind)) {
       fail("HT030", "Svelte conversion does not yet support structural flow, event modifiers, or references.");
     }
@@ -79,7 +81,7 @@ function checkSupported(definition: ComponentDefinition): ReadonlySet<string> {
     for (const child of node.children) visit(child);
   };
   visit(definition.template);
-  return importedNames;
+  return { importedNames, refs };
 }
 
 interface RenderContext {
@@ -113,6 +115,7 @@ interface RenderContext {
   usesEvents: boolean;
   readonly refs: Set<string>;
   readonly refsName: string;
+  readonly resetRootRefs: boolean;
   readonly refAttachmentName: string;
   readonly refTargetName: string;
   readonly writePathName: string;
@@ -250,13 +253,15 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const cases = arms.map((arm, index) => {
       const armFlow = arm.flow;
       const { flow: _flow, ...body } = arm;
+      const rendered = renderNode(body, root, local, lowering, context);
+      const markup = root && context.resetRootRefs ? `{#key ${context.refsName}.clear()}${rendered}{/key}` : rendered;
       if (armFlow?.kind === "when") {
         if (armFlow.testPlan === undefined) fail("HT030", `Expression \`${armFlow.test}\` could not be converted.`);
         const test = armFlow.testPlan.ast;
         const condition = lowering.condition(test, local);
-        return `${index === 0 ? "{#if" : "{:else if"} ${mayProduceInvalidResult(test, local) ? retained(context, condition, "false") : condition}}${renderNode(body, root, local, lowering, context)}`;
+        return `${index === 0 ? "{#if" : "{:else if"} ${mayProduceInvalidResult(test, local) ? retained(context, condition, "false") : condition}}${markup}`;
       }
-      if (armFlow?.kind === "else") return `{:else}${renderNode(body, root, local, lowering, context)}`;
+      if (armFlow?.kind === "else") return `{:else}${markup}`;
       fail("HT018", "A $match child must be a $when or $else arm.");
     }).join("");
     const block = `${cases}{/if}`;
@@ -525,7 +530,7 @@ interface RootScope extends Scope {
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
-  const importedNames = checkSupported(definition);
+  const { importedNames, refs } = checkSupported(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
   const styles = compileComponentStylesForSvelte(definition.css, definition);
@@ -604,11 +609,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
-    usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
+    usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
+    resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
   const controllerHostName = freshIdentifier("htmlNextHost");
-  const controllerRefsName = freshIdentifier("htmlNextControllerRefs");
   const iteratedRefs = iteratedRefNames(definition);
   const methodNames = new Map(target.methods.map((method) => [method.name, freshIdentifier("htmlNextMethod")]));
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
@@ -872,24 +877,25 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
     ...(context.refs.size === 0 && !usesController ? [] : [
-      `const ${context.refsName} = new Map<string, Set<Element>>();`,
-      ...(usesController ? [`const ${controllerRefsName} = new Map<string, Element | Element[]>();`] : []),
+      `const ${context.refsName} = new Map<string, Element | Element[]>();`,
       `function ${context.refAttachmentName}(name: string) {`,
+      "  let current: Element | undefined;",
       "  return (element: Element) => {",
-      `    const elements = ${context.refsName}.get(name) ?? new Set<Element>();`,
-      `    ${context.refsName}.set(name, elements); elements.add(element);`,
-      ...(usesController && iteratedRefs.size > 0 ? [
+      ...(iteratedRefs.size > 0 ? [
         `    if (${JSON.stringify([...iteratedRefs])}.includes(name)) {`,
-        `      const recorded = ${controllerRefsName}.get(name) as Element[] | undefined;`,
-        `      if (recorded === undefined) ${controllerRefsName}.set(name, [element]);`,
+        `      const recorded = ${context.refsName}.get(name) as Element[] | undefined;`,
+        "      const index = current === undefined ? -1 : recorded?.indexOf(current) ?? -1;",
+        `      if (recorded === undefined) ${context.refsName}.set(name, [element]);`,
+        "      else if (index >= 0) recorded[index] = element;",
         "      else recorded.push(element);",
-        `    } else ${controllerRefsName}.set(name, element);`,
-      ] : usesController ? [`    ${controllerRefsName}.set(name, element);`] : []),
-      "    return () => { elements.delete(element); };",
+        `    } else ${context.refsName}.set(name, element);`,
+      ] : [`    ${context.refsName}.set(name, element);`]),
+      "    current = element;",
       "  };",
       "}",
       `function ${context.refTargetName}(name: string): Element | undefined {`,
-      `  return [...(${context.refsName}.get(name) ?? [])].sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1)[0];`,
+      `  const recorded = ${context.refsName}.get(name);`,
+      "  return Array.isArray(recorded) ? recorded[0] : recorded;",
       "}",
     ]),
     ...(usesNestedWrites ? [
@@ -913,7 +919,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ] : []),
       `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
       `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${quote(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
-      `  refs: ${controllerRefsName},`,
+      `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
       "});",

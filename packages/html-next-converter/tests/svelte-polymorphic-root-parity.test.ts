@@ -23,6 +23,8 @@ async function snapshot(page: Page) {
       component: root.getAttribute("data-component"),
       controllerRoot: root.getAttribute("data-controller-root"),
       focused: document.activeElement === root,
+      hasLink: "link" in (window as unknown as { switchHost: { refs: object } }).switchHost.refs,
+      hasButton: "button" in (window as unknown as { switchHost: { refs: object } }).switchHost.refs,
     })),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
   };
