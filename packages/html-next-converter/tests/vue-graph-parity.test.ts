@@ -117,12 +117,14 @@ export default Object.assign(Component, { ssrRender });
         }));
         await writeFile(file.replace(/\.vue$/, ".scope.ts"), `import component from "./${component.name}"; component.__scopeId = ${JSON.stringify(scopeId)};`);
       }
+      const scopeImports = manifest.components.map((component) =>
+        `import "./${component.artifact.replace(/\.vue$/, ".scope")}";`).join("\n");
+      const itemArtifact = manifest.components.find((component) => component.tag === "x-graph-item")!.artifact;
       const entry = join(outDirectory, "entry.ts");
       const bundle = join(outDirectory, "vue.js");
       await writeFile(entry, `import { createApp, h } from "vue";
 import { XGraphList } from "./vue/${mode === "application" ? "application" : "index"}";
-import "./vue/XGraphItem.scope";
-import "./vue/XGraphList.scope";
+${scopeImports}
 createApp({ render: () => h(XGraphList, { id: "case" }) }).mount(document.querySelector("main"));\n`);
       await build({
         entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath],
@@ -134,8 +136,7 @@ createApp({ render: () => h(XGraphList, { id: "case" }) }).mount(document.queryS
       const hydrateBundle = join(outDirectory, "hydrate.js");
       await writeFile(hydrateEntry, `import { createSSRApp, h } from "vue";
 import { XGraphList } from "./vue/${mode === "application" ? "application" : "index"}";
-import "./vue/XGraphItem.scope";
-import "./vue/XGraphList.scope";
+${scopeImports}
 createSSRApp({ render: () => h(XGraphList, { id: "case" }) }).mount(document.querySelector("main"));\n`);
       await build({
         entryPoints: [hydrateEntry], outfile: hydrateBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath],
@@ -147,7 +148,7 @@ createSSRApp({ render: () => h(XGraphList, { id: "case" }) }).mount(document.que
       await writeFile(serverEntry, `import { createSSRApp, h } from "vue";
 import { renderToString } from "@vue/server-renderer";
 import { XGraphList } from "./vue/${mode === "application" ? "application" : "index"}";
-import XGraphItem from "./vue/XGraphItem.vue";
+import XGraphItem from "./${itemArtifact}";
 XGraphItem.__scopeId = "data-v-graph-${mode}-xgraphitem";
 XGraphList.__scopeId = "data-v-graph-${mode}-xgraphlist";
 export const render = () => renderToString(createSSRApp({ render: () => h(XGraphList, { id: "case" }) }));\n`);

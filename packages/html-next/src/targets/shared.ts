@@ -41,6 +41,10 @@ const NATIVE_BOOLEAN_ATTRIBUTES = new Set([
   "selected",
 ]);
 
+export function isNativeBooleanAttribute(name: string): boolean {
+  return NATIVE_BOOLEAN_ATTRIBUTES.has(name);
+}
+
 export function quote(value: string): string {
   return JSON.stringify(value);
 }

@@ -433,15 +433,21 @@ export class Lowering {
         const object = this.#operand(node.object, scope);
         const objectType = typeOf(node.object, scope);
         const access = objectType.nullable ? "?." : ".";
+        const retains = mayProduceInvalidResult(node.object, scope);
+        const candidate = retains ? "candidate" : object;
         // A closed shape still permits an absent read; the result is undefined at runtime.
-        if (objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)) {
-          return `(${object} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`;
-        }
-        return /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${object}${access}${node.key}` : `${object}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
+        const read = objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)
+          ? `(${candidate} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`
+          : /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${candidate}${access}${node.key}` : `${candidate}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
+        return retains ? `((candidate: any) => candidate === Symbol.for("html-next.invalid-result") ? candidate : ${read})(${object})`
+          : read;
       }
       case "index": {
         const object = this.#operand(node.object, scope);
         const index = this.value(node.index, scope);
+        if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
+          return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typeOf(node.object, scope).nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
+        }
         // A computed key may not be one of an object literal's declared names. JavaScript then
         // reads an absent property, while TypeScript rejects the indexing expression.
         if (typeOf(node.object, scope).type.kind === "object") {
@@ -471,10 +477,18 @@ export class Lowering {
         return `${this.condition(node.test, scope)} ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}`;
       case "call":
         return this.#call(node, scope);
-      case "object":
-        return `{ ${node.pairs.map((pair) => `${/^[A-Za-z_$][\w$]*$/.test(pair.key) ? pair.key : quote(pair.key)}: ${this.value(pair.value, scope)}`).join(", ")} }`;
-      case "array":
-        return `[${node.items.map((item) => this.value(item, scope)).join(", ")}]`;
+      case "object": {
+        const value = `{ ${node.pairs.map((pair) => `${/^[A-Za-z_$][\w$]*$/.test(pair.key) ? pair.key : quote(pair.key)}: ${this.value(pair.value, scope)}`).join(", ")} }`;
+        return node.pairs.some((pair) => mayProduceInvalidResult(pair.value, scope))
+          ? `(() => { const value = ${value}; return Object.values(value).some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
+          : value;
+      }
+      case "array": {
+        const value = `[${node.items.map((item) => this.value(item, scope)).join(", ")}]`;
+        return node.items.some((item) => mayProduceInvalidResult(item, scope))
+          ? `(() => { const value = ${value}; return value.some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
+          : value;
+      }
     }
   }
 
@@ -505,7 +519,9 @@ export class Lowering {
     if (filled) return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
-      case "list": return type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
+      case "list": return mayProduceInvalidResult(node, scope)
+        ? `((value: any) => value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}length)(${code})`
+        : type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
       default: return `${this.#use("truthy")}(${code})`;
     }
   }
@@ -516,7 +532,9 @@ export class Lowering {
     const type = typeOf(node, scope);
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
     if (isScalar(type)) return code;
-    if (item !== undefined && isScalar(item)) return `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
+    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
+      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
+      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
     return `${this.#use("text")}(${code})`;
   }
 
@@ -534,7 +552,9 @@ export class Lowering {
     // A string-or-number union serializes as Vue writes it; one with a boolean member needs the rule.
     if (kind === "scalar" && !hasBoolean(type.type)) return plain;
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
-    if (item !== undefined && isScalar(item)) return `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
+    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
+      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
+      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
     if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.#use("attribute")}(${code})`;
     return `${this.#use("attribute")}(${code})`;
   }
@@ -627,7 +647,9 @@ export class Lowering {
   #call(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): string {
     const values = node.args.map((argument) => this.value(argument, scope)).join(", ");
     if (node.fn === "default") {
-      return node.args.length === 2 ? `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})` : "undefined";
+      if (node.args.length !== 2) return "undefined";
+      if (node.args[0]?.kind === "literal" && node.args[0].value === null) return this.value(node.args[1]!, scope);
+      return `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
     }
     if (node.fn === "concat" || node.fn === "join") {
       return `${this.#use(node.fn)}(${values})`;

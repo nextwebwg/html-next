@@ -619,7 +619,7 @@ const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode 
  * or a `<data>` read (whose declared type describes `.value`). A loop alias or an untyped
  * declaration says nothing, so references through it are unconstrained.
  */
-function declaredTypeAt(definition: ComponentDefinition, path: string | readonly (string | number)[]): TypeNode | undefined {
+function declaredTypeAt(definition: ComponentDefinition, path: string | readonly (string | number)[], scope?: Scope): TypeNode | undefined {
   let cache = declaredPathTypes.get(definition);
   if (cache === undefined) {
     cache = new Map();
@@ -627,15 +627,16 @@ function declaredTypeAt(definition: ComponentDefinition, path: string | readonly
   }
   const segments = typeof path === "string" ? path.split(".") : path.map(String);
   const cacheKey = JSON.stringify(segments);
-  if (cache.has(cacheKey)) return cache.get(cacheKey);
+  const selected = definition.contract.props[segments[0]!]?.select !== undefined && scope !== undefined;
+  if (!selected && cache.has(cacheKey)) return cache.get(cacheKey);
 
   const [root, ...steps] = segments;
-  let type = rootDeclaredType(definition, root!, steps);
+  let type = rootDeclaredType(definition, root!, steps, scope);
   for (const step of type === undefined ? [] : steps) {
     if (type === undefined) break;
     type = typeAtKey(type, step);
   }
-  cache.set(cacheKey, type);
+  if (!selected) cache.set(cacheKey, type);
   return type;
 }
 
@@ -644,9 +645,14 @@ function rootDeclaredType(
   definition: ComponentDefinition,
   root: string,
   steps: string[],
+  scope?: Scope,
 ): TypeNode | undefined {
   const prop = definition.contract.props[root];
-  if (prop !== undefined) return normalizeType(prop.type);
+  if (prop !== undefined) {
+    const type = prop.select === undefined || scope === undefined
+      ? prop.type : selectedPropType(definition.contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
+    return type === null ? { kind: "terminal", name: "null" } : normalizeType(type);
+  }
   for (const declaration of definition.declarations ?? []) {
     if (declaration.name !== root) continue;
     if (declaration.kind === "state" || declaration.kind === "computed") {
@@ -738,8 +744,12 @@ function conformsAtReference(value: Value, type: TypeNode): boolean {
 
 /** Check the destination's immediate type; nested fields are checked when read. */
 function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
-  if (type === undefined || value === null || value === ABSENT) return true;
-  return type !== null && conformsAtReference(value, normalizeType(type));
+  if (type === undefined || value === ABSENT) return true;
+  if (type === null) return false;
+  // A missing number source cannot overwrite a child's declared default. Only a destination
+  // that explicitly includes null accepts it; ordinary nullable rendering is handled elsewhere.
+  if (value === null) return parseTypedValue(value, type, "$", "value").ok;
+  return conformsAtReference(value, normalizeType(type));
 }
 
 /**
@@ -760,7 +770,9 @@ function evalConforming(
     const value = readPath(path, scope);
     // Absence is not a violation: a value that is not there yet has nothing to conform to.
     if (value === ABSENT || value === undefined) continue;
-    if (conformsAtReference(value, type)) continue;
+    const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
+      ? type : declaredTypeAt(definition, path, scope);
+    if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
     return NONCONFORMING;
   }
   try {
@@ -985,7 +997,7 @@ function runHandler(
       const next = evalConforming(step.value, scope, context.definition);
       if (next === NONCONFORMING) continue;
       const path = resolveWritablePath(scope, step.writablePath);
-      if (path === undefined || !conformsAtDestination(next, declaredTypeAt(context.definition, path))) continue;
+      if (path === undefined || !conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) continue;
       setWritablePath(scope, path, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
@@ -1015,7 +1027,9 @@ function dispatchComponentEvent(
   declaration: EventDeclaration | undefined,
 ): boolean {
   if (declaration !== undefined && detail !== undefined) {
-    const parsed = parseTypedValue(detail, declarationTypeNode(declaration.type, declaration.shape)!);
+    // Literal <dispatch value> text is parsed while reading the definition. At dispatch time
+    // both controller input and expr:value are JavaScript values, not HTML text to coerce.
+    const parsed = parseTypedValue(detail, declarationTypeNode(declaration.type, declaration.shape)!, "$", "value");
     if (!parsed.ok) fail("HR002", `Event \`${event}\` detail does not satisfy its declared type.`);
   }
   return target.dispatchEvent(new CustomEvent(event, {
@@ -1635,6 +1649,17 @@ function renderInstance(
     if (iteratedRefNames(context.definition).has(node.ref)) {
       ((context.refs[node.ref] ??= []) as Element[]).push(element);
     } else context.refs[node.ref] = element;
+    if (node.name.includes("-")) {
+      let current = element;
+      whenLowered(element, (root) => {
+        const recorded = context.refs[node.ref!];
+        if (Array.isArray(recorded)) {
+          const index = recorded.indexOf(current);
+          if (index >= 0) (recorded as Element[])[index] = root;
+        } else if (recorded === current) context.refs[node.ref!] = root;
+        current = root;
+      });
+    }
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
@@ -1665,7 +1690,8 @@ function renderInstance(
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "attribute") {
-      ownEffect(context, scope, () => {
+      let bindingTarget = element;
+      const applyBinding = (): void => {
         const value = evalConforming(attribute.expression, scope, context.definition);
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
@@ -1690,28 +1716,49 @@ function renderInstance(
           }
         }
         if (attribute.target === "class") {
-          element.classList.toggle(attribute.name, truthy(value));
+          bindingTarget.classList.toggle(attribute.name, truthy(value));
         } else if (attribute.target === "style") {
-          (element as HTMLElement).style.setProperty(attribute.name, toText(value));
-        } else if (attribute.twoWay === true && applyBoundControlValue(element, attribute.name, value)) {
+          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
+        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
           // Native form-control properties carry the live value; no duplicate attribute write.
         } else {
-          setAttribute(element, attribute.name, toAttribute(value, attribute.name));
+          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
         }
+      };
+      ownEffect(context, scope, applyBinding);
+      if (node.name.includes("-")) whenLowered(element, (root) => {
+        bindingTarget = root;
+        applyBinding();
       });
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
-        const eventName = element instanceof HTMLSelectElement ||
-          (element instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(element.type))
-          ? "change"
-          : "input";
+        let target = element;
+        let attached = false;
+        let eventName = "input";
         const listener = (): void => {
-          if (element instanceof HTMLInputElement && element.type === "radio" && !element.checked) return;
-          setWritablePath(scope, attribute.writablePath!, controlValue(element));
+          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
+          setWritablePath(scope, attribute.writablePath!, controlValue(target));
+        };
+        const attach = (): void => {
+          eventName = target instanceof HTMLSelectElement ||
+            (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
+            ? "change" : "input";
+          target.addEventListener(eventName, listener);
+          attached = true;
+        };
+        const detach = (): void => {
+          target.removeEventListener(eventName, listener);
+          attached = false;
         };
         ownEffect(context, scope, () => {
-          element.addEventListener(eventName, listener);
-          return () => element.removeEventListener(eventName, listener);
+          attach();
+          return detach;
         }, 2);
+        whenLowered(element, (root) => {
+          const live = attached;
+          if (live) detach();
+          target = root;
+          if (live) attach();
+        });
       }
     } else if (attribute.kind === "property") {
       ownEffect(context, scope, () => {
@@ -3079,18 +3126,19 @@ function applyComponentProps(
     instance.propInputs[name]!.set({ value: input === undefined ? null : input, source: "value", present: input !== undefined });
     const attributeName = `data-${kebabCase(name)}`;
     const value = next[name] as Value;
+    // A bound data-* attribute is template output. Direct input still updates the prop handle,
+    // but only the binding may write that output (and an invalid input cannot trigger it).
+    const bound = instance.rootNode.attributes.some((binding) =>
+      binding.kind === "attribute" && binding.name === attributeName);
     // Null has no attribute form, but remains the effective in-memory prop value.
     if (input === undefined || input === null) {
       instance.explicit.delete(name);
       // An attribute the template binds is its own output (it shows the default); leave it be.
-      const bound = instance.rootNode.attributes.some((binding) =>
-        binding.kind === "attribute" && binding.name === attributeName
-      );
       if (!bound) element.removeAttribute(attributeName);
     } else {
       instance.explicit.add(name);
       const selected = selectedPropType(contract, prop, next);
-      element.setAttribute(attributeName, reflectedPropValue(input, selected));
+      if (!bound) element.setAttribute(attributeName, reflectedPropValue(input, selected));
     }
     if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
   }

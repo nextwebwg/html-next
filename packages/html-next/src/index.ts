@@ -3,6 +3,8 @@ export { HtmlDiagnosticError } from "./diagnostics.js";
 export {
   generateComponent,
   generateVueComponent,
+  generateReactComponent,
+  generateReactConversion,
   GENERATOR_VERSION,
   importsVueHost,
   importsVueHtml,
@@ -12,6 +14,14 @@ export {
   vueHtmlArtifact,
   vueControlArtifact,
   vuePropsArtifact,
+  reactPropsArtifact,
+  reactEventsArtifact,
+  reactControlArtifact,
+  reactDataArtifact,
+  reactHtmlArtifact,
+  reactHostArtifact,
+  reactContextArtifact,
+  reactDepthArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
 export { addControllerGraph } from "./controller-files.js";

@@ -133,7 +133,7 @@ export default Object.assign(Component, { ssrRender });
         const entry = join(output, "entry.ts");
         vueBundle = join(output, "vue.js");
         await writeFile(entry, `import { createApp, h, ref } from "vue";
-import XControlled from "./vue/XControlled";
+import XControlled from "./${manifest.components[0]!.artifact.replace(/\.vue$/, "")}";
 window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 };
 window.delayController = location.search.includes("delay");
 const controlled = ref(null);
