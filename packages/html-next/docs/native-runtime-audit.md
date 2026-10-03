@@ -15,6 +15,39 @@ The `native_build.capabilityFixtures` group reports isolated generated attributi
 `pnpm audit:native` records relevant platform surface support and the native sanitizer's output in
 the installed Chromium, Firefox, and WebKit builds.
 
+## Inline text reads
+
+The native HTML parser already creates inert text nodes in context-valid elements, including table
+cells. `Document.createTextNode()` and `Text.data` provide escaped text output and preserve sibling
+markup and node identity. The remaining gap is recognizing authored `$path` reads and `{expression}` segments and subscribing
+them to the existing `$value` effects. The shared parser records literal segments
+and compiled path reads within each authored text node; the live runtime and Node renderer update native text nodes, while
+framework targets lower the same reads to their own escaped-text rendering. Generated scalar
+components use their existing specialized dependency updates. No HTML source replacement or
+runtime scanning of returned values is involved. Identifier validation reuses CSS Syntax's
+ident-start code points, with digits as continuations and without dashes or identifier escapes.
+
+## Intl expression formatting
+
+Native `Intl.NumberFormat`, `DateTimeFormat`, `ListFormat`, `RelativeTimeFormat`, `DurationFormat`,
+`DisplayNames`, and `PluralRules` own locale negotiation, option validation, and localized output.
+The remaining gap is selecting a formatter from the declared HTML type, adapting serialized typed
+values, and connecting formatting to existing expression dependencies and invalid-value retention.
+`format.ts` supplies one native adapter used by the interpreter and emitted only into generated
+Vue/React components with authored formatting. The generated helper has no live-parser dependency.
+Native number/date range methods and structured parts support `formatRange()` and `formatParts()`.
+
+Civil `date`, `time`, and `datetime-local` values have no zone. Their native adapter anchors fields
+in UTC internally and removes unavailable zone-name parts; it does not shift the clock or show an
+invented UTC label. Global `datetime` values retain their instant meaning. CSS percentages supply a
+numeric ratio; CSS durations supply balanced duration fields. Plural message selection adds only a
+category lookup and formatted `#` substitution. Other native options keep their native names and
+semantics. Explicit locale/time-zone arguments make SSR and client preferences reviewable.
+Cross-engine evidence lives in `formatting-fixture.ts`, Vue/React parity, and server hydration tests.
+Node 22 lacks `Intl.DurationFormat`; the isolated server worker imports FormatJS's maintained
+polyfill, which preserves native implementations where available. The browser graph does not
+import it. Standalone framework SSR consumers configure this polyfill in their own server entry.
+
 ## Complete live inventory
 
 The production browser entry currently contains 76,087 attributed minified raw bytes plus 136

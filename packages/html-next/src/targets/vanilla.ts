@@ -11,6 +11,7 @@ import type {
   SlotNode,
   TemplateAttribute,
   TemplateNode,
+  TextNode,
 } from "../template.js";
 import { definitionMayInvokeComponents, rootArms } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -100,6 +101,7 @@ interface DirectProp {
 interface DirectPropBinding {
   readonly element: string;
   readonly prop: string;
+  readonly expression?: string;
   readonly kind: "attribute" | "property" | "text";
   readonly name?: string;
 }
@@ -540,6 +542,31 @@ function directEventListenerOptions(event: DirectEvent): string | undefined {
   return options.length === 0 ? undefined : `{ ${options.join(", ")} }`;
 }
 
+function hasMixedText(node: TemplateNode): boolean {
+  if (node.kind === "text") return node.segments !== undefined;
+  if (node.kind === "slot") return (node.fallback ?? []).some(hasMixedText);
+  return node.children.some(hasMixedText);
+}
+
+function directTextExpression(node: TextNode, values: ReadonlyMap<string, DirectValue>): DirectExpression | undefined {
+  if (node.segments === undefined) return node.expressionPlan === undefined
+    ? { source: js(node.value), kind: "string" } : directPrimitiveExpression(node.expressionPlan.ast, values);
+  const parts = node.segments.map((segment) => directTextExpression(segment, values));
+  return parts.some((part) => part === undefined) ? undefined : {
+    source: `(${parts.map((part) => part!.kind === "string" ? part!.source : `String(${part!.source})`).join(" + ")})`, kind: "string",
+  };
+}
+
+function textDependencies(node: TextNode): readonly string[] {
+  return [...new Set((node.segments ?? [node]).flatMap((segment) =>
+    segment.expressionPlan === undefined ? [] : directDependencies(segment.expressionPlan.ast)))];
+}
+
+function staticText(node: TextNode, plan: DirectReactivePlan): boolean {
+  return (node.segments ?? [node]).every((segment) => segment.expressionPlan === undefined
+    || directExpressionIsStatic(segment.expressionPlan.ast, plan));
+}
+
 function directTemplateSupported(
   node: TemplateNode,
   values: ReadonlyMap<string, DirectValue>,
@@ -547,7 +574,7 @@ function directTemplateSupported(
   states: ReadonlySet<string>,
   svgParent = false,
 ): boolean {
-  if (node.kind === "text") return true;
+  if (node.kind === "text") return directTextExpression(node, values) !== undefined;
   if (node.kind === "slot") return false;
   if (node.flow !== undefined) return false;
   const svg = node.name === "svg" || (svgParent && node.name !== "foreignObject");
@@ -587,6 +614,7 @@ function directBindingValues(
   values: string[] = [],
   svgParent = false,
 ): readonly string[] {
+  if (node.kind === "text" && !staticText(node, plan)) values.push(...textDependencies(node));
   if (node.kind !== "element") return values;
   const svg = node.name === "svg" || (svgParent && node.name !== "foreignObject");
   for (const attribute of node.attributes) {
@@ -613,6 +641,7 @@ function directStaticBindingValues(
   values: string[] = [],
   svgParent = false,
 ): readonly string[] {
+  if (node.kind === "text" && staticText(node, plan)) values.push(...textDependencies(node));
   if (node.kind !== "element") return values;
   const svg = node.name === "svg" || (svgParent && node.name !== "foreignObject");
   for (const attribute of node.attributes) {
@@ -634,6 +663,7 @@ function hasDirectExpressionBinding(
   plan: DirectReactivePlan,
   svgParent = false,
 ): boolean {
+  if (node.kind === "text") return node.segments !== undefined && !staticText(node, plan);
   if (node.kind !== "element") return false;
   const svg = node.name === "svg" || (svgParent && node.name !== "foreignObject");
   return node.attributes.some((attribute) =>
@@ -943,7 +973,8 @@ function directPropTemplateSupported(
   nativeProperties: boolean,
   svgParent = false,
 ): boolean {
-  if (node.kind === "text") return true;
+  if (node.kind === "text") return (node.segments ?? [node]).every((segment) => segment.expressionPlan === undefined
+    || segment.expressionPlan.ast.kind === "id" && props.has(segment.expressionPlan.ast.name));
   if (node.kind === "slot") {
     return node.nameExpression === undefined &&
       (node.fallback ?? []).every((child) => directPropTemplateSupported(child, props, nativeProperties, svgParent));
@@ -1003,7 +1034,28 @@ function renderNode(
   directProps?: DirectPropRenderContext,
 ): void {
   if (node.kind === "text") {
-    lines.push(`  ${parent}.append(${js(node.value)});`);
+    if (node.expressionPlan === undefined && node.segments === undefined) lines.push(`  ${parent}.append(${js(node.value)});`);
+    else {
+      const variable = `text${counter.value++}`;
+      lines.push(`  const ${variable} = document.createTextNode("");`);
+      lines.push(`  ${parent}.append(${variable});`);
+      if (direct !== undefined) {
+        const expression = directTextExpression(node, direct.plan.values)!;
+        const dependencies = textDependencies(node);
+        if (staticText(node, direct.plan)) lines.push(`  ${variable}.data = String(${expression.source});`);
+        else direct.bindings.push({ element: variable, kind: "text", state: dependencies[0]!, expression, dependencies });
+      } else if (directProps !== undefined && node.segments !== undefined) {
+        const names = textDependencies(node);
+        const source = `[${node.segments.map((segment) => segment.expressionPlan === undefined ? js(segment.value)
+          : directProps.plan.props.get(segment.expressionPlan.ast.kind === "id" ? segment.expressionPlan.ast.name : "")!.variable).join(", ")}].join("")`;
+        for (const name of names) directProps.bindings.push({ element: variable, kind: "text", prop: name, expression: source });
+        lines.push(`  ${variable}.data = ${source};`);
+      } else if (directProps !== undefined && node.expressionPlan?.ast.kind === "id") {
+        const name = node.expressionPlan.ast.name;
+        directProps.bindings.push({ element: variable, kind: "text", prop: name });
+        lines.push(`  ${variable}.data = ${directProps.plan.props.get(name)!.variable} == null ? "" : String(${directProps.plan.props.get(name)!.variable});`);
+      }
+    }
     return;
   }
   if (node.kind === "slot") {
@@ -1314,7 +1366,7 @@ export function generateVanilla(
     ...(directProps === undefined
       ? []
       : [...directProps.props.entries()].map(([name, prop]) =>
-        `  const ${prop.variable} = componentProps[${js(name)}] === undefined ? ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "undefined"} : componentProps[${js(name)}];`
+        `  ${hasMixedText(template) ? "let" : "const"} ${prop.variable} = componentProps[${js(name)}] === undefined ? ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "undefined"} : componentProps[${js(name)}];`
       )),
   ];
   const valueCounter = { value: 0 };
@@ -1598,7 +1650,7 @@ export function generateVanilla(
     const renderBindings = (bindings: readonly DirectPropBinding[]): void => {
       for (const binding of bindings) {
         if (binding.kind === "text") {
-          lines.push(`      ${binding.element}.textContent = value == null ? "" : String(value);`);
+          lines.push(`      ${binding.element}.textContent = ${binding.expression ?? 'value == null ? "" : String(value)'};`);
         } else if (binding.kind === "property") {
           lines.push(`      ${binding.element}[${js(binding.name!)}] = value;`);
         } else {
@@ -1621,6 +1673,7 @@ export function generateVanilla(
         lines.push(`  manageGeneratedProp(element, ${descriptor(name, prop)});`);
       } else {
         lines.push(`  manageGeneratedProp(element, ${descriptor(name, prop)}, (value) => {`);
+        if (bindings.some((binding) => binding.expression !== undefined)) lines.push(`      ${prop.variable} = value;`);
         renderBindings(bindings);
         lines.push("  });");
       }
@@ -1637,6 +1690,7 @@ export function generateVanilla(
           const bindings = directPropRender.bindings.filter((binding) => binding.prop === name);
           if (bindings.length === 0) continue;
           lines.push(`    if (name === ${js(name)}) {`);
+          if (directPropRender.bindings.some((binding) => binding.expression !== undefined)) lines.push(`      ${directPropRender.plan.props.get(name)!.variable} = value;`);
           renderBindings(bindings);
           lines.push("    }");
         }

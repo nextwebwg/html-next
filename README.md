@@ -96,7 +96,7 @@ component dependency graph, not a registration script.
   </defs>
 
   <button $ref="button" type="button">
-    <span $value="label"></span>
+    <span>$label</span>
   </button>
 
   <style>

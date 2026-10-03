@@ -12,6 +12,7 @@ import {
   validateMvpDomProperty,
 } from "./language.js";
 import { componentName } from "./names.js";
+import { IDENTIFIER, isIdentifier } from "./identifiers.js";
 import type {
   ComponentDefinition,
   ComponentDeclaration,
@@ -22,6 +23,7 @@ import type {
   SlotContract,
   TemplateAttribute,
   TemplateNode,
+  TextNode,
 } from "./template.js";
 import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
@@ -57,7 +59,7 @@ export function parseProjectedSlotContent(
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
       const value = sourceText(child);
-      if (value.trim() !== "") nodes.push({ kind: "text", value });
+      if (value.trim() !== "") nodes.push(...parseText(value, scope, source));
     } else if (isElement(child)) {
       nodes.push(parseElement(child, definition.contract, scope, source, slotState, platform));
     }
@@ -145,8 +147,8 @@ function validateDeclarationContent(element: Element, source: string): void {
 
 const FLOW_NAME_RE = /^\$(?:if|each|where|sort|limit|key|with|match|when|else)$/;
 const RAW_SINK_RE = /^(?:innerhtml|outerhtml|textcontent|innertext|srcdoc)$/;
-const EACH_RE = /^\s*([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*)\s*)?\bof\b\s*(.+)$/;
-const AS_RE = /^\s*(.+?)\s+\bas\b\s+([A-Za-z_$][\w$]*)\s*$/;
+const EACH_RE = new RegExp(String.raw`^\s*(${IDENTIFIER})(?:\s*,\s*(${IDENTIFIER}))?\s+of\b\s*(.+)$`, "u");
+const AS_RE = new RegExp(String.raw`^\s*(.+?)\s+\bas\b\s+(${IDENTIFIER})\s*$`, "u");
 const EVENT_PART_RE = /^[a-z][a-z0-9-]*$/;
 const EVENT_MODIFIER_RE = /^(?:prevent|stop|self|once|passive|capture|left|middle|right|ctrl|shift|alt|meta|exact|enter|escape|space|tab|up|down)$/;
 const NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$-]*$/;
@@ -181,6 +183,60 @@ function compileScopedExpression(
   return expression;
 }
 
+// Scan browser-parsed text, not source HTML. Mixed segments share one native Text node.
+// Brackets accept literal keys/indexes in shorthand; braces contain any checked expression.
+const TEXT_PATH = new RegExp(String.raw`\$${IDENTIFIER}(?:\.(?:${IDENTIFIER}|[0-9]+)|\[(?:[0-9]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')\])*`, "uy");
+
+function parseText(value: string, scope: ParseScope, source: string): TemplateNode[] {
+  const nodes: TextNode[] = [];
+  let literal = "";
+  const flush = (): void => {
+    if (literal !== "") nodes.push({ kind: "text", value: literal });
+    literal = "";
+  };
+  for (let offset = 0; offset < value.length;) {
+    if (value[offset] === "\\" && ["$", "{", "\\"].includes(value[offset + 1] ?? "")) {
+      literal += value[offset + 1];
+      offset += 2;
+      continue;
+    }
+    if (value[offset] === "{") {
+      let end = offset + 1;
+      let depth = 1;
+      let quote: string | undefined;
+      for (; end < value.length; end++) {
+        const char = value[end];
+        if (quote !== undefined) {
+          if (char === "\\") end++;
+          else if (char === quote) quote = undefined;
+        } else if (char === "'" || char === '"') quote = char;
+        else if (char === "{") depth++;
+        else if (char === "}" && --depth === 0) break;
+      }
+      if (depth !== 0) fail("HT004", "Unterminated text expression; escape a literal opening brace as `\\{`.", source);
+      flush();
+      const expression = value.slice(offset + 1, end);
+      nodes.push({ kind: "text", value: expression, expressionPlan: compileScopedExpression(expression, scope, source) });
+      offset = end + 1;
+      continue;
+    }
+    if (value[offset] === "$") {
+      TEXT_PATH.lastIndex = offset;
+      const match = TEXT_PATH.exec(value);
+      if (match !== null) {
+        flush();
+        nodes.push({ kind: "text", value: match[0], expressionPlan: compileScopedExpression(match[0], scope, source) });
+        offset = TEXT_PATH.lastIndex;
+        continue;
+      }
+    }
+    literal += value[offset++];
+  }
+  flush();
+  return nodes.length > 1 && nodes.some((node) => node.expressionPlan !== undefined)
+    ? [{ kind: "text", value, segments: nodes }] : nodes;
+}
+
 function validateCompiledExpression(
   expression: CompiledExpression,
   scope: ParseScope,
@@ -211,12 +267,12 @@ function collectTargets(
   const visit = (element: Element): void => {
     for (const attribute of sourceAttributes(element)) {
       if (attribute.name.startsWith("from:")) {
-        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
+        if (isIdentifier(attribute.value)) {
           record(attribute.value, { attribute: attribute.name.slice("from:".length).toLowerCase() });
         }
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
-        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(attribute.value)) {
+        if (isIdentifier(attribute.value)) {
           const property = platform.resolveDomProperty(sourceTag(element), key) ??
             (attribute.value.toLowerCase() === key ? attribute.value : key);
           record(attribute.value, { property });
@@ -360,7 +416,7 @@ function readProps(
     if (name === undefined || name === "") {
       fail("HC010", "A <prop> requires a `name` attribute.", source);
     }
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
+    if (!isIdentifier(name)) {
       fail("HC010", `Invalid prop name \`${name}\`.`, source);
     }
     const typeAttribute = attr(element, "type");
@@ -658,8 +714,11 @@ function readDeclarations(
       continue;
     }
     const localName = kind === "context" ? attr(element, "as") ?? name : name;
-    if (kind === "context" && !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(localName)) {
+    if (kind === "context" && !isIdentifier(localName)) {
       fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
+    }
+    if (kind !== "handler" && kind !== "method" && !isIdentifier(localName)) {
+      fail("HC013", `Declaration \`${localName}\` is not a valid expression identifier.`, source);
     }
     if (names.has(localName)) {
       fail("HC020", `Declaration \`${localName}\` collides in the flat component scope.`, source);
@@ -1152,7 +1211,7 @@ function parseElement(
     if (child.nodeName === "#comment") continue;
     if (isText(child)) {
       const value = sourceText(child);
-      if (value.trim() !== "") children.push({ kind: "text", value });
+      if (value.trim() !== "") children.push(...parseText(value, childScope, source));
       continue;
     }
     if (!isElement(child)) continue;
@@ -1169,7 +1228,7 @@ function parseElement(
           flowValues[attribute.name] = attribute.value;
         } else if (attribute.name.startsWith("from:") && attribute.name !== "from:name") {
           const prop = attribute.name.slice("from:".length);
-          if (!/^[A-Za-z_$][\w$]*$/.test(prop)) {
+          if (!isIdentifier(prop)) {
             fail("HT008", `Slot prop \`${prop}\` is not an expression-scope name.`, source);
           }
           rawProps.push({ name: prop, expression: attribute.value });
@@ -1202,7 +1261,7 @@ function parseElement(
         if (fallbackNode.nodeName === "#comment") continue;
         if (isText(fallbackNode)) {
           const value = sourceText(fallbackNode);
-          if (value.trim() !== "") fallback.push({ kind: "text", value });
+          if (value.trim() !== "") fallback.push(...parseText(value, slotScope, source));
         } else if (isElement(fallbackNode)) {
           fallback.push(parseElement(fallbackNode, contract, slotScope, source, slotState, platform));
         }

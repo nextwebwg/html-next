@@ -2341,7 +2341,19 @@ function renderTemplateNode(
 ): Node[] {
   if (node.kind === "text") {
     const text = candidate instanceof Text ? candidate : document.createTextNode("");
-    text.data = node.value;
+    if (node.expressionPlan === undefined && node.segments === undefined) text.data = node.value;
+    else {
+      const segments = node.segments ?? [node];
+      const accepted = segments.map((segment) => segment.expressionPlan === undefined ? segment.value : "");
+      ownEffect(context, scope, () => {
+        for (const [index, segment] of segments.entries()) {
+          if (segment.expressionPlan === undefined) continue;
+          const value = evalConforming(segment.expressionPlan.source, scope, context.definition);
+          if (value !== NONCONFORMING) accepted[index] = toText(value);
+        }
+        text.data = accepted.join("");
+      });
+    }
     return [text];
   }
   if (node.kind === "slot") return node.flow === undefined

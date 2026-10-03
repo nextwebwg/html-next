@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "@formatjs/intl-durationformat/polyfill.js";
 import { describe, it } from "vitest";
 
 import {
@@ -19,6 +20,18 @@ import {
 } from "../src/expression.js";
 
 describe("expression: compilation", () => {
+  it("uses case-sensitive names without dollars, dashes, or identifier escapes", () => {
+    const values = scope({ _name: "Ada", Name2: "Bea", name2: "Lin", café: "tea", "😀": "smile", record: { "first-name": "Ada", "$name": "Bea" } });
+    for (const [expression, expected] of [["$_name", "Ada"], ["$Name2", "Bea"], ["$name2", "Lin"], ["$café", "tea"], ["$😀", "smile"], ["$record['first-name']", "Ada"], ["$record['$name']", "Bea"]]) {
+      assert.equal(evaluate(expression!, values), expected);
+    }
+    assert.equal(evaluate("$left-$right", scope({ left: 5, right: 2 })), 3);
+    assert.deepEqual(compileExpression("$first-name").dependencies, ["first", "name"]);
+    for (const expression of ["$$name", "$1name", "$", "name$tail", "$record.$name", "{ $name: 1 }", String.raw`\name`, String.raw`na\me`]) {
+      assert.throws(() => compileExpression(expression), SyntaxError, expression);
+    }
+    assert.equal(evaluate("{ '$name': 1 }", scope({})) instanceof Object, true);
+  });
   it("uses dollar-prefixed references and dotted or bracketed list indexes", () => {
     const compiled = compileExpression("$items.0.name = 'Ada' and $items.1.name != null");
     assert.deepEqual(compiled.dependencies, ["items.0.name", "items.1.name"]);
@@ -93,6 +106,76 @@ describe("expression: compilation", () => {
 function scope(entries: Record<string, Value>): Scope {
   return new Map(Object.entries(entries));
 }
+
+describe("expression: Intl formatting", () => {
+  it("supports explicit formats, Intl options, and locale expressions", () => {
+    const s = scope({ amount: 1234.5, names: ["Ada", "Lin"], offset: -1, locale: "fr-CA" });
+    assert.equal(evaluate("format($amount, 'currency', { currency: 'CAD' }, $locale)", s),
+      new Intl.NumberFormat("fr-CA", { style: "currency", currency: "CAD" }).format(1234.5));
+    assert.equal(evaluate("format($names, 'list', { type: 'disjunction' }, 'en')", s), "Ada or Lin");
+    assert.equal(evaluate("format($offset, 'relativeTime', { unit: 'day', numeric: 'auto' }, 'en')", s), "yesterday");
+    assert.equal(evaluate("format(0.15, 'percent', {}, 'en')", s), "15%");
+    assert.equal(evaluate("format(5, 'unit', { unit: 'meter' }, 'en')", s), "5 m");
+    assert.equal(evaluate("format('2026-10-03T13:45Z', 'dateTime', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' }, 'en-CA')", s),
+      new Intl.DateTimeFormat("en-CA", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }).format(new Date("2026-10-03T13:45Z")));
+    assert.equal(evaluate("format({ hours: 1, minutes: 30 }, 'duration', { style: 'digital' }, 'en')", s), "1:30:00");
+    assert.equal(evaluate("format('CA', 'displayName', { type: 'region' }, 'en')", s), "Canada");
+    assert.equal(evaluate("format(2, 'plural', { forms: { one: '# item', other: '# items' } }, 'en')", s), "2 items");
+  });
+
+  it("infers from declared types rather than string contents", () => {
+    const s: Scope = Object.assign(scope({ amount: 12, clock: "01:46:40", names: ["Ada", "Lin"], delay: "1500ms", ratio: "15%", untyped: "01:46:40" }), {
+      typeOfDeclaredPath: (path: string) => path === "names" ? { kind: "list" as const, item: { kind: "terminal" as const, name: "string" as const } }
+        : { kind: "terminal" as const, name: ({ amount: "number", clock: "time", delay: "duration", ratio: "percentage", untyped: "string" } as const)[path as "amount"] },
+    });
+    assert.equal(evaluate("format($amount, { style: 'currency', currency: 'USD' }, 'en')", s), "$12.00");
+    assert.equal(evaluate("format($clock, { timeStyle: 'medium', hour12: false }, 'en-GB')", s), "01:46:40");
+    assert.equal(evaluate("format($clock, { timeStyle: 'long', hour12: false }, 'en-GB')", s), "01:46:40");
+    assert.equal(evaluate("format($names, {}, 'en')", s), "Ada and Lin");
+    assert.equal(evaluate("concat('Names: ', format([], {}, 'en'))", s), "Names: ");
+    assert.equal(evaluate("format([$untyped, concat('A', 'da')], {}, 'en')", s), "01:46:40 and Ada");
+    assert.equal(evaluate("format($delay, { style: 'long' }, 'en')", s), "1 second, 500 milliseconds");
+    assert.equal(evaluate("format($ratio, {}, 'en')", s), "15%");
+    assert.equal(evaluateCompiled(compileExpression("format($untyped)"), s), NONCONFORMING);
+    for (const expr of ["format(1, 'currency', {}, 'en')", "format(1, 'bogus')", "format(1, 'number', {}, 'bad_locale')", "format('oops', 'number')"]) {
+      assert.equal(evaluateCompiled(compileExpression(expr), s), NONCONFORMING, expr);
+    }
+    assert.equal(evaluate("format(null, 'number')", s), ABSENT);
+  });
+
+  it("formats ranges and exposes structured parts in expressions", () => {
+    assert.equal(evaluate("formatRange(1, 3, 'number', {}, 'en')", scope({})), new Intl.NumberFormat("en").formatRange(1, 3));
+    const parts = evaluate("formatParts(12.5, 'currency', { currency: 'USD' }, 'en')", scope({}));
+    assert.deepEqual(parts, new Intl.NumberFormat("en", { style: "currency", currency: "USD" }).formatToParts(12.5));
+    assert.deepEqual(compileExpression("concat(format($amount, 'currency', { currency: $currency }, $locale), ' due')").dependencies, ["amount", "currency", "locale"]);
+  });
+
+  it("preserves civil fields and rejects missing fields or rollover dates", () => {
+    const s = scope({});
+    for (const expr of [
+      "format('01:46:40', 'dateTime')", "format('2026-10-03', 'time')",
+      "format('2026-02-30', 'date')", "format('0000-01-01', 'date')",
+      "format('01:46:40', 'time', { timeZone: 'America/Vancouver' })",
+      "format('2026-10-03', 'date', { hour: 'numeric' })",
+    ]) assert.equal(evaluateCompiled(compileExpression(expr), s), NONCONFORMING, expr);
+    assert.equal(evaluate("format('12026-10-03', 'date', { year: 'numeric' }, 'en')", s), "12026");
+    assert.equal(evaluate("format('01:46:40', 'time', { timeStyle: 'full', hour12: false }, 'en-GB')", s), "01:46:40");
+  });
+
+  it("infers dynamic collection items without guessing heterogeneous object fields", () => {
+    const number = { kind: "terminal", name: "number" } as const;
+    const s: Scope = Object.assign(scope({ items: [12], record: { price: 15 }, object: { "0": 1, text: "hello" }, index: 0, key: "price", field: "text" }), {
+      typeOfDeclaredPath: (path: string) => ({
+        items: { kind: "list", item: number }, "items.0": number,
+        record: { kind: "record", value: number }, "record.0": number,
+        object: { kind: "object", open: false, fields: [{ name: "0", type: number, optional: false }, { name: "text", type: { kind: "terminal", name: "string" }, optional: false }] }, "object.0": number,
+      } as Record<string, import("../src/type-system.js").TypeNode>)[path],
+    });
+    assert.equal(evaluate("format($items[$index], {}, 'en')", s), "12");
+    assert.equal(evaluate("format($record[$key], {}, 'en')", s), "15");
+    assert.equal(evaluateCompiled(compileExpression("format($object[$field])"), s), NONCONFORMING);
+  });
+});
 
 describe("expression: reads and absent value", () => {
   it("reads declared identifiers and dotted paths", () => {
@@ -225,7 +308,7 @@ describe("expression: operators, comparison, functions", () => {
     assert.equal(evaluate("42 + '%'", s), ABSENT);
     assert.equal(evaluate("concat()", s), ABSENT);
     assert.equal(evaluate("join(['red'], 1)", s), ABSENT);
-    assert.throws(() => checkExpression("format('%s', 1)"), SyntaxError);
+    assert.equal(evaluateCompiled(compileExpression("format('%s', 1)"), s), NONCONFORMING);
   });
   it("uses absent-or-null fallback without evaluating an unused arm", () => {
     const data = scope({ data: { present: 0 } });

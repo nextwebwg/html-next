@@ -184,6 +184,10 @@ export type Flow =
 export interface TextNode {
   readonly kind: "text";
   readonly value: string;
+  /** An inline path read; omitted for literal text. Uses the same value semantics as `$value`. */
+  readonly expressionPlan?: CompiledExpression;
+  /** Mixed text stays one authored text node, preserving native shaping and hydration identity. */
+  readonly segments?: readonly TextNode[];
 }
 
 export interface SlotNode {
