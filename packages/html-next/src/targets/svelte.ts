@@ -138,9 +138,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const { flow: _flow, ...body } = arm;
       if (armFlow?.kind === "when") {
         if (armFlow.testPlan === undefined) fail("HT030", `Expression \`${armFlow.test}\` could not be converted.`);
-        return `${index === 0 ? "{#if" : "{:else if"} ${lowering.condition(armFlow.testPlan.ast, local)}}${renderNode(body, false, local, lowering, context)}`;
+        return `${index === 0 ? "{#if" : "{:else if"} ${lowering.condition(armFlow.testPlan.ast, local)}}${renderNode(body, root, local, lowering, context)}`;
       }
-      if (armFlow?.kind === "else") return `{:else}${renderNode(body, false, local, lowering, context)}`;
+      if (armFlow?.kind === "else") return `{:else}${renderNode(body, root, local, lowering, context)}`;
       fail("HT018", "A $match child must be a $when or $else arm.");
     }).join("");
     const block = `${cases}{/if}`;
