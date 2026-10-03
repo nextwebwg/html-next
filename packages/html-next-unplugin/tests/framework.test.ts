@@ -305,6 +305,8 @@ describe("svelte source adapter", () => {
           <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
           </defs><output $value="value"></output></template>
+        <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" href="#next">Link</a><button $else>Button</button></template></template>
+        <template component="ui-controlled" status="early" summary="Controller methods." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><method name="increment" export="increment" returns="promise(number)"></method></defs><button $ref="button" $value="count"></button></template>
         <template component="ui-cycle" status="early" summary="Computed cycle."><defs>
           <computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><output $value="left"></output></template>
         <template component="ui-depth" status="early" summary="Recursive graph."><defs>
@@ -321,6 +323,9 @@ describe("svelte source adapter", () => {
         </defs><ui-button $ref="root" from:label="label" class="primary" class:active="active" on:click="toggle"><slot></slot></ui-button></template>`;
     await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+    const controllerSource = "export default function connect(host) {} export async function increment(host) { return ++host.state.count; }";
+    await writeFile(join(library, "controlled.js"), controllerSource);
+    await writeFile(join(root, "src", "controlled.js"), controllerSource);
     const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });
     assert.ok(prepared.aliases.has("@example/controls"));
     assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
@@ -373,7 +378,8 @@ describe("svelte source adapter", () => {
       strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
     }, include: ["src"] }));
     await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
-      import { Button } from "@example/controls"; import { UiButton } from "./controls.html";
+      import { Button } from "@example/controls"; import { UiButton, UiControlled } from "./controls.html";
+      export const method: Promise<number> = (null! as ReturnType<typeof UiControlled>).increment();
       export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
       export const local: ComponentProps<typeof UiButton> = { label: "Save" };`);
     const compiler = require.resolve("typescript/bin/tsc");
@@ -384,6 +390,12 @@ describe("svelte source adapter", () => {
       const result = error as { stdout: string };
       assert.match(result.stdout, /number.*string/);
       assert.match(result.stdout, /huge/);
+      return true;
+    });
+    await writeFile(join(root, "src", "invalid.ts"), `import { UiControlled } from "./controls.html";
+      export const bad: Promise<string> = (null! as ReturnType<typeof UiControlled>).increment();`);
+    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /Promise<number>.*Promise<string>/);
       return true;
     });
     await rm(join(root, "src", "invalid.ts"));

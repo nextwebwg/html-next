@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { createElement, type ComponentType } from "react";
-import { renderToString } from "react-dom/server";
+import { sveltePlugin } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -35,13 +31,13 @@ async function snapshot(page: Page) {
   };
 }
 
-describe.skipIf(!enabled)("React controller parity", () => {
+describe.skipIf(!enabled)("Svelte controller parity", () => {
   let directory = "";
   let loaderBundle = "";
   const outputs = new Map<"application" | "library", { readonly bundle: string; readonly markup: string; readonly css: string }>();
 
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), "html-next-react-controller-"));
+    directory = await mkdtemp(join(tmpdir(), "html-next-svelte-controller-"));
     await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(directory, "node_modules"), "dir");
     await mkdir(join(directory, "components"));
     await writeFile(join(directory, "components/controlled.html"), source);
@@ -54,41 +50,33 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       outfile: loaderBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, mode);
-      const manifest = await convertComponents({ mode, target: "react", root: directory, outDirectory,
+      const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory,
         entries: ["components/**"], publicRootURL: "/app/" });
-      try {
-        await promisify(execFile)(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), [
-          "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
-          "--target", "ES2022", "--allowJs", "--skipLibCheck", "--strict",
-          join(outDirectory, manifest.components[0]!.artifact),
-        ], { cwd: directory });
-      } catch (error) {
-        assert.fail((error as Error & { stdout?: string }).stdout ?? String(error));
-      }
       assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "controller" && artifact.path.endsWith("controlled.js")));
-      assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "helper" && artifact.path === "react/host.ts"));
+      assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "helper" && artifact.path === "svelte/host.svelte.ts"));
       const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
         .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
-      const mountEntry = join(outDirectory, "mount.tsx");
-      await writeFile(mountEntry, `import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
-import { XControlled } from "./${manifest.output.entry.replace(/\.ts$/, "")}";
-const container = document.querySelector("main")!;
-const element = <XControlled id="case" />;
-const hydrating = container.hasChildNodes();
-const root = hydrating ? hydrateRoot(container, element) : createRoot(container);
-if (!hydrating) root.render(element);
-(window as any).reactRoot = root;
-(window as any).reactSetAmount = (amount: unknown) => root.render(<XControlled id="case" amount={amount as number} />);`);
+      const app = join(outDirectory, "App.svelte");
+      await writeFile(app, `<script lang="ts">
+import XControlled from "./${manifest.components[0]!.artifact}";
+let amount = $state<unknown>(undefined);
+if (typeof window !== "undefined") (window as any).svelteSetAmount = (next: unknown) => { amount = next; };
+</script><XControlled id="case" amount={amount as number} />`);
+      const mountEntry = join(outDirectory, "mount.ts");
+      await writeFile(mountEntry, `import { mount, hydrate, unmount } from "svelte";
+import App from "./App.svelte";
+const target = document.querySelector("main")!;
+const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, { target });
+(window as any).svelteRoot = { unmount: () => unmount(instance) };`);
       const bundle = join(outDirectory, "mount.js");
       await build({ entryPoints: [mountEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
-        target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" },
-        nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
-      const server = await build({ entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
-        platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" } });
-      const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
-      new Function("require", "module", "exports", server.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-      const markup = renderToString(createElement(module.exports.XControlled!, { id: "case" }));
+        target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
+      const serverEntry = join(outDirectory, "server.ts");
+      const serverBundle = join(outDirectory, "server.mjs");
+      await writeFile(serverEntry, `import { render } from "svelte/server"; import App from "./App.svelte"; export const html = render(App).body;`);
+      await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
+        packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
+      const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /<section[^>]*id="case"/);
       outputs.set(mode, { bundle, markup, css });
     }
@@ -107,10 +95,10 @@ if (!hydrating) root.render(element);
           try {
             const live = await browser.newPage();
             pages.push(live);
-            const react = await browser.newPage();
-            pages.push(react);
-            react.on("console", (message) => { if (message.type() === "warning" || message.type() === "error") warnings.push(message.text()); });
-            for (const page of [live, react]) {
+            const svelte = await browser.newPage();
+            pages.push(svelte);
+            svelte.on("console", (message) => { if (message.type() === "warning" || message.type() === "error") warnings.push(message.text()); });
+            for (const page of [live, svelte]) {
               page.on("pageerror", (error) => errors.push(error.message));
               await page.route("https://app.example/**", async (route) => {
                 const url = route.request().url();
@@ -121,33 +109,33 @@ if (!hydrating) root.render(element);
                   : `<style>${outputs.get(mode)!.css}</style><main>${hydrate ? outputs.get(mode)!.markup : ""}</main>` });
               });
             }
-            await Promise.all([live.goto("https://app.example/live"), react.goto("https://app.example/react")]);
+            await Promise.all([live.goto("https://app.example/live"), svelte.goto("https://app.example/svelte")]);
             await live.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
-            await react.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
+            await svelte.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
             await live.addScriptTag({ path: loaderBundle });
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): void } }).HtmlNextLoader.startBrowserComponents());
-            await react.addScriptTag({ path: outputs.get(mode)!.bundle });
-            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+            await svelte.addScriptTag({ path: outputs.get(mode)!.bundle });
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               (window as unknown as { trace: Record<string, number> }).trace.effects === 1)));
             const compare = async () => {
-              const [native, converted] = await Promise.all([snapshot(live), snapshot(react)]);
+              const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
-              await assertPixelsEqual(react, converted.pixels, native.pixels, "React controller pixels differ", live);
+              await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte controller pixels differ", live);
             };
             await compare();
-            await Promise.all([live, react].map((page) => page.locator("#case button.same-nested").click()));
+            await Promise.all([live, svelte].map((page) => page.locator("#case button.same-nested").click()));
             assert.equal((await snapshot(live)).behavior.trace.nestedEffects, 1, "a no-op nested write must not rerun its controller effect");
             await compare();
             for (const amount of [2, "bad", 7] as const) {
               await live.evaluate((value) => (window as unknown as { HtmlNextLoader: {
                 updateComponentProps(element: Element, props: Record<string, unknown>): void;
               } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { amount: value }), amount);
-              await react.evaluate((value) => (window as unknown as { reactSetAmount(value: unknown): void }).reactSetAmount(value), amount);
-              await Promise.all([live, react].map((page) => page.waitForFunction((value) =>
+              await svelte.evaluate((value) => (window as unknown as { svelteSetAmount(value: unknown): void }).svelteSetAmount(value), amount);
+              await Promise.all([live, svelte].map((page) => page.waitForFunction((value) =>
                 document.querySelector("#case")?.getAttribute("data-amount-input") === String(value), amount)));
               await compare();
             }
-            const undeclared = await Promise.all([live, react].map((page) => page.evaluate(() => {
+            const undeclared = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               let observed: { detail: unknown; bubbles: boolean; composed: boolean; cancelable: boolean } | null = null;
               root.addEventListener("ping", (event) => {
@@ -161,7 +149,7 @@ if (!hydrating) root.render(element);
               { observed: { detail: 7, bubbles: true, composed: true, cancelable: false }, returned: true },
               { observed: { detail: 7, bubbles: true, composed: true, cancelable: false }, returned: true },
             ]);
-            const declared = await Promise.all([live, react].map((page) => page.evaluate(() => {
+            const declared = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               let observed: { detail: unknown; bubbles: boolean; composed: boolean; cancelable: boolean } | null = null;
               root.addEventListener("saved", (event) => {
@@ -185,7 +173,7 @@ if (!hydrating) root.render(element);
               { observed: { detail: { reason: "action" }, bubbles: false, composed: false, cancelable: true }, returned: false,
                 invalid: { code: "HR002", message: "HR002: Event `saved` detail does not satisfy its declared type." } },
             ]);
-            const typedEmail = await Promise.all([live, react].map((page) => page.evaluate(() => {
+            const typedEmail = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const host = (window as unknown as { controllerHost: { dispatch(name: string, detail: unknown): boolean } }).controllerHost;
               let delivered = 0;
               document.querySelector("#case")!.addEventListener("contact", () => { delivered += 1; });
@@ -196,7 +184,7 @@ if (!hydrating) root.render(element);
               return { delivered, invalid };
             })));
             assert.deepEqual(typedEmail, [{ delivered: 1, invalid: "HR002" }, { delivered: 1, invalid: "HR002" }]);
-            const numericString = await Promise.all([live, react].map((page) => page.evaluate(() => {
+            const numericString = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const host = (window as unknown as { controllerHost: { dispatch(name: string, detail: unknown): boolean } }).controllerHost;
               let delivered = 0;
               document.querySelector("#case")!.addEventListener("quantity", () => { delivered += 1; });
@@ -206,7 +194,7 @@ if (!hydrating) root.render(element);
               return { delivered, invalid };
             })));
             assert.deepEqual(numericString, [{ delivered: 0, invalid: "HR002" }, { delivered: 0, invalid: "HR002" }]);
-            const separatedList = await Promise.all([live, react].map((page) => page.evaluate(() => {
+            const separatedList = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               let detail: unknown;
               root.addEventListener("labels", (event) => { detail = (event as CustomEvent).detail; }, { once: true });
@@ -215,16 +203,16 @@ if (!hydrating) root.render(element);
               return { detail, delivered };
             })));
             assert.deepEqual(separatedList, [{ detail: "one two", delivered: true }, { detail: "one two", delivered: true }]);
-            await Promise.all([live, react].map((page) => page.locator("#case button").first().click()));
-            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+            await Promise.all([live, svelte].map((page) => page.locator("#case button").first().click()));
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
             await compare();
-            const results = await Promise.all([live, react].map((page) => page.evaluate(() =>
+            const results = await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               (document.querySelector("#case") as Element & { increment(): Promise<number> }).increment())));
             assert.deepEqual(results, [2, 2]);
-            await Promise.all([live, react].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2")));
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2")));
             await compare();
-            const failures = await Promise.all([live, react].map((page) => page.evaluate(async () => {
+            const failures = await Promise.all([live, svelte].map((page) => page.evaluate(async () => {
               try { await (document.querySelector("#case") as Element & { missing(): Promise<void> }).missing(); return null; }
               catch (error) { const failure = error as Error & { diagnostic?: { code: string } }; return { code: failure.diagnostic?.code, message: failure.message }; }
             })));
@@ -232,39 +220,64 @@ if (!hydrating) root.render(element);
               { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
               { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
             ]);
-            await Promise.all([live, react].map((page) => page.evaluate(() => {
+            await Promise.all([live, svelte].map((page) => page.evaluate(() => {
+              const globals = window as unknown as { extraEffects: number; extraValue: number;
+                extraSignal: { set(value: number): void }; controllerHost: {
+                  root: Element; element: Element; signal(value: number): { get(): number; set(value: number): void };
+                  effect(run: () => void): () => void;
+                } };
+              const host = globals.controllerHost;
+              if (host.element !== host.root || !Object.isFrozen(host)) throw new Error("Native host identity and immutability differ");
+              globals.extraEffects = 0;
+              const signal = host.signal(1);
+              globals.extraSignal = signal;
+              host.effect(() => { globals.extraEffects++; globals.extraValue = signal.get(); });
+            })));
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
+              (window as unknown as { extraEffects: number }).extraEffects === 1)));
+            await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               (window as unknown as { detachedRoot: Element }).detachedRoot = root;
               root.remove();
             })));
-            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               (window as unknown as { trace: Record<string, number> }).trace.disconnects === 1)));
-            await Promise.all([live, react].map((page) => page.evaluate(() =>
+            await Promise.all([live, svelte].map((page) => page.evaluate(() => {
+              (window as unknown as { extraSignal: { set(value: number): void } }).extraSignal.set(2);
+              return new Promise<void>((resolve) => setTimeout(resolve, 0));
+            })));
+            assert.deepEqual(await Promise.all([live, svelte].map((page) => page.evaluate(() =>
+              (window as unknown as { extraEffects: number }).extraEffects))), [1, 1], "controller-owned effects pause during the disconnected gap");
+            await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               document.querySelector("main")!.append((window as unknown as { detachedRoot: Element }).detachedRoot))));
-            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               (window as unknown as { trace: Record<string, number> }).trace.connects === 2)));
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() => {
+              const globals = window as unknown as { extraEffects: number; extraValue: number };
+              return globals.extraEffects === 2 && globals.extraValue === 2;
+            })));
             await compare();
-            await Promise.all([live, react].map((page) => page.evaluate(() => {
+            await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const main = document.querySelector("main")!;
               const root = document.querySelector("#case")!;
               main.append(document.createElement("span"));
               main.append(root);
             })));
-            await Promise.all([live, react].map((page) => page.evaluate(() =>
+            await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               new Promise<void>((resolve) => setTimeout(resolve, 0)))));
-            assert.deepEqual((await Promise.all([live, react].map((page) => page.evaluate(() =>
+            assert.deepEqual((await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               ({ ...(window as unknown as { trace: Record<string, number> }).trace }))))).map((trace) =>
               ({ connects: trace.connects, disconnects: trace.disconnects })),
             [{ connects: 2, disconnects: 1 }, { connects: 2, disconnects: 1 }]);
             await Promise.all([
               live.evaluate(() => document.querySelector("#case")!.remove()),
-              react.evaluate(() => (window as unknown as { reactRoot: { unmount(): void } }).reactRoot.unmount()),
+              svelte.evaluate(() => (window as unknown as { svelteRoot: { unmount(): void } }).svelteRoot.unmount()),
             ]);
-            await Promise.all([live, react].map((page) => page.waitForFunction(() =>
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               (window as unknown as { trace: Record<string, number> }).trace.disconnects === 2)));
-            const traces = await Promise.all([live, react].map((page) => page.evaluate(() => ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
+            const traces = await Promise.all([live, svelte].map((page) => page.evaluate(() => ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
             assert.deepEqual(traces[1], traces[0]);
-            const cleanupRoots = await Promise.all([live, react].map((page) => page.evaluate(() =>
+            const cleanupRoots = await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               (window as unknown as { cleanupRoot: string }).cleanupRoot)));
             assert.deepEqual(cleanupRoots, ["section", "section"]);
             assert.deepEqual(errors, []);
@@ -279,7 +292,7 @@ if (!hydrating) root.render(element);
           const pages: Page[] = [];
           try {
             const live = await browser.newPage(); pages.push(live);
-            const react = await browser.newPage(); pages.push(react);
+            const svelte = await browser.newPage(); pages.push(svelte);
             for (const page of pages) {
               await page.route("https://app.example/**", (route) => {
                 const url = route.request().url();
@@ -290,7 +303,7 @@ if (!hydrating) root.render(element);
                   : `<style>${outputs.get(mode)!.css}</style><main>${hydrate ? outputs.get(mode)!.markup : ""}</main>` });
               });
             }
-            await Promise.all([live.goto("https://app.example/live"), react.goto("https://app.example/react")]);
+            await Promise.all([live.goto("https://app.example/live"), svelte.goto("https://app.example/svelte")]);
             await Promise.all(pages.map((page) => page.evaluate(() => {
               const globals = window as unknown as { trace: Record<string, number>; delayController: boolean };
               globals.trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 };
@@ -299,14 +312,14 @@ if (!hydrating) root.render(element);
             await live.addScriptTag({ path: loaderBundle });
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } })
               .HtmlNextLoader.startBrowserComponents());
-            await react.addScriptTag({ path: outputs.get(mode)!.bundle });
+            await svelte.addScriptTag({ path: outputs.get(mode)!.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() => {
               const globals = window as unknown as { trace: Record<string, number>; releaseController?: () => void };
               return globals.trace.connects === 1 && typeof globals.releaseController === "function";
             })));
             await Promise.all([
               live.evaluate(() => document.querySelector("#case")!.remove()),
-              react.evaluate(() => (window as unknown as { reactRoot: { unmount(): void } }).reactRoot.unmount()),
+              svelte.evaluate(() => (window as unknown as { svelteRoot: { unmount(): void } }).svelteRoot.unmount()),
             ]);
             await Promise.all(pages.map((page) => page.evaluate(() =>
               (window as unknown as { releaseController(): void }).releaseController())));

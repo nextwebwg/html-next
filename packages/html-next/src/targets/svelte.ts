@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
-import { definitionMayInvokeComponents, elementMatchRoot } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -24,6 +24,8 @@ export interface SvelteConversionOptions {
   readonly dataSpecifier?: string;
   readonly guardNestedDepth?: boolean;
   readonly reactivitySpecifier?: string;
+  readonly hostSpecifier?: string;
+  readonly controllerSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -31,7 +33,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -41,12 +43,9 @@ function nativeControlBinding(tag: string, name: string): boolean {
 
 function checkSupported(definition: ComponentDefinition): void {
   for (const declaration of definition.declarations ?? []) {
-    if (!["state", "computed", "handler", "data", "event"].includes(declaration.kind)) {
+    if (!["state", "computed", "handler", "data", "event", "method"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
     }
-  }
-  if (definition.controller !== undefined) {
-    fail("HT030", "Svelte conversion does not yet support controllers.");
   }
   const visit = (node: TemplateNode): void => {
     if (node.kind === "text") return;
@@ -423,7 +422,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const attributes = [...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
-    attributes.push(component
+    attributes.push(rootScope!.preservesRootFocus
+      ? "{@attach (element: Element) => { rootElement = element; if (rootFocusPending) { (element as HTMLElement).focus({ preventScroll: true }); rootFocusPending = false; } return () => { rootFocusPending ||= element.ownerDocument.activeElement === element; if (rootElement === element) rootElement = undefined; }; }}"
+      : component
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
     if (authoredClass?.kind === "literal" && componentClasses.length === 0) {
@@ -489,11 +490,13 @@ interface RootScope extends Scope {
   readonly props: readonly string[];
   readonly propContracts: Readonly<Record<string, PropContract>>;
   readonly stateNames: readonly string[];
+  readonly preservesRootFocus: boolean;
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
   checkSupported(definition);
   const target = targetComponent(definition);
+  const usesController = definition.controller !== undefined;
   const styles = compileComponentStylesForSvelte(definition.css, definition);
   const css = styles.css;
   const declarations = definition.declarations ?? [];
@@ -515,7 +518,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval "
-    + "Props Snippet untrack getContext setContext rootElement specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "Props Snippet untrack useComponentHost SvelteMap SvelteSet propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const handlerNames = new Map(handlers.map((handler) => [handler.name, declarationName(handler.name)]));
@@ -550,6 +553,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     props: target.props.map((prop) => prop.name),
     propContracts: definition.contract.props,
     stateNames: styles.stateNames,
+    preservesRootFocus: rootArms(definition.template) !== undefined,
     code,
     types,
   };
@@ -562,6 +566,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
+  const controllerHostName = freshIdentifier("htmlNextHost");
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const nestedDepthName = freshIdentifier("htmlNextDepth");
   const markup = renderNode(definition.template, true, scope, lowering, context);
@@ -624,17 +629,40 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return `  ${guard}{ const ${next}: unknown = ${lowering.value(step.value.ast, handlerScope)}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
   const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
+  const focusReads: string[] = [];
+  if (scope.preservesRootFocus) {
+    const match = definition.template.flow;
+    const focusCode = new Map(scope.code);
+    const focusTypes = new Map(scope.types);
+    const focusScope: Scope = { code: focusCode, types: focusTypes };
+    if (match?.kind === "match" && match.expressionPlan !== undefined) {
+      const expression = lowering.value(match.expressionPlan.ast, scope);
+      focusReads.push(`  void (${expression});`);
+      if (match.alias !== undefined) {
+        focusCode.set(match.alias, `(${expression})`);
+        focusTypes.set(match.alias, typeOf(match.expressionPlan.ast, scope));
+      }
+    }
+    const conditions: string[] = [];
+    for (const arm of rootArms(definition.template)!) {
+      if (arm.flow?.kind === "when" && arm.flow.testPlan !== undefined) {
+        conditions.push(`(${lowering.condition(arm.flow.testPlan.ast, focusScope)})`);
+      }
+    }
+    if (conditions.length > 0) focusReads.push(`  void (${conditions.join(" || ")});`);
+  }
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit === undefined ? [] : ['import { getContext, setContext } from "svelte";']),
-    ...(hasProps || context.usesControls || context.usesSampledSlots ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || context.usesControls || context.usesSampledSlots || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
+    ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`, 'import { SvelteMap, SvelteSet } from "svelte/reactivity";'] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     ...(nestedDepthLimit === undefined ? [] : [
@@ -651,6 +679,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
     `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
+    ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",
     "let hadConstructor = false;",
     "let hadProto = false;",
@@ -770,6 +799,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...computedSources,
+    ...(scope.preservesRootFocus ? [
+      "$effect.pre(() => {",
+      ...focusReads,
+      "  untrack(() => { rootFocusPending = rootElement !== undefined && rootElement.ownerDocument.activeElement === rootElement; });",
+      "});",
+    ] : []),
     ...Array.from({ length: context.htmlSites }, (_, index) => index)
       .filter((site) => !context.localHtmlSites.has(site))
       .map((site) => `const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)});`),
@@ -777,11 +812,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
-    ...(context.refs.size === 0 ? [] : [
-      `const ${context.refsName} = new Map<string, Set<Element>>();`,
+    ...(context.refs.size === 0 && !usesController ? [] : [
+      `const ${context.refsName} = new ${usesController ? "SvelteMap" : "Map"}<string, ${usesController ? "SvelteSet" : "Set"}<Element>>();`,
       `function ${context.refAttachmentName}(name: string) {`,
       "  return (element: Element) => {",
-      `    const elements = ${context.refsName}.get(name) ?? new Set<Element>();`,
+      `    const elements = ${context.refsName}.get(name) ?? new ${usesController ? "SvelteSet" : "Set"}<Element>();`,
       `    ${context.refsName}.set(name, elements); elements.add(element);`,
       "    return () => { elements.delete(element); };",
       "  };",
@@ -800,6 +835,26 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  }",
       "}",
     ] : []),
+    ...(usesController ? [
+      `const ${controllerHostName} = useComponentHost(() => import(${quote(definition.controller!)}), {`,
+      "  root: () => rootElement ?? null,",
+      `  definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
+      `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
+      ...(hasProps ? [
+        `  propInputs: (name: string) => ({ ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name],`,
+        "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
+      ] : []),
+      `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
+      `  computed: { ${[...computed, ...data].map((value) => `${quote(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
+      `  refs: ${context.refsName},`,
+      `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
+      `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
+      "});",
+      ...target.methods.map((method) => {
+        const alias = freshIdentifier("htmlNextMethod");
+        return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${controllerHostName}.invoke(${quote(method.name)}, ...args) as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${method.name} };`;
+      }),
+    ] : []),
     ...handlerSources,
     ...lowering.fallbacks(),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
@@ -810,6 +865,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
-      ...(computed.length > 0 ? ["reactivity" as const] : []),
+      ...(usesController ? ["host" as const] : []),
+      ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
     ] };
 }

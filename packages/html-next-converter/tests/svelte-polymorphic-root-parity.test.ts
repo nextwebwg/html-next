@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { createElement, type ComponentType } from "react";
-import { renderToString } from "react-dom/server";
+import { sveltePlugin } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -30,39 +28,38 @@ async function snapshot(page: Page) {
   };
 }
 
-describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("React polymorphic-root parity", () => {
+describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte polymorphic-root parity", () => {
   let directory = "";
   let liveBundle = "";
-  const outputs = new Map<"application" | "library", { reactBundle: string; serverMarkup: string; css: string }>();
+  const outputs = new Map<"application" | "library", { svelteBundle: string; serverMarkup: string; css: string }>();
 
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), "html-next-react-polymorphic-"));
+    directory = await mkdtemp(join(tmpdir(), "html-next-svelte-polymorphic-"));
+    await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(directory, "node_modules"), "dir");
     await writeFile(join(directory, "switch.html"), source);
     await writeFile(join(directory, "switch.js"), controller);
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, `out-${mode}`);
-      const manifest = await convertComponents({ mode, target: "react", root: directory, outDirectory, entries: ["switch.html"] });
+      const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["switch.html"] });
       const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
         .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
-      const entry = join(outDirectory, "mount.tsx");
-      await writeFile(entry, `import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
-import { XSwitch } from "./react/${mode === "application" ? "application" : "index"}";
-const mount = document.querySelector("main")!;
-const element = <XSwitch id="case" />;
-if (mount.hasChildNodes()) hydrateRoot(mount, element);
-else createRoot(mount).render(element);`);
-      const reactBundle = join(outDirectory, "mount.js");
-      await build({ entryPoints: [entry], outfile: reactBundle, bundle: true, format: "iife", platform: "browser",
-        target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" },
-        nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
-      const server = await build({ entryPoints: [join(outDirectory, manifest.output.entry)], bundle: true, write: false,
-        platform: "node", format: "cjs", jsx: "automatic", packages: "external", loader: { ".css": "empty" } });
-      const module = { exports: {} as Record<string, ComponentType<Record<string, unknown>>> };
-      new Function("require", "module", "exports", server.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
-      const serverMarkup = renderToString(createElement(module.exports.XSwitch!, { id: "case" }));
-      assert.match(serverMarkup, /^<button\b/);
-      outputs.set(mode, { reactBundle, serverMarkup, css });
+      const app = join(outDirectory, "App.svelte");
+      await writeFile(app, `<script>import XSwitch from "./${manifest.components[0]!.artifact}";</script><XSwitch id="case" />`);
+      const entry = join(outDirectory, "mount.ts");
+      await writeFile(entry, `import { mount, hydrate } from "svelte"; import App from "./App.svelte";
+const target = document.querySelector("main")!;
+if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
+      const svelteBundle = join(outDirectory, "mount.js");
+      await build({ entryPoints: [entry], outfile: svelteBundle, bundle: true, format: "iife", platform: "browser",
+        target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")] });
+      const serverEntry = join(outDirectory, "server.ts");
+      const serverBundle = join(outDirectory, "server.mjs");
+      await writeFile(serverEntry, `import { render } from "svelte/server"; import App from "./App.svelte"; export const html = render(App).body;`);
+      await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
+        packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
+      const serverMarkup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
+      assert.match(serverMarkup, /<button\b/);
+      outputs.set(mode, { svelteBundle, serverMarkup, css });
     }
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],
@@ -75,15 +72,15 @@ else createRoot(mount).render(element);`);
     for (const mode of ["application", "library"] as const) {
       for (const hydrate of [false, true]) {
         it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} retains native root behavior and focus through switches`, async () => {
-        const { reactBundle, serverMarkup, css } = outputs.get(mode)!;
+        const { svelteBundle, serverMarkup, css } = outputs.get(mode)!;
         const browser = await launchParityBrowser(browserType);
         const pages: Page[] = [];
         const errors: string[] = [];
         const warnings: string[] = [];
         try {
           const live = await browser.newPage(); pages.push(live);
-          const react = await browser.newPage(); pages.push(react);
-          react.on("console", (message) => { if (message.type() === "warning" || message.type() === "error") warnings.push(message.text()); });
+          const svelte = await browser.newPage(); pages.push(svelte);
+          svelte.on("console", (message) => { if (message.type() === "warning" || message.type() === "error") warnings.push(message.text()); });
           for (const page of pages) {
             page.on("pageerror", (error) => errors.push(error.message));
             await page.route("https://app.example/**", (route) => {
@@ -95,7 +92,7 @@ else createRoot(mount).render(element);`);
                 : `<style>${css}</style><main>${hydrate ? serverMarkup : ""}</main>` });
             });
           }
-          await Promise.all([live.goto("https://app.example/live"), react.goto("https://app.example/react")]);
+          await Promise.all([live.goto("https://app.example/live"), svelte.goto("https://app.example/svelte")]);
           await live.evaluate(() => {
             const globals = window as unknown as { switchTrace: string[][]; switchEffects: string[] };
             globals.switchTrace = []; globals.switchEffects = [];
@@ -103,13 +100,13 @@ else createRoot(mount).render(element);`);
           await live.addScriptTag({ path: liveBundle });
           await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } })
             .HtmlNextLoader.startBrowserComponents());
-          await react.evaluate(() => {
+          await svelte.evaluate(() => {
             const globals = window as unknown as { switchTrace: string[][]; switchEffects: string[] };
             globals.switchTrace = []; globals.switchEffects = [];
           });
-          await react.addScriptTag({ path: reactBundle });
+          await svelte.addScriptTag({ path: svelteBundle });
           for (const [index, tag] of ["button", "a", "button"].entries()) {
-            await Promise.all(pages.map((page) => page.waitForFunction((expected) => document.querySelector("#case")?.localName === expected, tag)));
+            await Promise.all(pages.map((page) => page.waitForFunction((expected) => document.querySelector("#case")?.localName === expected, tag, { timeout: 5_000 })));
             try {
               await Promise.all(pages.map((page) => page.waitForFunction((expected) => {
                 const globals = window as unknown as { switchTrace: string[][]; switchEffects: string[] };
@@ -122,15 +119,15 @@ else createRoot(mount).render(element);`);
               })));
               throw new Error(`Missing controller transition: ${JSON.stringify({ index, traces, errors, warnings })}`, { cause: error });
             }
-            const [native, converted] = await Promise.all([snapshot(live), snapshot(react)]);
+            const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
             assert.deepEqual(converted.behavior, native.behavior);
-            await assertPixelsEqual(react, converted.pixels, native.pixels, "React polymorphic-root pixels differ", live);
+            await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte polymorphic-root pixels differ", live);
             const expectedTrace = [["connect", "button"]];
             assert.deepEqual(await live.evaluate(() => (window as unknown as { switchTrace: string[][] }).switchTrace), expectedTrace);
-            assert.deepEqual(await react.evaluate(() => (window as unknown as { switchTrace: string[][] }).switchTrace), expectedTrace);
+            assert.deepEqual(await svelte.evaluate(() => (window as unknown as { switchTrace: string[][] }).switchTrace), expectedTrace);
             const expectedEffects = ["button", "a", "button"].slice(0, index + 1);
             assert.deepEqual(await live.evaluate(() => (window as unknown as { switchEffects: string[] }).switchEffects), expectedEffects);
-            assert.deepEqual(await react.evaluate(() => (window as unknown as { switchEffects: string[] }).switchEffects), expectedEffects);
+            assert.deepEqual(await svelte.evaluate(() => (window as unknown as { switchEffects: string[] }).switchEffects), expectedEffects);
             if (index < 2) await Promise.all(pages.map(async (page) => {
               await page.locator("#case").focus();
               await page.locator("#case").press("Enter");
