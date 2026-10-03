@@ -1,10 +1,10 @@
 import type { GeneratedArtifact } from "../generate.js";
-import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
 
 const SOURCE = `import { flushSync, untrack } from "svelte";
 import { cycleCheckedComputed } from "./reactivity.svelte";
 
-${NATIVE_CONNECTION_SOURCE}
+import { observeConnection } from "./connection.svelte";
+
 export interface StateAccess {
   readonly get: () => unknown;
   readonly set: (value: unknown) => void;

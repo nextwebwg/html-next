@@ -23,6 +23,7 @@ export {
   svelteDataArtifact,
   svelteReactivityArtifact,
   svelteHostArtifact,
+  svelteConnectionArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

@@ -21,6 +21,7 @@ import {
   svelteDataArtifact,
   svelteReactivityArtifact,
   svelteHostArtifact,
+  svelteConnectionArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -476,6 +477,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   if (options.target === "svelte" && neededHelpers.has("control")) {
     claim(svelteControlArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("connection")) {
+    claim(svelteConnectionArtifact(), "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("host")) {
     claim(svelteHostArtifact(), "helper");

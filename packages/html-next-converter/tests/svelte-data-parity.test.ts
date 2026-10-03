@@ -221,6 +221,10 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
       let reportBoth!: () => void;
       const bothHeld = new Promise<void>((resolve) => { reportBoth = resolve; });
       let staleCount = 0;
+      let reinserting = false;
+      const restarted = new Set<string>();
+      let reportRestart!: () => void;
+      const bothRestarted = new Promise<void>((resolve) => { reportRestart = resolve; });
       try {
         const live = await browser.newPage();
         pages.push(live);
@@ -238,6 +242,7 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
             const url = new URL(route.request().url());
             const pageNumber = url.searchParams.get("page");
             requests[kind].push(`${url.pathname}${url.search}`);
+            if (reinserting) { restarted.add(kind); if (restarted.size === 2) reportRestart(); }
             if (pageNumber === "3") {
               staleCount += 1;
               if (staleCount === 2) reportBoth();
@@ -264,6 +269,30 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
         await Promise.all([live, svelte].map((page) => page.waitForTimeout(50)));
         assert.deepEqual((await snapshot(svelte)).behavior, (await snapshot(live)).behavior);
         assert.equal(await svelte.locator("#case .label").textContent(), "Fourth");
+        await Promise.all([live, svelte].map((page) => page.evaluate(() => {
+          const globals = window as unknown as { detachedResource: Element };
+          globals.detachedResource = document.querySelector("#case")!;
+          globals.detachedResource.remove();
+        })));
+        await Promise.all([live, svelte].map((page) => page.waitForTimeout(50)));
+        const pausedCount = { live: requests.live.length, svelte: requests.svelte.length };
+        await new Promise((resolve) => setTimeout(resolve, 1700));
+        assert.deepEqual({ live: requests.live.length, svelte: requests.svelte.length }, pausedCount, "external disconnection must stop polling");
+        reinserting = true;
+        await Promise.all([live, svelte].map((page) => page.evaluate(() =>
+          document.querySelector("main")!.append((window as unknown as { detachedResource: Element }).detachedResource))));
+        await bothRestarted;
+        await waitFor("Fourth");
+        await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
+          document.querySelector("#case .pending")?.textContent === "false")));
+        assert.deepEqual((await snapshot(svelte)).behavior, (await snapshot(live)).behavior);
+        const moveCount = { live: requests.live.length, svelte: requests.svelte.length };
+        await Promise.all([live, svelte].map((page) => page.evaluate(() => {
+          const main = document.querySelector("main")!;
+          main.append(document.createElement("span")); main.append(document.querySelector("#case")!);
+        })));
+        await Promise.all([live, svelte].map((page) => page.waitForTimeout(100)));
+        assert.deepEqual({ live: requests.live.length, svelte: requests.svelte.length }, moveCount, "in-tree moves must retain the request lifetime");
         await Promise.all([
           live.evaluate(() => document.querySelector("#case")?.remove()),
           svelte.evaluate(() => (window as unknown as { svelteRoot: { unmount(): void } }).svelteRoot.unmount()),

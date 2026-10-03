@@ -2,6 +2,7 @@ import type { GeneratedArtifact } from "../generate.js";
 import { DATA_URL_SOURCE } from "./shared-generated.js";
 
 const SOURCE = `import { untrack } from "svelte";
+import { useConnection } from "./connection.svelte";
 
 export interface DataState<T> {
   readonly pending: boolean;
@@ -11,6 +12,7 @@ export interface DataState<T> {
 }
 
 export interface DataReadOptions {
+  readonly root: () => Element | null;
   readonly source: string;
   readonly definition: string;
   readonly type?: string;
@@ -26,8 +28,10 @@ ${DATA_URL_SOURCE}
 export function useDataRead<T>(options: DataReadOptions): DataState<T> {
   let state = $state.raw<DataState<T>>({ pending: true, value: null, error: null, ok: false });
   let value: T | null = null;
+  const connected = useConnection(options.root);
   $effect(() => {
     options.sources();
+    if (!connected()) return;
     const definition = (() => {
       try { return new URL(options.definition, document.baseURI).href; }
       catch { return document.baseURI; }

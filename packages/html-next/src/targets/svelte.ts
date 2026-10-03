@@ -33,7 +33,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -796,7 +796,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       if (declaration.source === undefined) return `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`;
       const parameters = declaration.parameters.map((parameter) => `${quote(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
       const sources = declaration.parameters.filter((parameter) => parameter.mode === "from").map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
-      return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
+      return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...computedSources,
     ...(scope.preservesRootFocus ? [
@@ -866,6 +866,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(context.usesControls ? ["control" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
       ...(usesController ? ["host" as const] : []),
+      ...(usesController || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),
       ...(computed.length > 0 || usesController ? ["reactivity" as const] : []),
     ] };
 }
