@@ -21,7 +21,7 @@ export interface ComponentHostOptions {
   readonly propNames?: readonly string[];
   readonly state: Readonly<Record<string, StateAccess>>;
   readonly computed: Readonly<Record<string, () => unknown>>;
-  readonly refs: ReadonlyMap<string, ReadonlySet<Element>>;
+  readonly refs: Map<string, Element | Element[]>;
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
   readonly methods: readonly { readonly name: string; readonly exportName: string }[];
 }
@@ -60,7 +60,7 @@ function moduleDiagnostic(code: "HJ001" | "HJ002", options: ComponentHostOptions
   });
 }
 
-function documentOrder(elements: ReadonlySet<Element>): Element[] {
+function documentOrder(elements: readonly Element[]): Element[] {
   return [...elements].filter((element) => element.isConnected)
     .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1);
 }
@@ -114,11 +114,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
       get: (_target, name) => {
         if (typeof name !== "string") return undefined;
-        void membership;
-        const elements = options.refs.get(name);
-        if (elements === undefined) return undefined;
-        const ordered = documentOrder(elements);
-        return ordered.length === 1 ? ordered[0] : ordered;
+        const recorded = options.refs.get(name);
+        if (!Array.isArray(recorded)) return recorded;
+        const live = documentOrder(recorded);
+        if (live.length !== recorded.length) options.refs.set(name, live);
+        return live;
       },
       has: (_target, name) => typeof name === "string" && options.refs.has(name),
     }),

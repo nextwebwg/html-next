@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
-import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -576,6 +576,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
   const controllerHostName = freshIdentifier("htmlNextHost");
+  const controllerRefsName = freshIdentifier("htmlNextControllerRefs");
+  const iteratedRefs = iteratedRefNames(definition);
   const methodNames = new Map(target.methods.map((method) => [method.name, freshIdentifier("htmlNextMethod")]));
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const nestedDepthName = freshIdentifier("htmlNextDepth");
@@ -666,7 +668,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
     ...(hasProps || context.usesControls || context.usesSampledSlots || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
-    ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`, 'import { SvelteMap, SvelteSet } from "svelte/reactivity";'] : []),
+    ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
@@ -833,11 +835,19 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
     ...(context.refs.size === 0 && !usesController ? [] : [
-      `const ${context.refsName} = new ${usesController ? "SvelteMap" : "Map"}<string, ${usesController ? "SvelteSet" : "Set"}<Element>>();`,
+      `const ${context.refsName} = new Map<string, Set<Element>>();`,
+      ...(usesController ? [`const ${controllerRefsName} = new Map<string, Element | Element[]>();`] : []),
       `function ${context.refAttachmentName}(name: string) {`,
       "  return (element: Element) => {",
-      `    const elements = ${context.refsName}.get(name) ?? new ${usesController ? "SvelteSet" : "Set"}<Element>();`,
+      `    const elements = ${context.refsName}.get(name) ?? new Set<Element>();`,
       `    ${context.refsName}.set(name, elements); elements.add(element);`,
+      ...(usesController && iteratedRefs.size > 0 ? [
+        `    if (${JSON.stringify([...iteratedRefs])}.includes(name)) {`,
+        `      const recorded = ${controllerRefsName}.get(name) as Element[] | undefined;`,
+        `      if (recorded === undefined) ${controllerRefsName}.set(name, [element]);`,
+        "      else recorded.push(element);",
+        `    } else ${controllerRefsName}.set(name, element);`,
+      ] : usesController ? [`    ${controllerRefsName}.set(name, element);`] : []),
       "    return () => { elements.delete(element); };",
       "  };",
       "}",
@@ -866,7 +876,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ] : []),
       `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
       `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${quote(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
-      `  refs: ${context.refsName},`,
+      `  refs: ${controllerRefsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
       "});",
