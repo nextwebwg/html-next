@@ -1,6 +1,6 @@
 # Style scoping: implementation
 
-How this package realizes the [styling contract](https://nextwebwg.org/html-next/styling). The
+How this package realizes the [styling contract](https://nextwebwg.org/declarative-components/styling). The
 contract is the source of truth; this note only records how the tooling meets it.
 
 ## Markers

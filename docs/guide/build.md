@@ -1,30 +1,32 @@
 ---
-title: Compile a graph
-order: 2
+title: Compile to native DOM
+order: 3
 blurb: CLI · Vite plugin · manifest
-eyebrow: HTML Next · Tools
+eyebrow: HTML Next · Native builds
 ---
 
-# Compile a graph
+# Compile to native DOM
 
 Compile a known component graph ahead of time into native DOM, with only the runtime support that graph uses.
 
 ## The command line
 
+Install `@nextwebwg/html-next` for the CLI. In an npm project, run these installed commands through `npx`:
+
 The `html-next` command reads component HTML and static imports without running controllers.
 
 ```bash
-html-next check components/app.html
-html-next inspect components/app.html
-html-next build components/app.html --out-dir generated
-html-next build components/app.html --out-dir generated --target vue --target styles
+npx html-next check components/app.html
+npx html-next inspect components/app.html
+npx html-next build components/app.html --out-dir generated
+npx html-next build components/app.html --out-dir generated --target vue --target styles
 ```
 
 `check` validates the graph, and `inspect` reports its component, controller, and module edges. `build` emits deterministic artifacts plus `html.manifest.json`, an inventory of what was built. Generated output keeps each definition's own root element and adds no wrapper.
 
 ## Vite
 
-`@nextwebwg/html-next-unplugin` compiles the graph during a Vite build.
+`@nextwebwg/html-next-unplugin` compiles the graph during a Vite build. For generated Vue or React components instead of native DOM factories, use its [framework target](/html-next/frameworks).
 
 ```bash
 npm install --save-dev @nextwebwg/html-next-unplugin
@@ -73,3 +75,7 @@ htmlNext({
 
 > [!warn] Current limits
 > Compiled component invocations must be empty and statically placed. Attributes, projected children, events, refs, and structural directives on an invocation fail with a source-located `HN` diagnostic rather than producing a partial build.
+
+## Next steps
+
+Use [Ship a library](/html-next/ship) for independently consumable entries, or read the [targets reference](/declarative-components/targets) for the proposal's delivery model.
