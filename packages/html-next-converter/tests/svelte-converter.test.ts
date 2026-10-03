@@ -95,7 +95,7 @@ it("lowers conditional and aliased child regions without wrapper elements", asyn
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["panel.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   assert.match(source, /\{#if open\}/);
-  assert.match(source, /\{@const user =/);
+  assert.match(source, /\{@const htmlNextAlias =/);
   compile(source, { filename: "XPanel.svelte", generate: "client" });
   compile(source, { filename: "XPanel.svelte", generate: "server" });
 });
@@ -110,7 +110,7 @@ it("lowers a match inside table markup to one selected native row", async () => 
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["table.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /\{#if s === "ok"\}/);
+  assert.match(source, /\{#if htmlNextAlias === "ok"\}/);
   compile(source, { filename: "XTable.svelte", generate: "client" });
   compile(source, { filename: "XTable.svelte", generate: "server" });
 });
@@ -213,15 +213,19 @@ it("checks a prop against the type selected by another prop", async () => {
   assert.match(await serverHtml(outDirectory, "XSelected", source, { value: "Ready" }), /<output[^>]*>Ready<\/output>/);
 });
 
-it("rejects a state-selected prop until the Svelte initialization boundary is implemented", async () => {
+it("initializes a state-selected prop after seeding the selector state", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-state-selected-"));
   temporary.push(root);
   await writeFile(join(root, "selected.html"), `<template component="x-selected" status="early" summary="Selected value."><defs>
     <state name="kind" type="keyword" values="text, number" value="text"></state>
     <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
   </defs><output $value="value"></output></template>`);
-  await assert.rejects(convertComponents({ mode: "library", target: "svelte", root, outDirectory: join(root, "out"), entries: ["selected.html"] }),
-    /HTC001: svelte conversion.*props selected by component state/);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  compile(source, { filename: "XSelected.svelte", generate: "client" });
+  const html = await serverHtml(outDirectory, "XSelected", source, { value: "Ready" });
+  assert.match(html, /<output[^>]*>Ready<\/output>/);
 });
 
 it("sanitizes dynamic HTML on the server with the shared safe-default policy", async () => {
@@ -300,4 +304,22 @@ it("emits a resource helper only for sourced data and keeps SSR pending without 
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   compile(source, { filename: "XCase.svelte", generate: "client" });
   assert.match(await serverHtml(outDirectory, "XCase", source), /<output[^>]*>true<\/output>/);
+});
+
+it("keeps keyword declarations, handler event names, and reserved local aliases compilable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-identifiers-"));
+  temporary.push(root);
+  await writeFile(join(root, "case.html"), `<template component="x-names" status="early" summary="Authored names."><defs>
+    <state name="class" type="number" value="1"></state><state name="event" type="number" value="2"></state>
+    <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="class + event + rootElement"></computed>
+    <handler name="switch"><set name="class" expr:value="class + 1"></set><set name="event" expr:value="event + 1"></set></handler>
+    </defs><button on:click="switch"><template $with="{ total: checkedProps } as default"><span $value="default.total"></span></template>
+      <template $match="class as class"><b $when="class = 1">First</b><b $else>Next</b></template></button></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  compile(source, { filename: "XNames.svelte", generate: "client" });
+  const html = (await serverHtml(outDirectory, "XNames", source)).replace(/<!--[\s\S]*?-->/g, "");
+  assert.match(html, /<span>6<\/span>/);
+  assert.match(html, /<b>First<\/b>/);
 });

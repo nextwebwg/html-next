@@ -73,6 +73,19 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "keyword and generated-name declarations stay reactive inside scoped aliases",
+    source: `<template component="x-keyword-names" status="early" summary="Authored names."><defs>
+      <state name="class" type="number" value="1"></state><state name="event" type="number" value="2"></state>
+      <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="class + event + rootElement"></computed>
+      <handler name="switch"><set name="class" expr:value="class + 1"></set><set name="event" expr:value="event + 1"></set></handler>
+      </defs><button on:click="switch"><template $with="{ total: checkedProps } as default"><span $value="default.total"></span></template>
+        <template $match="class as class"><b $when="class = 1">First</b><b $else>Next</b></template></button></template><x-keyword-names></x-keyword-names>`,
+    expect: { probe: `return [q('span').textContent, q('b').textContent];`, result: ["6", "First"], after: [
+      { action: `document.querySelector('button').click();`, result: ["8", "Next"] },
+      { action: `document.querySelector('button').click();`, result: ["10", "Next"] },
+    ] },
+  },
+  {
     name: "element match retains its native wrapper across selected arms",
     source: `<template component="x-wrapper-match" status="early" summary="Stable match wrapper."><defs>
       <state name="status" value="ready"></state><handler name="toggle"><set name="status" expr:value="status = 'ready' ? 'waiting' : 'ready'"></set></handler>

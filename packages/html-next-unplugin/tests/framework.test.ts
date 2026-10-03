@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
@@ -301,6 +301,15 @@ describe("svelte source adapter", () => {
       + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>
         <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state></defs>
         <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row"><li>Fallback</li></slot></ul></template>
+        <template component="ui-selected" status="early" summary="Selected input."><defs>
+          <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
+          <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+          </defs><output $value="value"></output></template>
+        <template component="ui-state-selected" status="early" summary="State-selected input."><defs>
+          <state name="kind" type="keyword" values="text, number" value="number"></state>
+          <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+          <handler name="switch"><set name="kind" value="text"></set></handler>
+          </defs><output on:click="switch" $value="value"></output></template>
         <template component="ui-primary" status="early" summary="Primary."><defs>
           <prop name="label" type="string" required>Label.</prop><state name="active" type="boolean" value="false"></state>
           <event name="change" type="boolean">Change.</event><handler name="toggle"><set name="active" expr:value="active = false"></set><dispatch event="change" expr:value="active"></dispatch><focus ref="root"></focus></handler>
@@ -313,7 +322,36 @@ describe("svelte source adapter", () => {
     assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
     const checker = require.resolve("svelte-check/bin/svelte-check");
     const cache = dirname(dirname(prepared.aliases.get("@example/controls")!));
-    await run(process.execPath, [checker, "--tsconfig", join(cache, "tsconfig.json"), "--output", "machine"], { cwd: root });
+    // Svelte deliberately suppresses diagnostics under node_modules, including the adapter cache.
+    // Validate a standalone copy and prove that the checker rejects an invalid native consumer.
+    const validation = join(root, "checked-svelte");
+    await cp(cache, validation, { recursive: true, filter: (source) => basename(source) !== "node_modules" });
+    const config = JSON.parse(await readFile(join(cache, "tsconfig.json"), "utf8")) as { files: string[]; compilerOptions: Record<string, unknown> };
+    const validationConfig = join(validation, "tsconfig.json");
+    const validationFiles = config.files.map((file) => join(validation, relative(cache, file)));
+    await writeFile(validationConfig, JSON.stringify({ ...config, files: validationFiles,
+      compilerOptions: { ...config.compilerOptions, rootDir: validation, outDir: join(validation, "types") } }));
+    const checkSvelte = async (project: string): Promise<void> => {
+      try { await run(process.execPath, [checker, "--tsconfig", project, "--output", "machine"], { cwd: root }); }
+      catch (error) { assert.fail((error as { stdout?: string }).stdout ?? String(error)); }
+    };
+    await checkSvelte(validationConfig);
+    const selectedConsumer = join(validation, "SelectedConsumer.svelte");
+    const selected = validationFiles.find((file) => file.endsWith("/UiSelected.svelte"))!;
+    assert.ok(selected);
+    const selectedImport = `./${relative(validation, selected).split("\\").join("/")}`;
+    const selectedConfig = join(validation, "tsconfig.consumer.json");
+    await writeFile(selectedConfig, JSON.stringify({ ...config, files: [selectedConsumer],
+      compilerOptions: { ...config.compilerOptions, rootDir: validation, outDir: join(validation, "types") } }));
+    await writeFile(selectedConsumer, `<script lang="ts">import UiSelected from ${JSON.stringify(selectedImport)};</script><UiSelected kind="number" value={2} /><UiSelected kind="text" value="Ready" />`);
+    await checkSvelte(selectedConfig);
+    await writeFile(selectedConsumer, `<script lang="ts">import UiSelected from ${JSON.stringify(selectedImport)};</script><UiSelected kind="number" value="Ready" />`);
+    await assert.rejects(run(process.execPath, [checker, "--tsconfig", selectedConfig, "--output", "machine"], { cwd: root }), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /string.*number/);
+      return true;
+    });
+    await rm(selectedConsumer);
+    await rm(selectedConfig);
     const entry = join(root, "src", "entry.ts");
     await writeFile(entry, `import { render } from "svelte/server";
       import { Button } from "@example/controls";
