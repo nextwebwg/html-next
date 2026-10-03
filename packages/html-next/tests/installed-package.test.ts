@@ -23,6 +23,7 @@ const publicExports = [
   "./validation",
   "./browser",
   "./node-loader",
+  "./server",
 ] as const;
 const browserExports = [
   "./runtime",
