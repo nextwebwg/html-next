@@ -59,9 +59,9 @@ function compileVue(source: string, filename: string): void {
 
 async function typecheckReact(root: string, files: readonly string[]): Promise<void> {
   await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "dir");
-  const tsc = fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url));
+  const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
   try {
-    await promisify(execFile)(tsc, [
+    await promisify(execFile)(process.execPath, [tsc,
       "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
       "--target", "ES2022", "--allowImportingTsExtensions", "--skipLibCheck", "--strict", ...files,
     ], { cwd: root });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +19,7 @@ import htmlNext from "../src/vite.js";
 import { syncHtmlNext } from "../src/framework.js";
 
 const run = promisify(execFile);
+const require = createRequire(import.meta.url);
 const temporary: string[] = [];
 const modules = fileURLToPath(new URL("../node_modules", import.meta.url));
 afterEach(async () => {
@@ -80,12 +82,12 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     await writeFile(join(root, "src", target === "vue" ? "consumer.vue" : "consumer.tsx"), target === "vue"
       ? `<script setup lang="ts">import { Button } from '@example/controls';</script><template><Button label="Save" size="large" /></template>`
       : `import { Button } from '@example/controls'; export const good = <Button label="Save" size="large" />;`);
-    const compiler = join(modules, ".bin", target === "vue" ? "vue-tsc" : "tsc");
-    await run(compiler, ["--noEmit", "-p", join(root, "tsconfig.json")], { cwd: root });
+    const compiler = require.resolve(target === "vue" ? "vue-tsc/bin/vue-tsc.js" : "typescript/bin/tsc");
+    await run(process.execPath, [compiler, "--noEmit", "-p", join(root, "tsconfig.json")], { cwd: root });
     await writeFile(join(root, "src", target === "vue" ? "invalid.vue" : "invalid.tsx"), target === "vue"
       ? `<script setup lang="ts">import { Button } from '@example/controls';</script><template><Button :label="42" size="huge" /></template>`
       : `import { Button } from '@example/controls'; export const bad = <Button label={42} size="huge" />;`);
-    await assert.rejects(run(compiler, ["--noEmit", "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+    await assert.rejects(run(process.execPath, [compiler, "--noEmit", "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
       const result = error as { stdout: string };
       assert.match(result.stdout, /number.*string/);
       assert.match(result.stdout, /huge/);
@@ -160,7 +162,8 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
     : `<script setup lang="ts">import { UiButton } from "./controls.html";</script><template><UiButton label="Save" /></template>`);
   await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { noEmit: true, strict: true,
     skipLibCheck: false, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
-  await run(join(modules, ".bin", target === "vue" ? "vue-tsc" : "tsc"), ["-p", join(root, "tsconfig.json")], { cwd: root });
+  const compiler = require.resolve(target === "vue" ? "vue-tsc/bin/vue-tsc.js" : "typescript/bin/tsc");
+  await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
   assert.ok(result.sourceFiles.some((path) => path.endsWith("src/controls.html")));
   const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()] });
   try {

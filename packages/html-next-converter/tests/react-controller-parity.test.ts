@@ -94,7 +94,7 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       const manifest = await convertComponents({ mode, target: "react", root: directory, outDirectory,
         entries: ["components/**"], publicRootURL: "/app/" });
       try {
-        await promisify(execFile)(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), [
+        await promisify(execFile)(process.execPath, [createRequire(import.meta.url).resolve("typescript/bin/tsc"),
           "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
           "--target", "ES2022", "--allowJs", "--skipLibCheck", "--strict",
           join(outDirectory, manifest.components[0]!.artifact),

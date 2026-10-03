@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, it } from "vitest";
 
@@ -14,7 +16,7 @@ import { convertComponents } from "../src/index.js";
 
 const run = promisify(execFile);
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
+const nodeModulesPath = fileURLToPath(new URL("../node_modules", import.meta.url));
 
 interface HtmlNode {
   readonly tagName?: string;
@@ -120,7 +122,7 @@ void [text, number, wrongNumber, wrongDefault, jsxText, jsxNumber, jsxWrongNumbe
           "dependent/consumer.tsx", "dependent/out/react/**/*.tsx", "dependent/out/react/**/*.ts"],
       }));
       try {
-        await run(join(nodeModulesPath, ".bin/tsc"), ["-p", join(directory, "tsconfig.json")], { cwd: directory });
+        await run(process.execPath, [createRequire(import.meta.url).resolve("typescript/bin/tsc"), "-p", join(directory, "tsconfig.json")], { cwd: directory });
       } catch (error) {
         const output = error as Error & { stdout?: string; stderr?: string };
         throw new Error(output.stdout || output.stderr || output.message, { cause: error });
