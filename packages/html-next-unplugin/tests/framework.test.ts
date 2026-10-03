@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
-import { build, createServer } from "vite";
+import { build, createServer, normalizePath } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { h } from "vue";
 import { renderToString } from "vue/server-renderer";
@@ -164,13 +164,14 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
     skipLibCheck: false, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
   const compiler = require.resolve(target === "vue" ? "vue-tsc/bin/vue-tsc.js" : "typescript/bin/tsc");
   await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
-  assert.ok(result.sourceFiles.some((path) => path.endsWith("src/controls.html")));
+  assert.ok(result.sourceFiles.some((path) => path.endsWith(join("src", "controls.html"))));
   const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()] });
   try {
     const resolved = await server.pluginContainer.resolveId("./controls.html", join(root, "src", "main.ts"));
     assert.ok(resolved?.id.endsWith("index.ts"));
-    assert.equal((await server.pluginContainer.resolveId("./controls.html?raw", join(root, "src", "main.ts")))?.id,
-      `${await realpath(join(root, "src", "controls.html"))}?raw`);
+    const raw = await server.pluginContainer.resolveId("./controls.html?raw", join(root, "src", "main.ts"));
+    assert.ok(raw);
+    assert.equal(normalizePath(raw.id), normalizePath(`${await realpath(join(root, "src", "controls.html"))}?raw`));
   } finally { await server.close(); }
 }, 60_000);
 
