@@ -77,7 +77,7 @@ it("lowers state, computed text, and declarative handlers to Svelte runes", asyn
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["counter.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /\$state\(0\)/);
+  assert.match(source, /\$state<number>\(0\)/);
   assert.match(source, /cycleCheckedComputed/);
   assert.match(source, /onclick=\{increment\}/);
   compile(source, { filename: "XCounter.svelte", generate: "client" });

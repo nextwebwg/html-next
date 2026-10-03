@@ -309,6 +309,8 @@ describe("svelte source adapter", () => {
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" href="#next">Link</a><button $else>Button</button></template></template>
         <template component="ui-controlled" status="early" summary="Controller methods." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><method name="increment" export="increment" returns="promise(number)"></method></defs><section><button $ref="button" $value="count"></button><span $each="row of [count]" $ref="rows" $value="row"></span></section></template>
+        <template component="ui-reserved" status="early" summary="Public slot names."><defs><prop name="children" type="string">Public children.</prop><prop name="slots" type="string">Public slots.</prop></defs><section><output $value="concat(children, '/', slots)"></output><slot name="title"></slot><slot></slot></section></template>
+        <template component="ui-names" status="early" summary="Import collisions."><defs><state name="UiReserved" value="Ready"></state><state name="Map" value="1"></state><state name="String" value="Ready"></state><state name="Symbol" value="Kept"></state><state name="absent" type="number"></state><handler name="UiControlled"><set name="absent" expr:value="1"></set></handler></defs><section><ui-reserved from:children="UiReserved" slots="Public"><b slot="title">Title</b><span $value="UiReserved"></span></ui-reserved><ui-controlled $ref="controlled" on:click="UiControlled"></ui-controlled><output .title="absent" $value="concat(String, '/', Map, '/', Symbol)"></output></section></template>
         <template component="ui-bound" status="early" summary="Component binding."><defs><state name="form" type="object({ amount: number })" value="{ amount: 2 }"></state></defs><section><ui-controlled bind:amount="form.amount"></ui-controlled></section></template>
         <template component="ui-cycle" status="early" summary="Computed cycle."><defs>
           <computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><output $value="left"></output></template>
@@ -381,10 +383,11 @@ describe("svelte source adapter", () => {
       strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
     }, include: ["src"] }));
     await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
-      import { Button } from "@example/controls"; import { UiButton, UiControlled } from "./controls.html";
+      import { Button } from "@example/controls"; import { UiButton, UiControlled, UiReserved } from "./controls.html";
       export const method: Promise<number> = (null! as ReturnType<typeof UiControlled>).increment();
       export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
-      export const local: ComponentProps<typeof UiButton> = { label: "Save" };`);
+      export const local: ComponentProps<typeof UiButton> = { label: "Save" };
+      export const reserved: ComponentProps<typeof UiReserved> = { children: "Child", slots: "Slots" };`);
     const compiler = require.resolve("typescript/bin/tsc");
     await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
     await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { Button } from "@example/controls";
@@ -399,6 +402,12 @@ describe("svelte source adapter", () => {
       export const bad: Promise<string> = (null! as ReturnType<typeof UiControlled>).increment();`);
     await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
       assert.match((error as { stdout: string }).stdout, /Promise<number>.*Promise<string>/);
+      return true;
+    });
+    await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { UiReserved } from "./controls.html";
+      export const bad: ComponentProps<typeof UiReserved> = { children: 42, slots: "Slots" };`);
+    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /number.*string/);
       return true;
     });
     await rm(join(root, "src", "invalid.ts"));

@@ -13,6 +13,9 @@ import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, ty
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
+// A NUL cannot appear in an authored HTML attribute or a declared public prop name.
+const SLOTS_PROP = "\0html-next:slots";
+
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
@@ -41,7 +44,16 @@ function nativeControlBinding(tag: string, name: string): boolean {
     (name === "value" || name === "checked" && tag === "input");
 }
 
-function checkSupported(definition: ComponentDefinition): void {
+function literalPropValue(value: string, contract: PropContract): string {
+  const type = normalizeType(contract.type);
+  const parsed = value === "" && type.kind === "terminal" && type.name === "boolean"
+    ? { ok: true as const, value: true }
+    : parseTypedValue(value, contract.type, "$", "html");
+  return parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`;
+}
+
+function checkSupported(definition: ComponentDefinition): ReadonlySet<string> {
+  const importedNames = new Set<string>();
   for (const declaration of definition.declarations ?? []) {
     if (!["state", "computed", "handler", "data", "event", "method", "context"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
@@ -53,6 +65,7 @@ function checkSupported(definition: ComponentDefinition): void {
       for (const child of node.fallback ?? []) visit(child);
       return;
     }
+    if (node.name.includes("-")) importedNames.add(componentName(node.name));
     if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind)) {
       fail("HT030", "Svelte conversion does not yet support structural flow, event modifiers, or references.");
     }
@@ -66,6 +79,7 @@ function checkSupported(definition: ComponentDefinition): void {
     for (const child of node.children) visit(child);
   };
   visit(definition.template);
+  return importedNames;
 }
 
 interface RenderContext {
@@ -186,13 +200,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const scoped = (node.props?.length ?? 0) > 0;
     if (scoped) context.usesScopedSlots = true;
     const defaultSlot = node.name === undefined && node.nameExpression === undefined;
-    const supplied = defaultSlot ? `slots?.[""]${scoped ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
+    const hasChildren = context.definition.contract.props.children === undefined;
+    const supplied = defaultSlot ? `slots?.[""]${scoped && hasChildren ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
     const checked = scoped ? `${context.checkedSlotName}(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
       const source = lowering.value(prop.expressionPlan.ast, scope);
       return `${quote(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
-    const children = !scoped && defaultSlot ? "{:else if children}{@render children()}" : "";
+    const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";
     return `{#if true}${nameDeclaration}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
   }
   if (node.flow?.kind === "each") return renderEach(node, scope, lowering, context);
@@ -285,6 +300,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       group.push(child); groups.set(assigned.value, group);
     }
     componentChildren = defaults;
+    if (childProps?.children !== undefined && defaults.length > 0) {
+      groups.set("", defaults);
+      componentChildren = [];
+    }
     for (const [slot, children] of groups) {
       const contracts = context.slotsByTag?.get(node.name);
       const contract = contracts?.find((entry) => !entry.dynamic && entry.name === slot)
@@ -310,7 +329,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const componentClasses = component ? node.attributes.filter((entry) => entry.kind === "attribute" && entry.target === "class") : [];
   if (componentClasses.length > 0) context.usesComponentClasses = true;
   const literals: string[] = [];
-  const bindings: string[] = slotBindings.length === 0 ? [] : [`slots={{ ${slotBindings.join(", ")} }}`];
+  const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
+    ? `slots={{ ${slotBindings.join(", ")} }}`
+    : `{...{ ${quote(SLOTS_PROP)}: { ${slotBindings.join(", ")} } }}`];
   const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
     attribute.kind === "attribute" && attribute.twoWay)
     .map((attribute) => attribute.name));
@@ -363,11 +384,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${quote(attribute.value)}`);
       else {
         const [prop, contract] = declared;
-        const typeNode = normalizeType(contract.type);
-        const parsed = attribute.value === "" && typeNode.kind === "terminal" && typeNode.name === "boolean"
-          ? { ok: true as const, value: true }
-          : parseTypedValue(attribute.value, contract.type, "$", "html");
-        literals.push(`${prop}={${parsed.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}}`);
+        literals.push(`${prop}={${literalPropValue(attribute.value, contract)}}`);
       }
       continue;
     }
@@ -384,7 +401,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
           const source = lowering.value(attribute.expressionPlan.ast, scope);
           const candidate = context.freshIdentifier("htmlNextBindingValue");
-          const value = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, "undefined as any");
+          const literal = node.attributes.find((entry) => entry.kind === "literal" && childProp(entry.name)?.[0] === declared[0]);
+          const initial = literal?.kind === "literal" ? `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
+          const value = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
           bindings.push(`${declared[0]}={${value}}`);
           bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
         } else if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
@@ -506,7 +525,7 @@ interface RootScope extends Scope {
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
-  checkSupported(definition);
+  const importedNames = checkSupported(definition);
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
   const styles = compileComponentStylesForSvelte(definition.css, definition);
@@ -522,7 +541,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const expressionScope: Scope = { code, types };
   const dataNames = new Map<DataDeclaration, string>();
   const dataTypes = new Map<DataDeclaration, string>();
-  const taken = new Set([...code.keys(), ...declarations.map((declaration) => declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name)]);
+  const taken = new Set([...importedNames, ...code.keys(), ...declarations.map((declaration) => declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name)]);
   const freshIdentifier = (base: string): string => {
     let name = base;
     let suffix = 2;
@@ -530,8 +549,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     taken.add(name);
     return name;
   };
-  const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval "
-    + "acceptsBindingDestination Props Snippet untrack useComponentHost SvelteMap SvelteSet propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+  const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
+    + "acceptsBindingDestination Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+  for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
@@ -601,6 +621,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${genericParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, dependentParameters)};`).join("\n  ");
   const destructured = target.props.map((prop) => `${prop.name}: input${prop.name}`).join(", ");
   const hasProps = target.props.length > 0;
+  const publicChildren = definition.contract.props.children !== undefined;
+  const publicSlots = definition.contract.props.slots !== undefined;
+  const internalProps = [!publicChildren ? "children" : undefined, !publicSlots ? "slots" : undefined].filter((name) => name !== undefined);
   const selectors = [...new Set(target.props.flatMap((prop) => prop.contract.select === undefined ? [] : [prop.contract.select.from]))];
   const validityContract = { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) =>
     [name, { ...prop, type: prop.select === undefined ? normalizeType(prop.type)
@@ -618,7 +641,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${source}, ${type}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`;
   });
   const stateSources = states.map((state) =>
-    `let ${code.get(state.name)!} = $state(${state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope)});`);
+    `let ${code.get(state.name)!} = $state<${typeScript(scope.types.get(state.name)!)}>(${state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) => {
     const expression = value.expression?.ast;
     const source = expression === undefined ? "undefined" : lowering.value(expression, scope);
@@ -698,11 +721,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
       `setContext("html-next:nested-depth", ${nestedDepthName} + 1);`,
     ]),
-    `type Props = { ${propTypes} children?: Snippet; slots?: Record<string, Snippet<[Record<string, any>]> | null>; [key: string]: unknown; };`,
-    `let { ${destructured}${destructured === "" ? "" : ", "}children, slots, ...rest }: Props = $props();`,
+    `type Props = { ${propTypes} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : "slots?: Record<string, Snippet<[Record<string, any>]> | null>;"} [key: string]: unknown; };`,
+    `let { ${[destructured, ...internalProps, "...rest"].filter(Boolean).join(", ")} }: Props = $props();`,
+    ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",

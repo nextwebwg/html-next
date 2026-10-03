@@ -8,10 +8,12 @@ export const componentBindingsSource = `<template component="x-number-field" sta
   <prop name="checked" type="boolean" default="false">Flag.</prop>
 </defs><input type="checkbox" .checked="checked"></template>
 <template component="x-bound-fields" status="early" summary="Nested component bindings." controller="./fields.js"><defs>
+  <state name="empty" type="number"></state>
   <state name="form" type="object({ amount: number, text: string, checked: boolean })" value="{ amount: 12, text: 'Ready', checked: true }"></state>
 </defs><form>
   <x-number-field id="number" bind:amount="form.amount"></x-number-field>
   <x-text-field id="text" bind:value="form.text"></x-text-field>
+  <x-number-field id="empty" amount="7" bind:amount="empty"></x-number-field>
   <x-flag-field id="flag" bind:checked="form.checked"></x-flag-field>
   <output id="amount" $value="form.amount"></output><output id="label" $value="form.text"></output><output id="checked" $value="form.checked"></output>
 </form><style>:host { display: block; font: 16px/24px Arial, sans-serif; } input { width: 80px; }</style></template>`;

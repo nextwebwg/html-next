@@ -73,6 +73,37 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "imported component names and children slots props preserve authored scope",
+    dependencies: {
+      "named-leaf.html": `<template component="x-named-leaf" status="early" summary="Reserved public names."><defs>
+        <prop name="children" type="string" default="Missing">Public children.</prop><prop name="slots" type="string" default="Missing">Public slots.</prop>
+        </defs><section><h1 $value="concat(children, '/', slots)"></h1><header><slot name="title"><i>Fallback title</i></slot></header>
+          <main><slot><i>Fallback body</i></slot></main></section></template>`,
+      "changing-button.html": `<template component="x-changing-button" status="early" summary="Action."><button type="button">Change</button></template>`,
+    },
+    source: `<template component="x-name-app" status="early" summary="Safe names."><defs>
+      <state name="XNamedLeaf" value="First"></state><state name="Map" value="99"></state><state name="String" value="String"></state>
+      <state name="Symbol" value="Symbol"></state><state name="Object" value="Object"></state><handler name="XChangingButton"><set name="XNamedLeaf" value="Next"></set></handler>
+      </defs><article><x-named-leaf from:children="XNamedLeaf" slots="Public"><b slot="title">Title</b><span $value="XNamedLeaf"></span></x-named-leaf>
+        <x-changing-button $ref="action" on:click="XChangingButton"></x-changing-button><output $value="concat(String, '/', Map, '/', Symbol, '/', Object)"></output></article></template><x-name-app></x-name-app>`,
+    expect: { probe: `return [q('h1').textContent, q('header').textContent, q('section main').textContent, q('output').textContent];`,
+      result: ["First/Public", "Title", "First", "String/99/Symbol/Object"], after: [
+        { action: `document.querySelector('button').click();`, result: ["Next/Public", "Title", "Next", "String/99/Symbol/Object"] },
+      ] },
+  },
+  {
+    name: "uninitialized typed states are null and accept their first native write",
+    source: `<template component="x-uninitialized" status="early" summary="Absent state."><defs>
+      <state name="count" type="number"></state><handler name="initialize"><set name="count" expr:value="1"></set></handler>
+      </defs><button type="button" on:click="initialize" .title="count" from:data-null="count = null"><output $value="count"></output></button>
+      </template><x-uninitialized></x-uninitialized>`,
+    expect: { probe: `return [q('button').title, q('button').getAttribute('data-null'), q('output').textContent];`,
+      result: ["null", "", ""], after: [
+        { action: `document.querySelector('button').click();`, result: ["1", null, "1"] },
+      ] },
+  },
+
+  {
     name: "keyword and generated-name declarations stay reactive inside scoped aliases",
     source: `<template component="x-keyword-names" status="early" summary="Authored names."><defs>
       <state name="class" type="number" value="1"></state><state name="event" type="number" value="2"></state>
