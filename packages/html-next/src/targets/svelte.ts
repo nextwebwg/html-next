@@ -5,7 +5,7 @@ import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
-import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
+import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
@@ -43,7 +43,7 @@ function nativeControlBinding(tag: string, name: string): boolean {
 
 function checkSupported(definition: ComponentDefinition): void {
   for (const declaration of definition.declarations ?? []) {
-    if (!["state", "computed", "handler", "data", "event", "method"].includes(declaration.kind)) {
+    if (!["state", "computed", "handler", "data", "event", "method", "context"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
     }
   }
@@ -503,13 +503,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
+  const contexts = declarations.filter((declaration): declaration is ContextDeclaration => declaration.kind === "context");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const code = new Map(target.props.map((prop) => [prop.name, `checkedProps.${prop.name}`]));
   const types = new Map<string, Static>(target.props.map((prop) => [prop.name, { type: normalizeType(prop.contract.type), nullable: true }]));
   const expressionScope: Scope = { code, types };
   const dataNames = new Map<DataDeclaration, string>();
   const dataTypes = new Map<DataDeclaration, string>();
-  const taken = new Set([...code.keys(), ...declarations.map((declaration) => declaration.name)]);
+  const taken = new Set([...code.keys(), ...declarations.map((declaration) => declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name)]);
   const freshIdentifier = (base: string): string => {
     let name = base;
     let suffix = 2;
@@ -521,6 +522,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     + "Props Snippet untrack useComponentHost SvelteMap SvelteSet propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
+  const contextNames = new Map<ContextDeclaration, string>();
+  for (const declaration of contexts) {
+    const alias = declaration.as ?? declaration.name;
+    const variable = freshIdentifier("htmlNextContext");
+    contextNames.set(declaration, variable);
+    code.set(alias, `${variable}.value`);
+    types.set(alias, { type: { kind: "terminal", name: "unknown" }, nullable: true });
+  }
   const handlerNames = new Map(handlers.map((handler) => [handler.name, declarationName(handler.name)]));
   for (const declaration of data) {
     const name = freshIdentifier(`htmlNextData${dataNames.size}`);
@@ -654,7 +663,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
-    ...(nestedDepthLimit === undefined ? [] : ['import { getContext, setContext } from "svelte";']),
+    ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
     ...(hasProps || context.usesControls || context.usesSampledSlots || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`, 'import { SvelteMap, SvelteSet } from "svelte/reactivity";'] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
@@ -791,7 +800,17 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  if (rootElement !== undefined) updatePropValidity(rootElement, { contract: propValidityContract, values: propInputValues });",
       "});",
     ] : []),
+    ...contexts.flatMap((declaration) => {
+      const variable = contextNames.get(declaration)!;
+      const key = `html-next:context:${declaration.from}\u0000${declaration.name}`;
+      const message = `<${definition.contract.tag}> requires context \`${declaration.name}\` from <${declaration.from}>.`;
+      return [
+        `const ${variable} = getContext<{ readonly value: unknown }>(${quote(key)});`,
+        `if (${variable} === undefined) throw Object.assign(new Error(${quote(`HR009: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR009", message: ${quote(message)} }) });`,
+      ];
+    }),
     ...stateSources,
+    ...states.map((state) => `setContext(${quote(`html-next:context:${definition.contract.tag}\u0000${state.name}`)}, { get value() { return ${code.get(state.name)}; } });`),
     ...data.map((declaration) => {
       if (declaration.source === undefined) return `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`;
       const parameters = declaration.parameters.map((parameter) => `${quote(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
@@ -845,7 +864,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
       `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
-      `  computed: { ${[...computed, ...data].map((value) => `${quote(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
+      `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${quote(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
