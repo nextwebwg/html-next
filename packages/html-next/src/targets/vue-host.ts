@@ -5,6 +5,7 @@
  * generated. It depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
+import { DATA_URL_SOURCE } from "./shared-generated.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
 export const VUE_HOST_PATH = "vue/host.ts";
@@ -28,21 +29,7 @@ interface DataReadOptions {
   readonly parameters: () => Readonly<Record<string, unknown>>;
 }
 
-function dataURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
-  const used = new Set<string>();
-  const expanded = source.replace(/\\{([A-Za-z_$][A-Za-z0-9_$-]*)\\}/g, (_match, name: string) => {
-    used.add(name);
-    const value = parameters[name];
-    return value == null ? "" : encodeURIComponent(String(value));
-  });
-  const url = new URL(expanded, baseURL);
-  for (const [name, value] of Object.entries(parameters)) {
-    if (used.has(name) || value == null) continue;
-    if (Array.isArray(value)) for (const item of value) url.searchParams.append(name, String(item));
-    else url.searchParams.set(name, String(value));
-  }
-  return url.href;
-}
+${DATA_URL_SOURCE}
 
 /** A Vue-owned declared read; no request is made during SSR. */
 export function useDataRead(state: { value: any }, options: DataReadOptions): void {

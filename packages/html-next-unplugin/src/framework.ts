@@ -87,16 +87,24 @@ async function packageDirectory(root: string, name: string): Promise<string | un
   }
 }
 
+function assertPackageSource(source: string, packageRoot: string): void {
+  const fromRoot = relative(packageRoot, source);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`HTML Next source import escapes its package: ${source}. Use a declared package dependency.`);
+  }
+}
+
 class FrameworkCompiler {
   readonly aliases = new Map<string, string>();
   readonly sources = new Set<string>();
-  readonly localSources = new Set<string>();
   readonly root: string;
   readonly declarationsFile: string;
   private readonly conversions = new Map<string, Promise<string>>();
   private readonly modules: string[] = [];
   private readonly locals = new Map<string, Promise<string>>();
   private readonly sourceModules = new Map<string, { content: string; imports: { start: number; end: number; source: string }[] }>();
+
+  get localSources(): readonly string[] { return [...this.locals.keys()]; }
 
   constructor(private readonly options: FrameworkPluginOptions) {
     this.root = resolve(options.root ?? process.cwd());
@@ -151,10 +159,7 @@ class FrameworkCompiler {
   private async sourceModule(source: string, packageRoot: string) {
     const known = this.sourceModules.get(source);
     if (known !== undefined) return known;
-    const fromRoot = relative(packageRoot, source);
-    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
-      throw new Error(`HTML Next source import escapes its package: ${source}. Use a declared package dependency.`);
-    }
+    assertPackageSource(source, packageRoot);
     this.sources.add(source);
     const content = await readFile(source, "utf8");
     const parsed = ts.createSourceFile(source, content, ts.ScriptTarget.Latest, true);
@@ -181,10 +186,7 @@ class FrameworkCompiler {
   }
 
   private async collectResources(source: string, packageRoot: string, html: Set<string>, visited: Set<string>): Promise<void> {
-    const fromRoot = relative(packageRoot, source);
-    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
-      throw new Error(`HTML Next source import escapes its package: ${source}. Use a declared package dependency.`);
-    }
+    assertPackageSource(source, packageRoot);
     if (visited.has(source)) return;
     visited.add(source);
     if (extname(source) === ".html") { html.add(source); return; }
@@ -338,7 +340,6 @@ class FrameworkCompiler {
   }
 
   localResource(source: string): Promise<string> {
-    this.localSources.add(source);
     let result = this.locals.get(source);
     if (result === undefined) {
       result = this.convertLocalResource(source);
@@ -392,6 +393,11 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       for (const source of compiler.sources) this.addWatchFile(source);
       server?.watcher.add([...compiler.sources]);
       return entry;
+    },
+    transform(code, id) {
+      if (options.target !== "react" || !id.endsWith(".tsx") || !slash(id).includes("/node_modules/.html-next/react/")) return null;
+      // A component has no import-time effect of its own. Its CSS must disappear with an unused export.
+      return { code, moduleSideEffects: false };
     },
     async closeBundle() { await updates; },
     async handleHotUpdate(context) {

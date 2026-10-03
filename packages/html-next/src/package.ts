@@ -231,7 +231,7 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     name: config.name,
     version: config.version,
     type: "module",
-    sideEffects: [...(config.sourceOnly ? [] : ["./dist/index.js"]), "./*.css"],
+    sideEffects: [...(config.sourceOnly ? [] : ["./dist/index.js"]), "**/*.css"],
     peerDependencies: { ...(config.sourceOnly ? {} : { "@nextwebwg/html-next": `^${GENERATOR_VERSION}` }), ...config.peerDependencies },
     ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
     exports: config.exports ?? (config.sourceOnly ? {

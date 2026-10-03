@@ -21,6 +21,7 @@ const publicExports = [
   "./validation",
   "./browser",
   "./node-loader",
+  "./server",
 ] as const;
 const browserExports = [
   "./runtime",
@@ -115,7 +116,7 @@ describe("workspace package contracts", () => {
       `${publicExports
         .filter((path) => path !== "./browser")
         .map((path) => `import ${JSON.stringify(specifier(path))};`)
-        .join("\n")}\nprocess.stdout.write("ok");\n`,
+        .join("\n")}\nconst { renderComponents } = await import("@nextwebwg/html-next/server");\nconst { parseComponent } = await import("@nextwebwg/html-next");\nconst rendered = await renderComponents("<x-packed>Package SSR</x-packed>", { definitions: [parseComponent('<template component="x-packed"><p><slot></slot></p></template>')] });\nif (!rendered.html.includes('data-component="x-packed"') || !rendered.html.includes("Package SSR")) throw new Error("Packaged server rendering failed");\nprocess.stdout.write("ok");\n`,
     );
     expect(
       execFileSync(process.execPath, [nodeEntry], { cwd: consumer, encoding: "utf8" }),

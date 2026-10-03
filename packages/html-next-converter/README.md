@@ -1,8 +1,9 @@
 # `@nextwebwg/html-next-converter`
 
-Converts a Declarative Components application or library graph into Vue 3.5 single-file components.
-Once converted, HTML Next is gone: each `.vue` file imports Vue, the components it nests, its own
-controller (copied beside it), and only the generated helpers its features need. A component using
+Converts a Declarative Components application or library graph into Vue 3.5 single-file components
+or React 19.3 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
+its nested components, its controller (copied beside it), and only the generated helpers its
+features need. A Vue component using
 `$html` imports `vue/html.ts`; that helper requires `parse5` as an application dependency for
 deterministic SSR. It parses inert fragments and applies one pinned safe-default allowlist in every
 browser and on the server. It deliberately does not call native `setHTML()`, even where available:
@@ -23,9 +24,9 @@ html-next-convert vue 'components/**' --mode library --out-dir generated
 
 Quote the glob so the converter, not your shell, expands it. It discovers every `.html`
 component below `components/`, including definitions with no incoming component link, and
-preserves the source directory layout beneath `generated/vue/`.
-An HTML file may contain several `<template component>` declarations; all are converted and
-exported by name. `ui-button` becomes `UiButton`, and no prefix is removed automatically. A directory path such as
+preserves the source directory layout beneath `generated/vue/`. One HTML resource may define
+several `<template component>` carriers; each gets its own named export. Names retain their
+prefix: `ui-button` becomes `UiButton`. A directory path such as
 `components/` is shorthand for the same recursive scan. Explicit `.html` files remain valid.
 
 When a `<data src>` URL is relative to its component file, pass `--public-root-url /app/`
@@ -51,14 +52,15 @@ conversion cannot map produces source-located `HTC001` with the underlying code.
 paths produce `HTC002` before any output is written, and an unsupported target version produces
 `HTC003` before the graph is loaded.
 
-React output is in development. It accepts the same quoted globs and mirrors the same source
+React output accepts the same quoted globs and mirrors the same source
 directories under `generated/react/`, emitting `.tsx` and adjacent plain `.css` files. The CSS is
-imported by each component; styled-components is not used. At present, React conversion covers
+imported by each component; styled-components is not used. React conversion covers
 static markup, props and bindings, default and named/scoped slots, state/computed/handlers,
-context, declared data, native form controls, safe HTML, and structural templates. Other valid
-HTML Next constructs fail conversion explicitly rather than
-producing output with silently changed behavior. Do not treat the React target as feature-complete
-or parity-certified yet. Svelte is not supported.
+context, declared data, native form controls, safe HTML, and structural templates. The shared
+conformance corpus and feature-specific React fixtures compare browser behavior, server output,
+hydration, and exact pixels with the live runtime in Chromium, Firefox, and WebKit. Constructs
+that cannot be represented fail conversion explicitly rather than silently changing behavior.
+Svelte is not supported.
 
 React applications use their usual `hydrateRoot` call and error options. If the server root is
 incompatible, React reports the recovery through `onRecoverableError` (or its default reporting);
@@ -86,3 +88,10 @@ then compile `.vue` and `.tsx` with their normal bundler plugins. For precompile
 emit JavaScript and declarations from those entries and point exports at the built files. The
 [installed-library test](./tests/library-distribution.test.ts) packs and installs the source-output
 shape, then renders both framework entries from that independent consumer.
+
+For guaranteed unused-component **and CSS** pruning in a preconverted package, expose individual
+component subpaths from the conversion inventory, such as `./react/XCard` pointing to
+`react/components/XCard.tsx`. Consumers can then import only the components they use. Some
+bundlers retain CSS side-effect imports from unused named re-exports in a shared `./react` barrel,
+even when they remove the unused JavaScript. The on-demand Vite adapter handles pruning for its
+generated named exports.

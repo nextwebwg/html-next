@@ -1,5 +1,5 @@
-import { SAFE_DEFAULT_ELEMENTS, SAFE_GLOBAL_ATTRIBUTES } from "../sanitizer-default.js";
 import type { GeneratedArtifact } from "../generate.js";
+import { SAFE_HTML_SANITIZER_SOURCE } from "./shared-generated.js";
 
 /** Feature-specific safe-markup output; generated React does not import the HTML Next runtime. */
 export function reactHtmlArtifact(version: string): GeneratedArtifact {
@@ -7,56 +7,7 @@ export function reactHtmlArtifact(version: string): GeneratedArtifact {
 import { createElement, Fragment, type ReactNode } from "react";
 import { defaultTreeAdapter, html as parse5Html, parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 
-const GLOBAL_ATTRIBUTES = new Set(${JSON.stringify([...SAFE_GLOBAL_ATTRIBUTES])});
-const ELEMENTS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = ${JSON.stringify(SAFE_DEFAULT_ELEMENTS)};
-const HTML_NAMESPACE = parse5Html.NS.HTML;
-const NAMESPACES: Readonly<Record<string, string>> = {
-  [HTML_NAMESPACE]: "html",
-  "http://www.w3.org/2000/svg": "svg",
-  "http://www.w3.org/1998/Math/MathML": "mathml",
-};
-
-function safeAttribute(name: string, value: string): boolean {
-  if (name !== "href" && name !== "cite") return true;
-  try { return new URL(value, "https://example.invalid/").protocol !== "javascript:"; }
-  catch { return true; }
-}
-
-function sanitizeBrowser(parent: ParentNode): void {
-  for (const child of Array.from(parent.childNodes)) {
-    if (child.nodeType === 8) { child.parentNode?.removeChild(child); continue; }
-    if (child.nodeType !== 1) continue;
-    const element = child as Element;
-    const elements = ELEMENTS[NAMESPACES[element.namespaceURI ?? ""] ?? ""];
-    if (elements === undefined || !Object.hasOwn(elements, element.localName)) {
-      element.remove();
-      continue;
-    }
-    const local = elements[element.localName] ?? [];
-    for (const attribute of Array.from(element.attributes)) {
-      if (attribute.namespaceURI !== null ||
-        (!GLOBAL_ATTRIBUTES.has(attribute.localName) && !local.includes(attribute.localName)) ||
-        !safeAttribute(attribute.localName, attribute.value)) element.removeAttributeNode(attribute);
-    }
-    sanitizeBrowser(element);
-  }
-}
-
-function sanitizeServer(parent: DefaultTreeAdapterTypes.ParentNode): void {
-  parent.childNodes = parent.childNodes.filter((node) => {
-    if (node.nodeName === "#comment") return false;
-    if (!("tagName" in node)) return true;
-    const elements = ELEMENTS[NAMESPACES[node.namespaceURI] ?? ""];
-    if (elements === undefined || !Object.hasOwn(elements, node.tagName)) return false;
-    const local = elements[node.tagName] ?? [];
-    node.attrs = node.attrs.filter((attribute) =>
-      attribute.namespace === undefined &&
-      (GLOBAL_ATTRIBUTES.has(attribute.name) || local.includes(attribute.name)) &&
-      safeAttribute(attribute.name, attribute.value));
-    sanitizeServer(node);
-    return true;
-  });
-}
+${SAFE_HTML_SANITIZER_SOURCE}
 
 function browserChildren(parent: ParentNode, projected = false): ReactNode[] {
   return Array.from(parent.childNodes).flatMap((node, index): ReactNode[] => {

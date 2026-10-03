@@ -1,4 +1,5 @@
 import type { GeneratedArtifact } from "../generate.js";
+import { DATA_URL_SOURCE } from "./shared-generated.js";
 
 const SOURCE = `import React from "react";
 
@@ -18,21 +19,7 @@ export interface DataReadOptions {
   readonly parameters: () => Readonly<Record<string, unknown>>;
 }
 
-function dataURL(source: string, baseURL: string, parameters: Readonly<Record<string, unknown>>): string {
-  const used = new Set<string>();
-  const expanded = source.replace(/\\{([A-Za-z_$][A-Za-z0-9_$-]*)\\}/g, (_match, name: string) => {
-    used.add(name);
-    const value = parameters[name];
-    return value == null ? "" : encodeURIComponent(String(value));
-  });
-  const url = new URL(expanded, baseURL);
-  for (const [name, value] of Object.entries(parameters)) {
-    if (used.has(name) || value == null) continue;
-    if (Array.isArray(value)) for (const item of value) url.searchParams.append(name, String(item));
-    else url.searchParams.set(name, String(value));
-  }
-  return url.href;
-}
+${DATA_URL_SOURCE}
 
 /** A component-owned declared read; effects never run during server rendering. */
 export function useDataRead<T>(options: DataReadOptions): DataState<T> {

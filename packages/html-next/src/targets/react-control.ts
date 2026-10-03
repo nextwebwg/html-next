@@ -164,7 +164,9 @@ export function writeBoundPath<T>(root: T, path: readonly (string | number)[], v
     source = next as Record<string | number, unknown>;
     target = copy as Record<string | number, unknown>;
   }
-  target[path[path.length - 1]!] = value;
+  const leaf = path[path.length - 1]!;
+  if (Object.is(source[leaf], value)) return root;
+  target[leaf] = value;
   return result as T;
 }
 `;

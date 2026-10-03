@@ -32,6 +32,7 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
       await mkdir(consumer);
       const card = join(source, "components", "card.html");
       const badge = join(nested, "badge.html");
+      const unused = join(nested, "unused.html");
       await writeFile(card, `<link rel="component" href="./nested/badge.html">
 <template component="x-card" status="early" summary="A card."><defs>
   <prop name="title" type="string" default="Ready">Title.</prop>
@@ -40,18 +41,20 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
 <style>:host { display: block; padding: 4px; }</style></template>`);
       await writeFile(badge, `<template component="x-badge" status="early" summary="A badge.">
 <span class="badge">New</span><style>:host { color: red; }</style></template>`);
+      await writeFile(unused, `<template component="x-unused" status="early" summary="Unused.">
+<aside>UNUSED_COMPONENT_MARKER</aside><style>:host { --unused-component-style: keep-out; }</style></template>`);
 
       await assembleComponentPackage({
         name: "@example/html-next-triad", version: "0.0.1", outDirectory: packageRoot,
-        components: [{ source: card }, { source: badge }],
+        components: [{ source: card }, { source: badge }, { source: unused }],
       });
       const convertedRoot = join(packageRoot, "converted");
       const vue = await convertComponents({ mode: "library", target: "vue", root: source,
         entries: ["components/**"], outDirectory: join(convertedRoot, "vue-target") });
       const react = await convertComponents({ mode: "library", target: "react", root: source,
         entries: ["components/**"], outDirectory: join(convertedRoot, "react-target") });
-      assert.deepEqual(vue.components.map((component) => component.tag), ["x-card", "x-badge"]);
-      assert.deepEqual(react.components.map((component) => component.tag), ["x-card", "x-badge"]);
+      assert.deepEqual(vue.components.map((component) => component.tag), ["x-card", "x-badge", "x-unused"]);
+      assert.deepEqual(react.components.map((component) => component.tag), ["x-card", "x-badge", "x-unused"]);
       const packageJsonPath = join(packageRoot, "package.json");
       const manifest = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
         exports: Record<string, unknown>;
@@ -61,6 +64,9 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
       };
       manifest.exports["./vue-converted"] = "./converted/vue-target/vue/index.ts";
       manifest.exports["./react"] = "./converted/react-target/react/index.ts";
+      for (const component of react.components) {
+        manifest.exports[`./react/${component.name}`] = `./converted/react-target/${component.artifact}`;
+      }
       manifest.dependencies = { ...manifest.dependencies, ...vue.package.dependencies, ...react.package.dependencies };
       Object.assign(manifest.peerDependencies, vue.package.peerDependencies, react.package.peerDependencies);
       manifest.peerDependenciesMeta = { vue: { optional: true }, react: { optional: true } };
@@ -121,6 +127,21 @@ export const wrong = <XCard title={42} />;
       assert.ok(bundledCSS, "published React entry must retain imported component CSS");
       assert.match(bundledCSS, /display:\s*block/, "card CSS must survive package bundling");
       assert.match(bundledCSS, /color:\s*red/, "nested badge CSS must survive package bundling");
+      const shakenEntry = join(consumer, "react-shaken.tsx");
+      await writeFile(shakenEntry, `import React from "react";
+import XCard from "@example/html-next-triad/react/XCard";
+import XBadge from "@example/html-next-triad/react/XBadge";
+export const card = <XCard title="Hello"><XBadge /></XCard>;
+`);
+      assert.deepEqual(typeErrors(shakenEntry), [], "individual React exports must typecheck in a consumer");
+      const shakenBundle = await build({ entryPoints: [shakenEntry], bundle: true, write: false,
+        platform: "browser", format: "esm", jsx: "automatic", external: ["react", "react-dom"],
+        outdir: join(consumer, "shaken"), nodePaths: [nodeModulesPath] });
+      const shakenContent = shakenBundle.outputFiles.map((file) => file.text).join("\n");
+      assert.match(shakenContent, /display:\s*block/);
+      assert.match(shakenContent, /color:\s*red/);
+      assert.equal(shakenContent.includes("UNUSED_COMPONENT_MARKER"), false);
+      assert.equal(shakenContent.includes("--unused-component-style"), false);
       const mountedEntry = join(consumer, "react-browser.tsx");
       await writeFile(mountedEntry, `import React from "react";
 import { createRoot } from "react-dom/client";

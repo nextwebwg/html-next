@@ -20,13 +20,15 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
   <prop name="amount" type="number" default="5">Controller prop.</prop>
   <state type="number" name="count" value="0"></state>
+  <state type="object({ value: number })" name="nested" value="{ value: 1 }"></state>
+  <handler name="sameNested"><set name="nested.value" value="1"></set></handler>
   <event name="saved" type="object" bubbles="false" composed="false" cancelable="true"><prop name="reason" type="keyword" values="action, programmatic" required></prop></event>
   <event name="contact" type="email"></event>
   <event name="quantity" type="number"></event>
   <event name="labels" type="keyword+"></event>
   <method name="increment" export="increment" returns="promise(number)"></method>
   <method name="missing" export="missingExport" returns="promise(undefined)"></method>
-</defs><section><button type="button" $ref="button">Increment</button><output $value="count"></output></section>
+</defs><section><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><output $value="count"></output></section>
 <style>:host { display: block; width: 180px; padding: 4px; background: rgb(240 245 250); font: 16px/24px Arial, sans-serif; }</style></template>`;
 const controller = `export default function connect(host) {
   window.trace.connects++;
@@ -44,13 +46,17 @@ const controller = `export default function connect(host) {
     host.root.setAttribute("data-amount-valid", String(host.props.amount.validate().valid));
     host.root.setAttribute("data-state-has-amount", String("amount" in host.state));
   });
+  const stopNested = host.effect(() => {
+    window.trace.nestedEffects++;
+    host.root.setAttribute("data-nested", String(host.state.nested.value));
+  });
   const stopClick = host.effect(() => {
     const button = host.refs.button;
     const click = () => { local.update((value) => value + 1); host.state.count += 1; };
     button.addEventListener("click", click);
     return () => button.removeEventListener("click", click);
   });
-  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopClick(); window.trace.disconnects++; };
+  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopClick(); window.trace.disconnects++; };
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }
@@ -94,7 +100,7 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       const manifest = await convertComponents({ mode, target: "react", root: directory, outDirectory,
         entries: ["components/**"], publicRootURL: "/app/" });
       try {
-        await promisify(execFile)(process.execPath, [createRequire(import.meta.url).resolve("typescript/bin/tsc"),
+        await promisify(execFile)(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), [
           "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
           "--target", "ES2022", "--allowJs", "--skipLibCheck", "--strict",
           join(outDirectory, manifest.components[0]!.artifact),
@@ -159,8 +165,8 @@ if (!hydrating) root.render(element);
               });
             }
             await Promise.all([live.goto("https://app.example/live"), react.goto("https://app.example/react")]);
-            await live.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, effectCleanups: 0, disconnects: 0 }; });
-            await react.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, effectCleanups: 0, disconnects: 0 }; });
+            await live.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
+            await react.evaluate(() => { (window as unknown as { trace: Record<string, number> }).trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 }; });
             await live.addScriptTag({ path: loaderBundle });
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): void } }).HtmlNextLoader.startBrowserComponents());
             await react.addScriptTag({ path: outputs.get(mode)!.bundle });
@@ -171,6 +177,9 @@ if (!hydrating) root.render(element);
               assert.deepEqual(converted.behavior, native.behavior);
               await assertPixelsEqual(react, converted.pixels, native.pixels, "React controller pixels differ", live);
             };
+            await compare();
+            await Promise.all([live, react].map((page) => page.locator("#case button.same-nested").click()));
+            assert.equal((await snapshot(live)).behavior.trace.nestedEffects, 1, "a no-op nested write must not rerun its controller effect");
             await compare();
             for (const amount of [2, "bad", 7] as const) {
               await live.evaluate((value) => (window as unknown as { HtmlNextLoader: {
@@ -249,7 +258,7 @@ if (!hydrating) root.render(element);
               return { detail, delivered };
             })));
             assert.deepEqual(separatedList, [{ detail: "one two", delivered: true }, { detail: "one two", delivered: true }]);
-            await Promise.all([live, react].map((page) => page.locator("#case button").click()));
+            await Promise.all([live, react].map((page) => page.locator("#case button").first().click()));
             await Promise.all([live, react].map((page) => page.waitForFunction(() =>
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
             await compare();
@@ -327,7 +336,7 @@ if (!hydrating) root.render(element);
             await Promise.all([live.goto("https://app.example/live"), react.goto("https://app.example/react")]);
             await Promise.all(pages.map((page) => page.evaluate(() => {
               const globals = window as unknown as { trace: Record<string, number>; delayController: boolean };
-              globals.trace = { connects: 0, effects: 0, effectCleanups: 0, disconnects: 0 };
+              globals.trace = { connects: 0, effects: 0, nestedEffects: 0, effectCleanups: 0, disconnects: 0 };
               globals.delayController = true;
             })));
             await live.addScriptTag({ path: loaderBundle });
@@ -349,7 +358,7 @@ if (!hydrating) root.render(element);
             const traces = await Promise.all(pages.map((page) => page.evaluate(() =>
               ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
             assert.deepEqual(traces[1], traces[0]);
-            assert.deepEqual(traces[0], { connects: 1, effects: 1, effectCleanups: 1, disconnects: 1 });
+            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, effectCleanups: 1, disconnects: 1 });
           } finally {
             await Promise.all(pages.map((page) => page.close()));
             await browser.close();

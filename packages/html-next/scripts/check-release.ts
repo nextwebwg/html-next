@@ -39,6 +39,7 @@ const expectedExports = [
   "./validation",
   "./browser",
   "./node-loader",
+  "./server",
 ];
 
 assert.equal(manifest.name, "@nextwebwg/html-next");

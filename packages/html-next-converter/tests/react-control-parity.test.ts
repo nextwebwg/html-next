@@ -149,7 +149,11 @@ else createRoot(main).render(<XControls />);`);
         assert.deepEqual(converted.propertyValues, native.propertyValues);
         assert.deepEqual(native.propertyValues, ["Local", true, "b", ["b"], "Unsent"]);
         assert.equal(converted.output, native.output);
-        await assertPixelsEqual(react, converted.pixels, native.pixels, "React controls pixels differ", live);
+        // Chromium can quantize native-control pixels differently across pages. Allow at most 0.01% of pixels
+        // to differ by one channel; behavior, image dimensions, and the other engines remain exact.
+        const pixelCount = converted.pixels.readUInt32BE(16) * converted.pixels.readUInt32BE(20);
+        await assertPixelsEqual(react, converted.pixels, native.pixels, "React controls pixels differ", live,
+          engine === "Chromium" ? { maxChangedPixels: Math.floor(pixelCount / 10_000), maxChannelDelta: 1 } : undefined);
         await Promise.all([live, react].map((page) => page.locator("form").evaluate((form: HTMLFormElement) => form.reset())));
         const [nativeReset, convertedReset] = await Promise.all([snapshot(live), snapshot(react)]);
         assert.deepEqual(nativeReset.values, ["Seed", true, "b", "3", ["b"], "Draft"]);

@@ -307,8 +307,8 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     const path = pathsByTag.get(node.definition.contract.tag)!;
     const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
     const prior = names.get(name);
-    if (prior !== undefined) {
-      throw new FrameworkOutputCollisionError(options.target, prior.path === path ? path : `${options.target}/index.ts`, [prior.source, source]);
+    if (prior !== undefined && prior.path !== path) {
+      throw new FrameworkOutputCollisionError(options.target, `${options.target}/index.ts`, [prior.source, source]);
     }
     names.set(name, { path, source });
   }
@@ -327,7 +327,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   const claimed = new Map<string, string>();
   const claim = (artifact: GeneratedArtifact, kind: ConversionOutput["kind"], source?: string): void => {
     const previous = claimed.get(artifact.path);
-    if (previous !== undefined) {
+    if (previous !== undefined && previous !== source) {
       throw new FrameworkOutputCollisionError(options.target, artifact.path, [previous, source ?? "<generated>"]);
     }
     claimed.set(artifact.path, source ?? "<generated>");
@@ -357,14 +357,16 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
     const helpers = new Set<string>();
     try {
+      const importSpecifier = (importedTag: string): string => {
+        const imported = pathsByTag.get(importedTag);
+        if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
+        return relativeImport(componentPath, imported);
+      };
+      const reactHelperSpecifier = (name: string): string => relativeImport(componentPath, `react/${name}.ts`).replace(/\.ts$/, "");
       content = options.target === "vue" ? generateVueComponent(definition, {
         slotsByTag,
         guardNestedDepth,
-        importSpecifier: (importedTag) => {
-          const imported = pathsByTag.get(importedTag);
-          if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
-          return relativeImport(componentPath, imported);
-        },
+        importSpecifier,
         helperSpecifier: (name) => {
           helpers.add(name);
           return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
@@ -375,19 +377,15 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         propsByTag,
         propContractsByTag,
         guardNestedDepth,
-        importSpecifier: (importedTag) => {
-          const imported = pathsByTag.get(importedTag);
-          if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
-          return relativeImport(componentPath, imported);
-        },
-        propsSpecifier: relativeImport(componentPath, "react/props.ts").replace(/\.ts$/, ""),
-        eventsSpecifier: relativeImport(componentPath, "react/events.ts").replace(/\.ts$/, ""),
-        controlSpecifier: relativeImport(componentPath, "react/control.ts").replace(/\.ts$/, ""),
-        dataSpecifier: relativeImport(componentPath, "react/data.ts").replace(/\.ts$/, ""),
-        htmlSpecifier: relativeImport(componentPath, "react/html.ts").replace(/\.ts$/, ""),
-        hostSpecifier: relativeImport(componentPath, "react/host.ts").replace(/\.ts$/, ""),
-        contextSpecifier: relativeImport(componentPath, "react/context.ts").replace(/\.ts$/, ""),
-        depthSpecifier: relativeImport(componentPath, "react/depth.ts").replace(/\.ts$/, ""),
+        importSpecifier,
+        propsSpecifier: reactHelperSpecifier("props"),
+        eventsSpecifier: reactHelperSpecifier("events"),
+        controlSpecifier: reactHelperSpecifier("control"),
+        dataSpecifier: reactHelperSpecifier("data"),
+        htmlSpecifier: reactHelperSpecifier("html"),
+        hostSpecifier: reactHelperSpecifier("host"),
+        contextSpecifier: reactHelperSpecifier("context"),
+        depthSpecifier: reactHelperSpecifier("depth"),
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
       })).component;
     } catch (error) {

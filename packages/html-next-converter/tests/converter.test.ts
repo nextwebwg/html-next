@@ -13,7 +13,7 @@ import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { HtmlDiagnosticError } from "@nextwebwg/html-next";
+import { HtmlDiagnosticError, reactControlArtifact } from "@nextwebwg/html-next";
 
 import { cases as conformanceCases, type ConformanceCase, type DiagnosticExpect } from "../../html-next/tests/conformance/cases.js";
 
@@ -66,11 +66,22 @@ async function typecheckReact(root: string, files: readonly string[]): Promise<v
       "--target", "ES2022", "--allowImportingTsExtensions", "--skipLibCheck", "--strict", ...files,
     ], { cwd: root });
   } catch (error) {
-    assert.fail((error as Error & { stdout?: string; stderr?: string }).stdout ?? String(error));
+    const failure = error as Error & { stdout?: string; stderr?: string };
+    assert.fail(failure.stdout || failure.stderr || String(failure));
   }
 }
 
 describe("framework converter", () => {
+  it("preserves the state reference for an unchanged nested control write", async () => {
+    const source = reactControlArtifact().content;
+    const compiled = await transform(source, { loader: "ts", format: "esm" });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString("base64")}`) as {
+      writeBoundPath<T>(root: T, path: readonly (string | number)[], value: unknown): T;
+    };
+    const root = { rows: [{ name: "Ada" }] };
+    assert.strictEqual(module.writeBoundPath(root, ["rows", 0, "name"], "Ada"), root);
+  });
+
   it("expands one glob into a nested React library with external CSS", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-react-nested-"));
     temporary.push(root);
@@ -828,7 +839,7 @@ export async function increment(host) { host.state.count += 1; return host.state
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})), '<div data-component="x-card">Ada</div>');
   });
 
-  it("exports every named component from one HTML file without stripping its prefix", async () => {
+  it("exports every named component from one HTML resource and tracks its source", async () => {
     const root = await fixture();
     await writeFile(join(root, "library.html"), `
       <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
@@ -838,6 +849,7 @@ export async function increment(host) { host.state.count += 1; return host.state
       const outDirectory = join(root, `multi-${target}-${mode}`);
       const manifest = await convertComponents({ mode, entries: ["library.html"], target, root, outDirectory });
       assert.deepEqual(manifest.entries.map(({ tag }) => tag).sort(), ["ui-button", "ui-dialog"]);
+      assert.deepEqual(manifest.sourceFiles, ["library.html"]);
       const entry = await readFile(join(outDirectory, manifest.output.entry), "utf8");
       assert.match(entry, /default as UiButton/);
       assert.match(entry, /default as UiDialog/);
@@ -845,12 +857,12 @@ export async function increment(host) { host.state.count += 1; return host.state
       if (target === "react") {
         const dialog = await readFile(join(outDirectory, "react/UiDialog.tsx"), "utf8");
         assert.match(dialog, /["']\.\/UiButton\.tsx["']/);
-        continue;
+      } else {
+        compileVue(await readFile(join(outDirectory, "vue/UiButton.vue"), "utf8"), "UiButton.vue");
+        const dialog = await readFile(join(outDirectory, "vue/UiDialog.vue"), "utf8");
+        compileVue(dialog, "UiDialog.vue");
+        assert.match(dialog, /["']\.\/UiButton\.vue["']/);
       }
-      compileVue(await readFile(join(outDirectory, "vue/UiButton.vue"), "utf8"), "UiButton.vue");
-      const dialog = await readFile(join(outDirectory, "vue/UiDialog.vue"), "utf8");
-      compileVue(dialog, "UiDialog.vue");
-      assert.match(dialog, /["']\.\/UiButton\.vue["']/);
     }
   });
 

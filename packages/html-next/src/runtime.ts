@@ -3,6 +3,7 @@ import { selectedPropType } from "./contract.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
 import {
   ABSENT,
@@ -35,6 +36,7 @@ import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
   compileComponentStyles,
+  type CompiledComponentStyles,
   markProjectedRoot,
   stateAttribute,
   stateAttributeValue,
@@ -172,6 +174,8 @@ const runtimeKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
 const lifecycleKey = Symbol.for("@nextwebwg/html-next.lifecycle.v1");
 
 interface DocumentState {
+  /** Static server lowering renders bindings without connecting lifecycle-owned work. */
+  staticRendering?: boolean;
   registry?: DocumentRegistry;
   mutationHub?: DocumentMutationHub;
   lifecycle?: LifecycleCoordinator;
@@ -325,6 +329,12 @@ function propValidity(instance: RuntimeInstance): Validity {
     (name) => instance.propInputs[name]?.get().source ?? "value");
 }
 
+function rootPropValidity(instance: RuntimeInstance): Validity {
+  if (instance.delegates.length === 0) return propValidity(instance);
+  const errors = [instance, ...instance.delegates].flatMap((entry) => propValidity(entry).errors);
+  return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
+}
+
 function reflectedPropValue(value: unknown, type: PropType | null): string {
   if (type !== null && parseTypedValue(value, type, "$", "value").ok) {
     return serializeTypedValue(value, type);
@@ -471,16 +481,24 @@ function readInvocation(
   readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
 } {
   const contract = definition.contract;
+  const restored = hydration && frameworkProps === undefined
+    ? renderedInstanceRecord(invocation, contract.tag) : undefined;
   const names = propAttributeNames(definition, hydration);
   const incoming = Object.create(null) as Record<string, IncomingProp>;
   const passThrough: Attr[] = [];
   for (const attribute of Array.from(invocation.attributes)) {
-    const propName = names[attribute.name.toLowerCase()];
+    const propName = restored === undefined ? names[attribute.name.toLowerCase()] : undefined;
     if (propName === undefined) {
       if (!hydration) passThrough.push(attribute);
       continue;
     }
     incoming[propName] = { value: attribute.value, source: "html", attributePresent: !hydration };
+  }
+  if (restored !== undefined) {
+    for (const name of Object.keys(contract.props)) {
+      const input = restored.inputs[name];
+      if (input?.present) incoming[name] = { value: input.value, source: input.source, attributePresent: false };
+    }
   }
   for (const [name, input] of Object.entries(frameworkProps ?? {})) {
     const prop = contract.props[name];
@@ -488,6 +506,9 @@ function readInvocation(
   }
 
   const values = parseIncomingProps(contract, incoming);
+  if (restored !== undefined) {
+    for (const name of Object.keys(contract.props)) values[name] = restored.props[name] as PropValue;
+  }
   const propInputs = Object.create(null) as Record<string, ReactiveSignal<PropInput>>;
   for (const name of Object.keys(contract.props)) {
     const item = incoming[name];
@@ -499,6 +520,13 @@ function readInvocation(
   // Props are attributes on the invocation (or, when hydrating, the data-* reflection of the
   // author's explicit attributes). They are never read from JavaScript properties.
   const { scope, effects } = componentScope(definition, values, parent);
+  if (restored !== undefined) {
+    for (const declaration of definition.declarations ?? []) {
+      if (declaration.kind === "state" && Object.hasOwn(restored.state, declaration.name)) {
+        scope.set(declaration.name, restored.state[declaration.name] as Value);
+      }
+    }
+  }
   for (const [name, prop] of Object.entries(contract.props)) {
     if (prop.select === undefined || contract.props[prop.select.from] !== undefined) continue;
     const item = incoming[name];
@@ -508,7 +536,7 @@ function readInvocation(
       if (values[name] !== undefined) scope.set(name, values[name] as Value);
     }
   }
-  const explicit = new Set(Object.keys(incoming).filter((name) => incoming[name]?.value !== null));
+  const explicit = new Set(restored?.explicit ?? Object.keys(incoming).filter((name) => incoming[name]?.value !== null));
   const declarations = definition.declarations ?? [];
   const definitionBase = (() => {
     try { return new URL(definition.source.file, invocation.ownerDocument.baseURI).href; }
@@ -537,7 +565,8 @@ function readInvocation(
       ])),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
-    effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0));
+    const active = !documentState(invocation.ownerDocument).staticRendering;
+    effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0, active));
     effects.push(createEffect(scope.scheduler, () => {
       let valid = true;
       const parameters = Object.fromEntries(data.parameters.map((parameter) => {
@@ -549,7 +578,7 @@ function readInvocation(
       }));
       if (!valid) return;
       resource.update(parameters);
-    }, 0));
+    }, 0, active));
   }
   return { scope, passThrough, effects, explicit, propInputs };
 }
@@ -812,6 +841,7 @@ function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<string> 
 interface HydrationRange {
   readonly slot: string;
   readonly fallback: boolean;
+  readonly scoped?: boolean;
   /** The server's marker nodes: [start, end], or [marker] for an empty slot. */
   readonly markers: readonly Node[];
   readonly content: readonly Node[];
@@ -1232,7 +1262,7 @@ function renderDynamicNode(
   candidate?: Node,
 ): Node[] {
   if (node.flow?.kind === "each") {
-    return renderEachRegion(node, scope, document, passThrough, context);
+    return renderEachRegion(node, scope, document, passThrough, context, candidate);
   }
   const existing = context.committed ? existingDynamicRange(candidate) : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:start");
@@ -1283,6 +1313,17 @@ interface EachBlock {
   readonly end: Comment;
   readonly scope: ReactiveScope;
   readonly effects: readonly ReactiveOwner[];
+}
+
+function existingEachRange(candidate: Node | undefined, kind: "each" | "item"): readonly [Comment, Comment] | undefined {
+  if (!(candidate instanceof Comment) || candidate.data !== `html-next:${kind}-start`) return undefined;
+  let depth = 1;
+  for (let node = candidate.nextSibling; node !== null; node = node.nextSibling) {
+    if (!(node instanceof Comment)) continue;
+    if (node.data === `html-next:${kind}-start`) depth += 1;
+    else if (node.data === `html-next:${kind}-end` && --depth === 0) return [candidate, node];
+  }
+  return undefined;
 }
 
 function moveBlockBefore(block: EachBlock, reference: Node): void {
@@ -1358,14 +1399,26 @@ function renderEachRegion(
   document: Document,
   passThrough: readonly RootAttribute[],
   context: RuntimeRenderContext,
+  candidate?: Node,
 ): Node[] {
   const flow = node.flow as Extract<Flow, { kind: "each" }>;
   const listType = declaredExpressionType(flow.listPlan ?? flow.list, scope);
   const itemType = listType?.kind === "list" ? listType.item : undefined;
-  const start = document.createComment("html-next:each-start");
-  const end = document.createComment("html-next:each-end");
-  const fragment = document.createDocumentFragment();
-  fragment.append(start, end);
+  const existing = context.committed ? existingEachRange(candidate, "each") : undefined;
+  const start = existing?.[0] ?? document.createComment("html-next:each-start");
+  const end = existing?.[1] ?? document.createComment("html-next:each-end");
+  const fragment = existing === undefined ? document.createDocumentFragment() : undefined;
+  fragment?.append(start, end);
+  const adopting: (readonly [Comment, Comment])[] = [];
+  let adoptionIndex = 0;
+  if (existing !== undefined) {
+    for (let node = start.nextSibling; node !== null && node !== end;) {
+      const block = existingEachRange(node, "item");
+      if (block === undefined) break;
+      adopting.push(block);
+      node = block[1].nextSibling;
+    }
+  }
   let blocks = new Map<unknown, EachBlock>();
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
@@ -1400,11 +1453,12 @@ function renderEachRegion(
       if (block === undefined) {
         local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const effectsStart = context.owned.effects.length;
+        const adopted = adopting[adoptionIndex++];
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, context)
-          : renderInstance(body as ElementNode, local, document, passThrough, context), document);
-        const blockStart = document.createComment("html-next:item-start");
-        const blockEnd = document.createComment("html-next:item-end");
+          : renderInstance(body as ElementNode, local, document, passThrough, context, adopted?.[0].nextSibling ?? undefined), document);
+        const blockStart = adopted?.[0] ?? document.createComment("html-next:item-start");
+        const blockEnd = adopted?.[1] ?? document.createComment("html-next:item-end");
         end.before(blockStart, ...rendered, blockEnd);
         block = {
           start: blockStart,
@@ -1421,6 +1475,13 @@ function renderEachRegion(
       ordered?.push(block);
       previous?.push(oldPositions?.get(key) ?? -1);
     }
+    for (const [blockStart, blockEnd] of adopting.slice(adoptionIndex)) {
+      clearRange(blockStart, blockEnd);
+      blockStart.remove();
+      blockEnd.remove();
+    }
+    adopting.length = 0;
+    adoptionIndex = 0;
     for (const [key, block] of blocks) if (!next.has(key)) removeBlock(block);
     if (ordered !== undefined && previous !== undefined) {
       const stable = stableBlockPositions(previous);
@@ -1436,7 +1497,7 @@ function renderEachRegion(
     blocks = next;
     syncContainingSelect(end);
   });
-  return [fragment];
+  return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
 
 function renderNode(
@@ -1952,7 +2013,7 @@ function renderSlot(
   const instruction = (target: string, data: string): Node => renderedFormMark(document, target, data);
   const ranged = (nodes: Node[], fallback: boolean): Node[] => {
     if (nodes.length === 0) return [instruction("marker", `slot=${quoted(name)}`)];
-    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}`;
+    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}${(node.props?.length ?? 0) > 0 ? ' scoped=""' : ""}`;
     return [instruction("start", data), ...nodes, instruction("end", "")];
   };
   if (assigned.length === 0) {
@@ -2023,38 +2084,43 @@ function serverMark(node: Node): ServerMark | undefined {
 }
 
 /** The slot ranges a server-rendered root owns, in document order, and its carried projection. */
-function serverRanges(root: Element, consume = true): { ranges: HydrationRange[]; carried: Node[] } | undefined {
+function serverRanges(root: Element, consume = true, tag?: string): { ranges: HydrationRange[]; carried: Node[] } | undefined {
   const ranges: HydrationRange[] = [];
   const inRanges = new Set<Node>();
-  const collect = (nodes: readonly Node[], into: HydrationRange[]): void => {
+  const lineage = (root.getAttribute(COMPONENT_ATTRIBUTE) ?? "").split(/\s+/);
+  const tagIndex = tag === undefined ? -1 : lineage.indexOf(tag);
+  // The innermost delegated component wraps the outer component's projection in its own ranges.
+  const delegatedDepth = tagIndex < 0 ? 0 : lineage.length - tagIndex - 1;
+  const collect = (nodes: readonly Node[], into: HydrationRange[], depth = delegatedDepth): void => {
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index]!;
       const mark = serverMark(node);
       if (mark?.target === "marker" && mark.attributes.has("slot")) {
-        into.push({ slot: mark.attributes.get("slot")!, fallback: false, markers: [node], content: [] });
+        if (depth === 0) into.push({ slot: mark.attributes.get("slot")!, fallback: false, markers: [node], content: [] });
         continue;
       }
       if (mark?.target === "start") {
-        let depth = 1;
+        let nesting = 1;
         const content: Node[] = [];
         let end: Node | undefined;
         for (index += 1; index < nodes.length; index += 1) {
           const inner = serverMark(nodes[index]!);
-          if (inner?.target === "start") depth += 1;
-          else if (inner?.target === "end" && --depth === 0) { end = nodes[index]; break; }
+          if (inner?.target === "start") nesting += 1;
+          else if (inner?.target === "end" && --nesting === 0) { end = nodes[index]; break; }
           content.push(nodes[index]!);
         }
         if (mark.attributes.has("slot")) {
-          into.push({ slot: mark.attributes.get("slot")!, fallback: mark.attributes.has("fallback"), markers: end ? [node, end] : [node], content });
+          if (depth > 0) collect(content, into, depth - 1);
+          else into.push({ slot: mark.attributes.get("slot")!, fallback: mark.attributes.has("fallback"), scoped: mark.attributes.has("scoped"), markers: end ? [node, end] : [node], content });
           for (const child of content) inRanges.add(child);
-        } else collect(content, into);   // a page's own range is transparent
+        } else collect(content, into, depth);   // a page's own range is transparent
         continue;
       }
       if (!(node instanceof Element)) continue;
       if (node !== root && node.hasAttribute("data-component")) {
         const nested = serverRanges(node, false);
-        for (const range of nested?.ranges ?? []) collect(range.content, into);
-      } else collect(Array.from(node.childNodes), into);
+        for (const range of nested?.ranges ?? []) collect(range.content, into, depth);
+      } else collect(Array.from(node.childNodes), into, depth);
     }
   };
   collect(Array.from(root.childNodes), ranges);
@@ -2078,6 +2144,58 @@ function serverRanges(root: Element, consume = true): { ranges: HydrationRange[]
  * in an inert trailing <template>.
  */
 const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";
+const INSTANCE_ATTRIBUTE = "data-html-next-instance";
+
+interface RenderedInstanceRecord {
+  readonly explicit: readonly string[];
+  readonly inputs: Readonly<Record<string, PropInput>>;
+  readonly props: Readonly<Record<string, unknown>>;
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+const renderedInstanceRecords = new WeakMap<Element, Readonly<Record<string, RenderedInstanceRecord>>>();
+
+function renderedInstanceRecord(element: Element, tag: string): RenderedInstanceRecord | undefined {
+  let records = renderedInstanceRecords.get(element);
+  if (records === undefined) {
+    const serialized = element.getAttribute(INSTANCE_ATTRIBUTE);
+    if (serialized === null) return undefined;
+    let parsed: unknown;
+    try { parsed = JSON.parse(serialized); }
+    catch { fail("HR010", "Malformed rendered component instance record."); }
+    if (!Array.isArray(parsed) || parsed.length !== 2 || parsed[0] !== 1) {
+      fail("HR010", "Unsupported rendered component instance record.");
+    }
+    const decoded = decodeHydrationValue(parsed[1]);
+    if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
+      fail("HR010", "Malformed rendered component instance record.");
+    }
+    records = decoded as Readonly<Record<string, RenderedInstanceRecord>>;
+    for (const record of Object.values(records)) {
+      if (record === null || typeof record !== "object" || !Array.isArray(record.explicit) ||
+        record.explicit.some((name) => typeof name !== "string") ||
+        [record.inputs, record.props, record.state].some((value) => value === null || typeof value !== "object" || Array.isArray(value)) ||
+        Object.values(record.inputs).some((input) => input === null || typeof input !== "object" ||
+          typeof input.present !== "boolean" || input.source !== "html" && input.source !== "value")) {
+        fail("HR010", "Malformed rendered component instance record.");
+      }
+    }
+    renderedInstanceRecords.set(element, records);
+    element.removeAttribute(INSTANCE_ATTRIBUTE);
+  }
+  return Object.hasOwn(records, tag) ? records[tag] : undefined;
+}
+
+function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
+  return {
+    explicit: [...instance.explicit],
+    inputs: Object.fromEntries(Object.entries(instance.propInputs).map(([name, signal]) => [name, signal.get()])),
+    props: Object.fromEntries(Object.keys(instance.definition.contract.props).map((name) => [name, instance.scope.get(name)])),
+    state: Object.fromEntries((instance.definition.declarations ?? [])
+      .filter((declaration) => declaration.kind === "state")
+      .map((declaration) => [declaration.name, instance.scope.get(declaration.name)])),
+  };
+}
 
 interface SerializedFormDefaults {
   readonly value?: string;
@@ -2156,7 +2274,12 @@ export function serializeRenderedForm(container: Element): string {
         else copiedOption.removeAttribute("selected");
       }
     }
-    const projection = runtimeInstance(original)?.projection;
+    const instance = runtimeInstance(original);
+    if (instance !== undefined) {
+      const records = Object.fromEntries([instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, instanceRecord(entry)]));
+      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
+    }
+    const projection = instance?.projection;
     if (projection === undefined) return;
     const unrendered = projection.nodes.filter((node) => !original.contains(node));
     if (unrendered.length === 0) return;
@@ -2164,7 +2287,25 @@ export function serializeRenderedForm(container: Element): string {
     for (const node of unrendered) carrier.content.append(node.cloneNode(true));
     copies[index]!.append(renderedFormMark(clone.ownerDocument, "carrier", ""), carrier);
   });
-  return clone.innerHTML;
+  // Serialize marks in the HTML spelling every parser accepts: a PI in supporting browsers and
+  // the fallback comment elsewhere. Node's DOM and a browser need not support the same node type.
+  const marks: string[] = [];
+  let prefix = "html-next:serialized-mark:";
+  const existingMarkup = clone.innerHTML;
+  while (existingMarkup.includes(prefix)) prefix += ":";
+  const walker = clone.ownerDocument.createTreeWalker(clone, 64 | 128 /* SHOW_PROCESSING_INSTRUCTION | SHOW_COMMENT */);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const mark = serverMark(node);
+    if (mark === undefined || !["start", "end", "marker", "carrier"].includes(mark.target)) continue;
+    if ((mark.target === "start" || mark.target === "marker") && !mark.attributes.has("slot")) continue;
+    const attributes = [...mark.attributes].map(([name, value]) =>
+      `${name}="${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`).join(" ");
+    marks.push(`<?${mark.target}${attributes === "" ? "" : ` ${attributes}`}?>`);
+    const placeholder = clone.ownerDocument.createComment(`${prefix}${marks.length - 1}`);
+    node.parentNode!.replaceChild(placeholder, node);
+    walker.currentNode = placeholder;
+  }
+  return clone.innerHTML.replace(new RegExp(`<!--${prefix}(\\d+)-->`, "g"), (source, index: string) => marks[Number(index)] ?? source);
 }
 
 /**
@@ -2174,6 +2315,10 @@ export function serializeRenderedForm(container: Element): string {
 export function inspectInstance(element: Element): unknown {
   const instance = runtimeInstance(element);
   if (instance === undefined) return undefined;
+  return inspectRuntimeInstance(instance);
+}
+
+function inspectRuntimeInstance(instance: RuntimeInstance): unknown {
   const props: Record<string, unknown> = {};
   for (const name of Object.keys(instance.definition.contract.props)) props[name] = instance.scope.get(name);
   const slots: Record<string, string[]> = {};
@@ -2183,7 +2328,8 @@ export function inspectInstance(element: Element): unknown {
   }
   // Order across slots is not observable; order within a slot is.
   const sorted = Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
-  return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props, slots: sorted };
+  return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props,
+    state: instanceRecord(instance).state, slots: sorted, delegates: instance.delegates.map(inspectRuntimeInstance) };
 }
 
 function renderTemplateNode(
@@ -2200,7 +2346,7 @@ function renderTemplateNode(
   }
   if (node.kind === "slot") return node.flow === undefined
     ? renderSlot(node, scope, document, context)
-    : renderEachRegion(node, scope, document, [], context);
+    : renderEachRegion(node, scope, document, [], context, candidate);
   return renderNode(node, scope, document, [], context, candidate);
 }
 
@@ -2310,14 +2456,14 @@ function prepareRuntimeInvocation(
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
   if (hydration && hydratedNodes === undefined) {
-    const server = serverRanges(invocation);
+    const server = serverRanges(invocation, true, definition.contract.tag);
     if (server !== undefined) {
       // The rendered form names every slot range, and the serializer carried the
       // projected nodes no slot currently renders. Together they are the authored projection.
       hydrationRanges = server.ranges;
       const nodes: Node[] = [];
       for (const range of server.ranges) {
-        if (range.fallback) continue;
+        if (range.fallback || range.scoped) continue;
         for (const node of range.content) {
           projectedSlotNames.set(node, range.slot);
           nodes.push(node);
@@ -2354,7 +2500,7 @@ function prepareRuntimeInvocation(
   if (Object.keys(definition.contract.props).length > 0) {
     instance.effects.push(createEffect(scope.scheduler, () => {
       const root = instance.rootElement.get();
-      if (root !== undefined) setElementValidity(root, propValidity(instance));
+      if (root !== undefined) setElementValidity(root, rootPropValidity(runtimeInstance(root) ?? instance));
     }, 2));
   }
   const context: RuntimeRenderContext = {
@@ -2442,9 +2588,12 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   instance.element = element;
   instance.validityCleanup?.();
   if (Object.keys(instance.definition.contract.props).length > 0) {
-    instance.validityCleanup = manageElementValidity(element, {}, { derive: () => propValidity(instance) });
+    instance.validityCleanup = manageElementValidity(element, {}, { derive: () => rootPropValidity(instance) });
   }
-  for (const delegate of instance.delegates) delegate.element = element;
+  for (const delegate of instance.delegates) {
+    delegate.element = element;
+    delegate.rootElement.set(element);
+  }
   runtimeInstances.set(element, instance);
   installPublicMethods(element, instance);
   instance.rootElement.set(element);
@@ -2548,6 +2697,7 @@ function commitRuntimeInvocations(
   // Commit ancestors first so their slot insertion moves nested live invocations before
   // descendants replace themselves. Discovery order does not determine nested survival.
   prepared.sort((left, right) => {
+    if (left.invocation === right.invocation) return 0;
     if (left.invocation.contains(right.invocation)) return -1;
     if (right.invocation.contains(left.invocation)) return 1;
     return 0;
@@ -2590,7 +2740,7 @@ function commitRuntimeInvocations(
     }
     invocation.context.committed = true;
     invocation.instance.element = host;
-    if (host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
+    if (invocation.replace && host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
       // This component delegates its root to a component that has not lowered yet. Claim the
       // element so discovery does not lower this component onto it a second time, but install
       // nothing: reflection, public methods, and the host belong on the root that survives.
@@ -2694,7 +2844,15 @@ function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
     installStateAttribute(instance);
     return;
   }
-  if (owner !== instance && !owner.delegates.includes(instance)) owner.delegates.push(instance);
+  if (owner !== instance && !owner.delegates.includes(instance)) {
+    owner.delegates.push(instance);
+    instance.rootElement.set(root);
+    installPropReflection(instance);
+    installStateAttribute(instance);
+    if (owner.validityCleanup === undefined && Object.keys(instance.definition.contract.props).length > 0) {
+      owner.validityCleanup = manageElementValidity(root, {}, { derive: () => rootPropValidity(owner) });
+    }
+  }
 }
 
 type QueryRoot = Node & ParentNode;
@@ -2822,8 +2980,23 @@ function lowerScopes(
  * Performs one explicit lowering pass, retaining definitions in a document registry for
  * later passes. It does not observe mutations or register Custom Elements.
  */
-export function lowerDocument(root: Document = document): number {
-  return lowerScopes(root, [root]).lowered.length;
+export interface DocumentRenderingOptions {
+  /** Render the declarative baseline without starting reads or connecting browser lifecycle. */
+  readonly connect?: boolean;
+}
+
+export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
+  const state = documentState(root);
+  const wasStatic = state.staticRendering;
+  state.staticRendering = options.connect === false;
+  const result = lowerScopes(root, [root]);
+  if (wasStatic && !state.staticRendering) {
+    for (const element of result.roots) {
+      const instance = runtimeInstance(element);
+      if (instance !== undefined) connectRuntimeInstance(instance);
+    }
+  }
+  return result.lowered.length;
 }
 
 export interface ComponentAttachmentOptions {
@@ -2972,6 +3145,7 @@ export function manageComponentLifecycle(
 export function registerComponentDefinitions(
   definitions: readonly ComponentDefinition[],
   root: Document = document,
+  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
 ): void {
   const registry = registryFor(root);
   for (const definition of definitions) {
@@ -2988,7 +3162,12 @@ export function registerComponentDefinitions(
     });
     if (definition.css !== "") {
       const style = root.createElement("style");
-      style.textContent = compileStyles(definition.css, definition, root);
+      if (styleCompiler === undefined) style.textContent = compileStyles(definition.css, definition, root);
+      else {
+        const compiled = styleCompiler(definition.css, definition);
+        stateNamesByDefinition.set(definition, compiled.stateNames);
+        style.textContent = compiled.css;
+      }
       root.head.append(style);
     }
   }
@@ -3210,6 +3389,7 @@ export interface ControllerSignal<T> extends ControllerComputed<T> {
 }
 
 function connectRuntimeInstance(instance: RuntimeInstance): void {
+  if (instance.element !== undefined && documentState(instance.element.ownerDocument).staticRendering) return;
   if (instance.connected) return;
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
@@ -3365,6 +3545,7 @@ export function observeDocument(
   options: DocumentObservationOptions = {},
 ): () => void {
   const state = documentState(root);
+  state.staticRendering = false;
   if (state.observer !== undefined) fail("HR003", "This document is already being observed.");
   const connected = new Map<Element, void | (() => void)>();
   const report = options.onError ?? ((error: unknown) => console.error(error));

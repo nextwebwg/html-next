@@ -57,7 +57,6 @@ function byKey([left]: readonly [string, unknown], [right]: readonly [string, un
 }
 
 interface DraftNode {
-  id: string;
   url: string;
   trustRoot: string;
   definition: ComponentDefinition;
@@ -109,7 +108,7 @@ export async function buildComponentGraph(
       const id = parsed.definitions.length === 1 ? finalURL : `${finalURL}#${tag}`;
       tags.set(tag, id);
       drafts.set(id, {
-        id, url: finalURL, trustRoot: resource.trustRoot, definition, dependencies: [],
+        url: finalURL, trustRoot: resource.trustRoot, definition, dependencies: [],
         shadowedByCustomElement: options.isCustomElementRegistered?.(tag) ?? false,
         complete: false,
       });
@@ -151,10 +150,10 @@ export async function buildComponentGraph(
   }
 
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
-  for (const [url, draft] of Array.from(drafts).sort(byKey)) {
-    if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${url}\`.`);
-    nodeEntries.push([url, Object.freeze({
-      id: draft.id,
+  for (const [id, draft] of Array.from(drafts).sort(byKey)) {
+    if (!draft.complete) fail("HL008", `Component graph did not finish loading \`${id}\`.`);
+    nodeEntries.push([id, Object.freeze({
+      id,
       url: draft.url,
       trustRoot: draft.trustRoot,
       definition: draft.definition,

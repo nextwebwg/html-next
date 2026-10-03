@@ -52,7 +52,8 @@ async function fixture() {
   <style>:host { color: rgb(1, 2, 3); }</style>
 </template>
 <template component="ui-badge" status="early" summary="Badge."><span>Badge</span></template>
-<template component="ui-unused" status="early" summary="Unused."><aside>UNUSED_COMPONENT_MARKER</aside></template>`);
+<template component="ui-unused" status="early" summary="Unused."><aside>UNUSED_COMPONENT_MARKER</aside>
+  <style>:host { --unused-component-style: keep-out; }</style></template>`);
   return { root, library };
 }
 
@@ -93,6 +94,26 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
       assert.match(result.stdout, /huge/);
       return true;
     });
+  }, 60_000);
+
+  it("omits unused component markup and CSS from a client build", async () => {
+    const { root } = await fixture();
+    const entry = join(root, "src", target === "vue" ? "client.ts" : "client.tsx");
+    await writeFile(entry, target === "vue"
+      ? `import { createApp, h } from "vue"; import { Button } from "@example/controls";
+        createApp({ render: () => h(Button, { label: "Save" }) }).mount("#app");`
+      : `import React from "react"; import { createRoot } from "react-dom/client";
+        import { Button } from "@example/controls";
+        createRoot(document.getElementById("app")!).render(<Button label="Save" />);`);
+    const result = await build({ root, configFile: false, logLevel: "silent",
+      plugins: [htmlNext({ target }), target === "vue" ? vue() : react()],
+      build: { rollupOptions: { input: entry }, write: false, minify: false } });
+    const bundles = Array.isArray(result) ? result : [result];
+    const output = bundles.flatMap((bundle) => "output" in bundle ? bundle.output : []);
+    const content = output.map((item) => item.type === "asset" ? String(item.source) : item.code).join("\n");
+    assert.match(content, /rgb\(1, ?2, ?3\)/);
+    assert.equal(content.includes("UNUSED_COMPONENT_MARKER"), false, "unused component markup entered the client bundle");
+    assert.equal(content.includes("--unused-component-style"), false, "unused component CSS entered the client bundle");
   }, 60_000);
 
   it("prepares types without starting Vite and refreshes generated sources after an edit", async () => {
@@ -180,6 +201,26 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
     const rawSource = await realpath(raw.id.slice(0, -"?raw".length));
     assert.equal(normalizePath(rawSource), normalizePath(await realpath(join(root, "src", "controls.html"))));
   } finally { await server.close(); }
+}, 60_000);
+
+it("converts a local HTML resource when a React TSX entry first imports it", async () => {
+  const { root, library } = await fixture();
+  // No declared source package or sync call: the import itself must trigger conversion.
+  await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
+  await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+  const entry = join(root, "src", "entry.tsx");
+  await writeFile(entry, `import React from "react"; import { renderToStaticMarkup } from "react-dom/server";
+    import { UiButton } from "./controls.html";
+    export const render = () => renderToStaticMarkup(<UiButton label="Save" />);`);
+  await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "react" }), react()],
+    build: { ssr: entry, outDir: "dist", minify: false } });
+  const output = await import(pathToFileURL(join(root, "dist", "entry.js")).href) as { render(): string };
+  const markup = output.render();
+  assert.match(markup, /Save/);
+  assert.match(markup, /Badge/);
+  assert.doesNotMatch(markup, /<ui-button|<ui-badge/);
+  assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
+  assert.doesNotMatch(await readFile(join(root, "dist", "entry.js"), "utf8"), /UNUSED_COMPONENT_MARKER/);
 }, 60_000);
 
 for (const target of ["vue", "react"] as const) it(`${target} supplies the sanitizer dependency for source-only HTML helpers`, async () => {
