@@ -8,6 +8,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, typeSource } from "./shared.js";
 import { Lowering, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
+import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 export interface SvelteConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
@@ -199,6 +200,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
     }
     attributes.push(`data-component=${quote((scope as RootScope).tag)}`);
+    if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
     for (const prop of (scope as RootScope).props) {
       if (node.attributes.some((attribute) => attribute.name === `data-${kebabCase(prop)}`)) continue;
       const value = scope.code.get(prop) ?? prop;
@@ -216,12 +218,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
 interface RootScope extends Scope {
   readonly tag: string;
   readonly props: readonly string[];
+  readonly stateNames: readonly string[];
 }
 
 export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
   checkSupported(definition);
   const target = targetComponent(definition);
-  const css = compileComponentStylesForBuild(definition.css, definition).css;
+  const styles = compileComponentStylesForBuild(definition.css, definition);
+  const css = styles.css;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
@@ -241,6 +245,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const scope: RootScope = {
     tag: definition.contract.tag,
     props: target.props.map((prop) => prop.name),
+    stateNames: styles.stateNames,
     code,
     types,
   };
@@ -293,6 +298,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ] : []),
     ...stateSources,
     ...computedSources,
+    ...(styles.stateNames.length === 0 ? [] : [
+      HOST_STATE_TOKENS_SOURCE,
+      `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
+    ]),
     ...handlerSources,
     ...lowering.fallbacks(),
     "</script>",

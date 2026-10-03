@@ -17,7 +17,8 @@ const source = `<template component="x-action" status="early" summary="Button or
   <prop name="href" type="string">Destination.</prop>
 </defs><template $match><a $when="as = 'a'" class="action" from:href="href">Go</a>
 <button $else class="action" type="button">Go</button></template>
-<style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }</style></template>`;
+<style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }
+  :host-state([as="a"]) { background: rgb(240, 240, 240); }</style></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, string | null>; readonly pixels: Buffer }> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
@@ -29,6 +30,7 @@ async function observe(page: Page): Promise<{ readonly behavior: Record<string, 
     href: element.getAttribute("href"),
     type: element.getAttribute("type"),
     as: element.getAttribute("data-as"),
+    hostState: element.getAttribute("data-x-action-state"),
     text: element.textContent,
   }));
   return { behavior, pixels: await root.screenshot({ animations: "disabled" }) };

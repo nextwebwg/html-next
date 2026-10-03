@@ -58,7 +58,8 @@ const fixtures = [
       <handler name="toggle"><set name="open" expr:value="open = false"></set></handler>
     </defs><div class="base" class:open="open" style:--tone="open ? 'green' : 'red'">
       <button type="button" on:click="toggle">Toggle</button><output $value="open ? 'Open' : 'Closed'"></output>
-    </div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; background: var(--tone); }</style></template>`,
+    </div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; background: var(--tone); }
+      :host-state([open]) { border-color: red; }</style></template>`,
     tag: "x-style",
     root: "div",
     checkpoint: "output",
@@ -67,6 +68,7 @@ const fixtures = [
     probe: async (page: Page) => ({
       className: await page.locator("div").getAttribute("class"),
       tone: await page.locator("div").evaluate((element) => (element as HTMLElement).style.getPropertyValue("--tone")),
+      hostState: await page.locator("div").getAttribute("data-x-style-state"),
       output: await page.locator("output").textContent(),
     }),
   },
