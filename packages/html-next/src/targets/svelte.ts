@@ -58,7 +58,6 @@ function checkSupported(definition: ComponentDefinition): void {
     }
     for (const attribute of node.attributes) {
       if (attribute.kind === "attribute" && attribute.twoWay === true && (
-          node.name.includes("-") ||
           attribute.writablePath === undefined || typeof attribute.writablePath[0] !== "string"
         )) {
         fail("HT030", "Svelte conversion does not yet support property or two-way bindings on this element.");
@@ -85,6 +84,7 @@ interface RenderContext {
   readonly retentions: Map<number, { readonly initial?: string }>;
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
+  usesComponentBindings: boolean;
   usesProperties: boolean;
   usesComponentClasses: boolean;
   readonly componentClassName: string;
@@ -375,7 +375,19 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
       if (attribute.twoWay === true) {
-        if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
+        if (component) {
+          const declared = childProp(attribute.name);
+          if (declared === undefined) fail("HT030", "Svelte conversion does not yet support two-way bindings to an undeclared component attribute.");
+          if (declared[1].select !== undefined) fail("HT030", "Svelte conversion does not yet support two-way bindings to a selected component prop.");
+          context.usesControls = true;
+          context.usesComponentBindings = true;
+          const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
+          const source = lowering.value(attribute.expressionPlan.ast, scope);
+          const candidate = context.freshIdentifier("htmlNextBindingValue");
+          const value = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, "undefined as any");
+          bindings.push(`${declared[0]}={${value}}`);
+          bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
+        } else if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
         else {
           // Ordinary elements reflect the attribute, and feed their native value back on input.
           context.usesAttributeBinding = true;
@@ -519,7 +531,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval "
-    + "Props Snippet untrack useComponentHost SvelteMap SvelteSet propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "acceptsBindingDestination Props Snippet untrack useComponentHost SvelteMap SvelteSet propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
@@ -570,7 +582,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
@@ -674,6 +686,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
+    ...(context.usesComponentBindings ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
@@ -898,7 +911,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
   return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || target.events.length > 0 ? ["props" as const] : []),
+      ...(hasProps || context.usesComponentBindings || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),

@@ -77,3 +77,22 @@ export function acceptsDeclaredEvent(value: unknown, type: Parameters<typeof par
   return parse(value, type, "$").ok;
 }
 `;
+
+/** Immediate declared-read checks retain raw containers; their fields are checked when read. */
+export const DECLARED_REFERENCE_TYPE_SOURCE = `export function acceptsDeclaredReference(value: unknown, type: TypeNode): boolean {
+  if (value == null) return true;
+  switch (type.kind) {
+    case "list": return Array.isArray(value);
+    case "record":
+    case "object": return typeof value === "object" && !Array.isArray(value);
+    case "union": return type.members.some((member) => acceptsDeclaredReference(value, member));
+    case "constrained": return acceptsDeclaredReference(value, type.base);
+    default: return parse(value, type, "$").ok;
+  }
+}
+
+/** Missing input cannot erase a child's accepted prop unless its type explicitly accepts null. */
+export function acceptsBindingDestination(value: unknown, type: TypeNode): boolean {
+  return value === undefined || (value === null ? parse(value, type, "$").ok : acceptsDeclaredReference(value, type));
+}
+`;
