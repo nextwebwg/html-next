@@ -21,6 +21,7 @@ export {
   svelteEventsArtifact,
   svelteControlArtifact,
   svelteDataArtifact,
+  svelteReactivityArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

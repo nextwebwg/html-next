@@ -19,6 +19,7 @@ import {
   svelteEventsArtifact,
   svelteControlArtifact,
   svelteDataArtifact,
+  svelteReactivityArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -383,6 +384,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
       }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
         slotsByTag,
         guardNestedDepth,
+        reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
         importSpecifier,
         propContractsByTag,
         stylesheetSpecifier: `./${node.definition.contract.name}.css`,
@@ -471,6 +473,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   if (options.target === "svelte" && neededHelpers.has("control")) {
     claim(svelteControlArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("reactivity")) {
+    claim(svelteReactivityArtifact(), "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("data")) {
     claim(svelteDataArtifact(), "helper");

@@ -305,6 +305,8 @@ describe("svelte source adapter", () => {
           <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
           </defs><output $value="value"></output></template>
+        <template component="ui-cycle" status="early" summary="Computed cycle."><defs>
+          <computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><output $value="left"></output></template>
         <template component="ui-depth" status="early" summary="Recursive graph."><defs>
           <prop name="level" type="number" default="0">Depth.</prop></defs>
           <section><span $value="level"></span><ui-depth $if="level < 2" from:level="level + 1"></ui-depth></section></template>

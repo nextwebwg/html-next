@@ -9,7 +9,7 @@ import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclarat
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
+import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
@@ -23,6 +23,7 @@ export interface SvelteConversionOptions {
   readonly controlSpecifier?: string;
   readonly dataSpecifier?: string;
   readonly guardNestedDepth?: boolean;
+  readonly reactivitySpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -30,7 +31,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -514,7 +515,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval "
-    + "Props Snippet untrack getContext setContext rootElement specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "Props Snippet untrack getContext setContext rootElement specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const handlerNames = new Map(handlers.map((handler) => [handler.name, declarationName(handler.name)]));
@@ -532,8 +533,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
     ] }, nullable: false });
   }
+  const computedNames = new Map<ReactiveDeclaration, string>();
   for (const declaration of [...states, ...computed]) {
-    code.set(declaration.name, declarationName(declaration.name));
+    const name = declarationName(declaration.name);
+    if (declaration.kind === "computed") computedNames.set(declaration, name);
+    code.set(declaration.name, declaration.kind === "computed" ? `${name}.get()` : name);
     const declared = declarationTypeNode(declaration.type, declaration.shape);
     const inferred = declaration.expression === undefined
       ? { type: { kind: "terminal", name: "unknown" }, nullable: true } as Static
@@ -589,8 +593,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const computedSources = computed.map((value) => {
     const expression = value.expression?.ast;
     const source = expression === undefined ? "undefined" : lowering.value(expression, scope);
-    return `let ${code.get(value.name)!} = $derived(${expression !== undefined && mayProduceInvalidResult(expression, scope)
-      ? retained(context, source, "undefined as any") : source});`;
+    const type = typeScript(scope.types.get(value.name)!);
+    return `const ${computedNames.get(value)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => (${expression !== undefined && mayProduceInvalidResult(expression, scope)
+      ? retained(context, source, "undefined as any") : source}) as ${type});`;
   });
   const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(): void {\n${handler.steps.map((step, index) => {
     const handlerScope = scope;
@@ -624,6 +629,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit === undefined ? [] : ['import { getContext, setContext } from "svelte";']),
     ...(hasProps || context.usesControls || context.usesSampledSlots ? ['import { untrack } from "svelte";'] : []),
+    ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
@@ -804,5 +810,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
+      ...(computed.length > 0 ? ["reactivity" as const] : []),
     ] };
 }
