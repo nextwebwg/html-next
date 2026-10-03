@@ -16,13 +16,14 @@ import {
   lowerDocument as lowerDocumentWithoutParser,
   observeDocument as observeDocumentWithoutParser,
   type DocumentObservationOptions,
+  type DocumentRenderingOptions,
 } from "./runtime.js";
 
 /** Lowers the definitions and instances the document already contains. */
-export function lowerDocument(root: Document = document): number {
+export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
   installInlineDefinitionParser(parseBrowserComponent);
   installProjectedSlotParser(parseBrowserProjectedSlot);
-  return lowerDocumentWithoutParser(root);
+  return lowerDocumentWithoutParser(root, options);
 }
 
 /** Lowers the document and keeps observing it for later definitions and instances. */

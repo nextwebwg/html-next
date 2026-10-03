@@ -19,7 +19,7 @@ let dom: JSDOM | undefined;
 try {
   dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
     url: request.url ?? "https://html-next.invalid/",
-    // Controllers and scripts are client behavior. No runScripts or resource loading is enabled.
+    // Page scripts remain inert. Component controllers connect at browser hydration.
     virtualConsole: new VirtualConsole(),
   });
   const view = dom.window;
@@ -32,7 +32,7 @@ try {
   document.body.innerHTML = request.html;
   installProjectedSlotParser(parseBrowserProjectedSlot);
   registerComponentDefinitions(request.definitions, document, compileComponentStylesForBuild);
-  lowerDocument(document);
+  lowerDocument(document, { connect: false });
   for (const [selector, state] of Object.entries(request.state ?? {})) {
     const elements = document.querySelectorAll(selector);
     if (elements.length === 0) fail("HR010", `Initial state selector \`${selector}\` matches no component.`);
@@ -44,7 +44,7 @@ try {
   }
   // Drain the shared runtime's microtask updates, including nested structural changes.
   await new Promise<void>((resolve) => setImmediate(resolve));
-  lowerDocument(document);
+  lowerDocument(document, { connect: false });
   const result = {
     html: serializeRenderedForm(document.body),
     css: Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n"),

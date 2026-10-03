@@ -174,6 +174,8 @@ const runtimeKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
 const lifecycleKey = Symbol.for("@nextwebwg/html-next.lifecycle.v1");
 
 interface DocumentState {
+  /** Static server lowering renders bindings without connecting lifecycle-owned work. */
+  staticRendering?: boolean;
   registry?: DocumentRegistry;
   mutationHub?: DocumentMutationHub;
   lifecycle?: LifecycleCoordinator;
@@ -563,7 +565,8 @@ function readInvocation(
       ])),
       onState: (state) => scope.set(data.name, state as unknown as Value),
     });
-    effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0));
+    const active = !documentState(invocation.ownerDocument).staticRendering;
+    effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0, active));
     effects.push(createEffect(scope.scheduler, () => {
       let valid = true;
       const parameters = Object.fromEntries(data.parameters.map((parameter) => {
@@ -575,7 +578,7 @@ function readInvocation(
       }));
       if (!valid) return;
       resource.update(parameters);
-    }, 0));
+    }, 0, active));
   }
   return { scope, passThrough, effects, explicit, propInputs };
 }
@@ -2243,16 +2246,17 @@ export function serializeRenderedForm(container: Element): string {
   let prefix = "html-next:serialized-mark:";
   const existingMarkup = clone.innerHTML;
   while (existingMarkup.includes(prefix)) prefix += ":";
-  const walker = clone.ownerDocument.createTreeWalker(clone, 128 /* SHOW_COMMENT */);
+  const walker = clone.ownerDocument.createTreeWalker(clone, 64 | 128 /* SHOW_PROCESSING_INSTRUCTION | SHOW_COMMENT */);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const mark = serverMark(node);
     if (mark === undefined || !["start", "end", "marker", "carrier"].includes(mark.target)) continue;
     if ((mark.target === "start" || mark.target === "marker") && !mark.attributes.has("slot")) continue;
-    const comment = node as Comment;
     const attributes = [...mark.attributes].map(([name, value]) =>
       `${name}="${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`).join(" ");
     marks.push(`<?${mark.target}${attributes === "" ? "" : ` ${attributes}`}?>`);
-    comment.data = `${prefix}${marks.length - 1}`;
+    const placeholder = clone.ownerDocument.createComment(`${prefix}${marks.length - 1}`);
+    node.parentNode!.replaceChild(placeholder, node);
+    walker.currentNode = placeholder;
   }
   return clone.innerHTML.replace(new RegExp(`<!--${prefix}(\\d+)-->`, "g"), (source, index: string) => marks[Number(index)] ?? source);
 }
@@ -2929,8 +2933,23 @@ function lowerScopes(
  * Performs one explicit lowering pass, retaining definitions in a document registry for
  * later passes. It does not observe mutations or register Custom Elements.
  */
-export function lowerDocument(root: Document = document): number {
-  return lowerScopes(root, [root]).lowered.length;
+export interface DocumentRenderingOptions {
+  /** Render the declarative baseline without starting reads or connecting browser lifecycle. */
+  readonly connect?: boolean;
+}
+
+export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
+  const state = documentState(root);
+  const wasStatic = state.staticRendering;
+  state.staticRendering = options.connect === false;
+  const result = lowerScopes(root, [root]);
+  if (wasStatic && !state.staticRendering) {
+    for (const element of result.roots) {
+      const instance = runtimeInstance(element);
+      if (instance !== undefined) connectRuntimeInstance(instance);
+    }
+  }
+  return result.lowered.length;
 }
 
 export interface ComponentAttachmentOptions {
@@ -3322,6 +3341,7 @@ export interface ControllerSignal<T> extends ControllerComputed<T> {
 }
 
 function connectRuntimeInstance(instance: RuntimeInstance): void {
+  if (instance.element !== undefined && documentState(instance.element.ownerDocument).staticRendering) return;
   if (instance.connected) return;
   instance.connected = true;
   for (const effect of instance.effects) effect.resume();
@@ -3477,6 +3497,7 @@ export function observeDocument(
   options: DocumentObservationOptions = {},
 ): () => void {
   const state = documentState(root);
+  state.staticRendering = false;
   if (state.observer !== undefined) fail("HR003", "This document is already being observed.");
   const connected = new Map<Element, void | (() => void)>();
   const report = options.onError ?? ((error: unknown) => console.error(error));

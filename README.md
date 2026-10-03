@@ -203,7 +203,7 @@ demonstrates each target.
 
 ## Render in Node and hydrate in the browser
 
-The experimental `@nextwebwg/html-next/server` entry renders validated definitions with the same
+The `@nextwebwg/html-next/server` entry renders validated definitions with the same
 general runtime used in the browser:
 
 ```ts
@@ -224,8 +224,11 @@ existing native nodes. Node-to-browser tests compare the restored instance and s
 against fresh client rendering in Chromium, Firefox and WebKit.
 
 See [Node rendering and hydration](./packages/html-next/docs/server-rendering.md) for the API,
-platform choices and boundaries. This path does not execute controllers or wait for network reads;
-it does not complete the specialized build and converter delivery tracks.
+platform choices and verification. The server renders the declarative baseline; browser hydration
+connects declared reads and attaches controllers through the live loader or bundled controller
+imports, following the [proposal's lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration).
+Tests cover both the live loader and a tree-shaken browser bundle, including later controller and
+read updates. The specialized build and converter delivery tracks have separate completion criteria.
 
 ## Types and validation
 

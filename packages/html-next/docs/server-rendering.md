@@ -1,6 +1,6 @@
 # Node rendering and hydration
 
-The experimental `@nextwebwg/html-next/server` entry renders validated component definitions in
+The `@nextwebwg/html-next/server` entry renders validated component definitions in
 Node.js. It uses the same general renderer as live browser delivery, rather than a second component
 interpreter. This entry is separate from browser imports.
 
@@ -25,9 +25,18 @@ or `observeDocument()`. Hydration adopts the rendered roots; clicking the exampl
 to 6. A graph from `loadNodeComponents()` supplies definitions through its non-shadowed nodes.
 
 `state` addresses lowered component roots, so selectors should use stable authored IDs. Each value
-must name declared state. Pages and controller modules are not executed during server rendering;
-controllers attach through the browser loader or the existing controller APIs. This renderer does
-not wait for declared network reads to resolve. It is not a request-time data loader.
+must name declared state. Node output matches the browser's declarative baseline before connection:
+props, initial state, computeds, template output and projected slots. Declared reads remain in their
+initial pending state. Browser hydration restores the instance, connects reads and attaches its
+controller to the adopted nodes. This follows the proposal's
+[controller lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration) and
+[connection boundary](https://nextwebwg.org/html-next/reactivity/#lifecycle).
+
+For controller-backed definitions, use the live browser loader (`@nextwebwg/html-next/browser`) with
+component links, or bundle the controller imports alongside runtime registration and observation.
+`registerComponentDefinitions()` alone registers data; it does not import JavaScript modules.
+The runtime's `lowerDocument(document, { connect: false })` renders the same static baseline in a
+browser. Ordinary `lowerDocument()` or `observeDocument()` connects its reads afterward.
 
 ## Platform audit and implementation boundary
 
@@ -39,10 +48,17 @@ document in a dedicated worker. Browser constructors exist only in that worker; 
 and the caller cannot share them. Worker startup is currently paid per render. CSS uses the existing
 PostCSS build compiler because server DOM CSSOM support does not match modern browser CSS.
 
+Native DOM connection (`isConnected`) also holds in a server DOM; it does not mean an instance has
+joined an interactive browser document. Disabling HTML scripts and resource loading in jsdom does
+not stop the runtime's own Fetch calls. The runtime therefore needs one explicit rendering boundary:
+static lowering keeps reactive DOM bindings active but leaves declared reads and connection lifecycle
+paused. Browser lowering and observation connect them. Controllers attach through the browser's
+ordinary ESM loader after adoption, as described in the proposal's JavaScript lifecycle.
+
 The rendered-form serializer carries prop inputs, accepted values, explicitness and declared state
 in a versioned implementation record. It retains projected content that no slot currently renders
 and native form reset defaults. Hydration consumes the records. Executable, opaque and cyclic values
-fail with `HR010` instead of being serialized with different semantics. The record is experimental
+fail with `HR010` instead of being serialized with different semantics. The versioned record is
 implementation metadata, not a new normative format. Normative behavior remains in the public
 [rendered form proposal](https://nextwebwg.org/html-next/rendered-form/).
 
@@ -57,6 +73,13 @@ row nodes. Delegated components recover the slot ranges at their own depth withi
 restored props, explicitness, declared state, slots and subsequent updates against fresh client
 instances. It also checks retained native nodes, keyed rows, shared context and pre-hydration input
 edits, focus and selection. `tests/package.test.ts` executes the renderer from an installed tarball.
+
+`tests/server-continuation.test.ts` compares the exact Node and browser baseline markup, then feeds
+Node output through the live graph loader and a minified, tree-shaken browser bundle with pre-parsed
+definitions and controller imports. Both deliveries adopt existing nodes, preserve input edits,
+attach controller effects and public methods, resolve and refetch declared reads, and dispose and
+reattach behavior on removal/reconnection. The bundle inventory excludes Node dependencies; the
+pre-parsed delivery also excludes the live parser. These checks run in Chromium, Firefox and WebKit.
 
 This evidence covers the general runtime's Node path. It does not complete the unplugin's specialized
 factory hydration or the converter targets, whose separate completion criteria remain in the

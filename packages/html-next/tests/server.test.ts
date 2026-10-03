@@ -34,6 +34,16 @@ describe("Node component rendering", () => {
     assert.match(outputs[1]!.html, /<span>8<\/span>/);
   });
 
+  it("renders the browser's declarative baseline before declared reads connect", async () => {
+    const definition = parseComponent(`<template component="x-server-read"><defs>
+      <data name="result" src="data:application/json,%22resolved%22" type="string"></data>
+      </defs><section><output $if="result.pending">Loading</output>
+      <b $if="result.ok" $value="result.value"></b></section></template>`);
+    const rendered = await renderComponents("<x-server-read></x-server-read>", { definitions: [definition] });
+    assert.match(rendered.html, /<output>Loading<\/output>/);
+    assert.equal(rendered.html.includes("<b>"), false);
+  });
+
   it("returns rendering diagnostics to the caller", async () => {
     await assert.rejects(renderComponents('<x-server-counter></x-server-counter>', {
       definitions: [counter, { ...counter, css: "changed" }],
