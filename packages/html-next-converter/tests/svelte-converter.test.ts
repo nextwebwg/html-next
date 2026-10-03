@@ -17,6 +17,19 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
+async function serverHtml(outDirectory: string, name: string, source: string, props: Record<string, unknown> = {}): Promise<string> {
+  const server = compile(source, { filename: `${name}.svelte`, generate: "server" });
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir");
+  const serverPath = join(outDirectory, "server.mjs");
+  await build({
+    stdin: { contents: server.js.code, resolveDir: join(outDirectory, "svelte"), sourcefile: `${name}.js` },
+    outfile: serverPath, bundle: true, packages: "external", platform: "node", format: "esm",
+    loader: { ".css": "empty" },
+  });
+  const module = await import(pathToFileURL(serverPath).href) as { default: Component<Record<string, unknown>> };
+  return render(module.default, { props }).body;
+}
+
 it("converts a simple component to compilable Svelte 5 in both graph modes", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-converter-"));
   temporary.push(root);
@@ -36,20 +49,7 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.doesNotMatch(source, /@nextwebwg\/html-next/);
     assert.match(source, /data-component="x-card"/);
     compile(source, { filename: "XCard.svelte", generate: "client" });
-    const server = compile(source, { filename: "XCard.svelte", generate: "server" });
-    await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir");
-    const serverPath = join(outDirectory, "server.mjs");
-    await build({
-      stdin: { contents: server.js.code, resolveDir: join(outDirectory, "svelte"), sourcefile: "XCard.js" },
-      outfile: serverPath,
-      bundle: true,
-      packages: "external",
-      platform: "node",
-      format: "esm",
-      loader: { ".css": "empty" },
-    });
-    const module = await import(pathToFileURL(serverPath).href) as { default: Component<{ label?: string; id?: string; class?: string }> };
-    const html = render(module.default, { props: { label: "Hello", id: "case", class: "outside" } }).body;
+    const html = await serverHtml(outDirectory, "XCard", source, { label: "Hello", id: "case", class: "outside" });
     assert.match(html, /<article[^>]*data-component="x-card"/);
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
@@ -107,4 +107,46 @@ it("lowers a match inside table markup to one selected native row", async () => 
   assert.match(source, /\{#if s === "ok"\}/);
   compile(source, { filename: "XTable.svelte", generate: "client" });
   compile(source, { filename: "XTable.svelte", generate: "server" });
+});
+
+it("renders sorted, filtered, limited rows with loop metadata and no wrapper", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-each-"));
+  temporary.push(root);
+  await writeFile(join(root, "list.html"), `<template component="x-list" status="early" summary="List.">
+    <ul><li $each="n, i of [3, 1, 2, 5]" $where="n < 5" $sort="n" $limit="3"
+      from:data-i="i" from:data-last="loop.last" from:data-count="loop.count" $value="n"></li></ul>
+  </template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["list.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.match(source, /\{#each /);
+  compile(source, { filename: "XList.svelte", generate: "client" });
+  const html = await serverHtml(outDirectory, "XList", source);
+  assert.deepEqual([...html.matchAll(/<li ([^>]*)>([^<]*)<\/li>/g)].map((match) => [
+    /data-i="([^"]*)"/.exec(match[1]!)?.[1],
+    /data-count="([^"]*)"/.exec(match[1]!)?.[1],
+    /data-last="([^"]*)"/.exec(match[1]!)?.[1] ?? null,
+    match[2],
+  ]), [["0", "3", null, "1"], ["1", "3", null, "2"], ["2", "3", "", "3"]]);
+});
+
+it("treats an absent list as empty and reports duplicate keyed rows", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-list-cases-"));
+  temporary.push(root);
+  await writeFile(join(root, "empty.html"), `<template component="x-empty" status="early" summary="Empty list.">
+    <defs><state name="rows" type="list(string)"></state></defs>
+    <ul><li $each="row of rows" $value="row"></li></ul>
+  </template>`);
+  await writeFile(join(root, "duplicate.html"), `<template component="x-duplicate" status="early" summary="Duplicate list.">
+    <defs><state name="rows" type="list(string)" value="['a', 'a']"></state></defs>
+    <ul><li $each="row of rows" $key="row" $value="row"></li></ul>
+  </template>`);
+  for (const [name, expected] of [["empty", "no rows"], ["duplicate", "HR004"]] as const) {
+    const outDirectory = join(root, `out-${name}`);
+    const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: [`${name}.html`] });
+    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+    compile(source, { filename: `${name}.svelte`, generate: "client" });
+    if (expected === "no rows") assert.doesNotMatch(await serverHtml(outDirectory, `X${name}`, source), /<li/);
+    else await assert.rejects(serverHtml(outDirectory, `X${name}`, source), /HR004/);
+  }
 });

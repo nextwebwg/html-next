@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType } from "../type-system.js";
-import type { ComponentDefinition, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
+import type { ComponentDefinition, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, typeSource } from "./shared.js";
 import { Lowering, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
@@ -39,7 +39,7 @@ function checkSupported(definition: ComponentDefinition): void {
       for (const child of node.fallback ?? []) visit(child);
       return;
     }
-    if (node.flow !== undefined && !["if", "with", "match", "when", "else"].includes(node.flow.kind) ||
+    if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind) ||
       node.ref !== undefined || node.events?.some((event) => event.modifiers.length > 0)) {
       fail("HT030", "Svelte conversion does not yet support structural flow, event modifiers, or references.");
     }
@@ -57,17 +57,60 @@ function checkSupported(definition: ComponentDefinition): void {
   visit(definition.template);
 }
 
+interface RenderContext {
+  readonly imports: Set<string>;
+  nextLoop: number;
+}
+
+function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
+  const flow = node.flow;
+  if (flow?.kind !== "each" || flow.listPlan === undefined) fail("HT030", "A Svelte list needs a checked $each expression.");
+  const listNode = flow.listPlan.ast;
+  const listType = typeOf(listNode, scope);
+  const itemType: Static = listType.type.kind === "list"
+    ? { type: present(listType.type.item).type, nullable: false }
+    : { type: { kind: "terminal", name: "unknown" }, nullable: false };
+  const indexType: Static = { type: { kind: "terminal", name: "number" }, nullable: false };
+  const loopType: Static = { type: { kind: "object", open: false, fields: [
+    { name: "index", type: indexType.type, optional: false },
+    { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
+    { name: "last", type: { kind: "terminal", name: "boolean" }, optional: false },
+    { name: "count", type: indexType.type, optional: false },
+  ] }, nullable: false };
+  const row = `htmlNextRow${context.nextLoop++}`;
+  const scopeWith = (item: string, index: string, loop: string): Scope => ({
+    code: new Map([...scope.code, [flow.item, item], ...(flow.index === undefined ? [] : [[flow.index, index] as const]), ["loop", loop]]),
+    types: new Map([...scope.types, [flow.item, itemType], ...(flow.index === undefined ? [] : [[flow.index, indexType] as const]), ["loop", loopType]]),
+  });
+  const list = lowering.list(listNode, scope, flow.item, {
+    ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
+    itemScope: scopeWith(flow.item, "index", "loop"),
+    sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
+    ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
+  });
+  const safeList = listType.type.kind === "list" && listType.nullable ? `(${list} ?? [])` : list;
+  const callbackScope = scopeWith("item", "index", "loop");
+  const checked = flow.keyPlan === undefined ? safeList : lowering.uniqueKeys(safeList,
+    `(item, index, loop) => ${lowering.value(flow.keyPlan.ast, callbackScope)}`);
+  const rows = lowering.eachRows(checked);
+  const rowScope = scopeWith(`${row}.item`, `${row}.index`, `${row}.loop`);
+  const key = flow.keyPlan === undefined ? "" : ` (${lowering.value(flow.keyPlan.ast, rowScope)})`;
+  const { flow: _flow, ...body } = node;
+  return `{#each ${rows} as ${row}${key}}${renderNode(body, false, rowScope, lowering, context)}{/each}`;
+}
+
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
-  imports: Set<string>): string {
+  context: RenderContext): string {
   if (node.kind === "text") return escapeHtml(node.value);
   if (node.kind === "slot") {
-    const fallback = (node.fallback ?? []).map((child) => renderNode(child, false, scope, lowering, imports)).join("");
+    const fallback = (node.fallback ?? []).map((child) => renderNode(child, false, scope, lowering, context)).join("");
     return `{#if children}{@render children()}${fallback === "" ? "" : `{:else}${fallback}`}{/if}`;
   }
+  if (node.flow?.kind === "each") return renderEach(node, scope, lowering, context);
   if (node.flow?.kind === "if") {
     if (node.flow.testPlan === undefined) fail("HT030", `Expression \`${node.flow.test}\` could not be converted.`);
     const { flow: _flow, ...body } = node;
-    return `{#if ${lowering.condition(node.flow.testPlan.ast, scope)}}${renderNode(body, root, scope, lowering, imports)}{/if}`;
+    return `{#if ${lowering.condition(node.flow.testPlan.ast, scope)}}${renderNode(body, root, scope, lowering, context)}{/if}`;
   }
   if (node.flow?.kind === "with") {
     if (node.flow.expressionPlan === undefined) fail("HT030", `Expression \`${node.flow.expr}\` could not be converted.`);
@@ -78,7 +121,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       code: new Map([...scope.code, [node.flow.alias, node.flow.alias]]),
       types: new Map([...scope.types, [node.flow.alias, typeOf(value, scope)]]),
     };
-    return `{#if true}{@const ${node.flow.alias} = ${lowering.value(value, scope)}}${renderNode(body, root, local, lowering, imports)}{/if}`;
+    return `{#if true}{@const ${node.flow.alias} = ${lowering.value(value, scope)}}${renderNode(body, root, local, lowering, context)}{/if}`;
   }
   if (node.flow?.kind === "match") {
     const flow = node.flow;
@@ -94,9 +137,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const { flow: _flow, ...body } = arm;
       if (armFlow?.kind === "when") {
         if (armFlow.testPlan === undefined) fail("HT030", `Expression \`${armFlow.test}\` could not be converted.`);
-        return `${index === 0 ? "{#if" : "{:else if"} ${lowering.condition(armFlow.testPlan.ast, local)}}${renderNode(body, false, local, lowering, imports)}`;
+        return `${index === 0 ? "{#if" : "{:else if"} ${lowering.condition(armFlow.testPlan.ast, local)}}${renderNode(body, false, local, lowering, context)}`;
       }
-      if (armFlow?.kind === "else") return `{:else}${renderNode(body, false, local, lowering, imports)}`;
+      if (armFlow?.kind === "else") return `{:else}${renderNode(body, false, local, lowering, context)}`;
       fail("HT018", "A $match child must be a $when or $else arm.");
     }).join("");
     const block = `${cases}{/if}`;
@@ -107,9 +150,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const content = contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined
     ? `{${lowering.text(contentDirective.expressionPlan.ast, scope)}}`
     : undefined;
-  if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, imports)).join("");
+  if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
-  if (component) imports.add(node.name);
+  if (component) context.imports.add(node.name);
   const name = component ? componentName(node.name) : node.name;
   const literals: string[] = [];
   const bindings: string[] = [];
@@ -145,7 +188,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   for (const event of node.events ?? []) attributes.push(`on${event.name}={${event.handler}}`);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
-  const children = content ?? node.children.map((child) => renderNode(child, false, scope, lowering, imports)).join("");
+  const children = content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   return `${open}${children}</${name}>`;
 }
 
@@ -167,10 +210,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const expressionScope: Scope = { code, types };
   for (const declaration of [...states, ...computed]) {
     code.set(declaration.name, declaration.name);
-    types.set(declaration.name, declarationTypeNode(declaration.type, declaration.shape) === undefined
-      ? declaration.expression === undefined ? { type: { kind: "terminal", name: "unknown" }, nullable: true }
-        : typeOf(declaration.expression.ast, expressionScope)
-      : present(declarationTypeNode(declaration.type, declaration.shape)!));
+    const declared = declarationTypeNode(declaration.type, declaration.shape);
+    const inferred = declaration.expression === undefined
+      ? { type: { kind: "terminal", name: "unknown" }, nullable: true } as Static
+      : typeOf(declaration.expression.ast, expressionScope);
+    const typed = declared === undefined ? inferred : present(declared);
+    types.set(declaration.name, { ...typed, nullable: typed.nullable || declaration.expression === undefined });
   }
   const scope: RootScope = {
     tag: definition.contract.tag,
@@ -179,8 +224,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const imports = new Set<string>();
-  const markup = renderNode(definition.template, true, scope, lowering, imports);
+  const context: RenderContext = { imports: new Set(), nextLoop: 0 };
+  const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
   const destructured = target.props.map((prop) =>
@@ -196,7 +241,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const script = [
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
-    ...[...imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
+    ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     `type Props = { ${propTypes} children?: Snippet; [key: string]: unknown; };`,
     `let { ${destructured}${destructured === "" ? "" : ", "}children, ...rest }: Props = $props();`,
