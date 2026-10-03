@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-system.js";
-import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
+import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
@@ -12,6 +12,7 @@ import { handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 export interface SvelteConversionOptions {
+  readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
@@ -53,8 +54,6 @@ function checkSupported(definition: ComponentDefinition): void {
   const visit = (node: TemplateNode): void => {
     if (node.kind === "text") return;
     if (node.kind === "slot") {
-      if (node.name !== undefined || node.nameExpression !== undefined || node.flow !== undefined ||
-        (node.props?.length ?? 0) > 0) fail("HT030", "Svelte conversion does not yet support named or scoped slots.");
       for (const child of node.fallback ?? []) visit(child);
       return;
     }
@@ -79,6 +78,10 @@ function checkSupported(definition: ComponentDefinition): void {
 
 interface RenderContext {
   readonly imports: Set<string>;
+  readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
+  usesScopedSlots: boolean;
+  usesSampledSlots: boolean;
+  readonly checkedSlotName: string;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   readonly styleOwner?: string;
   nextLoop: number;
@@ -117,7 +120,19 @@ function retainedStructural(context: RenderContext, source: string): string {
   return `retained${site}(${source})`;
 }
 
-function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
+function localOwnership(context: RenderContext, firstHtmlSite: number, firstRetention: number): string {
+  const localHtml = Array.from({ length: context.htmlSites - firstHtmlSite }, (_, index) => firstHtmlSite + index)
+    .filter((site) => !context.localHtmlSites.has(site));
+  for (const site of localHtml) context.localHtmlSites.add(site);
+  const localRetentions = [...context.retentions].filter(([site]) => site >= firstRetention && !context.localRetentions.has(site));
+  for (const [site] of localRetentions) context.localRetentions.add(site);
+  return [
+    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)})}`),
+    ...localRetentions.map(([site, entry]) => `{@const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`}}`),
+  ].join("");
+}
+
+function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
   const flow = node.flow;
   if (flow?.kind !== "each" || flow.listPlan === undefined) fail("HT030", "A Svelte list needs a checked $each expression.");
   const listNode = flow.listPlan.ast;
@@ -156,15 +171,7 @@ function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context
   const firstHtmlSite = context.htmlSites;
   const firstRetention = context.retentions.size;
   const markup = renderNode(body, false, rowScope, lowering, context);
-  const localHtml = Array.from({ length: context.htmlSites - firstHtmlSite }, (_, index) => firstHtmlSite + index)
-    .filter((site) => !context.localHtmlSites.has(site));
-  for (const site of localHtml) context.localHtmlSites.add(site);
-  const localRetentions = [...context.retentions].filter(([site]) => site >= firstRetention && !context.localRetentions.has(site));
-  for (const [site] of localRetentions) context.localRetentions.add(site);
-  const declarations = [
-    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)})}`),
-    ...localRetentions.map(([site, entry]) => `{@const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`}}`),
-  ].join("");
+  const declarations = localOwnership(context, firstHtmlSite, firstRetention);
   return `{#each ${rows} as ${row}${key}}${declarations}${markup}{/each}`;
 }
 
@@ -172,8 +179,24 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   context: RenderContext): string {
   if (node.kind === "text") return escapeHtml(node.value);
   if (node.kind === "slot") {
+    if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, false, scope, lowering, context)).join("");
-    return `{#if children}{@render children()}${fallback === "" ? "" : `{:else}${fallback}`}{/if}`;
+    const sampledName = node.nameExpression === undefined ? undefined : context.freshIdentifier("htmlNextSlotName");
+    if (sampledName !== undefined) context.usesSampledSlots = true;
+    const name = sampledName ?? quote(node.name ?? "");
+    const nameDeclaration = sampledName === undefined ? "" : `{@const ${sampledName} = untrack(() => String(${lowering.value(node.nameExpression!.ast, scope)}))}`;
+    const selected = context.freshIdentifier("htmlNextSlot");
+    const scoped = (node.props?.length ?? 0) > 0;
+    if (scoped) context.usesScopedSlots = true;
+    const defaultSlot = node.name === undefined && node.nameExpression === undefined;
+    const supplied = defaultSlot ? `slots?.[""]${scoped ? " ?? (children === undefined ? undefined : null)" : ""}` : `slots?.[${name}]`;
+    const checked = scoped ? `${context.checkedSlotName}(${supplied}, ${name})` : supplied;
+    const values = scoped ? `{ ${node.props!.map((prop) => {
+      const source = lowering.value(prop.expressionPlan.ast, scope);
+      return `${quote(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
+    }).join(", ")} }` : "{}";
+    const children = !scoped && defaultSlot ? "{:else if children}{@render children()}" : "";
+    return `{#if true}${nameDeclaration}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
   }
   if (node.flow?.kind === "each") return renderEach(node, scope, lowering, context);
   if (node.flow?.kind === "if") {
@@ -245,8 +268,43 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const childProps = component ? context.propContractsByTag?.get(node.name) : undefined;
   const childProp = (attributeName: string): readonly [string, PropContract] | undefined =>
     Object.entries(childProps ?? {}).find(([prop]) => prop.toLowerCase() === attributeName || kebabCase(prop) === attributeName);
+  let snippetDeclarations = "";
+  let componentChildren = node.children;
+  const slotBindings: string[] = [];
+  if (component) {
+    const groups = new Map<string, TemplateNode[]>();
+    const defaults: TemplateNode[] = [];
+    for (const child of node.children) {
+      const assigned = child.kind === "element" ? child.attributes.find((entry) => entry.kind === "literal" && entry.name === "slot") : undefined;
+      if (assigned?.kind !== "literal") { defaults.push(child); continue; }
+      const group = groups.get(assigned.value) ?? [];
+      group.push(child); groups.set(assigned.value, group);
+    }
+    componentChildren = defaults;
+    for (const [slot, children] of groups) {
+      const contracts = context.slotsByTag?.get(node.name);
+      const contract = contracts?.find((entry) => !entry.dynamic && entry.name === slot)
+        ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
+      const scoped = (contract?.props?.length ?? 0) > 0;
+      const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
+      if (scoped && carrier === undefined) { slotBindings.push(`${quote(slot)}: null`); continue; }
+      const alias = context.freshIdentifier("htmlNextSlotProps");
+      const snippet = context.freshIdentifier("htmlNextProjection");
+      const projectedScope: Scope = !scoped ? scope : {
+        ...scope,
+        code: new Map([...scope.code, ...contract!.props!.map((prop) => [prop, `${alias}[${quote(prop)}]`] as const)]),
+        types: new Map<string, Static>([...scope.types, ...contract!.props!.map((prop) => [prop, { type: { kind: "terminal" as const, name: "unknown" }, nullable: true }] as const)]),
+      };
+      const firstHtml = context.htmlSites;
+      const firstRetention = context.retentions.size;
+      const markup = (scoped ? carrier!.children : children).map((child) => renderNode(child, false, projectedScope, lowering, context)).join("");
+      const ownership = localOwnership(context, firstHtml, firstRetention);
+      snippetDeclarations += `{#snippet ${snippet}(${alias}: Record<string, any>)}${ownership}${markup}{/snippet}`;
+      slotBindings.push(`${quote(slot)}: ${snippet}`);
+    }
+  }
   const literals: string[] = [];
-  const bindings: string[] = [];
+  const bindings: string[] = slotBindings.length === 0 ? [] : [`slots={{ ${slotBindings.join(", ")} }}`];
   const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
     attribute.kind === "attribute" && attribute.twoWay)
     .map((attribute) => attribute.name));
@@ -399,9 +457,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (!component && isVoidElement(node.name)) return open;
   const previousBoundSelect = context.boundSelect;
   if (node.name === "select") context.boundSelect = context.usesControls && node.attributes.some((entry) => entry.name === "value" && (entry.kind === "property" || entry.kind === "attribute" && entry.twoWay));
-  const children = content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
+  const children = content ?? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   context.boundSelect = previousBoundSelect;
-  return `${open}${children}</${name}>`;
+  const markup = `${open}${children}</${name}>`;
+  return snippetDeclarations === "" ? markup : `{#if true}${snippetDeclarations}${markup}{/if}`;
 }
 
 interface RootScope extends Scope {
@@ -462,7 +521,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
+  const context: RenderContext = { imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesProperties: false, propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
@@ -529,15 +588,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const script = [
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
-    ...(hasProps || context.usesControls ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || context.usesControls || context.usesSampledSlots ? ['import { untrack } from "svelte";'] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
-    `type Props = { ${propTypes} children?: Snippet; [key: string]: unknown; };`,
-    `let { ${destructured}${destructured === "" ? "" : ", "}children, ...rest }: Props = $props();`,
+    `type Props = { ${propTypes} children?: Snippet; slots?: Record<string, Snippet<[Record<string, any>]> | null>; [key: string]: unknown; };`,
+    `let { ${destructured}${destructured === "" ? "" : ", "}children, slots, ...rest }: Props = $props();`,
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
     `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { delete attrs.constructor; delete attrs.__proto__; } return attrs; });`,
@@ -568,6 +627,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "    const stop = observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); });",
       "    return () => { dispose?.(); stop(); };",
       "  };",
+      "}",
+    ] : []),
+    ...(context.usesScopedSlots ? [
+      `function ${context.checkedSlotName}(slot: Snippet<[Record<string, any>]> | null | undefined, name: string) {`,
+      "  if (slot === null) {",
+      `    const message = 'Scoped slot \u0060' + name + '\u0060 requires a consumer <template slot="' + name + '">.';`,
+      "    throw Object.assign(new Error('HR007: ' + message), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
+      "  }",
+      "  return slot;",
       "}",
     ] : []),
     ...(context.usesProperties ? [

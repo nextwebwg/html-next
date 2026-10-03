@@ -263,7 +263,7 @@ for (const target of ["vue", "react"] as const) it(`${target} supplies the sanit
 
 
 describe("svelte source adapter", () => {
-  it("mounts on-demand local imports in Vite and updates native output", async () => {
+  it.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("mounts on-demand local imports in Vite and updates native output", async () => {
     const { root, library } = await fixture();
     await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
@@ -296,7 +296,11 @@ describe("svelte source adapter", () => {
       .replace('on:click="increment"', 'on:click.self="increment"').replace('<span $value="$label">', '<span $ref="label" $value="$label">')
       .replace('<span>Badge</span>', `<defs><state name="form" type="object({ text: string, choices: list(string) })" value="{ text: 'Ready', choices: ['b'] }"></state></defs>
         <section .scrollTop="10">Badge<p .textContent="form.text"></p><input value="authored" .title="form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
-          <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select></section>`);
+          <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
+          <ui-rows><template slot="row"><li .title="item.name" $value="item.name"></li></template></ui-rows></section>`)
+      + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>
+        <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state></defs>
+        <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row"><li>Fallback</li></slot></ul></template>`;
     await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
     const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });

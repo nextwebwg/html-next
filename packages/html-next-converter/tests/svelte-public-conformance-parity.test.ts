@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
-import { build, type Plugin } from "esbuild";
+import { build } from "esbuild";
 import { parseFragment } from "parse5";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
-import { compile } from "svelte/compiler";
+import { sveltePlugin } from "./helpers/svelte.js";
 
 import { parseComponent } from "@nextwebwg/html-next";
 import { cases, type ConformanceCase } from "../../html-next/tests/conformance/cases.js";
@@ -65,6 +65,7 @@ assert.deepEqual(cases.filter((testCase) => "probe" in testCase.expect && !selec
 // Converter regressions exercise the new boundaries beyond the shared initial-render cases.
 interface ConverterCase extends ConformanceCase {
   readonly passthrough?: string;
+  readonly dependencies?: Readonly<Record<string, string>>;
   readonly liveSetup?: string;
   readonly hydrationOnlyProbe?: boolean;
   readonly beforeHydration?: string;
@@ -150,6 +151,64 @@ const regressions: readonly ConverterCase[] = [
         { action: `document.querySelector('button.invalid').click();`, result: ["40px", 0, true, "40px", 0, "Ready", "Ready"] },
         { action: `document.querySelector('button.valid').click();`, result: ["20px", 0, false, "20px", 10, "Ready", "Ready"] },
         { action: `const e = document.querySelector('input.generic'); e.value = 'Edited'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["20px", 0, false, "20px", 10, "Edited", "Edited"] },
+      ] },
+  },
+
+  {
+    name: "named and dynamic slot snippets preserve projection and fallbacks",
+    dependencies: { "panel.html": `<template component="x-panel" status="early" summary="Panel."><defs>
+      <state name="slotName" value="title"></state><handler name="rotate"><set name="slotName" value="secondary"></set></handler>
+      </defs><section><header><slot from:name="slotName"><b>Untitled</b></slot></header><main><slot><i>Empty</i></slot></main>
+        <button class="rotate" on:click="rotate">Rotate</button></section>
+      <style>:host { display: block; background: rgb(238 244 250); padding: 4px; } header { color: rgb(32 48 64); }
+        h2 { font-style: italic; } :slotted(h2) { color: rgb(200 20 30); }</style></template>` },
+    source: `<template component="x-slot-app" status="early" summary="Slot app."><defs>
+      <state name="heading" value="Title"></state><handler name="rename"><set name="heading" value="Changed"></set></handler>
+      </defs><article><x-panel><h2 slot="title" $value="heading"></h2><h3 slot="secondary">Second</h3><p>Body</p></x-panel>
+        <x-panel></x-panel><button class="rename" on:click="rename">Rename</button></article></template><x-slot-app></x-slot-app>`,
+    expect: { probe: `return [qa('section header').map(e => e.textContent.trim()), qa('section main').map(e => e.textContent.trim()), q('h2') ? getComputedStyle(q('h2')).color : null, q('h2') ? getComputedStyle(q('h2')).fontStyle : null, qa('x-panel, slot').length];`,
+      result: [["Title", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0], after: [
+        { action: `document.querySelector('button.rename').click();`, result: [["Changed", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0] },
+        { action: `document.querySelector('button.rotate').click();`, result: [["Changed", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0] },
+      ] },
+  },
+  {
+    name: "scoped slot snippets keep child row names and parent expressions separate",
+    dependencies: { "rows.html": `<template component="x-rows" status="early" summary="Rows."><defs>
+      <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state>
+      <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+      </defs><div><button class="add" on:click="add">Add</button><ul>
+        <slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot>
+      </ul></div><style>:host { display: block; background: rgb(238 244 250); padding: 4px; } li { font-weight: bold; }
+        :slotted(li) { color: rgb(32 48 64); }</style></template>` },
+    source: `<template component="x-scoped-app" status="early" summary="Scoped app."><defs>
+      <state name="item" type="object" value="{ name: 'Parent' }"></state><state name="heading" value="Team"></state>
+      <handler name="rename"><set name="heading" value="Group"></set></handler></defs>
+      <article><button class="rename" on:click="rename">Rename</button><output $value="item.name"></output>
+        <x-rows><template slot="row"><li .title="item.name"><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small><input .value="item.name"></li></template></x-rows>
+        <x-rows></x-rows></article></template><x-scoped-app></x-scoped-app>`,
+    expect: { probe: `return [q('output').textContent, qa('ul').map(e => Array.from(e.querySelectorAll('li'), e => e.textContent)), qa('ul')[0] ? Array.from(qa('ul')[0].querySelectorAll('li'), e => [e.title, e.querySelector('input').value, getComputedStyle(e).color, getComputedStyle(e).fontWeight]) : []];`,
+      result: ["Parent", [["AdaTeam0"], ["Missing"]], [["Ada", "Ada", "rgb(32, 48, 64)", "400"]]], after: [
+        { action: `document.querySelector('button.rename').click();`, result: ["Parent", [["AdaGroup0"], ["Missing"]], [["Ada", "Ada", "rgb(32, 48, 64)", "400"]]] },
+        { action: `document.querySelector('button.add').click();`, result: ["Parent", [["AdaGroup0", "BeaGroup1"], ["Missing"]], [["Ada", "Ada", "rgb(32, 48, 64)", "400"], ["Bea", "Bea", "rgb(32, 48, 64)", "400"]]] },
+      ] },
+  },
+
+  {
+    name: "scoped slot snippets retain each invalid prop independently per row",
+    dependencies: { "measures.html": `<template component="x-measures" status="early" summary="Measured rows."><defs>
+      <state name="rows" type="list(object({ id: string, width: length }))" value="[{ id: 'a', width: '8px' }, { id: 'b', width: '4px' }]"></state>
+      <handler name="invalidate"><set name="rows.0.width" value="1rem"></set></handler>
+      <handler name="restore"><set name="rows.0.width" value="2px"></set><set name="rows.1.width" value="6px"></set></handler>
+      </defs><section><button class="invalidate" on:click="invalidate">Invalidate</button><button class="restore" on:click="restore">Restore</button>
+        <slot name="measure" $each="row of rows" $key="row.id" from:item="min(row.width, 5px)" from:index="loop.index"></slot></section></template>` },
+    source: `<template component="x-measure-app" status="early" summary="Measure app."><div><x-measures>
+      <template slot="measure"><span .title="item" $value="concat(item, '/', index)"></span><input .value="item"></template>
+      </x-measures></div></template><x-measure-app></x-measure-app>`,
+    expect: { probe: `return [qa('span').map(e => [e.textContent, e.title]), qa('input').map(e => e.value)];`,
+      result: [[["5px/0", "5px"], ["4px/1", "4px"]], ["5px", "4px"]], after: [
+        { action: `document.querySelector('button.invalidate').click();`, result: [[["5px/0", "5px"], ["4px/1", "4px"]], ["5px", "4px"]] },
+        { action: `document.querySelector('button.restore').click();`, result: [[["2px/0", "2px"], ["5px/1", "5px"]], ["2px", "5px"]] },
       ] },
   },
 
@@ -325,15 +384,6 @@ function withoutStylingMarkers(value: unknown): unknown {
   ]));
 }
 
-function sveltePlugin(generate: "client" | "server"): Plugin {
-  return { name: `svelte-${generate}`, setup(plugin) {
-    plugin.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({
-      contents: compile(await readFile(path, "utf8"), { filename: path, generate }).js.code,
-      loader: "js",
-      resolveDir: dirname(path),
-    }));
-  } };
-}
 
 async function capturePixels(page: Page): Promise<Buffer> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
@@ -357,15 +407,17 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
       for (const mode of ["application", "library"] as const) {
         const caseDirectory = join(directory, String(index), mode);
         await mkdir(caseDirectory, { recursive: true });
-        await writeFile(join(caseDirectory, "component.html"), definition);
+        const links = Object.keys(testCase.dependencies ?? {}).map((file) => `<link rel="component" href="./${file}">`).join("");
+        for (const [file, source] of Object.entries(testCase.dependencies ?? {})) await writeFile(join(caseDirectory, file), source);
+        await writeFile(join(caseDirectory, "component.html"), links + definition);
         const outDirectory = join(caseDirectory, "out");
         const manifest = await convertComponents({ mode, target: "svelte", entries: ["component.html"], root: caseDirectory, outDirectory });
-        assert.deepEqual(manifest.components.map((component) => component.tag), [parsed.contract.tag]);
-        const component = manifest.components[0]!;
+        assert.equal(manifest.components.length, 1 + Object.keys(testCase.dependencies ?? {}).length);
+        const component = manifest.components.find((entry) => entry.tag === parsed.contract.tag)!;
         const wrapper = join(outDirectory, "App.svelte");
         await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props, testCase.passthrough)}`);
-        const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
-        const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
+        const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
+          .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
         const browserEntry = join(outDirectory, "browser.ts");
         const bundle = join(outDirectory, "svelte.js");
         await writeFile(browserEntry, `import { mount, hydrate } from "svelte";\nimport App from "./App.svelte";\nconst target = document.querySelector("main")!;\nif (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });`);
@@ -406,7 +458,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
               assert.equal(output.serverError, undefined, `Svelte server rendering failed: ${output.serverError}`);
               for (const page of [live, svelte, hydrated]) page.on("pageerror", (error) => errors.push(error.message));
               hydrated.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
-              await live.setContent(`${baseStyle}${definition}<main>${invocation}</main>`);
+              await live.setContent(`${baseStyle}${Object.values(testCase.dependencies ?? {}).join("")}${definition}<main>${invocation}</main>`);
               await live.addScriptTag({ path: liveBundle });
               await live.evaluate(() => window.HtmlRuntime.lowerDocument());
               if (testCase.liveSetup !== undefined) await live.evaluate((script) => Function(script)(), testCase.liveSetup);
