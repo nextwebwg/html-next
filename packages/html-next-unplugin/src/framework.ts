@@ -48,7 +48,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
     if (["types", "node_modules"].includes(item.name)) continue;
     const path = resolve(directory, item.name);
     if (item.isDirectory()) files.push(...await sourceFiles(path));
-    else if (/\.(?:vue|[cm]?[jt]sx?)$/.test(item.name)) files.push(path);
+    else if (/\.(?:vue|svelte|[cm]?[jt]sx?)$/.test(item.name)) files.push(path);
   }
   return files;
 }
@@ -274,6 +274,7 @@ class FrameworkCompiler {
       digest.update(await readFile(consumerRequire.resolve(`${name}/package.json`)));
     }
     if (this.options.target === "vue") digest.update(await readFile(require.resolve("vue-tsc/package.json")));
+    if (this.options.target === "svelte") digest.update(await readFile(require.resolve("svelte2tsx/package.json")));
     const fingerprint = digest.digest("hex");
     const metadata = resolve(cache, "declarations.fingerprint");
     if (await readFile(metadata, "utf8").catch(() => "") === fingerprint && await exists(declarationEntry)) return declarationEntry;
@@ -283,11 +284,17 @@ class FrameworkCompiler {
     await writeFile(config, JSON.stringify({ compilerOptions: {
       target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "react-jsx",
       strict: true, skipLibCheck: true, allowJs: true, checkJs: false, allowImportingTsExtensions: true,
-      declaration: true, emitDeclarationOnly: true, noEmitOnError: true,
+      declaration: true, emitDeclarationOnly: true, noEmitOnError: this.options.target !== "svelte",
       rootDir: cache, outDir: output, types: [],
     }, files }), "utf8");
     const binary = this.options.target === "vue" ? require.resolve("vue-tsc/bin/vue-tsc.js") : require.resolve("typescript/bin/tsc");
-    try { await run(process.execPath, [binary, "-p", config], { maxBuffer: 8 * 1024 * 1024 }); }
+    try {
+      if (this.options.target === "svelte") {
+        const { emitDts } = await import("svelte2tsx");
+        await emitDts({ libRoot: cache, declarationDir: output, tsconfig: config,
+          svelteShimsPath: require.resolve("svelte2tsx/svelte-shims-v4.d.ts") });
+      } else await run(process.execPath, [binary, "-p", config], { maxBuffer: 8 * 1024 * 1024 });
+    }
     catch (error) {
       const result = error as { stdout?: string; stderr?: string };
       throw new Error(`HTML Next ${this.options.target} declaration generation failed:\n${result.stdout ?? ""}${result.stderr ?? ""}`, { cause: error });
@@ -410,7 +417,8 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       return entry;
     },
     transform(code, id) {
-      if (options.target !== "react" || !id.endsWith(".tsx") || !slash(id).includes("/node_modules/.html-next/react/")) return null;
+      if (!(options.target === "react" && id.endsWith(".tsx") || options.target === "svelte" && id.endsWith(".svelte")) ||
+        !slash(id).includes(`/node_modules/.html-next/${options.target}/`)) return null;
       // A component has no import-time effect of its own. Its CSS must disappear with an unused export.
       return { code, moduleSideEffects: false };
     },

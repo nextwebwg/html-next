@@ -6,7 +6,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-sys
 import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, isVoidElement, quote, svgAttributeName, typeSource } from "./shared.js";
+import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
@@ -388,7 +388,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set() };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
-    `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
+    `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${propTypeSource(prop.contract)};`).join("\n  ");
   const destructured = target.props.map((prop) => `${prop.name}: input${prop.name}`).join(", ");
   const hasProps = target.props.length > 0;
   const selectors = [...new Set(target.props.flatMap((prop) => prop.contract.select === undefined ? [] : [prop.contract.select.from]))];

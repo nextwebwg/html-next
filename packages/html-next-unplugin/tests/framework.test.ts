@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
@@ -15,6 +15,7 @@ import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { chromium } from "playwright";
 import react from "@vitejs/plugin-react";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import htmlNext from "../src/vite.js";
 import { syncHtmlNext } from "../src/framework.js";
 
@@ -33,7 +34,7 @@ async function fixture() {
   await mkdir(library, { recursive: true });
   await mkdir(join(root, "src"));
   await mkdir(join(root, "node_modules", "@types"));
-  for (const name of ["vue", "react", "react-dom", "@types/react", "@types/react-dom"]) {
+  for (const name of ["vue", "react", "react-dom", "svelte", "@types/react", "@types/react-dom"]) {
     await symlink(join(modules, name), join(root, "node_modules", name), "dir");
   }
   await writeFile(join(root, "package.json"), JSON.stringify({ type: "module", dependencies: { "@example/controls": "1.0.0" } }));
@@ -259,3 +260,78 @@ for (const target of ["vue", "react"] as const) it(`${target} supplies the sanit
     assert.doesNotMatch(markup.match(/<div>([\s\S]*)<\/div>/)?.[1] ?? "", /unsafe|<script/);
   } finally { await server.close(); }
 }, 60_000);
+
+
+describe("svelte source adapter", () => {
+  it("mounts on-demand local imports in Vite and updates native output", async () => {
+    const { root, library } = await fixture();
+    await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+    await writeFile(join(root, "src", "App.svelte"), `<script lang="ts">import { UiButton } from "./controls.html";</script><UiButton label="Save" />`);
+    await writeFile(join(root, "src", "mount.ts"), `import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.getElementById("app")! });`);
+    await writeFile(join(root, "index.html"), `<div id="app"></div><script type="module" src="/src/mount.ts"></script>`);
+    const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()], server: { port: 0, host: "127.0.0.1" } });
+    const browser = await chromium.launch();
+    try {
+      await server.listen();
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(server.resolvedUrls!.local[0]!);
+      await page.waitForFunction(() => document.querySelector("output")?.textContent === "0");
+      await page.locator("button").click();
+      await page.waitForFunction(() => document.querySelector("output")?.textContent === "1");
+      assert.equal(await page.locator("ui-button, ui-badge").count(), 0);
+      assert.equal(await page.locator("button").evaluate((element) => getComputedStyle(element).color), "rgb(1, 2, 3)");
+      assert.deepEqual(errors, []);
+      assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
+    } finally { await browser.close(); await server.close(); }
+  }, 60_000);
+
+  it("converts package and local imports with precise declarations and tree shaking", async () => {
+    const { root, library } = await fixture();
+    await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+    const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });
+    assert.ok(prepared.aliases.has("@example/controls"));
+    assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+    assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
+    const checker = require.resolve("svelte-check/bin/svelte-check");
+    const cache = dirname(dirname(prepared.aliases.get("@example/controls")!));
+    await run(process.execPath, [checker, "--tsconfig", join(cache, "tsconfig.json"), "--output", "machine"], { cwd: root });
+    const entry = join(root, "src", "entry.ts");
+    await writeFile(entry, `import { render } from "svelte/server";
+      import { Button } from "@example/controls";
+      import { UiBadge } from "./controls.html";
+      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body;`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { ssr: entry, outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "entry.js")).href) as { markup(): string };
+    assert.match(output.markup(), /Save/);
+    assert.match(output.markup(), /Badge/);
+    const bundle = await readFile(join(root, "dist", "entry.js"), "utf8");
+    assert.equal(/<ui-button|<ui-badge|UNUSED_COMPONENT_MARKER|parseComponent|html-next\/live/.test(bundle), false, "unused components and HTML Next runtime must be absent");
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
+      strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
+    }, include: ["src"] }));
+    await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
+      import { Button } from "@example/controls"; import { UiButton } from "./controls.html";
+      export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
+      export const local: ComponentProps<typeof UiButton> = { label: "Save" };`);
+    const compiler = require.resolve("typescript/bin/tsc");
+    await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
+    await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { Button } from "@example/controls";
+      export const bad: ComponentProps<typeof Button> = { label: 42, size: "huge" };`);
+    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+      const result = error as { stdout: string };
+      assert.match(result.stdout, /number.*string/);
+      assert.match(result.stdout, /huge/);
+      return true;
+    });
+    await rm(join(root, "src", "invalid.ts"));
+    await writeFile(join(library, "controls.html"), (await readFile(join(library, "controls.html"), "utf8")).replace('values="small, large"', 'values="small, large, huge"'));
+    await syncHtmlNext({ target: "svelte", root });
+    await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte"; import { Button } from "@example/controls";
+      export const refreshed: ComponentProps<typeof Button> = { label: "Save", size: "huge" };`);
+    await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
+  }, 60_000);
+});
