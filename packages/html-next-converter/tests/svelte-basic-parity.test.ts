@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
-import { compile } from "svelte/compiler";
+import { sveltePlugin } from "./helpers/svelte.js";
 
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
@@ -95,18 +95,13 @@ describe.skipIf(!enabled)("Svelte basic visual and behavior parity", () => {
         const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory,
           entries: [`${fixture.name}.html`] });
         const component = manifest.components[0]!;
-        const componentPath = join(outDirectory, component.artifact);
-        const svelteSource = await readFile(componentPath, "utf8");
-        const compiled = compile(svelteSource, { filename: componentPath, generate: "client" });
-        const compiledPath = join(outDirectory, "svelte", `${component.name}.js`);
-        await writeFile(compiledPath, compiled.js.code);
         const entry = join(outDirectory, "entry.js");
         await writeFile(entry, `import { mount } from "svelte";
-import Component from "./svelte/${component.name}.js";
+import Component from "./${component.artifact}";
 mount(Component, { target: document.querySelector("main") });`);
         const bundle = join(outDirectory, "svelte.js");
         await build({ entryPoints: [entry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
-          target: ["es2022"], loader: { ".css": "empty" }, nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
+          target: ["es2022"], loader: { ".css": "empty" }, plugins: [sveltePlugin("client")], nodePaths: [fileURLToPath(new URL("../node_modules", import.meta.url))] });
         const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
         outputs.set(`${fixture.name}:${mode}`, { bundle,
           css: style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8") });
@@ -136,8 +131,12 @@ mount(Component, { target: document.querySelector("main") });`);
             await svelte.setContent(`<style>${css}</style><main></main>`);
             await svelte.addScriptTag({ path: bundle });
             for (const [index, expected] of fixture.expectedText.entries()) {
-              await Promise.all([live, svelte].map((page) => page.waitForFunction(({ selector, text }) =>
-                document.querySelector(selector)?.textContent === text, { selector: fixture.checkpoint, text: expected })));
+              try {
+                await Promise.all([live, svelte].map((page) => page.waitForFunction(({ selector, text }) =>
+                  document.querySelector(selector)?.textContent === text, { selector: fixture.checkpoint, text: expected }, { timeout: 3_000 })));
+              } catch (error) {
+                assert.fail(`Missing ${fixture.name} checkpoint ${index}: ${String(error)}; page errors=${errors.join(" | ")}`);
+              }
               const [native, converted] = await Promise.all([snapshot(live, fixture), snapshot(svelte, fixture)]);
               assert.deepEqual(converted.data, native.data);
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, `Svelte ${fixture.name} pixels differ`, live);
