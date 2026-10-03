@@ -7,7 +7,7 @@ import type { ComponentDefinition, ElementNode, HandlerDeclaration, ReactiveDecl
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, svgAttributeName, typeSource } from "./shared.js";
-import { Lowering, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
+import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 export interface SvelteConversionOptions {
@@ -79,6 +79,20 @@ interface RenderContext {
   nextLoop: number;
   htmlSites: number;
   readonly localHtmlSites: Set<number>;
+  readonly retentions: Map<number, { readonly initial?: string }>;
+  readonly localRetentions: Set<number>;
+}
+
+function retained(context: RenderContext, source: string, initial: string): string {
+  const site = context.retentions.size;
+  context.retentions.set(site, { initial });
+  return `retained${site}(${source})`;
+}
+
+function retainedStructural(context: RenderContext, source: string): string {
+  const site = context.retentions.size;
+  context.retentions.set(site, {});
+  return `retained${site}(${source})`;
 }
 
 function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
@@ -101,12 +115,14 @@ function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context
     code: new Map([...scope.code, [flow.item, item], ...(flow.index === undefined ? [] : [[flow.index, index] as const]), ["loop", loop]]),
     types: new Map([...scope.types, [flow.item, itemType], ...(flow.index === undefined ? [] : [[flow.index, indexType] as const]), ["loop", loopType]]),
   });
+  const listSource = lowering.value(listNode, scope);
+  const stableSource = mayProduceInvalidResult(listNode, scope) ? retained(context, listSource, "[] as any[]") : listSource;
   const list = lowering.list(listNode, scope, flow.item, {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
     itemScope: scopeWith(flow.item, "index", "loop"),
     sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
-  });
+  }, stableSource);
   const safeList = listType.type.kind === "list" && listType.nullable ? `(${list} ?? [])` : list;
   const callbackScope = scopeWith("item", "index", "loop");
   const checked = flow.keyPlan === undefined ? safeList : lowering.uniqueKeys(safeList,
@@ -116,11 +132,17 @@ function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context
   const key = flow.keyPlan === undefined ? "" : ` (${lowering.value(flow.keyPlan.ast, rowScope)})`;
   const { flow: _flow, ...body } = node;
   const firstHtmlSite = context.htmlSites;
+  const firstRetention = context.retentions.size;
   const markup = renderNode(body, false, rowScope, lowering, context);
   const localHtml = Array.from({ length: context.htmlSites - firstHtmlSite }, (_, index) => firstHtmlSite + index)
     .filter((site) => !context.localHtmlSites.has(site));
   for (const site of localHtml) context.localHtmlSites.add(site);
-  const declarations = localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml()}`).join("");
+  const localRetentions = [...context.retentions].filter(([site]) => site >= firstRetention && !context.localRetentions.has(site));
+  for (const [site] of localRetentions) context.localRetentions.add(site);
+  const declarations = [
+    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml()}`),
+    ...localRetentions.map(([site, entry]) => `{@const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`}}`),
+  ].join("");
   return `{#each ${rows} as ${row}${key}}${declarations}${markup}{/each}`;
 }
 
@@ -135,7 +157,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (node.flow?.kind === "if") {
     if (node.flow.testPlan === undefined) fail("HT030", `Expression \`${node.flow.test}\` could not be converted.`);
     const { flow: _flow, ...body } = node;
-    return `{#if ${lowering.condition(node.flow.testPlan.ast, scope)}}${renderNode(body, root, scope, lowering, context)}{/if}`;
+    const test = node.flow.testPlan.ast;
+    const condition = lowering.condition(test, scope);
+    return `{#if ${mayProduceInvalidResult(test, scope) ? retained(context, condition, "false") : condition}}${renderNode(body, root, scope, lowering, context)}{/if}`;
   }
   if (node.flow?.kind === "with") {
     if (node.flow.expressionPlan === undefined) fail("HT030", `Expression \`${node.flow.expr}\` could not be converted.`);
@@ -146,7 +170,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       code: new Map([...scope.code, [node.flow.alias, node.flow.alias]]),
       types: new Map([...scope.types, [node.flow.alias, typeOf(value, scope)]]),
     };
-    return `{#if true}{@const ${node.flow.alias} = ${lowering.value(value, scope)}}${renderNode(body, root, local, lowering, context)}{/if}`;
+    const source = lowering.value(value, scope);
+    const markup = renderNode(body, root, local, lowering, context);
+    if (!mayProduceInvalidResult(value, scope)) return `{#if true}{@const ${node.flow.alias} = ${source}}${markup}{/if}`;
+    const site = context.retentions.size;
+    const result = `htmlNextStructural${site}`;
+    const retainedSource = retainedStructural(context, source);
+    return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}{@const ${node.flow.alias} = ${result}.value}${markup}{/if}{/if}`;
   }
   if (node.flow?.kind === "match") {
     const flow = node.flow;
@@ -162,14 +192,21 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const { flow: _flow, ...body } = arm;
       if (armFlow?.kind === "when") {
         if (armFlow.testPlan === undefined) fail("HT030", `Expression \`${armFlow.test}\` could not be converted.`);
-        return `${index === 0 ? "{#if" : "{:else if"} ${lowering.condition(armFlow.testPlan.ast, local)}}${renderNode(body, root, local, lowering, context)}`;
+        const test = armFlow.testPlan.ast;
+        const condition = lowering.condition(test, local);
+        return `${index === 0 ? "{#if" : "{:else if"} ${mayProduceInvalidResult(test, local) ? retained(context, condition, "false") : condition}}${renderNode(body, root, local, lowering, context)}`;
       }
       if (armFlow?.kind === "else") return `{:else}${renderNode(body, root, local, lowering, context)}`;
       fail("HT018", "A $match child must be a $when or $else arm.");
     }).join("");
     const block = `${cases}{/if}`;
     if (flow.alias === undefined || value === undefined) return block;
-    return `{#if true}{@const ${flow.alias} = ${lowering.value(value, scope)}}${block}{/if}`;
+    const source = lowering.value(value, scope);
+    if (!mayProduceInvalidResult(value, scope)) return `{#if true}{@const ${flow.alias} = ${source}}${block}{/if}`;
+    const site = context.retentions.size;
+    const result = `htmlNextStructural${site}`;
+    const retainedSource = retainedStructural(context, source);
+    return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}{@const ${flow.alias} = ${result}.value}${block}{/if}{/if}`;
   }
   const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
   let content: string | undefined;
@@ -289,7 +326,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   };
   const lowering = new Lowering();
   const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
-    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set() };
+    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set() };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
@@ -312,8 +349,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   });
   const stateSources = states.map((state) =>
     `let ${state.name} = $state(${state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope)});`);
-  const computedSources = computed.map((value) =>
-    `let ${value.name} = $derived(${value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, scope)});`);
+  const computedSources = computed.map((value) => {
+    const expression = value.expression?.ast;
+    const source = expression === undefined ? "undefined" : lowering.value(expression, scope);
+    return `let ${value.name} = $derived(${expression !== undefined && mayProduceInvalidResult(expression, scope)
+      ? retained(context, source, "undefined as any") : source});`;
+  });
   const handlerSources = handlers.map((handler) => `function ${handler.name}(): void {\n${handler.steps.map((step) => {
     if (step.kind !== "set") return "";
     return `  ${step.writablePath[0]} = ${lowering.value(step.value.ast, scope)};`;
@@ -348,6 +389,28 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  else if (hadProto) element.removeAttribute('__proto__');",
     "  hadProto = proto;",
     "});",
+    ...(context.retentions.size === 0 ? [] : [
+      "function retainedValue<T>(initial: T): (candidate: unknown) => T {",
+      "  let previous = initial;",
+      "  return (candidate: unknown) => {",
+      "    if (candidate === Symbol.for('html-next.invalid-result')) return previous;",
+      "    previous = candidate as T;",
+      "    return previous;",
+      "  };",
+      "}",
+      ...(Array.from(context.retentions.values()).some((entry) => entry.initial === undefined) ? [
+        "function retainedStructuralValue<T>(): (candidate: T | symbol) => { ready: boolean; value: T } {",
+        "  let ready = false;",
+        "  let previous!: T;",
+        "  return (candidate: T | symbol) => {",
+        "    if (candidate !== Symbol.for('html-next.invalid-result')) { ready = true; previous = candidate as T; }",
+        "    return { ready, value: previous };",
+        "  };",
+        "}",
+      ] : []),
+      ...[...context.retentions].filter(([site]) => !context.localRetentions.has(site))
+        .map(([site, entry]) => `const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`};`),
+    ]),
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${quote(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
       "const inputAccepted: Record<string, boolean> = {};",

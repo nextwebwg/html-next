@@ -565,10 +565,11 @@ export class Lowering {
     scope: Scope,
     item: string,
     options: { where?: ExpressionNode; itemScope: Scope; sort: readonly string[]; limit?: ExpressionNode },
+    source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
     // Vue iterates null and undefined as nothing; anything but a list must also iterate as nothing.
-    let code = type.type.kind === "list" ? this.value(node, scope) : `${this.#use("list")}(${this.value(node, scope)})`;
+    let code = type.type.kind === "list" ? source : `${this.#use("list")}(${source})`;
     if (options.where === undefined && options.sort.length === 0 && options.limit === undefined) return code;
     if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
     if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;

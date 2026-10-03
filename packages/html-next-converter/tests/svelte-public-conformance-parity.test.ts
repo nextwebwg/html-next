@@ -19,7 +19,7 @@ const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const livePath = fileURLToPath(new URL("../../html-next/src/live.ts", import.meta.url));
 const baseStyle = "<style>html { color-scheme: light; } body { margin: 8px; font: 16px/1.4 Arial, sans-serif; }</style>";
 
-// Grow this list as feature slices land. It deliberately uses the same public cases as Vue and React.
+// Keep every successful public case accounted for as support lands.
 const selected = new Set([
   "HTML parser recovery keeps the first duplicate attribute",
   "preserves SVG namespaces and camelCase attributes inside a native root",
@@ -34,10 +34,35 @@ const selected = new Set([
   "invocation attributes named after Object prototype members pass through",
   "$value renders escaped text (a <b> in data is literal characters)",
   "<template $value> renders inline text with no wrapper element",
+  "$html sanitizes: <script>, on* handlers, and javascript: URLs are stripped and do not execute",
+  "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
+  "dimensional arithmetic scales numeric parts and preserves written units",
+  "$if truthiness: '' / 0 / [] / false are falsy; non-empty string and non-zero are truthy",
+  "invalid structural expressions keep the last rendered region until a valid update",
+  "initially invalid structural expressions render nothing until a valid update",
+  "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
+  "$each with $sort/$limit and the loop object (index/last/count), plus item, i binding",
+  "$each $where filters and reindexes the loop",
+  "$sort with multiple keys and descending (a,-b)",
+  "$match/$when/$else renders only the winning arm",
+  "$match selects a row inside <table><tbody>, falling back to $else",
+  "a structural <template> produces no wrapper element",
+  "$with binds an aliased expression into a child scope",
+  "a <style> in a definition moves to <head> and the definition template is removed",
+  "an absent required prop lowers with valueMissing validity",
+  "an unparseable number prop renders its default and reports badInput",
   "invalid $html expressions retain the last sanitized content",
+]);
+const pending = new Set([
+  "matches :host in :slotted() rules as the component root", // Projected nodes lack the style marker.
+  "bind: renders its initial state; declared on: bindings are consumed", // Generic bind: is not lowered yet.
+  "reactive declarations seed once: state initializes, computed evaluates, data is pending", // Data declarations are not lowered yet.
+  ".property binding resolves through the generated DOM contract", // .property is not lowered yet.
 ]);
 const successful = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
 assert.equal(successful.length, selected.size, "Every selected public case must still exist");
+assert.deepEqual(cases.filter((testCase) => "probe" in testCase.expect && !selected.has(testCase.name))
+  .map((testCase) => testCase.name).sort(), [...pending].sort(), "Every public success case must be selected or explicitly pending");
 
 type HtmlNode = {
   readonly nodeName: string;
@@ -111,7 +136,7 @@ async function capturePixels(page: Page): Promise<Buffer> {
 describe.skipIf(!enabled)("public Svelte converter shared conformance parity", () => {
   let directory = "";
   let liveBundle = "";
-  const artifacts = new Map<string, { readonly bundle: string; readonly css: string; readonly server: string }>();
+  const artifacts = new Map<string, { readonly bundle: string; readonly css: string; readonly server: string; readonly serverError?: string }>();
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-svelte-public-conformance-"));
@@ -144,8 +169,11 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
         await writeFile(serverEntry, `import { render } from "svelte/server";\nimport App from "./App.svelte";\nexport const html = render(App).body;`);
         await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
           packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
-        const server = await import(pathToFileURL(serverBundle).href) as { html: string };
-        artifacts.set(`${index}:${mode}`, { bundle, css, server: server.html });
+        let server = "";
+        let serverError: string | undefined;
+        try { server = (await import(pathToFileURL(serverBundle).href) as { html: string }).html; }
+        catch (error) { serverError = String(error); }
+        artifacts.set(`${index}:${mode}`, { bundle, css, server, ...(serverError === undefined ? {} : { serverError }) });
       }
     }
   }, 120_000);
@@ -168,6 +196,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
             try {
               const { definition, invocation } = scene(testCase.source);
               const output = artifacts.get(`${index}:${mode}`)!;
+              assert.equal(output.serverError, undefined, `Svelte server rendering failed: ${output.serverError}`);
               for (const page of [live, svelte, hydrated]) page.on("pageerror", (error) => errors.push(error.message));
               hydrated.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
               await live.setContent(`${baseStyle}${definition}<main>${invocation}</main>`);
