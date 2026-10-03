@@ -30,12 +30,18 @@ export type ServerRenderReply =
  */
 export function renderComponents(html: string, options: ServerRenderOptions): Promise<RenderedComponents> {
   const source = import.meta.url.endsWith(".ts");
+  const entry = new URL(source ? "./server-worker.ts" : "./server-worker.js", import.meta.url);
+  // Node 22 needs the TypeScript loader registered inside the worker before importing its entry.
+  // A JavaScript bootstrap avoids depending on native TypeScript support in the supported LTS range.
+  const workerEntry = source ? new URL(`data:text/javascript,${encodeURIComponent(
+    `import { tsImport } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))}; await tsImport(${JSON.stringify(entry.href)}, ${JSON.stringify(import.meta.url)});`,
+  )}`) : entry;
   return new Promise((resolve, reject) => {
     let replied = false;
-    const worker = new Worker(new URL(source ? "./server-worker.ts" : "./server-worker.js", import.meta.url), {
+    const worker = new Worker(workerEntry, {
       workerData: { ...options, html } satisfies ServerRenderRequest,
-      // Source development uses tsx; packaged workers are ordinary ESM and need no loader.
-      execArgv: source ? ["--import", "tsx"] : [],
+      // Packaged workers are ordinary ESM. Do not inherit caller loader or --input-type flags.
+      execArgv: [],
     });
     worker.once("message", (reply: ServerRenderReply) => {
       replied = true;
