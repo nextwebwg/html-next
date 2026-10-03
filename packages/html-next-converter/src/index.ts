@@ -6,6 +6,7 @@ import {
   addControllerGraph,
   generateVueComponent,
   generateReactConversion,
+  generateSvelteConversion,
   HtmlDiagnosticError,
   loadNodeComponents,
   vueHostArtifact,
@@ -25,12 +26,13 @@ import {
   type GeneratedArtifact,
 } from "@nextwebwg/html-next";
 
-export type FrameworkTarget = "vue" | "react";
+export type FrameworkTarget = "vue" | "react" | "svelte";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
   vue: "3.5",
   react: "19.3",
+  svelte: "5.57.1",
 };
 
 interface BaseConvertOptions {
@@ -164,7 +166,7 @@ function frameworkEntry(
 ): GeneratedArtifact {
   const exports = [...entries].sort((left, right) => left.artifact.localeCompare(right.artifact)).map((entry) => {
     const artifact = entry.artifact.slice(entry.artifact.lastIndexOf("/") + 1);
-    const name = artifact.replace(/\.(?:vue|tsx)$/, "");
+    const name = artifact.replace(/\.(?:vue|tsx|svelte)$/, "");
     return `export { default as ${name} } from ${JSON.stringify(relativeImport(`${target}/index.ts`, entry.artifact))};`;
   });
   return {
@@ -216,7 +218,7 @@ function componentArtifact(projectRoot: string, url: string, tag: string, name: 
   const insideRoot = source !== ".." && !source.startsWith(`..${sep}`) && !isAbsolute(source);
   const directory = insideRoot ? dirname(source) : `_external/${tag}`;
   const segments = directory === "." ? [] : directory.split(sep);
-  return [target, ...segments, `${name}.${target === "vue" ? "vue" : "tsx"}`].join("/");
+  return [target, ...segments, `${name}.${target === "vue" ? "vue" : target === "svelte" ? "svelte" : "tsx"}`].join("/");
 }
 
 function componentRelativeDataSource(source: string): boolean {
@@ -355,6 +357,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     });
     let content: string;
     let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
+    let svelteConversion: ReturnType<typeof generateSvelteConversion> | undefined;
     const helpers = new Set<string>();
     try {
       const importSpecifier = (importedTag: string): string => {
@@ -372,7 +375,10 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
           return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
         },
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
-      }) : (reactConversion = generateReactConversion(definition, {
+      }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
+        importSpecifier,
+        stylesheetSpecifier: `./${node.definition.contract.name}.css`,
+      })).component : (reactConversion = generateReactConversion(definition, {
         slotsByTag,
         propsByTag,
         propContractsByTag,
@@ -407,6 +413,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         reactStyles = true;
         claim({ path: componentPath.replace(/\.tsx$/, ".css"), content: `${css}\n` }, "style", source);
       }
+    }
+    if (svelteConversion !== undefined && svelteConversion.css !== "") {
+      claim({ path: componentPath.replace(/\.svelte$/, ".css"), content: `${svelteConversion.css}\n` }, "style", source);
     }
     for (const helper of helpers) neededHelpers.add(helper);
     for (const file of controllerFiles.values()) {
@@ -492,7 +501,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     graph: options.mode,
     package: Object.freeze({
       dependencies: Object.freeze(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}),
-      peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}.0` }),
+      peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),

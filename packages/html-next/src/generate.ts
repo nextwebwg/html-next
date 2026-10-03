@@ -2,6 +2,7 @@ import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
+import { generateSvelteOutput, type SvelteConversionOptions, type SvelteConversionOutput } from "./targets/svelte.js";
 import { reactEventsArtifact as makeReactEventsArtifact } from "./targets/react-events.js";
 import { reactControlArtifact as makeReactControlArtifact } from "./targets/react-control.js";
 import { reactDataArtifact as makeReactDataArtifact } from "./targets/react-data.js";
@@ -137,4 +138,8 @@ export function generateReactComponent(definition: ComponentDefinition, options?
 /** Converts one definition with CSS and helper usage for package-level output. */
 export function generateReactConversion(definition: ComponentDefinition, options?: ReactConversionOptions): ReactConversionOutput {
   return generateReactOutput(definition, GENERATOR_VERSION, options);
+}
+
+export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
+  return generateSvelteOutput(definition, options);
 }

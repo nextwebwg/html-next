@@ -5,6 +5,7 @@ export {
   generateVueComponent,
   generateReactComponent,
   generateReactConversion,
+  generateSvelteConversion,
   GENERATOR_VERSION,
   importsVueHost,
   importsVueHtml,
