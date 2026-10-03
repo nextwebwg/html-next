@@ -104,14 +104,20 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
   ].join("\n");
 }
 
-function publicName(definition: ComponentDefinition): string {
-  return definition.contract.name.replace(/^Ui(?=[A-Z])/, "");
-}
-
 function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Record<string, string>> {
   const entries = [...definitions].sort((left, right) => left.contract.name.localeCompare(right.contract.name));
-  const exportsFor = (extension: string): string => entries.map((definition) =>
-    `export { default as ${publicName(definition)} } from ${JSON.stringify(`./${definition.contract.name}.${extension}`)};`
+  const names = new Set(entries.map((definition) => definition.contract.name));
+  const exported = entries.flatMap((definition) => {
+    const legacy = definition.contract.name.replace(/^Ui(?=[A-Z])/, "");
+    const aliases = [definition.contract.name];
+    if (legacy !== definition.contract.name && !names.has(legacy)) {
+      aliases.push(legacy);
+      names.add(legacy);
+    }
+    return aliases.map((name) => ({ name, definition }));
+  });
+  const exportsFor = (extension: string): string => exported.map(({ name, definition }) =>
+    `export { default as ${name} } from ${JSON.stringify(`./${definition.contract.name}.${extension}`)};`
   ).join("\n") + "\n";
   return Object.freeze({
     "vue/index.js": exportsFor("vue"),
@@ -121,7 +127,7 @@ function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Re
     "vue/index.d.ts": [
       'import type { DefineComponent } from "vue";',
       "export interface VueAdapterEventMap { [name: string]: unknown }",
-      ...entries.map((definition) => `export declare const ${publicName(definition)}: DefineComponent<Record<string, unknown>>;`),
+      ...exported.map(({ name }) => `export declare const ${name}: DefineComponent<Record<string, unknown>>;`),
       "",
     ].join("\n"),
   });
@@ -144,29 +150,31 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   const componentPath = (path: string): string => posix.join("components", relative(sourceRoot, path).split(sep).join("/"));
 
   for (const sourcePath of [...sources].sort()) {
-    const parsed = parseComponentResource(await readFile(sourcePath, "utf8"), sourcePath).definition;
+    const parsedResource = parseComponentResource(await readFile(sourcePath, "utf8"), sourcePath);
     const source = componentPath(sourcePath);
-    const definition = Object.freeze({ ...parsed, source: Object.freeze({ file: `./${source}` }) });
-    if (names.has(definition.contract.tag)) throw new Error(`Duplicate package component <${definition.contract.tag}>.`);
-    names.add(definition.contract.tag);
-    const controller = parsed.controller === undefined
-      ? undefined
-      : componentPath(resolve(dirname(sourcePath), parsed.controller));
-    definitions.push(controller === undefined ? definition : Object.freeze({ ...definition, controller: `./${controller}` }));
-    if (controller !== undefined) {
-      controllers.set(definition.contract.tag, controller);
-      await addStaticModuleGraph(
-        resolve(dirname(sourcePath), parsed.controller!),
-        controller,
-        files,
-        moduleSources,
-        moduleDependencies,
-      );
-    }
-    const generated = generateComponent(generatedDefinition(definition, controller));
-    for (const artifact of generated) {
-      if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
-      files.set(artifact.path, artifact.content);
+    for (const parsed of parsedResource.definitions) {
+      const definition = Object.freeze({ ...parsed, source: Object.freeze({ file: `./${source}` }) });
+      if (names.has(definition.contract.tag)) throw new Error(`Duplicate package component <${definition.contract.tag}>.`);
+      names.add(definition.contract.tag);
+      const controller = parsed.controller === undefined
+        ? undefined
+        : componentPath(resolve(dirname(sourcePath), parsed.controller));
+      definitions.push(controller === undefined ? definition : Object.freeze({ ...definition, controller: `./${controller}` }));
+      if (controller !== undefined) {
+        controllers.set(definition.contract.tag, controller);
+        await addStaticModuleGraph(
+          resolve(dirname(sourcePath), parsed.controller!),
+          controller,
+          files,
+          moduleSources,
+          moduleDependencies,
+        );
+      }
+      const generated = config.sourceOnly ? [] : generateComponent(generatedDefinition(definition, controller));
+      for (const artifact of generated) {
+        if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
+        files.set(artifact.path, artifact.content);
+      }
     }
     files.set(source, { copy: sourcePath });
   }
@@ -205,34 +213,49 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     if (files.has(props.path)) throw new Error(`Package artifact collision at ${props.path}.`);
     files.set(props.path, props.content);
   }
-  for (const [target, content] of Object.entries(targetIndexes(definitions))) {
-    if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);
-    files.set(target, content);
+  const publicNames = new Set<string>();
+  for (const definition of definitions) {
+    if (publicNames.has(definition.contract.name)) throw new Error(`Duplicate package export ${definition.contract.name}.`);
+    publicNames.add(definition.contract.name);
   }
-  files.set("dist/index.js", packageEntry(definitions, controllers));
-  files.set("dist/index.d.ts", [
-    'import type { ComponentDefinition } from "@nextwebwg/html-next";',
-    "export declare const definitions: readonly ComponentDefinition[];",
-    "export declare function register(root?: Document): () => void;",
-    "export declare const stop: undefined | (() => void);",
-    "",
-  ].join("\n"));
+  const sourceEntry = "html-next/index.js";
+  if (files.has(sourceEntry)) throw new Error(`Package artifact collision at ${sourceEntry}.`);
+  files.set(sourceEntry, [...definitions].sort((a, b) => a.contract.name.localeCompare(b.contract.name)).map((definition) =>
+    `export { ${definition.contract.name} } from ${JSON.stringify(`../${definition.source.file.slice(2)}`)};`
+  ).join("\n") + "\n");
+  if (!config.sourceOnly) {
+    for (const [target, content] of Object.entries(targetIndexes(definitions))) {
+      if (files.has(target)) throw new Error(`Package artifact collision at ${target}.`);
+      files.set(target, content);
+    }
+    files.set("dist/index.js", packageEntry(definitions, controllers));
+    files.set("dist/index.d.ts", [
+      'import type { ComponentDefinition } from "@nextwebwg/html-next";',
+      "export declare const definitions: readonly ComponentDefinition[];",
+      "export declare function register(root?: Document): () => void;",
+      "export declare const stop: undefined | (() => void);",
+      "",
+    ].join("\n"));
+  }
   const packageJson = {
     name: config.name,
     version: config.version,
     type: "module",
-    sideEffects: ["./dist/index.js", "./*.css"],
-    peerDependencies: { "@nextwebwg/html-next": `^${GENERATOR_VERSION}`, ...config.peerDependencies },
+    sideEffects: [...(config.sourceOnly ? [] : ["./dist/index.js"]), "**/*.css"],
+    peerDependencies: { ...(config.sourceOnly ? {} : { "@nextwebwg/html-next": `^${GENERATOR_VERSION}` }), ...config.peerDependencies },
     ...(config.peerDependenciesMeta === undefined ? {} : { peerDependenciesMeta: config.peerDependenciesMeta }),
-    exports: config.exports ?? {
-      ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
+    exports: config.exports ?? (config.sourceOnly ? {
+      ".": { "html-next": `./${sourceEntry}` },
+      "./components/*": "./components/*",
+    } : {
+      ".": { "html-next": `./${sourceEntry}`, types: "./dist/index.d.ts", import: "./dist/index.js" },
       "./vue": { types: "./vue/index.d.ts", import: "./vue/index.js" },
       "./vanilla": "./vanilla/index.js",
       "./components/*": "./components/*",
       "./vue/*": "./vue/*",
       "./vanilla/*": "./vanilla/*",
       "./styles/*": "./styles/*",
-    },
+    }),
   };
   files.set("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
   files.set("html.manifest.json", `${JSON.stringify({

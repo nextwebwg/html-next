@@ -12,6 +12,8 @@ import {
   type TemplateNode,
 } from "@nextwebwg/html-next";
 import { createUnplugin } from "unplugin";
+import { frameworkVitePlugin, type FrameworkPluginOptions } from "./framework.js";
+export { syncHtmlNext, type FrameworkPluginOptions, type FrameworkSyncResult } from "./framework.js";
 
 export const componentsModule = "virtual:html-next/components";
 export const supportModule = "virtual:html-next/support";
@@ -24,13 +26,15 @@ const resolvedComponentPrefix = `\0${componentPrefix}`;
 const stylePrefix = "html-next:style:";
 const resolvedStylePrefix = `\0${stylePrefix}`;
 
-export interface HtmlNextPluginOptions {
+export interface HtmlNextNativePluginOptions {
   readonly entries: readonly string[];
   readonly root?: string;
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
 }
+
+export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
 
 export interface HtmlNextDynamicBoundary {
   readonly tag: string;
@@ -133,12 +137,13 @@ function collectInvocationEdges(
       const boundary = dynamicBoundaries.get(tag);
       if (boundary !== undefined) {
         const uses = dynamicUses.get(tag) ?? new Set<string>();
-        uses.add(node.url);
+        uses.add(node.id);
         dynamicUses.set(tag, uses);
         return;
       }
       const target = tags.get(tag);
-      if (target === undefined || !node.dependencies.includes(target)) {
+      // Siblings share their resource scope without materializing every possible sibling edge.
+      if (target === undefined || (!node.dependencies.includes(target) && nodes.get(target)?.url !== node.url)) {
         diagnostic(
           "HN001",
           `Component invocation <${tag}> is not a declared static dependency or dynamic boundary.`,
@@ -147,7 +152,7 @@ function collectInvocationEdges(
       }
       invoked.set(tag, target);
     });
-    edges.set(node.url, invoked);
+    edges.set(node.id, invoked);
   }
 
   const visiting = new Set<string>();
@@ -457,7 +462,7 @@ function displayPath(root: string, url: string): string {
   return relative(root, path).split(sep).join("/");
 }
 
-async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGraph> {
+async function compileGraph(options: HtmlNextNativePluginOptions): Promise<CompiledGraph> {
   if (options.entries.length === 0) throw new Error("HTML Next requires at least one component entry.");
   const root = resolve(options.root ?? process.cwd());
   const delivery = options.mode ?? "application";
@@ -483,10 +488,10 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
   for (const node of graph.nodes.values()) {
     const name = node.definition.contract.name;
     const prior = generatedNames.get(name);
-    if (prior !== undefined && prior !== node.url) {
+    if (prior !== undefined && prior !== node.id) {
       diagnostic("HN010", `Generated factory name \`${name}\` collides with ${prior}.`, node.url);
     }
-    generatedNames.set(name, node.url);
+    generatedNames.set(name, node.id);
   }
 
   for (const boundary of options.dynamicBoundaries ?? []) {
@@ -519,13 +524,13 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     })
       .find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
-    const encodedURL = encodeURIComponent(node.url);
+    const encodedURL = encodeURIComponent(node.id);
     const styleId = `${stylePrefix}${encodedURL}.css`;
     let module = artifact.content.replace(
       `../styles/${definition.contract.tag}.css`,
       styleId,
     );
-    const invoked = invocations.edges.get(node.url) ?? new Map<string, string>();
+    const invoked = invocations.edges.get(node.id) ?? new Map<string, string>();
     if (invoked.size > 0 && module.includes("manageComponentLifecycle")) {
       // The general runtime renders this template, so it renders the invocations too.
       module = routeRenderedInvocations(module, invoked, graph.nodes, renderedComponents);
@@ -534,7 +539,7 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
       module = routeComponentInvocations(module, node, invoked, graph.nodes);
     }
     module = routeSupportImports(module, supportImports);
-    components.set(resolvedComponentId(node.url), module);
+    components.set(resolvedComponentId(node.id), module);
     styles.set(`${resolvedStylePrefix}${encodedURL}.css`, definition.css);
     const capabilities = componentCapabilities(definition);
     for (const capability of capabilities) allCapabilities.add(capability);
@@ -586,7 +591,7 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     publicComponents,
     styles,
     support: supportSource(supportImports, renderedComponents),
-    sourceFiles: Object.freeze([...graph.nodes.keys()].map((url) => fileURLToPath(url))),
+    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)))]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
       delivery,
@@ -605,7 +610,11 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
   });
 }
 
-export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
+export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options, meta) => {
+  if ("target" in options) {
+    if (meta.framework !== "vite") throw new Error("Automatic framework conversion currently requires the Vite adapter.");
+    return { name: "html-next-framework", vite: frameworkVitePlugin(options) };
+  }
   let compiled: Promise<CompiledGraph> | undefined;
   const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph(options);
 

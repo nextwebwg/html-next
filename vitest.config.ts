@@ -7,6 +7,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^@nextwebwg\/html-next-converter$/,
+        replacement: fileURLToPath(new URL("./packages/html-next-converter/src/index.ts", import.meta.url)),
+      },
+      {
         find: /^@nextwebwg\/html-next$/,
         replacement: fileURLToPath(new URL("./packages/html-next/src/index.ts", import.meta.url)),
       },

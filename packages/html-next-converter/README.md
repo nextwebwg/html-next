@@ -24,7 +24,9 @@ html-next-convert vue 'components/**' --mode library --out-dir generated
 
 Quote the glob so the converter, not your shell, expands it. It discovers every `.html`
 component below `components/`, including definitions with no incoming component link, and
-preserves the source directory layout beneath `generated/vue/`. A directory path such as
+preserves the source directory layout beneath `generated/vue/`. One HTML resource may define
+several `<template component>` carriers; each gets its own named export. Names retain their
+prefix: `ui-button` becomes `UiButton`. A directory path such as
 `components/` is shorthand for the same recursive scan. Explicit `.html` files remain valid.
 
 When a `<data src>` URL is relative to its component file, pass `--public-root-url /app/`
@@ -64,7 +66,11 @@ React applications use their usual `hydrateRoot` call and error options. If the 
 incompatible, React reports the recovery through `onRecoverableError` (or its default reporting);
 the converter does not generate an `HR005` hydration entry or replace React's recovery flow.
 
-To distribute one authored library in all three forms, assemble the native HTML Next package from
+For source-only distribution with automatic Vue or React conversion in the consuming app,
+use the [Vite adapter](../html-next-unplugin/README.md#vue-and-react-source-imports). It also
+generates consumer declarations, so publishers do not need separate framework copies.
+
+To distribute preconverted copies of one authored library in all three forms, assemble the native HTML Next package from
 the `.html` sources, then run the Vue and React library converters over the same quoted glob. Give
 each conversion its own output directory so both `html-next.conversion.json` manifests survive:
 
@@ -82,3 +88,10 @@ then compile `.vue` and `.tsx` with their normal bundler plugins. For precompile
 emit JavaScript and declarations from those entries and point exports at the built files. The
 [installed-library test](./tests/library-distribution.test.ts) packs and installs the source-output
 shape, then renders both framework entries from that independent consumer.
+
+For guaranteed unused-component **and CSS** pruning in a preconverted package, expose individual
+component subpaths from the conversion inventory, such as `./react/XCard` pointing to
+`react/components/XCard.tsx`. Consumers can then import only the components they use. Some
+bundlers retain CSS side-effect imports from unused named re-exports in a shared `./react` barrel,
+even when they remove the unused JavaScript. The on-demand Vite adapter handles pruning for its
+generated named exports.

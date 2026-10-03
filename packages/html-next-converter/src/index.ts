@@ -76,6 +76,8 @@ export interface ConversionManifest {
     readonly peerDependencies: Readonly<Record<string, string>>;
   };
   readonly entries: readonly ConversionEntry[];
+  /** Authored HTML and controller dependencies, relative to the conversion root. */
+  readonly sourceFiles: readonly string[];
   readonly output: {
     readonly entry: string;
     readonly inventory: "html-next.conversion.json";
@@ -294,6 +296,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     seenEntries.add(entry);
   }
   const graph = await loadNodeComponents(entries, { baseURL: pathToFileURL(`${projectRoot}${sep}`).href });
+  const sourceFiles = new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)));
   const pathsByTag = new Map([...graph.nodes.values()].map((node) => [
     node.definition.contract.tag,
     componentArtifact(projectRoot, node.url, node.definition.contract.tag, node.definition.contract.name, options.target),
@@ -340,7 +343,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     let controller: string | undefined;
     if (node.controller !== undefined) {
       try {
-        controller = await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles);
+        controller = await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles, sourceFiles);
       } catch (error) {
         throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error));
       }
@@ -462,12 +465,10 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
   }
 
-  const conversionEntries = entries.map((url) => {
-    const node = graph.nodes.get(url);
-    if (node === undefined) throw new Error(`Framework conversion did not resolve entry ${url}.`);
-    const component = manifestComponents.find(({ source }) =>
-      source === relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/")
-    )!;
+  const conversionEntries = graph.roots.map((id) => {
+    const node = graph.nodes.get(id);
+    if (node === undefined) throw new Error(`Framework conversion did not resolve entry ${id}.`);
+    const component = manifestComponents.find(({ tag }) => tag === node.definition.contract.tag)!;
     return {
       source: component.source,
       tag: component.tag,
@@ -494,6 +495,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
       peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}.0` }),
     }),
     entries: Object.freeze(conversionEntries),
+    sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),
     output: Object.freeze({
       entry: entry.path,
       inventory,

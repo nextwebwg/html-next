@@ -154,6 +154,40 @@ describe("workspace package contracts", () => {
     );
   }, 120_000);
 
+  it("installs the source adapter and prepares React types through the consumer Vite config", () => {
+    const tarballs = releaseDirectories.map(pack);
+    const consumer = join(workspace, "adapter-consumer");
+    mkdirSync(join(consumer, "src"), { recursive: true });
+    writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "adapter-consumer", private: true, type: "module" }));
+    const toolingModules = join(root, "packages/html-next-unplugin/node_modules");
+    const version = (name: string) => (JSON.parse(readFileSync(join(toolingModules, name, "package.json"), "utf8")) as { version: string }).version;
+    execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...tarballs,
+      ...["vite", "react", "react-dom", "@types/react", "@types/react-dom", "@vitejs/plugin-react"].map((name) => `${name}@${version(name)}`)],
+      { cwd: consumer, shell: useCommandShell });
+    const library = join(consumer, "node_modules", "@example", "source-controls");
+    const source = join(consumer, "controls.html");
+    writeFileSync(source, `<template component="ui-label" status="early" summary="Label."><defs><prop name="label" type="string" required>Label.</prop></defs><output $value="$label"></output></template>`);
+    const assembly = join(consumer, "assemble.mjs");
+    writeFileSync(assembly, `import { assembleComponentPackage } from "@nextwebwg/html-next"; await assembleComponentPackage(${JSON.stringify({
+      name: "@example/source-controls", version: "1.0.0", sourceOnly: true, outDirectory: library, components: [{ source }],
+    })});`);
+    execFileSync(process.execPath, [assembly], { cwd: consumer, encoding: "utf8" });
+    const manifest = JSON.parse(readFileSync(join(consumer, "package.json"), "utf8")) as { dependencies: Record<string, string> };
+    manifest.dependencies["@example/source-controls"] = "1.0.0";
+    writeFileSync(join(consumer, "package.json"), JSON.stringify(manifest));
+    writeFileSync(join(consumer, "vite.config.mjs"), `import htmlNext from "@nextwebwg/html-next-unplugin/vite"; import react from "@vitejs/plugin-react"; export default { plugins: [htmlNext({ target: "react" }), react()] };`);
+    const cli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/cli.js");
+    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    expect(readFileSync(join(consumer, "src/html-next.d.ts"), "utf8")).toContain('declare module "@example/source-controls"');
+    writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label="Ready" />;');
+    writeFileSync(join(consumer, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true,
+      skipLibCheck: false, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
+    const tsc = join(consumer, "node_modules/typescript/bin/tsc");
+    execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
+    writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label={42} />;');
+    expect(() => execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8", stdio: "pipe" })).toThrow();
+  }, 120_000);
+
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
     const versions = new Set<string>();
     for (const packageDirectory of releaseDirectories) {

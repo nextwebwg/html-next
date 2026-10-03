@@ -839,6 +839,33 @@ export async function increment(host) { host.state.count += 1; return host.state
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, {})), '<div data-component="x-card">Ada</div>');
   });
 
+  it("exports every named component from one HTML resource and tracks its source", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "library.html"), `
+      <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
+      <template component="ui-dialog" status="early" summary="Dialog."><section><ui-button></ui-button></section></template>
+    `);
+    for (const target of ["vue", "react"] as const) for (const mode of ["application", "library"] as const) {
+      const outDirectory = join(root, `multi-${target}-${mode}`);
+      const manifest = await convertComponents({ mode, entries: ["library.html"], target, root, outDirectory });
+      assert.deepEqual(manifest.entries.map(({ tag }) => tag).sort(), ["ui-button", "ui-dialog"]);
+      assert.deepEqual(manifest.sourceFiles, ["library.html"]);
+      const entry = await readFile(join(outDirectory, manifest.output.entry), "utf8");
+      assert.match(entry, /default as UiButton/);
+      assert.match(entry, /default as UiDialog/);
+      assert.doesNotMatch(entry, /default as Button|export default/);
+      if (target === "react") {
+        const dialog = await readFile(join(outDirectory, "react/UiDialog.tsx"), "utf8");
+        assert.match(dialog, /["']\.\/UiButton\.tsx["']/);
+      } else {
+        compileVue(await readFile(join(outDirectory, "vue/UiButton.vue"), "utf8"), "UiButton.vue");
+        const dialog = await readFile(join(outDirectory, "vue/UiDialog.vue"), "utf8");
+        compileVue(dialog, "UiDialog.vue");
+        assert.match(dialog, /["']\.\/UiButton\.vue["']/);
+      }
+    }
+  });
+
   it("resolves exported package component subpaths from the consuming project", async () => {
     const root = await fixture();
     const packageRoot = join(root, "node_modules", "@acme", "ui");

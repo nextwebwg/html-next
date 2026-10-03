@@ -3,7 +3,7 @@ import { describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import type { FetchedComponent } from "../src/graph.js";
-import { buildComponentGraph } from "../src/source-graph.js";
+import { buildComponentGraph, parseComponentResource } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
 
 const root = "https://cdn.example/ui/1/";
@@ -36,6 +36,43 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
+  it("retains the singular parser result as an alias for the first definition", () => {
+    const parsed = parseComponentResource(component("ui-button") + component("ui-dialog"), "library.html");
+    assert.equal(parsed.definition, parsed.definitions[0]);
+    assert.deepEqual(parsed.definitions.map((definition) => definition.contract.tag), ["ui-button", "ui-dialog"]);
+  });
+
+  it("loads every named component in a resource once and connects sibling definitions", async () => {
+    const library = `${root}library.html`;
+    const fixtures = fetcher({
+      [library]: component("ui-button", `<link rel="component" href="./shared.html">`, "./button.js") +
+        component("ui-dialog", "", "./dialog.js"),
+      [`${root}shared.html`]: component("ui-icon", `<link rel="component" href="./library.html">`),
+    });
+    const graph = await buildComponentGraph(["@ui/library.html", "@ui/shared.html"], {
+      resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+    });
+    assert.deepEqual([...graph.nodes.values()].map((node) => node.definition.contract.name).sort(), ["UiButton", "UiDialog", "UiIcon"]);
+    assert.equal(fixtures.counts.get(library), 1);
+    const button = graph.nodes.get(graph.tags.get("ui-button")!)!;
+    const dialog = graph.nodes.get(graph.tags.get("ui-dialog")!)!;
+    assert.notEqual(button.id, dialog.id);
+    assert.equal(button.url, library);
+    assert.equal(dialog.url, library);
+    assert.equal(button.controller?.url, `${root}button.js`);
+    assert.equal(dialog.controller?.url, `${root}dialog.js`);
+    assert.ok(button.dependencies.includes(graph.tags.get("ui-icon")!));
+    assert.ok(graph.roots.includes(button.id));
+    assert.ok(graph.roots.includes(dialog.id));
+  });
+
+  it("rejects duplicate component names within the same resource", async () => {
+    await expectDiagnostic("HL007", () => buildComponentGraph(["@ui/library.html"], {
+      resolver: resolver(),
+      fetchComponent: fetcher({ [`${root}library.html`]: component("ui-button") + component("ui-button") }).fetchComponent,
+    }));
+  });
+
   it("loads a mapped transitive graph, deduplicates a diamond, and records controller entries", async () => {
     const shared = `${root}shared.html`;
     const fixtures = fetcher({
