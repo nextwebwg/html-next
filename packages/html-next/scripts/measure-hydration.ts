@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
+import { renderComponents } from "../src/server.js";
+import { parseComponent } from "../src/source-parser.js";
+
 const rows = 250;
 const warmups = 2;
 const samples = 7;
@@ -23,19 +26,12 @@ function invocation(index: number): string {
 }
 
 /**
- * The server markup to adopt, captured by lowering the authored instances once and serializing the
- * result. Hand-written markup goes stale the moment the rendered form changes — it did, and this
- * benchmark measured nothing for as long as it was wrong. A real lowering pass is the only honest
- * source of "what a server would have sent".
+ * Use actual Node output so this measures the serialized instance records and cross-realm adoption
+ * that a server-rendered page needs, rather than a browser-to-browser approximation.
  */
-async function captureServerMarkup(page: Page): Promise<string> {
+async function captureServerMarkup(): Promise<string> {
   const authored = Array.from({ length: rows }, (_, index) => invocation(index)).join("");
-  await page.setContent(`${definition}<main>${authored}</main>`);
-  await page.addScriptTag({ path: bundlePath });
-  return page.evaluate(() => {
-    (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
-    return document.querySelector("main")!.innerHTML;
-  });
+  return (await renderComponents(authored, { definitions: [parseComponent(definition)] })).html;
 }
 
 interface RunResult {
@@ -93,16 +89,9 @@ function summary(values: readonly number[]): { readonly median: number; readonly
   return { median, p95 };
 }
 
-async function measureEngine(engine: BrowserType): Promise<Record<string, unknown>> {
+async function measureEngine(engine: BrowserType, serverMarkup: string): Promise<Record<string, unknown>> {
   const browser = await engine.launch({ headless: true });
   try {
-    const capture = await browser.newPage();
-    let serverMarkup = "";
-    try {
-      serverMarkup = await captureServerMarkup(capture);
-    } finally {
-      await capture.close();
-    }
     const run = async (hydration: boolean): Promise<readonly number[]> => {
       const durations: number[] = [];
       for (let index = 0; index < warmups + samples; index += 1) {
@@ -150,12 +139,13 @@ try {
     samples,
     warmups,
   };
+  const serverMarkup = await captureServerMarkup();
   for (const [name, engine] of [
     ["chromium", chromium],
     ["firefox", firefox],
     ["webkit", webkit],
   ] as const) {
-    results[name] = await measureEngine(engine);
+    results[name] = await measureEngine(engine, serverMarkup);
   }
   process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
 } finally {

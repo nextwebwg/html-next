@@ -18,6 +18,7 @@ config.test!.include = [
   "packages/html-next/tests/runtime.test.ts",
   "packages/html-next/tests/sanitize.test.ts",
   "packages/html-next/tests/source-adapters.test.ts",
+  "packages/html-next/tests/server-hydration.test.ts",
   "packages/html-next/tests/validity.test.ts",
   "packages/html-next/tests/pantry-app.test.ts",
   "packages/html-next/tests/platform-scoping.test.ts",

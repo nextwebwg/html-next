@@ -26,6 +26,12 @@ attribution. All 20 contributing modules are classified into six audited respons
 new unclassified dependency fails the gate. Next work runs measured parser, execution, lifecycle,
 compatibility, and policy reductions against this complete entry.
 
+The general runtime also has an experimental [Node rendering entry](server-rendering.md). Its
+Node-to-browser tests cover instance restoration and subsequent updates in Chromium, Firefox and
+WebKit, including declared state, explicit props, slots, shared context, keyed rows and native
+control edits. This is separate evidence from specialized native factories and converter hydration;
+the incomplete hydration milestones below refer to those delivery products.
+
 ## Native application or library build
 
 **Tracked goal.** Compile a complete application or library graph to native DOM with one
