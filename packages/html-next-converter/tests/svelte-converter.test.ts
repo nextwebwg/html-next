@@ -262,3 +262,35 @@ it("keeps each row's sanitized HTML boundary local to that row", async () => {
   const html = (await serverHtml(outDirectory, "XRows", source)).replace(/<!--[\s\S]*?-->/g, "");
   assert.match(html, /<li[^>]*><b>A<\/b><\/li>.*<li[^>]*><i>B<\/i><\/li>/);
 });
+
+it.each([
+  { name: "generic bind", defs: '<state name="value" value="Ready"></state>',
+    root: '<div><output bind:value="value"></output></div>', expected: /<output[^>]*value="Ready"/ },
+  { name: "pending data", defs: '<data name="feed"></data><computed name="pending" from="feed.pending"></computed>',
+    root: '<div $value="pending"></div>', expected: />true</ },
+  { name: "keyword-named data", defs: '<data name="default"></data><state name="htmlNextData0" value="kept"></state>',
+    root: '<div><i $value="default.pending"></i><b $value="htmlNextData0"></b></div>', expected: /<i>true<\/i><b>kept<\/b>/ },
+  { name: "bindings with generated-name collisions", defs: '<state name="boundAttribute" value="kept"></state><state name="boundValue" value="Ready"></state>',
+    root: '<div><output bind:value="boundValue"></output><b $value="boundAttribute"></b></div>', expected: /<output[^>]*value="Ready"[^>]*><\/output><b>kept<\/b>/ },
+  { name: "native property", defs: '', root: '<button .disabled="true"></button>', expected: /<button[^>]* disabled/ },
+])("renders $name in Svelte server output", async ({ defs, root: markup, expected }) => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-shared-"));
+  temporary.push(root);
+  await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Shared behavior."><defs>${defs}</defs>${markup}</template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  compile(source, { filename: "XCase.svelte", generate: "client" });
+  const html = (await serverHtml(outDirectory, "XCase", source)).replace(/<!--[\s\S]*?-->/g, "");
+  assert.match(html, expected);
+});
+
+it.each([
+  { defs: '<data name="feed" src="/api/feed"></data>', root: '<div></div>', reason: /data sources/ },
+  { defs: '', root: '<div .scrollTop="10"></div>', reason: /property or two-way bindings/ },
+])("rejects unsupported Svelte behavior explicitly: $reason", async ({ defs, root: markup, reason }) => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-unsupported-"));
+  temporary.push(root);
+  await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Unsupported behavior."><defs>${defs}</defs>${markup}</template>`);
+  await assert.rejects(convertComponents({ mode: "library", target: "svelte", root, outDirectory: join(root, "out"), entries: ["case.html"] }), reason);
+});

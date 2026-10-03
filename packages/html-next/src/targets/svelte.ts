@@ -1,9 +1,9 @@
 /** Svelte 5 output from the shared, checked component definition. */
 import { fail } from "../diagnostics.js";
-import { compileComponentStylesForBuild } from "../component-styles-build.js";
+import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-system.js";
-import type { ComponentDefinition, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
+import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, svgAttributeName, typeSource } from "./shared.js";
@@ -24,6 +24,11 @@ export interface SvelteConversionOutput {
   readonly usesHtml: boolean;
 }
 
+function nativeControlBinding(tag: string, name: string): boolean {
+  return ["input", "textarea", "select"].includes(tag) &&
+    (name === "value" || name === "checked" && tag === "input");
+}
+
 function checkSupported(definition: ComponentDefinition): void {
   for (const prop of Object.values(definition.contract.props)) {
     if (prop.select !== undefined && definition.contract.props[prop.select.from] === undefined) {
@@ -31,7 +36,10 @@ function checkSupported(definition: ComponentDefinition): void {
     }
   }
   for (const declaration of definition.declarations ?? []) {
-    if (declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "handler") {
+    if (declaration.kind === "data" && declaration.source !== undefined) {
+      fail("HT030", "Svelte conversion does not yet support data sources.");
+    }
+    if (!["state", "computed", "handler", "data"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
     }
     if (declaration.kind === "handler" && declaration.steps.some((step) =>
@@ -58,11 +66,11 @@ function checkSupported(definition: ComponentDefinition): void {
       fail("HT030", "Svelte conversion does not yet support $match on an element wrapper.");
     }
     for (const attribute of node.attributes) {
-      if (attribute.kind === "property" ||
+      // Svelte's native boolean attribute path also sets the reflected disabled property.
+      if (attribute.kind === "property" && attribute.name !== "disabled" ||
         attribute.kind === "attribute" && attribute.twoWay === true && (
-          !["input", "textarea", "select"].includes(node.name) ||
-          !["value", "checked"].includes(attribute.name) ||
-          attribute.name === "checked" && node.name !== "input" ||
+          node.name.includes("-") ||
+          ["input", "textarea", "select"].includes(node.name) && !nativeControlBinding(node.name, attribute.name) ||
           attribute.writablePath?.length !== 1 || typeof attribute.writablePath[0] !== "string"
         )) {
         fail("HT030", "Svelte conversion does not yet support property or two-way bindings on this element.");
@@ -76,11 +84,16 @@ function checkSupported(definition: ComponentDefinition): void {
 interface RenderContext {
   readonly imports: Set<string>;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
+  readonly styleOwner?: string;
   nextLoop: number;
   htmlSites: number;
   readonly localHtmlSites: Set<number>;
   readonly retentions: Map<number, { readonly initial?: string }>;
   readonly localRetentions: Set<number>;
+  usesAttributeBinding: boolean;
+  readonly bindingHelperName: string;
+  readonly bindingValueName: string;
+  readonly rootAttributeBindings: Set<string>;
 }
 
 function retained(context: RenderContext, source: string, initial: string): string {
@@ -140,7 +153,7 @@ function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context
   const localRetentions = [...context.retentions].filter(([site]) => site >= firstRetention && !context.localRetentions.has(site));
   for (const [site] of localRetentions) context.localRetentions.add(site);
   const declarations = [
-    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml()}`),
+    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)})}`),
     ...localRetentions.map(([site, entry]) => `{@const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`}}`),
   ].join("");
   return `{#each ${rows} as ${row}${key}}${declarations}${markup}{/each}`;
@@ -225,12 +238,16 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     Object.entries(childProps ?? {}).find(([prop]) => prop.toLowerCase() === attributeName || kebabCase(prop) === attributeName);
   const literals: string[] = [];
   const bindings: string[] = [];
+  const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
+    attribute.kind === "attribute" && attribute.twoWay && !nativeControlBinding(node.name, attribute.name))
+    .map((attribute) => attribute.name));
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
   const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
+      if (controlledNames.has(attribute.name)) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       const declared = childProp(attribute.name);
       if (declared === undefined) literals.push(`${attribute.name}=${quote(attribute.value)}`);
@@ -247,11 +264,28 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
-      if (attribute.twoWay === true) bindings.push(`bind:${attribute.name}={${attribute.writablePath![0]}}`);
+      if (attribute.twoWay === true) {
+        if (nativeControlBinding(node.name, attribute.name)) bindings.push(`bind:${attribute.name}={${attribute.writablePath![0]}}`);
+        else {
+          // Ordinary elements reflect the attribute, and feed their native value back on input.
+          context.usesAttributeBinding = true;
+          const name = svgAttributeName(attribute.name);
+          const value = lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
+          // Svelte optimizes value= into a property write even on <output>. Keep the
+          // server attribute declarative, and use only setAttribute/removeAttribute on the client.
+          bindings.push(`{...(typeof document === 'undefined' ? { ${quote(name)}: ${value} } : {})}`);
+          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${value}, (${context.bindingValueName}: any) => { ${attribute.writablePath![0]} = ${context.bindingValueName}; })}`);
+          if (root) context.rootAttributeBindings.add(attribute.name);
+        }
+      }
       else if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
       else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
       else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
       else bindings.push(`${component ? attribute.name : svgAttributeName(attribute.name)}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
+    }
+    if (attribute.kind === "property") {
+      if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
+      bindings.push(`${attribute.name}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
     }
   }
   const attributes = [...literals];
@@ -281,6 +315,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
   }
   attributes.push(...bindings);
+  if (!component && context.styleOwner !== undefined) attributes.push(`${SVELTE_OWNER_ATTRIBUTE}=${quote(context.styleOwner)}`);
   for (const event of node.events ?? []) attributes.push(`on${event.name}={${event.handler}}`);
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
@@ -298,15 +333,36 @@ interface RootScope extends Scope {
 export function generateSvelteOutput(definition: ComponentDefinition, options: SvelteConversionOptions = {}): SvelteConversionOutput {
   checkSupported(definition);
   const target = targetComponent(definition);
-  const styles = compileComponentStylesForBuild(definition.css, definition);
+  const styles = compileComponentStylesForSvelte(definition.css, definition);
   const css = styles.css;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
+  const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
   const code = new Map(target.props.map((prop) => [prop.name, `checkedProps.${prop.name}`]));
   const types = new Map<string, Static>(target.props.map((prop) => [prop.name, { type: normalizeType(prop.contract.type), nullable: true }]));
   const expressionScope: Scope = { code, types };
+  const dataNames = new Map<DataDeclaration, string>();
+  const taken = new Set([...code.keys(), ...declarations.map((declaration) => declaration.name)]);
+  const freshIdentifier = (base: string): string => {
+    let name = base;
+    let suffix = 2;
+    while (taken.has(name)) name = `${base}${suffix++}`;
+    taken.add(name);
+    return name;
+  };
+  for (const declaration of data) {
+    const name = freshIdentifier(`htmlNextData${dataNames.size}`);
+    dataNames.set(declaration, name);
+    code.set(declaration.name, name);
+    types.set(declaration.name, { type: { kind: "object", open: false, fields: [
+      { name: "pending", type: { kind: "terminal", name: "boolean" }, optional: false },
+      { name: "value", type: { kind: "terminal", name: "unknown" }, optional: false },
+      { name: "error", type: { kind: "terminal", name: "unknown" }, optional: false },
+      { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
+    ] }, nullable: false });
+  }
   for (const declaration of [...states, ...computed]) {
     code.set(declaration.name, declaration.name);
     const declared = declarationTypeNode(declaration.type, declaration.shape);
@@ -326,7 +382,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   };
   const lowering = new Lowering();
   const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
-    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set() };
+    ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
+    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
+    usesAttributeBinding: false, bindingHelperName: freshIdentifier("boundAttribute"),
+    bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set() };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
@@ -371,7 +430,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `let { ${destructured}${destructured === "" ? "" : ", "}children, ...rest }: Props = $props();`,
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    "const rootAttrs = $derived.by(() => { const attrs = { ...rest }; if (typeof document !== 'undefined') { delete attrs.constructor; delete attrs.__proto__; } return attrs; });",
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { delete attrs.constructor; delete attrs.__proto__; } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     "let specialElement: Element | undefined;",
     "let hadConstructor = false;",
@@ -389,6 +448,20 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  else if (hadProto) element.removeAttribute('__proto__');",
     "  hadProto = proto;",
     "});",
+    ...(context.usesAttributeBinding ? [
+      `function ${context.bindingHelperName}(name: string, read: () => unknown, update: (value: any) => void) {`,
+      "  return (element: Element) => {",
+      "    $effect(() => {",
+      "      const value = read();",
+      "      if (value == null) element.removeAttribute(name);",
+      "      else element.setAttribute(name, String(value));",
+      "    });",
+      "    const listener = () => update((element as Element & { value?: unknown }).value ?? element.getAttribute('value'));",
+      "    element.addEventListener('input', listener);",
+      "    return () => element.removeEventListener('input', listener);",
+      "  };",
+      "}",
+    ] : []),
     ...(context.retentions.size === 0 ? [] : [
       "function retainedValue<T>(initial: T): (candidate: unknown) => T {",
       "  let previous = initial;",
@@ -429,10 +502,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "});",
     ] : []),
     ...stateSources,
+    ...data.map((declaration) => `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`),
     ...computedSources,
     ...Array.from({ length: context.htmlSites }, (_, index) => index)
       .filter((site) => !context.localHtmlSites.has(site))
-      .map((site) => `const htmlSite${site} = retainedSanitizedHtml();`),
+      .map((site) => `const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)});`),
     ...(styles.stateNames.length === 0 ? [] : [
       HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,

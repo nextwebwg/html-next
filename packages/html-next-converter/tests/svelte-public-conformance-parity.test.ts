@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } 
 import { compile } from "svelte/compiler";
 
 import { parseComponent } from "@nextwebwg/html-next";
-import { cases } from "../../html-next/tests/conformance/cases.js";
+import { cases, type ConformanceCase } from "../../html-next/tests/conformance/cases.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
 
@@ -52,17 +52,101 @@ const selected = new Set([
   "an absent required prop lowers with valueMissing validity",
   "an unparseable number prop renders its default and reports badInput",
   "invalid $html expressions retain the last sanitized content",
+  "matches :host in :slotted() rules as the component root",
+  "bind: renders its initial state; declared on: bindings are consumed",
+  "reactive declarations seed once: state initializes, computed evaluates, data is pending",
+  ".property binding resolves through the generated DOM contract",
 ]);
-const pending = new Set([
-  "matches :host in :slotted() rules as the component root", // Projected nodes lack the style marker.
-  "bind: renders its initial state; declared on: bindings are consumed", // Generic bind: is not lowered yet.
-  "reactive declarations seed once: state initializes, computed evaluates, data is pending", // Data declarations are not lowered yet.
-  ".property binding resolves through the generated DOM contract", // .property is not lowered yet.
-]);
-const successful = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
-assert.equal(successful.length, selected.size, "Every selected public case must still exist");
+const shared = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
+assert.equal(shared.length, selected.size, "Every selected public case must still exist");
 assert.deepEqual(cases.filter((testCase) => "probe" in testCase.expect && !selected.has(testCase.name))
-  .map((testCase) => testCase.name).sort(), [...pending].sort(), "Every public success case must be selected or explicitly pending");
+  .map((testCase) => testCase.name), [], "Every public success case must be selected");
+
+// Converter regressions exercise the new boundaries beyond the shared initial-render cases.
+interface ConverterCase extends ConformanceCase {
+  readonly passthrough?: string;
+  readonly liveSetup?: string;
+}
+const regressions: readonly ConverterCase[] = [
+  {
+    name: "generic bindings reflect attributes and update before declared input handlers",
+    source: `<template component="x-output" status="early" summary="Bound output."><defs>
+      <state name="value" value="x"></state><state name="last" value="-"></state>
+      <handler name="record"><set name="last" expr:value="value"></set></handler>
+      <handler name="change"><set name="value" value="y"></set></handler>
+      <handler name="clear"><set name="value" expr:value="null"></set></handler>
+    </defs><div><output bind:value="value" on:input="record"></output><span $value="last"></span>
+      <button class="change" on:click="change">Change</button><button class="clear" on:click="clear">Clear</button>
+    </div></template><x-output></x-output>`,
+    expect: {
+      probe: `const e = q('output'); return [e.getAttribute('value'), e.value, q('span').textContent];`,
+      result: ["x", "", "-"],
+      after: [
+        { action: `document.querySelector('button.change').click();`, result: ["y", "", "-"] },
+        { action: `const e = document.querySelector('output'); e.value = 'typed'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["typed", "typed", "typed"] },
+        { action: `document.querySelector('button.clear').click();`, result: [null, "typed", "typed"] },
+      ],
+    },
+  },
+  {
+    name: "generic bindings read the value attribute when the element has no value property",
+    source: `<template component="x-generic" status="early" summary="Generic input."><defs>
+      <state name="value" value="x"></state>
+    </defs><div><i bind:value="value"></i><span $value="value"></span></div></template><x-generic></x-generic>`,
+    expect: {
+      probe: `return [q('i').getAttribute('value'), q('span').textContent];`, result: ["x", "x"],
+      after: [{ action: `const e = document.querySelector('i'); e.setAttribute('value', 'updated'); e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["updated", "updated"] }],
+    },
+  },
+  {
+    name: "generic root bindings override authored and invocation value attributes",
+    source: `<template component="x-root-output" status="early" summary="Bound root."><defs>
+      <state name="value" value="x"></state>
+    </defs><output value="authored" bind:value="value"></output></template><x-root-output value="incoming"></x-root-output>`,
+    expect: { probe: `return [q('output').getAttribute('value'), q('output').textContent];`, result: ["x", ""] },
+  },
+  {
+    name: "generic root bindings preserve a native consumer input callback",
+    source: `<template component="x-input-callback" status="early" summary="Input callback."><defs>
+      <state name="value" value="x"></state>
+    </defs><output bind:value="value"></output></template><x-input-callback></x-input-callback>`,
+    passthrough: `oninput={(event) => event.currentTarget.setAttribute('data-observed', 'called')}`,
+    liveSetup: `document.querySelector('output').addEventListener('input', (event) => event.currentTarget.setAttribute('data-observed', 'called'));`,
+    expect: {
+      probe: `const e = q('output'); return [e.getAttribute('value'), e.getAttribute('data-observed')];`, result: ["x", null],
+      after: [{ action: `const e = document.querySelector('output'); e.value = 'typed'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["typed", "called"] }],
+    },
+  },
+  {
+    name: "reflected disabled properties update without leaving a directive attribute",
+    source: `<template component="x-disabled" status="early" summary="Disabled property."><defs>
+      <state name="disabled" type="boolean" value="true"></state>
+      <handler name="enable"><set name="disabled" expr:value="false"></set></handler>
+    </defs><div><button class="target" disabled .disabled="disabled">Target</button>
+      <button class="enable" on:click="enable">Enable</button></div></template><x-disabled></x-disabled>`,
+    expect: {
+      probe: `const e = q('button.target'); return [e.disabled, e.hasAttribute('disabled'), e.hasAttribute('.disabled')];`,
+      result: [true, true, false], after: [{ action: `document.querySelector('button.enable').click();`, result: [false, false, false] }],
+    },
+  },
+  {
+    name: "slot styling excludes authored fallback and sanitized HTML while reaching projected descendants",
+    source: `<template component="x-styled-slot" status="early" summary="Styled projection.">
+      <div><p class="owned">Owned</p><section><slot><p>Fallback</p></slot></section>
+        <aside $html="'&lt;p&gt;&lt;span&gt;HTML&lt;/span&gt;&lt;/p&gt;'"></aside></div>
+      <style>p { color: rgb(1, 2, 3); } span { font-weight: bold; }
+        :slotted(p) { color: rgb(5, 6, 7); } :slotted(span) { font-style: italic; }</style>
+    </template><x-styled-slot id="projected"><p><span>Projected</span></p></x-styled-slot><x-styled-slot id="fallback"></x-styled-slot>`,
+    expect: {
+      probe: `const style = (s) => getComputedStyle(q(s)); return [style('#projected > p').color, style('#projected section p').color,
+        style('#projected section span').fontStyle, style('#projected section span').fontWeight,
+        style('#projected aside p').color, style('#projected aside span').fontStyle,
+        style('#projected aside span').fontWeight, style('#fallback section p').color];`,
+      result: ["rgb(1, 2, 3)", "rgb(5, 6, 7)", "italic", "400", "rgb(1, 2, 3)", "normal", "700", "rgb(1, 2, 3)"],
+    },
+  },
+];
+const successful: readonly ConverterCase[] = [...shared, ...regressions];
 
 type HtmlNode = {
   readonly nodeName: string;
@@ -83,7 +167,8 @@ function scene(source: string): { readonly definition: string; readonly invocati
   };
 }
 
-function consumer(invocation: string, tag: string, name: string, props: Readonly<Record<string, { readonly type: unknown }>>): string {
+function consumer(invocation: string, tag: string, name: string, props: Readonly<Record<string, { readonly type: unknown }>>,
+  passthrough = ""): string {
   const nodes = parseFragment(invocation).childNodes as readonly HtmlNode[];
   const render = (node: HtmlNode): string => {
     if (node.nodeName === "#text") return node.value?.trim() === "" ? "" : `{${JSON.stringify(node.value)}}`;
@@ -97,7 +182,7 @@ function consumer(invocation: string, tag: string, name: string, props: Readonly
       return `${prop ?? attribute}={${JSON.stringify(typed)}}`;
     }).join(" ");
     const element = component ? name : node.tagName;
-    const open = `<${element}${attributes === "" ? "" : ` ${attributes}`}`;
+    const open = `<${element}${attributes === "" ? "" : ` ${attributes}`}${!component || passthrough === "" ? "" : ` ${passthrough}`}`;
     const children = (node.childNodes ?? []).map(render).join("");
     if (children === "") return `${open} />`;
     return `${open}>${children}</${element}>`;
@@ -113,7 +198,7 @@ function withoutStylingMarkers(value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
     key === "attributes" && Array.isArray(entry)
-      ? entry.filter((attribute) => Array.isArray(attribute) && attribute[0] !== "data-slotted")
+      ? entry.filter((attribute) => Array.isArray(attribute) && !["data-slotted", "data-html-next-owner"].includes(attribute[0]))
       : withoutStylingMarkers(entry),
   ]));
 }
@@ -156,7 +241,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
         assert.deepEqual(manifest.components.map((component) => component.tag), [parsed.contract.tag]);
         const component = manifest.components[0]!;
         const wrapper = join(outDirectory, "App.svelte");
-        await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props)}`);
+        await writeFile(wrapper, `<script>import ${component.name} from "./${component.artifact}";</script>\n${consumer(invocation, parsed.contract.tag, component.name, parsed.contract.props, testCase.passthrough)}`);
         const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
         const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
         const browserEntry = join(outDirectory, "browser.ts");
@@ -202,6 +287,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
               await live.setContent(`${baseStyle}${definition}<main>${invocation}</main>`);
               await live.addScriptTag({ path: liveBundle });
               await live.evaluate(() => window.HtmlRuntime.lowerDocument());
+              if (testCase.liveSetup !== undefined) await live.evaluate((script) => Function(script)(), testCase.liveSetup);
               await svelte.setContent(`${baseStyle}<style>${output.css}</style><main></main>`);
               await svelte.addScriptTag({ path: output.bundle });
               await hydrated.setContent(`${baseStyle}<style>${output.css}</style><main>${output.server}</main>`);

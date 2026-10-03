@@ -118,6 +118,7 @@ export function rewriteComponentSelector(
   host: string,
   names: Set<string>,
   canonical: (name: string) => string = (name) => name,
+  projected: string = `[${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *`,
 ): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
@@ -134,17 +135,18 @@ export function rewriteComponentSelector(
   }
   output += selector.slice(index);
   output = output
-    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where([${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *):is(`)
+    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where(${projected}):is(`)
     .replace(/:host(?![\w-])/g, host);
   return rewriteComponentTags(rewriteValiditySelectors(output));
 }
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
-export function assembleComponentStyles(tag: string, own: string, slotted: string, hoisted: string): string {
+export function assembleComponentStyles(tag: string, own: string, slotted: string, hoisted: string,
+  projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`): string {
   const root = `[${COMPONENT_ATTRIBUTE}~="${tag}"]`;
   return [
     hoisted,
-    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
+    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], ${projectedBoundary}) {\n${own}\n}`,
     slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
   ].filter((part) => part !== "").join("\n");
 }

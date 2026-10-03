@@ -1,5 +1,6 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { SAFE_HTML_SANITIZER_SOURCE } from "./shared-generated.js";
+import { SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 
 /** One deterministic sanitizer for Svelte's raw HTML insertion on server and client. */
 export function svelteHtmlArtifact(version: string): GeneratedArtifact {
@@ -9,16 +10,25 @@ import { defaultTreeAdapter, html as parse5Html, parseFragment, serialize, type 
 ${SAFE_HTML_SANITIZER_SOURCE}
 
 /** Keep the last safe output if an expression becomes invalid. */
-export function retainedSanitizedHtml(): (value: unknown) => string {
+export function retainedSanitizedHtml(owner?: string): (value: unknown) => string {
   let previous = "";
   return (value: unknown): string => {
     if (value === Symbol.for("html-next.invalid-result")) return previous;
     const context = defaultTreeAdapter.createElement("template", HTML_NAMESPACE, []);
     const fragment = parseFragment(context, value == null ? "" : String(value), {});
     sanitizeServer(fragment);
+    if (owner !== undefined) markOwned(fragment, owner);
     previous = serialize(fragment);
     return previous;
   };
+}
+
+function markOwned(parent: DefaultTreeAdapterTypes.ParentNode, owner: string): void {
+  for (const node of parent.childNodes) {
+    if (!("tagName" in node)) continue;
+    node.attrs.push({ name: "${SVELTE_OWNER_ATTRIBUTE}", value: owner });
+    markOwned(node, owner);
+  }
 }
 ` });
 }

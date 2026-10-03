@@ -19,11 +19,25 @@ import type { ComponentDefinition } from "./template.js";
 /** At-rules whose block holds style rules; everything else is document-wide and hoisted. */
 const GROUPING = new Set(["media", "supports", "container", "layer", "scope", "starting-style"]);
 
+export const SVELTE_OWNER_ATTRIBUTE = "data-html-next-owner";
+
 export function compileComponentStylesForBuild(
   css: string,
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
+  return compileStyles(css, definition, source);
+}
+
+/** Snippets are opaque on the server, so scope by authored ownership instead of mutating them. */
+export function compileComponentStylesForSvelte(css: string, definition: ComponentDefinition): CompiledComponentStyles {
+  const projected = (definition.slots?.length ?? 0) === 0 ? undefined
+    : `:not([${SVELTE_OWNER_ATTRIBUTE}~="${definition.contract.tag}"])`;
+  return compileStyles(css, definition, undefined, projected);
+}
+
+function compileStyles(css: string, definition: ComponentDefinition, source?: string,
+  projected?: string): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return { css: "", stateNames: [] };
   const renamed = renameComponentPseudoClasses(css);
@@ -31,9 +45,9 @@ export function compileComponentStylesForBuild(
   const hoisted: string[] = [];
 
   const rewrite = (rule: Rule): void => {
-    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, undefined, projected);
     rule.walkRules((nested) => {
-      nested.selector = rewriteComponentSelector(nested.selector, tag, ":scope", names);
+      nested.selector = rewriteComponentSelector(nested.selector, tag, ":scope", names, undefined, projected);
     });
   };
   const prune = (container: Container<ChildNode>, want: StyleRuleKind, topLevel: boolean): void => {
@@ -59,7 +73,7 @@ export function compileComponentStylesForBuild(
   const own = compile("own");
   const slotted = compile("slotted");
   validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n"), projected), stateNames: Array.from(names) };
 }
 
 /**
