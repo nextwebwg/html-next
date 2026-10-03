@@ -201,6 +201,35 @@ Generated targets preserve the definition's native root; they do not add a compo
 wrapper. The checked-in [button output](./packages/html-next/examples/generated)
 demonstrates each target.
 
+## Render in Node and hydrate in the browser
+
+The `@nextwebwg/html-next/server` entry renders validated definitions with the same
+general runtime used in the browser:
+
+```ts
+import { parseComponent } from "@nextwebwg/html-next";
+import { renderComponents } from "@nextwebwg/html-next/server";
+
+const definition = parseComponent(componentSource);
+const { html, css } = await renderComponents('<x-counter id="counter"></x-counter>', {
+  definitions: [definition],
+  state: { "#counter": { count: 5 } },
+});
+```
+
+Serve the returned markup and styles. In the browser, register the same definitions through
+`registerComponentDefinitions()` and call `lowerDocument()` or `observeDocument()` from the runtime
+entry. Hydration restores props, explicitness, declared state and projected slots while adopting
+existing native nodes. Node-to-browser tests compare the restored instance and subsequent updates
+against fresh client rendering in Chromium, Firefox and WebKit.
+
+See [Node rendering and hydration](./packages/html-next/docs/server-rendering.md) for the API,
+platform choices and verification. The server renders the declarative baseline; browser hydration
+connects declared reads and attaches controllers through the live loader or bundled controller
+imports, following the [proposal's lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration).
+Tests cover both the live loader and a tree-shaken browser bundle, including later controller and
+read updates. The specialized build and converter delivery tracks have separate completion criteria.
+
 ## Types and validation
 
 HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.
