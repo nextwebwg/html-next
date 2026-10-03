@@ -1,13 +1,19 @@
 ---
 title: HTML Forms
-order: 4
+order: 6
 blurb: request construction · fetch enhancement
-eyebrow: HTML Next · Tools
+eyebrow: HTML Next · Forms
 ---
 
 # HTML Forms
 
 Build requests from native forms, and submit them with `fetch` without losing native validation.
+
+## Install
+
+```bash
+npm install @nextwebwg/html-next
+```
 
 ## Independent of components
 

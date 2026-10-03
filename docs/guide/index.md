@@ -1,74 +1,59 @@
 ---
-title: Tools
+title: HTML Next
 order: -1
-blurb: packages · delivery modes · install
-eyebrow: HTML Next · Tools
-status: 1.0.0-alpha on npm · Stage 0 proposals
+blurb: universal components · HTML, CSS, JavaScript
+eyebrow: HTML Next
+status: Open source · MIT licensed
+pager: false
 ---
 
-# HTML Next tools
+# Universal components. Built with HTML.
 
-JavaScript tools for the HTML Next proposals. Author a component once as HTML, then run it live in the browser, compile it to native DOM, or convert it to Vue.
+Build reactive components using the next generation of HTML. Author once, run them in the browser, or bring them to Vue and React. Svelte support is coming soon.
 
-## Install
+## One component, more places to use it
+
+Your components belong to your library, not to one application stack. HTML Next gives an HTML definition state, computed values, events, slots, and scoped styles, then delivers it in the form your project needs.
+
+::: targets
+HTML you can read
+: Define the interface and markup together. Add ordinary JavaScript when a component needs it.
+
+Reactivity you can declare
+: Connect state, values, and events in the component. Let the tools handle updates.
+
+Output you can own
+: Ship native DOM or framework source. Inspect the generated code and keep using your usual build tools.
+:::
+
+## Choose how to use it
+
+::: targets
+[Use Vue or React](/html-next/frameworks)
+: Add the Vite adapter and import HTML components alongside your existing components. Both adapters and converters are available today; Svelte is coming soon.
+
+[Run directly in the browser](/html-next/runtime)
+: Add one module script and link your component. The live runtime discovers and updates instances, with no build step.
+
+[Compile to native DOM](/html-next/build)
+: Build a known application or library graph with Vite. Component parsing stays out of the browser bundle.
+:::
+
+## Start small. Ship something reusable.
+
+[Build your first component](/html-next/quick-start) with a short HTML file. Use the same definition in a page, a Vue project, or a React project. When it is ready to share, [ship an HTML source library](/html-next/ship) or [convert it ahead of time](/html-next/convert).
 
 ```bash
 npm install @nextwebwg/html-next
 ```
 
-The packages publish `1.0.0-alpha` prereleases. The proposals they implement are at Stage 0, so the syntax and the generated output may still change.
+For Vue and React projects, add the [Vite adapter](/html-next/frameworks). For generated framework source, use the [converter](/html-next/convert). HTML Forms is available as an [independent subpath](/html-next/forms).
 
-## Packages
+## Built on a public proposal
 
-| Package | What it does |
-| --- | --- |
-| `@nextwebwg/html-next` | The tools: the live browser runtime, the compiler and CLI, validity on any element, and HTML Forms request construction. |
-| `@nextwebwg/html-next-unplugin` | Compiles a component graph in a Vite build. |
-| `@nextwebwg/html-next-converter` | Converts a component graph to Vue single-file components. |
+HTML Next is JavaScript tooling for the [Declarative HTML Components](/declarative-components/) and [HTML Forms](/html-forms/) proposals. The component language has one reference: the public proposal. These guides cover installing and using its implementation.
 
-## Three ways to deliver a component
+> [!note] Early, and usable today
+> The tools are in early development and the proposals are at Stage 0. Syntax and generated output may change. Vue and React adapters and converters are available; Svelte adapters and conversion are planned and do not ship yet.
 
-The same component definition works in all three modes, with the same observable DOM, state, events, validation, and lifecycle.
-
-| Mode | Use it when | Guide |
-| --- | --- | --- |
-| Live runtime | A page loads components itself, with one script and no build step. | [Run in the browser](/tools/runtime) |
-| Compiled build | An application or library has a known component graph and wants tree-shaken native DOM. | [Compile a graph](/tools/build) |
-| Vue conversion | A Vue project wants plain Vue components with no HTML Next left in them. | [Convert to Vue](/tools/convert) |
-
-HTML Forms is independent of all three: [its subpath](/tools/forms) works on native forms and imports nothing else.
-
-## A component
-
-A definition declares its public interface, an optional controller, and one root element. The controller is an ordinary ES module.
-
-```html title="counter.html"
-<template component="x-counter" controller="./counter.js">
-  <defs>
-    <state name="count" type="number" value="0"></state>
-    <computed name="label" from="concat('Count: ', count)"></computed>
-  </defs>
-
-  <button $ref="button" type="button">
-    <span $value="label"></span>
-  </button>
-
-  <style>
-    button { font: inherit; }
-  </style>
-</template>
-```
-
-```js title="counter.js"
-export default function controller({ refs, state }) {
-  const increment = () => { state.count += 1; };
-  refs.button.addEventListener("click", increment);
-  return () => refs.button.removeEventListener("click", increment);
-}
-```
-
-The complete component language is defined by the [Declarative HTML Components proposal](/html-next/).
-
-## Source
-
-The tools are MIT-licensed and developed in [nextwebwg/html-next](https://github.com/nextwebwg/html-next). [Looma](https://threadlabs.studio/looma/) is a UI library built on them.
+[Looma](https://threadlabs.studio/looma/) is a UI library authored with this component language. Explore the [tools source](https://github.com/nextwebwg/html-next), try a component, and [report what you find](https://github.com/nextwebwg/html-next/issues).

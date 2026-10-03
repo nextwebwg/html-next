@@ -82,7 +82,7 @@ rest of the graph at runtime. No build step, and definitions may arrive later.
 build and emits the already-parsed definitions, so the browser fetches no component sources.
 
 `tests/pantry-app.test.ts` drives one scenario against both and requires every step to observe the
-same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands of delivery modes.
+same DOM, the agreement the [proposal](https://nextwebwg.org/declarative-components/) demands of delivery modes.
 
 ## Known gaps this example documents
 

@@ -29,8 +29,8 @@ must name declared state. Node output matches the browser's declarative baseline
 props, initial state, computeds, template output and projected slots. Declared reads remain in their
 initial pending state. Browser hydration restores the instance, connects reads and attaches its
 controller to the adopted nodes. This follows the proposal's
-[controller lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration) and
-[connection boundary](https://nextwebwg.org/html-next/reactivity/#lifecycle).
+[controller lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration) and
+[connection boundary](https://nextwebwg.org/declarative-components/reactivity/#lifecycle).
 
 For controller-backed definitions, use the live browser loader (`@nextwebwg/html-next/browser`) with
 component links, or bundle the controller imports alongside runtime registration and observation.
@@ -60,7 +60,7 @@ in a versioned implementation record. It retains projected content that no slot 
 and native form reset defaults. Hydration consumes the records. Executable, opaque and cyclic values
 fail with `HR010` instead of being serialized with different semantics. The versioned record is
 implementation metadata, not a new normative format. Normative behavior remains in the public
-[rendered form proposal](https://nextwebwg.org/html-next/rendered-form/).
+[rendered form proposal](https://nextwebwg.org/declarative-components/rendered-form/).
 
 Slot marks serialize as `<?start ...?>` / `<?end?>` so the receiving browser chooses its native PI
 or comment representation. Structural lists adopt their serialized item ranges and retain keyed
