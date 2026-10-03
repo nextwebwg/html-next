@@ -294,8 +294,8 @@ describe("svelte source adapter", () => {
       .replace('<handler name="increment">', '<event name="change" type="integer" cancelable="true">Count.</event><handler name="increment">')
       .replace('<set name="count" expr:value="$count + 1"></set>', '<set name="count" expr:value="$count + 1" $if="count >= 0"></set><dispatch event="change" expr:value="count"></dispatch><focus ref="label"></focus>')
       .replace('on:click="increment"', 'on:click.self="increment"').replace('<span $value="$label">', '<span $ref="label" $value="$label">')
-      .replace('<span>Badge</span>', `<defs><state name="form" type="object({ text: string, choices: list(string) })" value="{ text: 'Ready', choices: ['b'] }"></state></defs>
-        <section .scrollTop="10">Badge<p .textContent="form.text"></p><input value="authored" .title="form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
+      .replace('<span>Badge</span>', `<defs><data name="feed" src="/api/feed" type="object({ label: string })"><param name="text" expr:value="form.text"></param></data><state name="form" type="object({ text: string, choices: list(string) })" value="{ text: 'Ready', choices: ['b'] }"></state></defs>
+        <section .scrollTop="10">Badge<output $value="feed.value.label"></output><p .textContent="form.text"></p><input value="authored" .title="form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
           <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
           <ui-rows><template slot="row"><li .title="item.name" $value="item.name"></li></template></ui-rows></section>`)
       + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>

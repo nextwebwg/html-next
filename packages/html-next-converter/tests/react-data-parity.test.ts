@@ -15,19 +15,7 @@ import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const source = `<template component="x-data-cycle" status="early" summary="Data lifecycle."><defs>
-  <state type="number" name="page" value="1"></state>
-  <computed name="requestPage" from="page + 1"></computed>
-  <data name="feed" src="./api/feed" type="object({ label: string })" debounce="20ms" poll="1500ms">
-    <param name="page" from:value="requestPage"></param>
-  </data>
-  <handler name="next"><set name="page" expr:value="page + 1"></set></handler>
-</defs><section><button type="button" on:click="next">Next</button>
-  <output class="label" $value="feed.value.label"></output>
-  <output class="pending" $value="feed.pending"></output>
-  <output class="ok" $value="feed.ok"></output>
-  <output class="failed" $value="feed.error ? 'yes' : 'no'"></output>
-</section><style>:host { display: block; background: rgb(238 244 250); padding: 4px; }</style></template>`;
+import { dataLifecycleSource as source } from "./fixtures/data-lifecycle.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

@@ -1,5 +1,6 @@
-import type { WritablePathSegment } from "../expression.js";
-import { typeAtKey, type TypeNode } from "../type-system.js";
+import { typeCheckedDependencies, type CompiledExpression, type WritablePathSegment } from "../expression.js";
+import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
+import type { ComponentDefinition } from "../template.js";
 import { quote } from "./shared.js";
 import type { Lowering, Scope } from "./vue-lowering.js";
 
@@ -95,3 +96,53 @@ export function handlerDestinationCheck(
   if (type.open) checks.push(`!${JSON.stringify(type.fields.map((field) => field.name))}.includes(${key})`);
   return checks.length === 0 ? "false" : `(${checks.join(" || ")})`;
 }
+
+/** Declared types constrain expressions at the point each reference is read. */
+export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition): string | undefined {
+  const checks = typeCheckedDependencies(plan).flatMap((path) => {
+    const [root, ...steps] = path.split(".");
+    const source = scope.code.get(root!);
+    if (source === undefined) return [];
+    // A declared path may intentionally name an absent field. The runtime checks that value at
+    // read time, and generated TypeScript must not reject the component for testing that absence.
+    const read = `(${source} as any)${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
+    const check = (initial: TypeNode, keys: readonly string[]): string[] => {
+      let type: TypeNode | undefined = initial;
+      for (const step of keys) {
+        type = typeAtKey(type, step);
+        if (type === undefined) return [];
+      }
+      return [`(${read} == null || ${destinationTypeCheck(type, read)})`];
+    };
+    const prop = definition.contract.props[root!];
+    if (prop === undefined) {
+      const declaration = definition.declarations?.find((entry) => entry.name === root);
+      if (declaration?.kind === "state" || declaration?.kind === "computed") {
+        const type = declarationTypeNode(declaration.type, declaration.shape);
+        return type === undefined ? [] : check(type, steps);
+      }
+      if (declaration?.kind !== "data") return [];
+      const [surface, ...keys] = steps;
+      if (surface === "pending" || surface === "ok") return check({ kind: "terminal", name: "boolean" }, keys);
+      if (surface !== "value" || declaration.type === undefined) return [];
+      return check(declaration.type === "text" ? { kind: "terminal", name: "string" }
+        : parseTypeExpression(declaration.type), keys);
+    }
+    const select = prop.select;
+    if (select === undefined) return check(normalizeType(prop.type), steps);
+    const selector = scope.code.get(select.from);
+    if (selector === undefined) return [];
+    const options = select.options.map((option) => {
+      let type = option.type;
+      for (const step of steps) {
+        const next = typeAtKey(type, step);
+        if (next === undefined) return `(${selector} === ${JSON.stringify(option.value)})`;
+        type = next;
+      }
+      return `(${selector} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(type, read)})`;
+    });
+    return [`(${read} == null || (${options.join(" || ")}))`];
+  });
+  return checks.length === 0 ? undefined : checks.join(" && ");
+}
+

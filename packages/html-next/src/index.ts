@@ -20,6 +20,7 @@ export {
   svelteHtmlArtifact,
   svelteEventsArtifact,
   svelteControlArtifact,
+  svelteDataArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

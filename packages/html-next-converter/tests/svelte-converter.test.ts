@@ -8,6 +8,7 @@ import { compile } from "svelte/compiler";
 import type { Component } from "svelte";
 import { render } from "svelte/server";
 import { build } from "esbuild";
+import { sveltePlugin } from "./helpers/svelte.js";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes } from "parse5";
 
 import { convertComponents } from "../src/index.js";
@@ -27,7 +28,7 @@ async function serverHtml(outDirectory: string, name: string, source: string, pr
   await build({
     stdin: { contents: server.js.code, resolveDir: join(outDirectory, "svelte"), sourcefile: `${name}.js` },
     outfile: serverPath, bundle: true, packages: "external", platform: "node", format: "esm",
-    loader: { ".css": "empty" },
+    loader: { ".css": "empty" }, plugins: [sveltePlugin("server")],
   });
   const module = await import(pathToFileURL(serverPath).href) as { default: Component<Record<string, unknown>> };
   return render(module.default, { props }).body;
@@ -287,11 +288,16 @@ it.each([
   assert.match(html, expected);
 });
 
-it.each([
-  { defs: '<data name="feed" src="/api/feed"></data>', root: '<div></div>', reason: /data sources/ },
-])("rejects unsupported Svelte behavior explicitly: $reason", async ({ defs, root: markup, reason }) => {
-  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-unsupported-"));
+it("emits a resource helper only for sourced data and keeps SSR pending without requests", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-resource-"));
   temporary.push(root);
-  await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Unsupported behavior."><defs>${defs}</defs>${markup}</template>`);
-  await assert.rejects(convertComponents({ mode: "library", target: "svelte", root, outDirectory: join(root, "out"), entries: ["case.html"] }), reason);
+  await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Resource output."><defs>
+    <data name="feed" src="/api/feed" type="object({ label: string })"></data>
+    </defs><output $value="feed.pending"></output></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
+  assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "svelte/data.svelte.ts"));
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  compile(source, { filename: "XCase.svelte", generate: "client" });
+  assert.match(await serverHtml(outDirectory, "XCase", source), /<output[^>]*>true<\/output>/);
 });

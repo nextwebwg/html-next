@@ -2,13 +2,15 @@
 import { fail } from "../diagnostics.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
-import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
+import { elementMatchRoot } from "../template.js";
+import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
-import { handlerDestinationCheck } from "./type-guards.js";
+import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 export interface SvelteConversionOptions {
@@ -19,6 +21,7 @@ export interface SvelteConversionOptions {
   readonly htmlSpecifier?: string;
   readonly eventsSpecifier?: string;
   readonly controlSpecifier?: string;
+  readonly dataSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -26,7 +29,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -41,9 +44,6 @@ function checkSupported(definition: ComponentDefinition): void {
     }
   }
   for (const declaration of definition.declarations ?? []) {
-    if (declaration.kind === "data" && declaration.source !== undefined) {
-      fail("HT030", "Svelte conversion does not yet support data sources.");
-    }
     if (!["state", "computed", "handler", "data", "event"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
     }
@@ -60,9 +60,6 @@ function checkSupported(definition: ComponentDefinition): void {
     if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind)) {
       fail("HT030", "Svelte conversion does not yet support structural flow, event modifiers, or references.");
     }
-    if (node.flow?.kind === "match" && node.name !== "template") {
-      fail("HT030", "Svelte conversion does not yet support $match on an element wrapper.");
-    }
     for (const attribute of node.attributes) {
       if (attribute.kind === "attribute" && attribute.twoWay === true && (
           node.name.includes("-") ||
@@ -77,6 +74,7 @@ function checkSupported(definition: ComponentDefinition): void {
 }
 
 interface RenderContext {
+  readonly definition: ComponentDefinition;
   readonly imports: Set<string>;
   readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
   usesScopedSlots: boolean;
@@ -226,6 +224,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}{@const ${node.flow.alias} = ${result}.value}${markup}{/if}{/if}`;
   }
   if (node.flow?.kind === "match") {
+    if (node.name !== "template") return renderNode(elementMatchRoot(node), root, scope, lowering, context);
     const flow = node.flow;
     const value = flow.expressionPlan?.ast;
     const local: RootScope = flow.alias === undefined ? scope as RootScope : {
@@ -258,7 +257,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
   let content: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
-    const value = lowering.text(contentDirective.expressionPlan.ast, scope);
+    const plan = contentDirective.expressionPlan;
+    const guard = declaredReferenceGuard(plan, scope, context.definition);
+    const source = lowering.text(plan.ast, scope);
+    const value = guard === undefined && !mayProduceInvalidResult(plan.ast, scope) ? source
+      : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
     content = contentDirective.name === "html"
       ? `{@html htmlSite${context.htmlSites++}(${value})}`
       : `{${value}}`;
@@ -502,6 +505,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const types = new Map<string, Static>(target.props.map((prop) => [prop.name, { type: normalizeType(prop.contract.type), nullable: true }]));
   const expressionScope: Scope = { code, types };
   const dataNames = new Map<DataDeclaration, string>();
+  const dataTypes = new Map<DataDeclaration, string>();
   const taken = new Set([...code.keys(), ...declarations.map((declaration) => declaration.name)]);
   const freshIdentifier = (base: string): string => {
     let name = base;
@@ -514,9 +518,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const name = freshIdentifier(`htmlNextData${dataNames.size}`);
     dataNames.set(declaration, name);
     code.set(declaration.name, name);
+    const payload = declaration.type === undefined ? { kind: "terminal", name: "unknown" } as const
+      : declaration.type === "text" ? { kind: "terminal", name: "string" } as const : parseTypeExpression(declaration.type);
+    dataTypes.set(declaration, typeSource(payload));
     types.set(declaration.name, { type: { kind: "object", open: false, fields: [
       { name: "pending", type: { kind: "terminal", name: "boolean" }, optional: false },
-      { name: "value", type: { kind: "terminal", name: "unknown" }, optional: false },
+      { name: "value", type: { kind: "union", members: [payload, { kind: "terminal", name: "null" }] }, optional: false },
       { name: "error", type: { kind: "terminal", name: "unknown" }, optional: false },
       { name: "ok", type: { kind: "terminal", name: "boolean" }, optional: false },
     ] }, nullable: false });
@@ -539,7 +546,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const context: RenderContext = { imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
+  const context: RenderContext = { definition, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
@@ -607,6 +614,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
     ...(hasProps || context.usesControls || context.usesSampledSlots ? ['import { untrack } from "svelte";'] : []),
+    ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
@@ -731,7 +739,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "});",
     ] : []),
     ...stateSources,
-    ...data.map((declaration) => `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`),
+    ...data.map((declaration) => {
+      if (declaration.source === undefined) return `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`;
+      const parameters = declaration.parameters.map((parameter) => `${quote(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from").map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
+      return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
+    }),
     ...computedSources,
     ...Array.from({ length: context.htmlSites }, (_, index) => index)
       .filter((site) => !context.localHtmlSites.has(site))
@@ -772,5 +785,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),
+      ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
     ] };
 }

@@ -73,6 +73,19 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "element match retains its native wrapper across selected arms",
+    source: `<template component="x-wrapper-match" status="early" summary="Stable match wrapper."><defs>
+      <state name="status" value="ready"></state><handler name="toggle"><set name="status" expr:value="status = 'ready' ? 'waiting' : 'ready'"></set></handler>
+      </defs><section class="wrapper" $match="status as s"><button $when="s = 'ready'" on:click="toggle">Ready</button><button $else on:click="toggle">Waiting</button></section>
+      <style>:host { display: block; padding: 4px; background: rgb(238 244 250); }</style></template><x-wrapper-match id="case"></x-wrapper-match>`,
+    liveSetup: `window.wrapper = document.querySelector('#case');`,
+    expect: { probe: `return [q('#case').tagName, q('#case').className, q('#case').textContent.trim(), window.wrapper ? q('#case') === window.wrapper : true];`,
+      result: ["SECTION", "wrapper", "Ready", true], after: [
+        { action: `window.wrapper ??= document.querySelector('#case'); document.querySelector('button').click();`, result: ["SECTION", "wrapper", "Waiting", true] },
+        { action: `document.querySelector('button').click();`, result: ["SECTION", "wrapper", "Ready", true] },
+      ] },
+  },
+  {
     name: "native form bindings retain authored defaults, typed state and pre-hydration edits",
     source: `<template component="x-edited-form" status="early" summary="Edited controls."><defs>
       <state name="form" type="object({ text: string, number: number, checked: boolean, choice: string, choices: list(string) })" value="{ text: 'Ready', number: 4, checked: false, choice: 'b', choices: ['b'] }"></state>

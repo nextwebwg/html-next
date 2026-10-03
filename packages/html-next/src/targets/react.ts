@@ -1,6 +1,6 @@
 /** React output is compiled from the same checked component definition as the browser runtime. */
 import { fail } from "../diagnostics.js";
-import { compileExpression, typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
+import { compileExpression, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
@@ -11,8 +11,8 @@ import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { destinationTypeCheck, handlerDestinationCheck } from "./type-guards.js";
-import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue, typeAtKey, type TypeNode } from "../type-system.js";
+import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck } from "./type-guards.js";
+import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
 import { parseFragment } from "parse5";
@@ -87,54 +87,6 @@ interface RenderScope extends Scope {
   readonly local?: boolean;
 }
 
-/** Declared types constrain expressions at the point each reference is read. */
-function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition): string | undefined {
-  const checks = typeCheckedDependencies(plan).flatMap((path) => {
-    const [root, ...steps] = path.split(".");
-    const source = scope.code.get(root!);
-    if (source === undefined) return [];
-    // A declared path may intentionally name an absent field. The runtime checks that value at
-    // read time, and generated TypeScript must not reject the component for testing that absence.
-    const read = `(${source} as any)${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
-    const check = (initial: TypeNode, keys: readonly string[]): string[] => {
-      let type: TypeNode | undefined = initial;
-      for (const step of keys) {
-        type = typeAtKey(type, step);
-        if (type === undefined) return [];
-      }
-      return [`(${read} == null || ${destinationTypeCheck(type, read)})`];
-    };
-    const prop = definition.contract.props[root!];
-    if (prop === undefined) {
-      const declaration = definition.declarations?.find((entry) => entry.name === root);
-      if (declaration?.kind === "state" || declaration?.kind === "computed") {
-        const type = declarationTypeNode(declaration.type, declaration.shape);
-        return type === undefined ? [] : check(type, steps);
-      }
-      if (declaration?.kind !== "data") return [];
-      const [surface, ...keys] = steps;
-      if (surface === "pending" || surface === "ok") return check({ kind: "terminal", name: "boolean" }, keys);
-      if (surface !== "value" || declaration.type === undefined) return [];
-      return check(declaration.type === "text" ? { kind: "terminal", name: "string" }
-        : parseTypeExpression(declaration.type), keys);
-    }
-    const select = prop.select;
-    if (select === undefined) return check(normalizeType(prop.type), steps);
-    const selector = scope.code.get(select.from);
-    if (selector === undefined) return [];
-    const options = select.options.map((option) => {
-      let type = option.type;
-      for (const step of steps) {
-        const next = typeAtKey(type, step);
-        if (next === undefined) return `(${selector} === ${JSON.stringify(option.value)})`;
-        type = next;
-      }
-      return `(${selector} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(type, read)})`;
-    });
-    return [`(${read} == null || (${options.join(" || ")}))`];
-  });
-  return checks.length === 0 ? undefined : checks.join(" && ");
-}
 
 function contextExportName(tag: string, name: string): string {
   const suffix = name.replace(/[^A-Za-z0-9$]/g, (character) => `_u${character.charCodeAt(0).toString(16)}_`);
