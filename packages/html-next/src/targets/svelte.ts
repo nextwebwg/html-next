@@ -576,6 +576,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
   const controllerHostName = freshIdentifier("htmlNextHost");
+  const methodNames = new Map(target.methods.map((method) => [method.name, freshIdentifier("htmlNextMethod")]));
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const nestedDepthName = freshIdentifier("htmlNextDepth");
   const markup = renderNode(definition.template, true, scope, lowering, context);
@@ -857,7 +858,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(usesController ? [
       `const ${controllerHostName} = useComponentHost(() => import(${quote(definition.controller!)}), {`,
       "  root: () => rootElement ?? null,",
-      `  definition: ${quote(definition.source.file)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
+      `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
         `  propInputs: (name: string) => ({ ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name],`,
@@ -869,10 +870,18 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
       "});",
-      ...target.methods.map((method) => {
-        const alias = freshIdentifier("htmlNextMethod");
-        return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${controllerHostName}.invoke(${quote(method.name)}, ...args) as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${method.name} };`;
-      }),
+    ] : []),
+    ...target.methods.map((method) => {
+      const alias = methodNames.get(method.name)!;
+      const result = usesController ? `${controllerHostName}.invoke(${quote(method.name)}, ...args)`
+        : `Promise.reject(new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}))`;
+      return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${result} as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${method.name} };`;
+    }),
+    ...(!usesController && target.methods.length > 0 ? [
+      "$effect(() => {",
+      "  const element = rootElement; if (element === undefined) return;",
+      ...target.methods.map((method) => `  Object.defineProperty(element, ${quote(method.name)}, { configurable: true, enumerable: false, value: ${methodNames.get(method.name)} });`),
+      "});",
     ] : []),
     ...handlerSources,
     ...lowering.fallbacks(),

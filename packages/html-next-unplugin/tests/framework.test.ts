@@ -305,6 +305,7 @@ describe("svelte source adapter", () => {
           <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
           </defs><output $value="value"></output></template>
+        <template component="ui-no-controller" status="early" summary="Method readiness."><defs><method name="ping" returns="promise(undefined)"></method></defs><button>Ping</button></template>
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" href="#next">Link</a><button $else>Button</button></template></template>
         <template component="ui-controlled" status="early" summary="Controller methods." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><method name="increment" export="increment" returns="promise(number)"></method></defs><button $ref="button" $value="count"></button></template>

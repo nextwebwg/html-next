@@ -13,9 +13,7 @@ import { convertComponents, type ConversionGraph } from "../src/index.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
-const source = `<template component="x-no-controller" status="early" summary="Method without controller."><defs>
-  <method name="ping" returns="promise(undefined)"></method>
-</defs><button type="button">Ping</button></template>`;
+import { methodReadinessSource as source } from "./fixtures/method-readiness.js";
 
 type Failure = { readonly name: string; readonly code: string | null; readonly message: string };
 

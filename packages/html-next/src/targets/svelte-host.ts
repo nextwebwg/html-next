@@ -13,6 +13,7 @@ export interface StateAccess {
 export interface ComponentHostOptions {
   readonly root: () => Element | null;
   readonly definition: string;
+  readonly tag: string;
   readonly controller: string;
   readonly props: () => Readonly<Record<string, unknown>>;
   readonly propInputs?: (name: string) => unknown;
@@ -180,11 +181,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   };
   const invoke = (name: string, ...args: unknown[]): Promise<unknown> => {
     const method = options.methods.find((entry) => entry.name === name)!;
-    if (started === undefined) return Promise.reject(new TypeError(
+    if (controllerModule === undefined) return Promise.reject(new TypeError(
       "Controller method " + String.fromCharCode(96) + name + String.fromCharCode(96) +
-      " is not ready for <" + host.root?.getAttribute("data-component") + ">.",
+      " is not ready for <" + options.tag + ">.",
     ));
-    return started.then((loaded) => {
+    return controllerModule.then((loaded) => {
       const exported = loaded[method.exportName];
       if (typeof exported !== "function") {
         const message = "Controller does not export method " + String.fromCharCode(96) + method.exportName + String.fromCharCode(96) + ".";

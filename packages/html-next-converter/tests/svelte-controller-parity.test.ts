@@ -317,6 +317,12 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
               const globals = window as unknown as { trace: Record<string, number>; releaseController?: () => void };
               return globals.trace.connects === 1 && typeof globals.releaseController === "function";
             })));
+            const methodResults = await Promise.all(pages.map((page) => page.evaluate(async () =>
+              Promise.race([
+                (document.querySelector("#case") as Element & { increment(): Promise<number> }).increment(),
+                new Promise<string>((resolve) => setTimeout(() => resolve("pending setup"), 500)),
+              ]))));
+            assert.deepEqual(methodResults, [1, 1], "methods wait for the module, not for asynchronous default-controller setup");
             await Promise.all([
               live.evaluate(() => document.querySelector("#case")!.remove()),
               svelte.evaluate(() => (window as unknown as { svelteRoot: { unmount(): void } }).svelteRoot.unmount()),
