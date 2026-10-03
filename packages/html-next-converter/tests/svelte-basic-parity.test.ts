@@ -51,6 +51,25 @@ const fixtures = [
       ])),
     }),
   },
+  {
+    name: "style",
+    source: `<template component="x-style" status="early" summary="Reactive style."><defs>
+      <state name="open" type="boolean" value="false"></state>
+      <handler name="toggle"><set name="open" expr:value="open = false"></set></handler>
+    </defs><div class="base" class:open="open" style:--tone="open ? 'green' : 'red'">
+      <button type="button" on:click="toggle">Toggle</button><output $value="open ? 'Open' : 'Closed'"></output>
+    </div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; background: var(--tone); }</style></template>`,
+    tag: "x-style",
+    root: "div",
+    checkpoint: "output",
+    expectedText: ["Closed", "Open"],
+    click: "button",
+    probe: async (page: Page) => ({
+      className: await page.locator("div").getAttribute("class"),
+      tone: await page.locator("div").evaluate((element) => (element as HTMLElement).style.getPropertyValue("--tone")),
+      output: await page.locator("output").textContent(),
+    }),
+  },
 ] as const;
 
 type Fixture = (typeof fixtures)[number];

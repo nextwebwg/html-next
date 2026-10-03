@@ -49,8 +49,8 @@ function checkSupported(definition: ComponentDefinition): void {
     }
     for (const attribute of node.attributes) {
       if (attribute.kind === "directive" && attribute.name === "html" || attribute.kind === "property" ||
-        attribute.kind === "attribute" && (attribute.twoWay === true || attribute.target !== undefined)) {
-        fail("HT030", "Svelte conversion does not yet support content, property, class, style, or two-way bindings.");
+        attribute.kind === "attribute" && attribute.twoWay === true) {
+        fail("HT030", "Svelte conversion does not yet support HTML content, property, or two-way bindings.");
       }
     }
     for (const child of node.children) visit(child);
@@ -167,7 +167,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
-      bindings.push(`${attribute.name}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
+      if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
+      else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
+      else bindings.push(`${attribute.name}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
   }
   const attributes = [...literals];
