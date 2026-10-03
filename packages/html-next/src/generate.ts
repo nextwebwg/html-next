@@ -12,6 +12,7 @@ import { reactContextArtifact as makeReactContextArtifact } from "./targets/reac
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
 import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
+import { svelteHtmlArtifact as makeSvelteHtmlArtifact } from "./targets/svelte-html.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
@@ -80,6 +81,10 @@ export function reactPropsArtifact(): GeneratedArtifact {
 
 export function sveltePropsArtifact(): GeneratedArtifact {
   return makeSveltePropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteHtmlArtifact(): GeneratedArtifact {
+  return makeSvelteHtmlArtifact(GENERATOR_VERSION);
 }
 
 export function reactEventsArtifact(declared = false): GeneratedArtifact {

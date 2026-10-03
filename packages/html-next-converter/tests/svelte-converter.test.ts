@@ -8,6 +8,7 @@ import { compile } from "svelte/compiler";
 import type { Component } from "svelte";
 import { render } from "svelte/server";
 import { build } from "esbuild";
+import { parseFragment, serialize, type DefaultTreeAdapterTypes } from "parse5";
 
 import { convertComponents } from "../src/index.js";
 
@@ -215,4 +216,43 @@ it("rejects a state-selected prop until the Svelte initialization boundary is im
   </defs><output $value="value"></output></template>`);
   await assert.rejects(convertComponents({ mode: "library", target: "svelte", root, outDirectory: join(root, "out"), entries: ["selected.html"] }),
     /HTC001: svelte conversion.*props selected by component state/);
+});
+
+it("sanitizes dynamic HTML on the server with the shared safe-default policy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-html-"));
+  temporary.push(root);
+  await writeFile(join(root, "body.html"), `<template component="x-body" status="early" summary="Safe body."><defs>
+    <prop name="body" type="string">Body.</prop>
+  </defs><div $html="body"></div></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["body.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.match(source, /retainedSanitizedHtml/);
+  assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "svelte/html.ts"));
+  assert.deepEqual(manifest.package.dependencies, { parse5: "^8.0.1" });
+  compile(source, { filename: "XBody.svelte", generate: "client" });
+  const html = await serverHtml(outDirectory, "XBody", source, {
+    body: `<b>OK</b><script>bad()</script><img src="x" onerror="bad()"><a href="javascript:bad()">Link</a>`,
+  });
+  const fragment = parseFragment(html);
+  const div = fragment.childNodes.find((node) => "tagName" in node && node.tagName === "div");
+  assert.ok(div);
+  const content = serialize(div as DefaultTreeAdapterTypes.ParentNode);
+  assert.match(content, /<b>OK<\/b>/);
+  assert.doesNotMatch(content, /<script|onerror|javascript:/);
+});
+
+it("keeps each row's sanitized HTML boundary local to that row", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-row-html-"));
+  temporary.push(root);
+  await writeFile(join(root, "rows.html"), `<template component="x-rows" status="early" summary="HTML rows."><defs>
+    <state name="rows" type="list(string)" value="['&lt;b&gt;A&lt;/b&gt;', '&lt;i&gt;B&lt;/i&gt;']"></state>
+  </defs><ul><li $each="row of rows" $html="row"></li></ul></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["rows.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.match(source, /\{#each [^}]+\}\{@const htmlSite0 = retainedSanitizedHtml\(\)\}/);
+  compile(source, { filename: "XRows.svelte", generate: "client" });
+  const html = (await serverHtml(outDirectory, "XRows", source)).replace(/<!--[\s\S]*?-->/g, "");
+  assert.match(html, /<li[^>]*><b>A<\/b><\/li>.*<li[^>]*><i>B<\/i><\/li>/);
 });

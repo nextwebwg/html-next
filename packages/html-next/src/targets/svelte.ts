@@ -14,12 +14,14 @@ export interface SvelteConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
+  readonly htmlSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
 export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
+  readonly usesHtml: boolean;
 }
 
 function checkSupported(definition: ComponentDefinition): void {
@@ -56,14 +58,14 @@ function checkSupported(definition: ComponentDefinition): void {
       fail("HT030", "Svelte conversion does not yet support $match on an element wrapper.");
     }
     for (const attribute of node.attributes) {
-      if (attribute.kind === "directive" && attribute.name === "html" || attribute.kind === "property" ||
+      if (attribute.kind === "property" ||
         attribute.kind === "attribute" && attribute.twoWay === true && (
           !["input", "textarea", "select"].includes(node.name) ||
           !["value", "checked"].includes(attribute.name) ||
           attribute.name === "checked" && node.name !== "input" ||
           attribute.writablePath?.length !== 1 || typeof attribute.writablePath[0] !== "string"
         )) {
-        fail("HT030", "Svelte conversion does not yet support HTML content, property, or two-way bindings.");
+        fail("HT030", "Svelte conversion does not yet support property or two-way bindings on this element.");
       }
     }
     for (const child of node.children) visit(child);
@@ -75,6 +77,8 @@ interface RenderContext {
   readonly imports: Set<string>;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   nextLoop: number;
+  htmlSites: number;
+  readonly localHtmlSites: Set<number>;
 }
 
 function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context: RenderContext): string {
@@ -111,7 +115,13 @@ function renderEach(node: ElementNode, scope: Scope, lowering: Lowering, context
   const rowScope = scopeWith(`${row}.item`, `${row}.index`, `${row}.loop`);
   const key = flow.keyPlan === undefined ? "" : ` (${lowering.value(flow.keyPlan.ast, rowScope)})`;
   const { flow: _flow, ...body } = node;
-  return `{#each ${rows} as ${row}${key}}${renderNode(body, false, rowScope, lowering, context)}{/each}`;
+  const firstHtmlSite = context.htmlSites;
+  const markup = renderNode(body, false, rowScope, lowering, context);
+  const localHtml = Array.from({ length: context.htmlSites - firstHtmlSite }, (_, index) => firstHtmlSite + index)
+    .filter((site) => !context.localHtmlSites.has(site));
+  for (const site of localHtml) context.localHtmlSites.add(site);
+  const declarations = localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml()}`).join("");
+  return `{#each ${rows} as ${row}${key}}${declarations}${markup}{/each}`;
 }
 
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
@@ -161,10 +171,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (flow.alias === undefined || value === undefined) return block;
     return `{#if true}{@const ${flow.alias} = ${lowering.value(value, scope)}}${block}{/if}`;
   }
-  const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "value");
-  const content = contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined
-    ? `{${lowering.text(contentDirective.expressionPlan.ast, scope)}}`
-    : undefined;
+  const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
+  let content: string | undefined;
+  if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
+    const value = lowering.text(contentDirective.expressionPlan.ast, scope);
+    content = contentDirective.name === "html"
+      ? `{@html htmlSite${context.htmlSites++}(${value})}`
+      : `{${value}}`;
+  }
   if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
   if (component) context.imports.add(node.name);
@@ -261,7 +275,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag, nextLoop: 0 };
+  const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
+    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set() };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
@@ -290,6 +305,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
     ...(hasProps ? ['import { untrack } from "svelte";'] : []),
+    ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
@@ -315,13 +331,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ] : []),
     ...stateSources,
     ...computedSources,
+    ...Array.from({ length: context.htmlSites }, (_, index) => index)
+      .filter((site) => !context.localHtmlSites.has(site))
+      .map((site) => `const htmlSite${site} = retainedSanitizedHtml();`),
     ...(styles.stateNames.length === 0 ? [] : [
       HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
     ...handlerSources,
     ...lowering.fallbacks(),
-    "</script>",
-  ].join("\n");
-  return { component: `${script}\n${markup}\n`, css };
+  ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
+  return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0 };
 }
