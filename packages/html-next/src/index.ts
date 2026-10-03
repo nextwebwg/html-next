@@ -16,6 +16,7 @@ export {
   vueControlArtifact,
   vuePropsArtifact,
   reactPropsArtifact,
+  sveltePropsArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

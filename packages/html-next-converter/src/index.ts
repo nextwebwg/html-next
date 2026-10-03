@@ -14,6 +14,7 @@ import {
   vueControlArtifact,
   vuePropsArtifact,
   reactPropsArtifact,
+  sveltePropsArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -378,6 +379,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
       }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
         importSpecifier,
         stylesheetSpecifier: `./${node.definition.contract.name}.css`,
+        propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
       })).component : (reactConversion = generateReactConversion(definition, {
         slotsByTag,
         propsByTag,
@@ -417,6 +419,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     if (svelteConversion !== undefined && svelteConversion.css !== "") {
       claim({ path: componentPath.replace(/\.svelte$/, ".css"), content: `${svelteConversion.css}\n` }, "style", source);
     }
+    if (svelteConversion !== undefined && Object.keys(definition.contract.props).length > 0) neededHelpers.add("props");
     for (const helper of helpers) neededHelpers.add(helper);
     for (const file of controllerFiles.values()) {
       claim(file, "controller", source);
@@ -448,6 +451,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   if (options.target === "react" && neededHelpers.has("props")) {
     claim(reactPropsArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("props")) {
+    claim(sveltePropsArtifact(), "helper");
   }
   if (options.target === "react" && neededHelpers.has("events")) {
     claim(reactEventsArtifact(hasDeclaredEvents), "helper");
