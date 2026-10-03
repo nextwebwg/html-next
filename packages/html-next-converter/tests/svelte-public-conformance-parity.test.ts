@@ -69,6 +69,43 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "guarded nested handlers preserve types and sequential computed reads",
+    source: `<template component="x-handler-path" status="early" summary="Nested handlers."><defs>
+      <state name="form" type="object({ rows: list(object({ name: string })), index: number })" value="{ rows: [{ name: 'Ada' }, { name: 'Bea' }], index: 1 }"></state>
+      <state name="count" type="number" value="0"></state>
+      <computed name="next" from="count + 1"></computed>
+      <handler name="rename"><set name="form.rows[form.index].name" value="Ann"></set><set name="form.index" expr:value="0"></set>
+        <set name="form.rows[form.index].name" value="Zoe" $if="form.index = 0"></set>
+        <set name="count" expr:value="next"></set><set name="count" expr:value="next"></set></handler>
+      <handler name="wrong"><set name="count" expr:value="concat(count)"></set><set name="form.rows[0].name" expr:value="7"></set>
+        <set name="form.rows[9].name" value="Missing"></set><set name="count" expr:value="99" $if="false"></set></handler>
+    </defs><section><output $value="concat(form.rows[0].name, '/', form.rows[1].name, '/', count)"></output>
+      <button class="rename" on:click="rename">Rename</button><button class="wrong" on:click="wrong">Invalid</button>
+    </section></template><x-handler-path></x-handler-path>`,
+    expect: { probe: `return q('output').textContent;`, result: "Ada/Bea/0", after: [
+      { action: `document.querySelector('button.rename').click();`, result: "Zoe/Ann/2" },
+      { action: `document.querySelector('button.wrong').click();`, result: "Zoe/Ann/2" },
+    ] },
+  },
+  {
+    name: "native filtered events dispatch declared detail and run ref actions",
+    source: `<template component="x-native-actions" status="early" summary="Native events."><defs>
+      <state name="count" type="number" value="0"></state>
+      <event name="change" type="number" bubbles="true" cancelable="true">Count.</event>
+      <handler name="send"><set name="count" expr:value="count + 1"></set><dispatch event="change" expr:value="count"></dispatch>
+        <focus ref="field"></focus><validate ref="field"></validate></handler>
+    </defs><section><input $ref="field" required><output $value="count"></output>
+      <button class="send" on:click.self.prevent="send">Send<span>Nested</span></button>
+      <button class="key" on:keydown.enter.once="send">Key</button></section></template><x-native-actions></x-native-actions>`,
+    expect: { probe: `const e = q('section'); return [q('output').textContent, e.getAttribute('data-detail'), e.getAttribute('data-invalid'), document.activeElement === q('input')];`,
+      result: ["0", null, null, false], after: [
+        { action: `const e = document.querySelector('section'); e.addEventListener('change', (event) => { e.setAttribute('data-detail', String(event.detail) + '/' + event.bubbles + '/' + event.cancelable); event.preventDefault(); }); e.querySelector('input').addEventListener('invalid', (event) => { e.setAttribute('data-invalid', 'yes'); event.preventDefault(); }); e.querySelector('button span').click();`, result: ["0", null, null, false] },
+        { action: `document.querySelector('button.send').click();`, result: ["1", "1/true/true", "yes", true] },
+        { action: `const e = document.querySelector('button.key'); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));`, result: ["2", "2/true/true", "yes", true] },
+      ] },
+  },
+
+  {
     name: "generic bindings reflect attributes and update before declared input handlers",
     source: `<template component="x-output" status="early" summary="Bound output."><defs>
       <state name="value" value="x"></state><state name="last" value="-"></state>

@@ -290,6 +290,11 @@ describe("svelte source adapter", () => {
 
   it("converts package and local imports with precise declarations and tree shaking", async () => {
     const { root, library } = await fixture();
+    const authored = (await readFile(join(library, "controls.html"), "utf8"))
+      .replace('<handler name="increment">', '<event name="change" type="integer" cancelable="true">Count.</event><handler name="increment">')
+      .replace('<set name="count" expr:value="$count + 1"></set>', '<set name="count" expr:value="$count + 1" $if="count >= 0"></set><dispatch event="change" expr:value="count"></dispatch><focus ref="label"></focus>')
+      .replace('on:click="increment"', 'on:click.self="increment"').replace('<span $value="$label">', '<span $ref="label" $value="$label">');
+    await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
     const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });
     assert.ok(prepared.aliases.has("@example/controls"));

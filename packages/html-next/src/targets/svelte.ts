@@ -8,6 +8,7 @@ import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
+import { handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 export interface SvelteConversionOptions {
@@ -15,6 +16,7 @@ export interface SvelteConversionOptions {
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
   readonly htmlSpecifier?: string;
+  readonly eventsSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -22,6 +24,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
+  readonly helpers: readonly ("props" | "html" | "events")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -39,12 +42,8 @@ function checkSupported(definition: ComponentDefinition): void {
     if (declaration.kind === "data" && declaration.source !== undefined) {
       fail("HT030", "Svelte conversion does not yet support data sources.");
     }
-    if (!["state", "computed", "handler", "data"].includes(declaration.kind)) {
+    if (!["state", "computed", "handler", "data", "event"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
-    }
-    if (declaration.kind === "handler" && declaration.steps.some((step) =>
-      step.kind !== "set" || step.guard !== undefined || step.writablePath.length !== 1)) {
-      fail("HT030", "Svelte conversion does not yet support guarded, nested, or non-state handler steps.");
     }
   }
   if (definition.controller !== undefined) {
@@ -58,8 +57,7 @@ function checkSupported(definition: ComponentDefinition): void {
       for (const child of node.fallback ?? []) visit(child);
       return;
     }
-    if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind) ||
-      node.ref !== undefined || node.events?.some((event) => event.modifiers.length > 0)) {
+    if (node.flow !== undefined && !["if", "with", "match", "when", "else", "each"].includes(node.flow.kind)) {
       fail("HT030", "Svelte conversion does not yet support structural flow, event modifiers, or references.");
     }
     if (node.flow?.kind === "match" && node.name !== "template") {
@@ -94,6 +92,13 @@ interface RenderContext {
   readonly bindingHelperName: string;
   readonly bindingValueName: string;
   readonly rootAttributeBindings: Set<string>;
+  usesEvents: boolean;
+  readonly refs: Set<string>;
+  readonly refsName: string;
+  readonly refAttachmentName: string;
+  readonly refTargetName: string;
+  readonly writePathName: string;
+  readonly freshIdentifier: (base: string) => string;
 }
 
 function retained(context: RenderContext, source: string, initial: string): string {
@@ -316,7 +321,19 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   attributes.push(...bindings);
   if (!component && context.styleOwner !== undefined) attributes.push(`${SVELTE_OWNER_ATTRIBUTE}=${quote(context.styleOwner)}`);
-  for (const event of node.events ?? []) attributes.push(`on${event.name}={${event.handler}}`);
+  if (node.ref !== undefined) {
+    context.refs.add(node.ref);
+    attributes.push(`{@attach ${context.refAttachmentName}(${quote(node.ref)})}`);
+  }
+  const nativeEvents = (node.events ?? []).filter((event) => component || event.modifiers.length > 0);
+  for (const event of node.events ?? []) {
+    if (!nativeEvents.includes(event)) attributes.push(`on${event.name}={${event.handler}}`);
+  }
+  if (nativeEvents.length > 0) {
+    context.usesEvents = true;
+    attributes.push(`{@attach (element: Element) => attachNativeEvents(element, [${nativeEvents.map((event) =>
+      `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: ${event.handler} }`).join(", ")}])}`);
+  }
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const children = content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
@@ -385,7 +402,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, bindingHelperName: freshIdentifier("boundAttribute"),
-    bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set() };
+    bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
+    usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
+    refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
+    writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${propTypeSource(prop.contract)};`).join("\n  ");
@@ -414,14 +434,39 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return `let ${value.name} = $derived(${expression !== undefined && mayProduceInvalidResult(expression, scope)
       ? retained(context, source, "undefined as any") : source});`;
   });
-  const handlerSources = handlers.map((handler) => `function ${handler.name}(): void {\n${handler.steps.map((step) => {
-    if (step.kind !== "set") return "";
-    return `  ${step.writablePath[0]} = ${lowering.value(step.value.ast, scope)};`;
+  const handlerSources = handlers.map((handler) => `function ${handler.name}(event?: Event): void {\n${handler.steps.map((step, index) => {
+    const handlerScope: Scope = { code: new Map([...scope.code, ["event", "event"]]),
+      types: new Map([...scope.types, ["event", { type: { kind: "terminal", name: "unknown" }, nullable: true } as Static]]) };
+    const guard = step.guard === undefined ? "" : `if (${lowering.value(step.guard.ast, handlerScope)} !== Symbol.for('html-next.invalid-result') && ${lowering.condition(step.guard.ast, handlerScope)}) `;
+    if (step.kind === "dispatch") {
+      const declaration = target.events.find((event) => event.name === step.event);
+      if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
+      const detail = context.freshIdentifier(`htmlNextDetail${index}`);
+      const source = step.value === undefined ? "undefined" : lowering.value(step.value.ast, handlerScope);
+      return `  ${guard}{ const ${detail} = ${source}; if (${detail} !== Symbol.for('html-next.invalid-result')) dispatchDeclared(rootElement ?? null, ${quote(step.event)}, ${detail}, ${JSON.stringify(declarationTypeNode(declaration.type, declaration.shape))}, ${JSON.stringify({ bubbles: declaration.bubbles, composed: declaration.composed, cancelable: declaration.cancelable })}); }`;
+    }
+    if (step.kind === "focus" || step.kind === "validate") {
+      context.refs.add(step.target);
+      const action = step.kind === "focus" ? "focus" : "reportValidity";
+      return `  ${guard}(${context.refTargetName}(${quote(step.target)}) as HTMLElement & { reportValidity?: () => boolean } | undefined)?.${action}?.();`;
+    }
+    if (step.kind !== "set") fail("HT030", `Svelte conversion of handler step in \`${handler.name}\` is not implemented.`);
+    const state = states.find((entry) => entry.name === step.writablePath[0]);
+    if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
+    const next = context.freshIdentifier(`htmlNextCandidate${index}`);
+    const check = handlerDestinationCheck(scope.types.get(state.name)?.type, step.writablePath, 1, next, handlerScope, lowering);
+    const destination = scope.code.get(state.name)!;
+    const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
+      : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
+        ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
+    return `  ${guard}{ const ${next}: unknown = ${lowering.value(step.value.ast, handlerScope)}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
+  const usesNestedWrites = handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const script = [
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
     ...(hasProps ? ['import { untrack } from "svelte";'] : []),
+    ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
@@ -511,8 +556,36 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
     ]),
+    ...(context.refs.size === 0 ? [] : [
+      `const ${context.refsName} = new Map<string, Set<Element>>();`,
+      `function ${context.refAttachmentName}(name: string) {`,
+      "  return (element: Element) => {",
+      `    const elements = ${context.refsName}.get(name) ?? new Set<Element>();`,
+      `    ${context.refsName}.set(name, elements); elements.add(element);`,
+      "    return () => { elements.delete(element); };",
+      "  };",
+      "}",
+      `function ${context.refTargetName}(name: string): Element | undefined {`,
+      `  return [...(${context.refsName}.get(name) ?? [])].sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1)[0];`,
+      "}",
+    ]),
+    ...(usesNestedWrites ? [
+      `function ${context.writePathName}(root: unknown, path: readonly unknown[], value: unknown): void {`,
+      "  let target = root;",
+      "  for (const [index, key] of path.entries()) {",
+      "    if (typeof key !== 'string' && typeof key !== 'number' || target === null || typeof target !== 'object') return;",
+      "    if (index === path.length - 1) (target as Record<string | number, unknown>)[key] = value;",
+      "    else target = (target as Record<string | number, unknown>)[key];",
+      "  }",
+      "}",
+    ] : []),
     ...handlerSources,
     ...lowering.fallbacks(),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
-  return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0 };
+  return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
+    helpers: [
+      ...(hasProps || target.events.length > 0 ? ["props" as const] : []),
+      ...(context.htmlSites > 0 ? ["html" as const] : []),
+      ...(context.usesEvents ? ["events" as const] : []),
+    ] };
 }

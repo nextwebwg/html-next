@@ -70,3 +70,10 @@ function sanitizeServer(parent: DefaultTreeAdapterTypes.ParentNode): void {
     return true;
   });
 }`;
+
+/** Declared event details share the typed-prop module's strict value parser. */
+export const DECLARED_EVENT_TYPE_SOURCE = `/** Declared event details use the same nested type and constraint check as typed values. */
+export function acceptsDeclaredEvent(value: unknown, type: Parameters<typeof parse>[1]): boolean {
+  return parse(value, type, "$").ok;
+}
+`;
