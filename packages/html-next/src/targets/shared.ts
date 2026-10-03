@@ -6,6 +6,10 @@ import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
 import { typeScriptType } from "../type-system.js";
 
+/** Reflected native properties with an HTML representation during server rendering. */
+export const SSR_BOOLEAN_PROPERTIES = new Set(["disabled", "hidden", "required", "readOnly", "multiple", "open", "controls"]);
+export const SSR_STRING_PROPERTIES = new Set(["formAction", "title", "id", "name", "placeholder", "alt"]);
+
 const VOID_ELEMENTS = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
   "source", "track", "wbr",

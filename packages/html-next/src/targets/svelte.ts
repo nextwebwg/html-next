@@ -6,7 +6,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-sys
 import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource } from "./shared.js";
+import { escapeHtml, isVoidElement, quote, svgAttributeName, propTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
 import { handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -65,11 +65,8 @@ function checkSupported(definition: ComponentDefinition): void {
       fail("HT030", "Svelte conversion does not yet support $match on an element wrapper.");
     }
     for (const attribute of node.attributes) {
-      // Svelte's native boolean attribute path also sets the reflected disabled property.
-      if (attribute.kind === "property" && attribute.name !== "disabled" && !nativeControlBinding(node.name, attribute.name) ||
-        attribute.kind === "attribute" && attribute.twoWay === true && (
+      if (attribute.kind === "attribute" && attribute.twoWay === true && (
           node.name.includes("-") ||
-          ["input", "textarea", "select"].includes(node.name) && !nativeControlBinding(node.name, attribute.name) ||
           attribute.writablePath === undefined || typeof attribute.writablePath[0] !== "string"
         )) {
         fail("HT030", "Svelte conversion does not yet support property or two-way bindings on this element.");
@@ -90,6 +87,8 @@ interface RenderContext {
   readonly retentions: Map<number, { readonly initial?: string }>;
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
+  usesProperties: boolean;
+  readonly propertyAttachmentName: string;
   usesControls: boolean;
   usesNestedBindings: boolean;
   boundSelect: boolean;
@@ -316,6 +315,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         else {
           // Ordinary elements reflect the attribute, and feed their native value back on input.
           context.usesAttributeBinding = true;
+          context.usesControls = true;
           const name = svgAttributeName(attribute.name);
           const value = lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
           // Svelte optimizes value= into a property write even on <output>. Keep the
@@ -333,7 +333,25 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
-      else bindings.push(`${attribute.name}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
+      else {
+        const source = lowering.value(attribute.expressionPlan.ast, scope);
+        if (attribute.name === "textContent") {
+          const value = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source;
+          content = `{${value} == null ? "" : String(${value})}`;
+        } else {
+          context.usesProperties = true;
+          bindings.push(`{@attach ${context.propertyAttachmentName}(${quote(attribute.name)}, () => ${source})}`);
+          if (SSR_BOOLEAN_PROPERTIES.has(attribute.name) || SSR_STRING_PROPERTIES.has(attribute.name)) {
+            const candidate = context.freshIdentifier("htmlNextPropertyValue");
+            const serialized = SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? `Boolean(${candidate})` : `String(${candidate})`;
+            const rendered = mayProduceInvalidResult(attribute.expressionPlan.ast, scope)
+              ? retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? "undefined as boolean | undefined" : "undefined as string | undefined")
+              : SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? `Boolean(${source})` : `String(${source})`;
+            bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
+          }
+        }
+        if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(attribute.name.toLowerCase()); }
+      }
     }
   }
   const attributes = [...literals];
@@ -447,7 +465,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesProperties: false, propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
@@ -512,7 +530,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
     ...(hasProps || context.usesControls ? ['import { untrack } from "svelte";'] : []),
-    ...(context.usesControls ? [`import { attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
+    ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
@@ -552,17 +570,31 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  };",
       "}",
     ] : []),
+    ...(context.usesProperties ? [
+      `function ${context.propertyAttachmentName}(name: string, read: () => unknown) {`,
+      "  return (element: Element) => {",
+      "    let initialized = false;",
+      "    $effect(() => {",
+      "      const value = read();",
+      "      if (value === Symbol.for('html-next.invalid-result')) return;",
+      "      // Native scroll setters run while live roots are detached and have no initial layout effect.",
+      "      const first = !initialized; initialized = true;",
+      "      if (first && (name === 'scrollTop' || name === 'scrollLeft')) return;",
+      "      Reflect.set(element, name, value);",
+      "    });",
+      "  };",
+      "}",
+    ] : []),
     ...(context.usesAttributeBinding ? [
       `function ${context.bindingHelperName}(name: string, read: () => unknown, update: (value: any) => void) {`,
       "  return (element: Element) => {",
       "    $effect(() => {",
       "      const value = read();",
+      "      if (value === Symbol.for('html-next.invalid-result')) return;",
       "      if (value == null) element.removeAttribute(name);",
       "      else element.setAttribute(name, String(value));",
       "    });",
-      "    const listener = () => update((element as Element & { value?: unknown }).value ?? element.getAttribute('value'));",
-      "    element.addEventListener('input', listener);",
-      "    return () => element.removeEventListener('input', listener);",
+      "    return attachGenericBinding(element, update);",
       "  };",
       "}",
     ] : []),

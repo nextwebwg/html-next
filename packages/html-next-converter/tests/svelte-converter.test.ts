@@ -272,6 +272,9 @@ it.each([
     root: '<div><i $value="default.pending"></i><b $value="htmlNextData0"></b></div>', expected: /<i>true<\/i><b>kept<\/b>/ },
   { name: "bindings with generated-name collisions", defs: '<state name="boundAttribute" value="kept"></state><state name="boundValue" value="Ready"></state>',
     root: '<div><output bind:value="boundValue"></output><b $value="boundAttribute"></b></div>', expected: /<output[^>]*value="Ready"[^>]*><\/output><b>kept<\/b>/ },
+  { name: "nullable reflected properties", defs: '<state name="record" type="object" value="{}"></state>',
+    root: '<button .title="null" .name="record.missing"></button>', expected: /title="null"[^>]*name="undefined"/ },
+  { name: "native scroll property", defs: '', root: '<div .scrollTop="10"></div>', expected: /<div/ },
   { name: "native property", defs: '', root: '<button .disabled="true"></button>', expected: /<button[^>]* disabled/ },
 ])("renders $name in Svelte server output", async ({ defs, root: markup, expected }) => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-shared-"));
@@ -287,7 +290,6 @@ it.each([
 
 it.each([
   { defs: '<data name="feed" src="/api/feed"></data>', root: '<div></div>', reason: /data sources/ },
-  { defs: '', root: '<div .scrollTop="10"></div>', reason: /property or two-way bindings/ },
 ])("rejects unsupported Svelte behavior explicitly: $reason", async ({ defs, root: markup, reason }) => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-unsupported-"));
   temporary.push(root);

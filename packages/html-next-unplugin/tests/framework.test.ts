@@ -295,7 +295,7 @@ describe("svelte source adapter", () => {
       .replace('<set name="count" expr:value="$count + 1"></set>', '<set name="count" expr:value="$count + 1" $if="count >= 0"></set><dispatch event="change" expr:value="count"></dispatch><focus ref="label"></focus>')
       .replace('on:click="increment"', 'on:click.self="increment"').replace('<span $value="$label">', '<span $ref="label" $value="$label">')
       .replace('<span>Badge</span>', `<defs><state name="form" type="object({ text: string, choices: list(string) })" value="{ text: 'Ready', choices: ['b'] }"></state></defs>
-        <section>Badge<input value="authored" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
+        <section .scrollTop="10">Badge<p .textContent="form.text"></p><input value="authored" .title="form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
           <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select></section>`);
     await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));

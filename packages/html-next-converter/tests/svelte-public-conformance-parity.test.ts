@@ -132,6 +132,28 @@ const regressions: readonly ConverterCase[] = [
   },
 
   {
+    name: "native property bindings preserve setters and retain invalid results",
+    source: `<template component="x-native-properties" status="early" summary="Native properties."><defs>
+      <state name="count" type="number" value="1"></state><state name="disabled" type="boolean" value="false"></state>
+      <state name="label" type="string" value="Ready"></state>
+      <handler name="invalid"><set name="count" expr:value="0"></set><set name="disabled" expr:value="true"></set></handler>
+      <handler name="valid"><set name="count" expr:value="2"></set><set name="disabled" expr:value="false"></set></handler>
+    </defs><section><p class="content" .textContent="40px / count"></p>
+      <button class="bound" .disabled="disabled" .title="40px / count">Bound</button>
+      <div class="scroll" style="height: 20px; overflow: auto" .scrollTop="20 / count"><div style="height: 200px"></div></div>
+      <input class="generic" value="Authored" bind:title="label"><output $value="label"></output>
+      <button class="invalid" on:click="invalid">Invalid</button><button class="valid" on:click="valid">Valid</button>
+    </section></template><x-native-properties></x-native-properties>`,
+    hydrationOnlyProbe: true,
+    expect: { probe: `return [q('p.content').textContent, q('p.content').childElementCount, q('button.bound').disabled, q('button.bound').title, q('div.scroll').scrollTop, q('input.generic').getAttribute('title'), q('output').textContent];`,
+      result: ["40px", 0, false, "40px", 0, "Ready", "Ready"], after: [
+        { action: `document.querySelector('button.invalid').click();`, result: ["40px", 0, true, "40px", 0, "Ready", "Ready"] },
+        { action: `document.querySelector('button.valid').click();`, result: ["20px", 0, false, "20px", 10, "Ready", "Ready"] },
+        { action: `const e = document.querySelector('input.generic'); e.value = 'Edited'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["20px", 0, false, "20px", 10, "Edited", "Edited"] },
+      ] },
+  },
+
+  {
     name: "guarded nested handlers preserve types and sequential computed reads",
     source: `<template component="x-handler-path" status="early" summary="Nested handlers."><defs>
       <state name="form" type="object({ rows: list(object({ name: string })), index: number })" value="{ rows: [{ name: 'Ada' }, { name: 'Bea' }], index: 1 }"></state>
