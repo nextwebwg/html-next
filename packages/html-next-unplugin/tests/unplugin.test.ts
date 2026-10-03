@@ -133,14 +133,14 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /function manageGeneratedProp(?:s)?/);
   });
 
-  it("turns linked component invocations into compiled factory calls", async () => {
+  it("turns sibling component invocations from one resource into compiled factory calls", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-linked-"));
     temporary.push(root);
-    await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
+    await writeFile(join(root, "app.html"), `
       <template component="x-app" status="early" summary="App.">
         <main><x-child></x-child></main>
-      </template>`);
-    await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
+      </template>
+      <template component="x-child" status="early" summary="Child.">
       <strong>Compiled child</strong>
     </template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
@@ -171,7 +171,7 @@ describe("HTML Next unplugin", () => {
     // Only component roots carry a marker, naming their own component.
     assert.match(output, /setAttribute\("data-component", "x-child"\)/);
     assert.doesNotMatch(output, /data-component-root|getAttribute\("data-component"\)/);
-    assert.deepEqual(manifest.publicEntries.map(({ tag }) => tag), ["x-app"]);
+    assert.deepEqual(manifest.publicEntries.map(({ tag }) => tag), ["x-app", "x-child"]);
     assert.deepEqual(manifest.components.map(({ tag }) => tag), ["x-app", "x-child"]);
 
     const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -540,13 +540,13 @@ describe("HTML Next unplugin", () => {
     }
   });
 
-  it("exposes independently consumable public component modules in library mode", async () => {
+  it("exposes independently consumable components from one HTML resource in library mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-library-"));
     temporary.push(root);
-    await writeFile(join(root, "alpha.html"), `<template component="x-alpha" status="early" summary="Alpha.">
+    await writeFile(join(root, "library.html"), `<template component="x-alpha" status="early" summary="Alpha.">
       <p>Alpha public entry</p>
-    </template>`);
-    await writeFile(join(root, "beta.html"), `<template component="x-beta" status="early" summary="Beta.">
+    </template>
+    <template component="x-beta" status="early" summary="Beta.">
       <p>Beta public entry</p>
     </template>`);
     await writeFile(
@@ -558,7 +558,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({
-        entries: ["alpha.html", "beta.html"],
+        entries: ["library.html"],
         root,
         mode: "library",
       })],

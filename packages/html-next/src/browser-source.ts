@@ -87,30 +87,28 @@ export function parseBrowserComponentResource(
 ): ParsedComponentResource {
   const container = root.createElement("template");
   container.innerHTML = sourceText;
-  let carrier: HTMLTemplateElement | undefined;
+  const carriers: HTMLTemplateElement[] = [];
   for (const node of container.content.childNodes) {
     if (
       node.nodeType === 1 && (node as Element).localName === "template" &&
       (node as Element).hasAttribute("component")
     ) {
-      if (carrier !== undefined) {
-        fail("HS001", "A component resource must contain exactly one <template component>.", source);
-      }
-      carrier = node as HTMLTemplateElement;
+      carriers.push(node as HTMLTemplateElement);
     }
   }
-  if (carrier === undefined) {
-    fail("HS001", "A component resource must contain exactly one <template component>.", source);
+  if (carriers.length === 0) {
+    fail("HS001", "A component resource requires at least one <template component>.", source);
   }
+  const carrierSet = new Set<Node>(carriers);
   const dependencies: string[] = [];
   for (const node of container.content.childNodes) {
-    if (node === carrier || node.nodeType === 8 ||
+    if (carrierSet.has(node) || node.nodeType === 8 ||
       (node.nodeType === 3 && (node.nodeValue ?? "").trim() === "")) continue;
     if (
       node.nodeType !== 1 || (node as Element).localName !== "link" ||
       (node as Element).getAttribute("rel") !== "component"
     ) {
-      fail("HT009", "A component resource may contain only dependency links and one inert carrier.", source);
+      fail("HT009", "A component resource may contain only dependency links and inert component carriers.", source);
     }
     const href = (node as Element).getAttribute("href");
     if (href === null || href.trim() === "") {
@@ -118,8 +116,8 @@ export function parseBrowserComponentResource(
     }
     dependencies.push(href);
   }
-  return {
-    definition: parseBrowserComponent(carrier, source),
-    dependencies,
-  };
+  return Object.freeze({
+    definitions: Object.freeze(carriers.map((carrier) => parseBrowserComponent(carrier, source))),
+    dependencies: Object.freeze(dependencies),
+  });
 }

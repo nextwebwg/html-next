@@ -73,7 +73,7 @@ export interface InspectedComponentGraph {
 export async function inspectComponents(entries: readonly string[]): Promise<InspectedComponentGraph> {
   const graph = await componentGraph(entries);
   const display = (url: string): string => url.startsWith("file:")
-    ? relative(process.cwd(), fileURLToPath(url)).split(sep).join("/")
+    ? relative(process.cwd(), fileURLToPath(url)).split(sep).join("/") + new URL(url).hash
     : url;
   return Object.freeze({
     roots: Object.freeze(graph.roots.map(display)),
@@ -108,7 +108,7 @@ export async function buildComponents(
   const components: Array<BuildManifest["components"][number]> = [];
   const selected = new Set(options.targets ?? ["docs", "styles", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
-  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
+  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/") + new URL(url).hash;
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const entry = fileURLToPath(node.url);

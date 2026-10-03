@@ -46,8 +46,12 @@ styles or imported CSS, controller adapters, types, static assets, and an invent
 
 Library conversion emits independently consumable component entries, package exports appropriate
 to the target, declaration files, styles, controllers, preserved ordinary modules, and dependency
-metadata. Generated source must remain compatible with the target's standard compiler and bundler
-pipeline.
+metadata. The inventory's `package.dependencies` lists feature-specific runtime imports such as
+`parse5` for `$html`, and `package.peerDependencies` names the target framework. Publishers merge
+these fields into their package manifest and remain responsible for dependencies imported by their
+own controller modules. A multi-target package may mark each framework peer optional when its
+subpaths are independently usable. Generated source must remain compatible with the target's
+standard compiler and bundler pipeline.
 
 ## Failure behavior
 
@@ -58,6 +62,12 @@ not silently approximate behavior.
 Runtime failures preserve the shared public error, event, type, cancellation, and cleanup
 contract. Target error boundaries may observe those failures but cannot replace required component
 events or leave effects, requests, or controllers active after disposal.
+
+An incompatible React server root is a hydration diagnostic exception, not a component-thrown
+HTML Next error. The application calls React's `hydrateRoot` and may observe recovery through its
+`onRecoverableError` option; generated components do not add an `HR005` wrapper or take over
+hydration. Matching server markup, the recovered render, and subsequent behavior must still meet
+the converter's parity requirements.
 
 ## Optimization boundary
 

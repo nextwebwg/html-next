@@ -54,6 +54,40 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
   });
 
+  it("fetches a multi-component library once and renders both definitions and sibling invocations", async () => {
+    const page = await browser.newPage();
+    let requests = 0;
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("https://library.example/**", async (route) => {
+      const library = route.request().url().endsWith("/library.html");
+      if (library) requests += 1;
+      await route.fulfill({ contentType: "text/html", body: library ? `
+        <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
+        <template component="ui-dialog" status="early" summary="Dialog."><section><ui-button></ui-button></section></template>
+      ` : '<link rel="component" href="/library.html"><ui-button id="button"></ui-button><ui-dialog id="dialog"></ui-dialog>' });
+    });
+    try {
+      await page.goto("https://library.example/");
+      await page.addScriptTag({ path: bundlePath });
+      const result = await page.evaluate(async () => {
+        const api = (window as unknown as { HtmlNextLoader: {
+          startBrowserComponents(): Promise<{ graph: { nodes: Map<string, unknown> }; stop(): void }>;
+        } }).HtmlNextLoader;
+        const started = await api.startBrowserComponents();
+        const value = { count: started.graph.nodes.size, button: document.querySelector("#button")?.localName,
+          dialog: document.querySelector("#dialog")?.localName, child: document.querySelector("#dialog button")?.textContent };
+        started.stop();
+        return value;
+      });
+      assert.deepEqual(result, { count: 2, button: "button", dialog: "section", child: "Save" });
+      assert.equal(requests, 1);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("starts the linkable browser distributable when the module executes", async () => {
     const page = await browser.newPage();
     await page.route("https://distribution.example/**", async (route) => {

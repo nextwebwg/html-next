@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,21 @@ describe("buildComponents", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("builds every carrier and preserves definition identities in resource inspection", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "html-next-cli-resource-"));
+    try {
+      const source = join(directory, "controls.html");
+      await writeFile(source, `<template component="ui-button" status="early" summary="Button."><button>Save</button></template>
+<template component="ui-badge" status="early" summary="Badge."><span>New</span></template>`);
+      const inspected = await inspectComponents([source]);
+      assert.deepEqual(inspected.roots.map((root) => root.split("#").at(-1)), ["ui-button", "ui-badge"]);
+      const built = await buildComponents([source], join(directory, "output"), { targets: ["vue"] });
+      assert.deepEqual(built.components.map((component) => component.name), ["UiBadge", "UiButton"]);
+      assert.match(await readFile(join(directory, "output/vue/UiButton.vue"), "utf8"), /Save/);
+      assert.match(await readFile(join(directory, "output/vue/UiBadge.vue"), "utf8"), /New/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   it("rejects an empty build and colliding generated paths", async () => {

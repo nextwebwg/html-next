@@ -30,13 +30,24 @@
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",
-    "unplugin": "catalog:"
+    "@nextwebwg/html-next-converter": "workspace:*",
+    "parse5": "catalog:",
+    "typescript": "5.9.3",
+    "unplugin": "catalog:",
+    "vue-tsc": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-vue": "6.0.9",
+    "playwright": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "typescript": "catalog:"
+    "vue": "catalog:"
   },
   "publishConfig": {
     "access": "public",
@@ -47,5 +58,16 @@
     "type": "git",
     "url": "git+https://github.com/nextwebwg/html-next.git",
     "directory": "packages/html-next-unplugin"
+  },
+  "bin": {
+    "html-next-sync": "./dist/cli.js"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   }
 }

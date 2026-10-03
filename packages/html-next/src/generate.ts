@@ -1,6 +1,15 @@
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
+import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
+import { reactEventsArtifact as makeReactEventsArtifact } from "./targets/react-events.js";
+import { reactControlArtifact as makeReactControlArtifact } from "./targets/react-control.js";
+import { reactDataArtifact as makeReactDataArtifact } from "./targets/react-data.js";
+import { reactHtmlArtifact as makeReactHtmlArtifact } from "./targets/react-html.js";
+import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host.js";
+import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
+import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
+import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
@@ -62,6 +71,39 @@ export function vuePropsArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_PROPS_PATH, content: vuePropsModule(GENERATOR_VERSION) });
 }
 
+/** Target-independent typed invocation rules, copied into React output only when props are used. */
+export function reactPropsArtifact(): GeneratedArtifact {
+  return makeReactPropsArtifact(GENERATOR_VERSION);
+}
+
+export function reactEventsArtifact(declared = false): GeneratedArtifact {
+  return makeReactEventsArtifact(GENERATOR_VERSION, declared);
+}
+
+export function reactControlArtifact(): GeneratedArtifact {
+  return makeReactControlArtifact(GENERATOR_VERSION);
+}
+
+export function reactDataArtifact(): GeneratedArtifact {
+  return makeReactDataArtifact(GENERATOR_VERSION);
+}
+
+export function reactHtmlArtifact(): GeneratedArtifact {
+  return makeReactHtmlArtifact(GENERATOR_VERSION);
+}
+
+export function reactHostArtifact(): GeneratedArtifact {
+  return makeReactHostArtifact(GENERATOR_VERSION);
+}
+
+export function reactContextArtifact(): GeneratedArtifact {
+  return makeReactContextArtifact(GENERATOR_VERSION);
+}
+
+export function reactDepthArtifact(): GeneratedArtifact {
+  return makeReactDepthArtifact(GENERATOR_VERSION);
+}
+
 export { importsVueHost } from "./targets/vue-host.js";
 export { importsVueHtml } from "./targets/vue-html.js";
 export { importsVueControl } from "./targets/vue-control.js";
@@ -85,4 +127,14 @@ function convertedToVue(definition: ComponentDefinition): string | undefined {
 /** Converts one definition to a Vue single-file component, failing with a diagnostic if it cannot. */
 export function generateVueComponent(definition: ComponentDefinition, options?: VueConversionOptions): string {
   return generateVue(definition, GENERATOR_VERSION, options);
+}
+
+/** Converts one definition to a React component, failing when a construct is not yet mapped. */
+export function generateReactComponent(definition: ComponentDefinition, options?: ReactConversionOptions): string {
+  return generateReact(definition, GENERATOR_VERSION, options);
+}
+
+/** Converts one definition with CSS and helper usage for package-level output. */
+export function generateReactConversion(definition: ComponentDefinition, options?: ReactConversionOptions): ReactConversionOutput {
+  return generateReactOutput(definition, GENERATOR_VERSION, options);
 }

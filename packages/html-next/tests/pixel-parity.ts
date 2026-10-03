@@ -10,11 +10,12 @@ export function launchParityBrowser(browserType: BrowserType): Promise<Browser> 
 interface PixelDifference {
   readonly size: string;
   readonly changed: number;
+  readonly maxChannelDelta: number;
   readonly first: { readonly x: number; readonly y: number; readonly actual: number[]; readonly expected: number[] } | null;
 }
 
 async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Promise<PixelDifference> {
-  if (actual.equals(expected)) return { size: "same PNG", changed: 0, first: null };
+  if (actual.equals(expected)) return { size: "same PNG", changed: 0, maxChannelDelta: 0, first: null };
   return page.evaluate(async ([actualPng, expectedPng]: [string, string]) => {
     const decode = async (encoded: string) => {
       const response = await fetch(`data:image/png;base64,${encoded}`);
@@ -30,14 +31,18 @@ async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Pr
     };
     const [left, right] = await Promise.all([decode(actualPng), decode(expectedPng)]);
     if (left.width !== right.width || left.height !== right.height) {
-      return { size: `${left.width}x${left.height} versus ${right.width}x${right.height}`, changed: -1, first: null };
+      return { size: `${left.width}x${left.height} versus ${right.width}x${right.height}`, changed: -1, maxChannelDelta: 255, first: null };
     }
     let changed = 0;
+    let maxChannelDelta = 0;
     let first: { x: number; y: number; actual: number[]; expected: number[] } | null = null;
     for (let offset = 0; offset < left.data.length; offset += 4) {
       if (left.data[offset] === right.data[offset] && left.data[offset + 1] === right.data[offset + 1] &&
         left.data[offset + 2] === right.data[offset + 2] && left.data[offset + 3] === right.data[offset + 3]) continue;
       changed += 1;
+      for (let channel = 0; channel < 4; channel += 1) {
+        maxChannelDelta = Math.max(maxChannelDelta, Math.abs(left.data[offset + channel]! - right.data[offset + channel]!));
+      }
       if (first === null) {
         const pixel = offset / 4;
         first = {
@@ -48,7 +53,7 @@ async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Pr
         };
       }
     }
-    return { size: `${left.width}x${left.height}`, changed, first };
+    return { size: `${left.width}x${left.height}`, changed, maxChannelDelta, first };
   }, [actual.toString("base64"), expected.toString("base64")] as [string, string]);
 }
 
@@ -87,11 +92,14 @@ async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | unde
 }
 
 /** Compare rendered RGBA pixels, not the PNG encoders' byte streams. */
-export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Buffer, message: string, expectedPage?: Page): Promise<void> {
+export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Buffer, message: string, expectedPage?: Page,
+  tolerance?: { readonly maxChangedPixels: number; readonly maxChannelDelta: number }): Promise<void> {
   const difference = await pixelDifference(page, actual, expected);
   if (difference.changed === 0) return;
+  if (tolerance !== undefined && difference.changed > 0 && difference.changed <= tolerance.maxChangedPixels &&
+    difference.maxChannelDelta <= tolerance.maxChannelDelta) return;
   let diagnostics: unknown;
   try { diagnostics = await diagnosePixelMismatch(page, expectedPage, actual, expected); }
   catch (error) { diagnostics = { error: String(error) }; }
-  assert.fail(`${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; first=${JSON.stringify(difference.first)}; diagnostics=${JSON.stringify(diagnostics)}`);
+  assert.fail(`${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; max channel delta=${difference.maxChannelDelta}; first=${JSON.stringify(difference.first)}; diagnostics=${JSON.stringify(diagnostics)}`);
 }

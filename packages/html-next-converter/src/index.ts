@@ -1,30 +1,36 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { glob, lstat, mkdir, writeFile } from "node:fs/promises";
+import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   addControllerGraph,
   generateVueComponent,
+  generateReactConversion,
   HtmlDiagnosticError,
-  importsVueHost,
-  importsVueHtml,
-  importsVueControl,
-  importsVueProps,
   loadNodeComponents,
   vueHostArtifact,
   vueHtmlArtifact,
   vueControlArtifact,
   vuePropsArtifact,
+  reactPropsArtifact,
+  reactEventsArtifact,
+  reactControlArtifact,
+  reactDataArtifact,
+  reactHtmlArtifact,
+  reactHostArtifact,
+  reactContextArtifact,
+  reactDepthArtifact,
   type ComponentGraph,
   type TemplateNode,
   type GeneratedArtifact,
 } from "@nextwebwg/html-next";
 
-export type FrameworkTarget = "vue";
+export type FrameworkTarget = "vue" | "react";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
   vue: "3.5",
+  react: "19.3",
 };
 
 interface BaseConvertOptions {
@@ -55,7 +61,7 @@ export interface ConversionEntry {
 
 export interface ConversionOutput {
   readonly path: string;
-  readonly kind: "component" | "controller" | "helper" | "entry" | "inventory";
+  readonly kind: "component" | "controller" | "helper" | "style" | "entry" | "inventory";
   readonly source?: string;
 }
 
@@ -64,7 +70,14 @@ export interface ConversionManifest {
   readonly target: FrameworkTarget;
   readonly targetVersion: string;
   readonly graph: ConversionGraph;
+  /** Package.json fields required by the emitted source artifacts. */
+  readonly package: {
+    readonly dependencies: Readonly<Record<string, string>>;
+    readonly peerDependencies: Readonly<Record<string, string>>;
+  };
   readonly entries: readonly ConversionEntry[];
+  /** Authored HTML and controller dependencies, relative to the conversion root. */
+  readonly sourceFiles: readonly string[];
   readonly output: {
     readonly entry: string;
     readonly inventory: "html-next.conversion.json";
@@ -151,13 +164,59 @@ function frameworkEntry(
 ): GeneratedArtifact {
   const exports = [...entries].sort((left, right) => left.artifact.localeCompare(right.artifact)).map((entry) => {
     const artifact = entry.artifact.slice(entry.artifact.lastIndexOf("/") + 1);
-    const name = artifact.replace(/\.vue$/, "");
-    return `export { default as ${name} } from ${JSON.stringify(`./${artifact}`)};`;
+    const name = artifact.replace(/\.(?:vue|tsx)$/, "");
+    return `export { default as ${name} } from ${JSON.stringify(relativeImport(`${target}/index.ts`, entry.artifact))};`;
   });
   return {
     path: `${target}/${mode === "application" ? "application.ts" : "index.ts"}`,
     content: `${exports.join("\n")}\n`,
   };
+}
+
+function relativeImport(from: string, to: string): string {
+  const path = relative(dirname(from), to).split(sep).join("/");
+  return path.startsWith(".") ? path : `./${path}`;
+}
+
+function hasGlob(pattern: string): boolean {
+  return pattern.includes("*") || pattern.includes("?") || pattern.includes("[") || pattern.includes("{");
+}
+
+/** A file remains an entry; a glob or directory expands to every HTML component below it. */
+async function expandEntries(projectRoot: string, patterns: readonly string[]): Promise<string[]> {
+  const entries: string[] = [];
+  for (const pattern of patterns) {
+    let scan = pattern;
+    if (!hasGlob(pattern)) {
+      const path = resolve(projectRoot, pattern);
+      const metadata = await lstat(path).catch((error: unknown) => {
+        if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (!metadata?.isDirectory()) {
+        entries.push(pattern);
+        continue;
+      }
+      scan = `${pattern.replace(/[\\/]$/, "")}/**`;
+    }
+    const matches: string[] = [];
+    for await (const match of glob(scan, { cwd: projectRoot })) {
+      if (extname(match).toLowerCase() !== ".html") continue;
+      if (!(await lstat(resolve(projectRoot, match))).isFile()) continue;
+      matches.push(match);
+    }
+    if (matches.length === 0) throw new Error(`Framework conversion input ${JSON.stringify(pattern)} matched no HTML component files.`);
+    entries.push(...matches.sort());
+  }
+  return entries;
+}
+
+function componentArtifact(projectRoot: string, url: string, tag: string, name: string, target: FrameworkTarget): string {
+  const source = relative(projectRoot, fileURLToPath(url));
+  const insideRoot = source !== ".." && !source.startsWith(`..${sep}`) && !isAbsolute(source);
+  const directory = insideRoot ? dirname(source) : `_external/${tag}`;
+  const segments = directory === "." ? [] : directory.split(sep);
+  return [target, ...segments, `${name}.${target === "vue" ? "vue" : "tsx"}`].join("/");
 }
 
 function componentRelativeDataSource(source: string): boolean {
@@ -225,7 +284,8 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   const projectRoot = resolve(options.root ?? process.cwd());
   const outputRoot = resolve(options.outDirectory);
-  const entries = options.entries.map((entry) => pathToFileURL(resolve(projectRoot, entry)).href);
+  const expanded = await expandEntries(projectRoot, options.entries);
+  const entries = expanded.map((entry) => pathToFileURL(resolve(projectRoot, entry)).href);
   const seenEntries = new Set<string>();
   for (const entry of entries) {
     if (seenEntries.has(entry)) {
@@ -236,14 +296,38 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     seenEntries.add(entry);
   }
   const graph = await loadNodeComponents(entries, { baseURL: pathToFileURL(`${projectRoot}${sep}`).href });
+  const sourceFiles = new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)));
+  const pathsByTag = new Map([...graph.nodes.values()].map((node) => [
+    node.definition.contract.tag,
+    componentArtifact(projectRoot, node.url, node.definition.contract.tag, node.definition.contract.name, options.target),
+  ] as const));
+  const names = new Map<string, { readonly path: string; readonly source: string }>();
+  for (const node of graph.nodes.values()) {
+    const name = node.definition.contract.name;
+    const path = pathsByTag.get(node.definition.contract.tag)!;
+    const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
+    const prior = names.get(name);
+    if (prior !== undefined) {
+      throw new FrameworkOutputCollisionError(options.target, prior.path === path ? path : `${options.target}/index.ts`, [prior.source, source]);
+    }
+    names.set(name, { path, source });
+  }
   const slotsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag, node.definition.slots ?? []] as const));
+  const propsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
+    new Set(Object.keys(node.definition.contract.props))] as const));
+  const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
+    node.definition.contract.props] as const));
   const guardNestedDepth = needsNestedDepthGuard(graph);
   const manifestComponents: ConversionManifest["components"][number][] = [];
   const planned: Array<{ artifact: GeneratedArtifact; kind: ConversionOutput["kind"]; source?: string }> = [];
+  const neededHelpers = new Set<string>();
+  const hasDeclaredEvents = [...graph.nodes.values()].some((node) =>
+    node.definition.declarations?.some((declaration) => declaration.kind === "event") === true);
+  let reactStyles = false;
   const claimed = new Map<string, string>();
   const claim = (artifact: GeneratedArtifact, kind: ConversionOutput["kind"], source?: string): void => {
     const previous = claimed.get(artifact.path);
-    if (previous !== undefined && previous !== source) {
+    if (previous !== undefined) {
       throw new FrameworkOutputCollisionError(options.target, artifact.path, [previous, source ?? "<generated>"]);
     }
     claimed.set(artifact.path, source ?? "<generated>");
@@ -253,12 +337,13 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const source = relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/");
     const tag = node.definition.contract.tag;
+    const componentPath = pathsByTag.get(tag)!;
     // The controller and its relative imports are copied beside the component, which imports them.
     const controllerFiles = new Map<string, GeneratedArtifact>();
     let controller: string | undefined;
     if (node.controller !== undefined) {
       try {
-        controller = await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles);
+        controller = await addControllerGraph(node.controller.url, node.trustRoot, `${options.target}/controllers/${tag}`, controllerFiles, sourceFiles);
       } catch (error) {
         throw new FrameworkConversionError(options.target, source, tag, error instanceof Error ? error.message : String(error));
       }
@@ -266,15 +351,45 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     const definition = Object.freeze({
       ...node.definition,
       source: Object.freeze({ file: browserDefinitionURL(node.definition, source, options.publicRootURL, options.target, tag) }),
-      ...(controller === undefined ? {} : { controller: `./${controller.slice(`${options.target}/`.length)}` }),
+      ...(controller === undefined ? {} : { controller: relativeImport(componentPath, controller) }),
     });
     let content: string;
+    let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
+    const helpers = new Set<string>();
     try {
-      content = generateVueComponent(definition, {
+      content = options.target === "vue" ? generateVueComponent(definition, {
         slotsByTag,
         guardNestedDepth,
+        importSpecifier: (importedTag) => {
+          const imported = pathsByTag.get(importedTag);
+          if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
+          return relativeImport(componentPath, imported);
+        },
+        helperSpecifier: (name) => {
+          helpers.add(name);
+          return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
+        },
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
-      });
+      }) : (reactConversion = generateReactConversion(definition, {
+        slotsByTag,
+        propsByTag,
+        propContractsByTag,
+        guardNestedDepth,
+        importSpecifier: (importedTag) => {
+          const imported = pathsByTag.get(importedTag);
+          if (imported === undefined) throw new FrameworkConversionError(options.target, source, tag, `unknown component <${importedTag}>`);
+          return relativeImport(componentPath, imported);
+        },
+        propsSpecifier: relativeImport(componentPath, "react/props.ts").replace(/\.ts$/, ""),
+        eventsSpecifier: relativeImport(componentPath, "react/events.ts").replace(/\.ts$/, ""),
+        controlSpecifier: relativeImport(componentPath, "react/control.ts").replace(/\.ts$/, ""),
+        dataSpecifier: relativeImport(componentPath, "react/data.ts").replace(/\.ts$/, ""),
+        htmlSpecifier: relativeImport(componentPath, "react/html.ts").replace(/\.ts$/, ""),
+        hostSpecifier: relativeImport(componentPath, "react/host.ts").replace(/\.ts$/, ""),
+        contextSpecifier: relativeImport(componentPath, "react/context.ts").replace(/\.ts$/, ""),
+        depthSpecifier: relativeImport(componentPath, "react/depth.ts").replace(/\.ts$/, ""),
+        ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
+      })).component;
     } catch (error) {
       if (error instanceof HtmlDiagnosticError) {
         if (error.diagnostic.code.startsWith("HY")) {
@@ -285,9 +400,24 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
       throw error;
     }
     if (/@nextwebwg\//.test(content)) throw new FrameworkConversionError(options.target, source, tag);
-    const component: GeneratedArtifact = { path: `${options.target}/${node.definition.contract.name}.vue`, content };
+    const component: GeneratedArtifact = { path: componentPath, content };
     claim(component, "component", source);
-    for (const file of controllerFiles.values()) claim(file, "controller", source);
+    if (reactConversion !== undefined) {
+      for (const helper of reactConversion.helpers) neededHelpers.add(helper);
+      const css = reactConversion.css;
+      if (css !== "") {
+        reactStyles = true;
+        claim({ path: componentPath.replace(/\.tsx$/, ".css"), content: `${css}\n` }, "style", source);
+      }
+    }
+    for (const helper of helpers) neededHelpers.add(helper);
+    for (const file of controllerFiles.values()) {
+      claim(file, "controller", source);
+      if (options.target === "react" && /\.(?:js|mjs|cjs)$/.test(file.path)) {
+        const declarationPath = file.path.replace(/\.mjs$/, ".d.mts").replace(/\.cjs$/, ".d.cts").replace(/\.js$/, ".d.ts");
+        claim({ path: declarationPath, content: "declare const controller: unknown;\nexport default controller;\n" }, "helper", source);
+      }
+    }
     manifestComponents.push(Object.freeze({
       name: node.definition.contract.name,
       tag,
@@ -297,25 +427,50 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     }));
   }
 
-  if (planned.some(({ artifact }) => importsVueHost(artifact.content))) {
+  if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
   }
-  if (planned.some(({ artifact }) => importsVueHtml(artifact.content))) {
+  if (options.target === "vue" && neededHelpers.has("html")) {
     claim(vueHtmlArtifact(), "helper");
   }
-  if (planned.some(({ artifact }) => importsVueControl(artifact.content))) {
+  if (options.target === "vue" && neededHelpers.has("control")) {
     claim(vueControlArtifact(), "helper");
   }
-  if (planned.some(({ artifact }) => importsVueProps(artifact.content))) {
+  if (options.target === "vue" && neededHelpers.has("props")) {
     claim(vuePropsArtifact(), "helper");
   }
+  if (options.target === "react" && neededHelpers.has("props")) {
+    claim(reactPropsArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("events")) {
+    claim(reactEventsArtifact(hasDeclaredEvents), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("control")) {
+    claim(reactControlArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("data")) {
+    claim(reactDataArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("html")) {
+    claim(reactHtmlArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("host")) {
+    claim(reactHostArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("context")) {
+    claim(reactContextArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("depth")) {
+    claim(reactDepthArtifact(), "helper");
+  }
+  if (options.target === "react" && reactStyles) {
+    claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
+  }
 
-  const conversionEntries = entries.map((url) => {
-    const node = graph.nodes.get(url);
-    if (node === undefined) throw new Error(`Framework conversion did not resolve entry ${url}.`);
-    const component = manifestComponents.find(({ source }) =>
-      source === relative(projectRoot, fileURLToPath(node.url)).split(sep).join("/")
-    )!;
+  const conversionEntries = graph.roots.map((id) => {
+    const node = graph.nodes.get(id);
+    if (node === undefined) throw new Error(`Framework conversion did not resolve entry ${id}.`);
+    const component = manifestComponents.find(({ tag }) => tag === node.definition.contract.tag)!;
     return {
       source: component.source,
       tag: component.tag,
@@ -337,7 +492,12 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     target: options.target,
     targetVersion,
     graph: options.mode,
+    package: Object.freeze({
+      dependencies: Object.freeze(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}),
+      peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}.0` }),
+    }),
     entries: Object.freeze(conversionEntries),
+    sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),
     output: Object.freeze({
       entry: entry.path,
       inventory,

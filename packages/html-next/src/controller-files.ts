@@ -73,6 +73,7 @@ export async function addControllerGraph(
   trustRoot: string,
   targetRoot: string,
   artifacts: Map<string, GeneratedArtifact>,
+  sourceFiles?: Set<string>,
 ): Promise<string> {
   const files = new Map<string, string>();
   const root = fileURLToPath(trustRoot);
@@ -88,6 +89,7 @@ export async function addControllerGraph(
   const base = commonDirectory(paths);
   const target = (path: string) => `${targetRoot}/${relative(base, path).split(sep).join("/")}`;
   for (const [url, content] of files) {
+    sourceFiles?.add(fileURLToPath(url));
     const path = target(fileURLToPath(url));
     const prior = artifacts.get(path);
     if (prior !== undefined && prior.content !== content) throw new Error(`Generated artifact collision at ${path}.`);
