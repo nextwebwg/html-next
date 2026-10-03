@@ -66,8 +66,71 @@ assert.deepEqual(cases.filter((testCase) => "probe" in testCase.expect && !selec
 interface ConverterCase extends ConformanceCase {
   readonly passthrough?: string;
   readonly liveSetup?: string;
+  readonly hydrationOnlyProbe?: boolean;
+  readonly beforeHydration?: string;
+  readonly editedResult?: unknown;
 }
 const regressions: readonly ConverterCase[] = [
+  {
+    name: "native form bindings retain authored defaults, typed state and pre-hydration edits",
+    source: `<template component="x-edited-form" status="early" summary="Edited controls."><defs>
+      <state name="form" type="object({ text: string, number: number, checked: boolean, choice: string, choices: list(string) })" value="{ text: 'Ready', number: 4, checked: false, choice: 'b', choices: ['b'] }"></state>
+      <state name="ticks" type="number" value="0"></state>
+      <handler name="unrelated"><set name="ticks" expr:value="ticks + 1"></set></handler>
+      <handler name="change"><set name="form.text" value="New"></set><set name="form.checked" expr:value="true"></set>
+        <set name="form.choice" value="a"></set><set name="form.choices" expr:value="['a']"></set></handler>
+    </defs><form><input class="text" name="text" value="authored" bind:value="form.text">
+      <textarea name="area" bind:value="form.text">default area</textarea>
+      <input class="number" type="number" bind:value="form.number">
+      <input class="checked" type="checkbox" name="check" checked bind:checked="form.checked">
+      <input class="readonly" value="original" .value="form.text">
+      <select name="single" bind:value="form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
+      <select name="multiple" multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
+      <button type="button" class="unrelated" on:click="unrelated">Unrelated</button>
+      <button type="button" class="change" on:click="change">Change</button>
+      <output $value="concat(form.text, '/', form.checked, '/', form.choice, '/', join(form.choices, ','), '/', ticks)"></output>
+    </form></template><x-edited-form></x-edited-form>`,
+    hydrationOnlyProbe: true,
+    beforeHydration: `const e = document.querySelector('input.text'); e.value = 'Edited'; e.focus(); e.setSelectionRange(1, 3); document.querySelector('textarea').value = 'Edited area'; document.querySelector('input.checked').checked = true;`,
+    editedResult: ["Edited", "authored", "Edited area", "default area", true, true, "Ready", "original", "b", ["b"], "Ready/false/b/b/0", true, 1, 3],
+    expect: { probe: `const input = q('input.text'), area = q('textarea'), check = q('input.checked'), read = q('input.readonly'); return [input.value, input.defaultValue, area.value, area.defaultValue, check.checked, check.defaultChecked, read.value, read.defaultValue, q('select[name=single]').value, Array.from(q('select[multiple]').selectedOptions, e => e.value), q('output').textContent, document.activeElement === input, input.selectionStart, input.selectionEnd];`,
+      result: ["Ready", "authored", "Ready", "default area", false, true, "Ready", "original", "b", ["b"], "Ready/false/b/b/0", false, 5, 5], after: [
+        { action: `document.querySelector('button.unrelated').click();`, result: ["Edited", "authored", "Edited area", "default area", true, true, "Ready", "original", "b", ["b"], "Ready/false/b/b/1", true, 1, 3] },
+        { action: `document.querySelector('button.change').click();`, result: ["New", "authored", "New", "default area", true, true, "New", "original", "a", ["a"], "New/true/a/a/1", true, 3, 3] },
+        { action: `document.querySelector('form').reset();`, result: ["authored", "authored", "default area", "default area", true, true, "original", "original", "a", ["a"], "New/true/a/a/1", true, 8, 8] },
+      ] },
+  },
+
+  {
+    name: "nested native and generic bindings use native input types and destination checks",
+    source: `<template component="x-binding-types" status="early" summary="Binding types."><defs>
+      <state name="form" type="object({ text: string, number: number, checked: boolean, choice: string, choices: list(string) })" value="{ text: 'Ready', number: 4, checked: false, choice: 'b', choices: ['b'] }"></state>
+      <state name="items" type="list(string)" value="['a', 'b']"></state>
+      <handler name="remove"><set name="items" expr:value="['a']"></set></handler>
+      <handler name="restore"><set name="items" expr:value="['a', 'b']"></set></handler>
+    </defs><section><input class="number" type="number" bind:value="form.number">
+      <input class="range" type="range" min="0" max="10" bind:value="form.number">
+      <input class="check" type="checkbox" bind:checked="form.checked">
+      <input class="radio" type="radio" bind:checked="form.checked">
+      <input class="text" bind:value="form.text">
+      <output class="generic" bind:value="form.text"></output>
+      <select class="choice" bind:value="form.choice"><option $each="item of items" from:value="item" $value="item"></option></select>
+      <select class="multiple" multiple bind:value="form.choices"><option value="a">A</option><option value="b">B</option></select>
+      <button class="remove" on:click="remove">Remove</button><button class="restore" on:click="restore">Restore</button>
+      <p $value="concat(form.text, '/', form.number, '/', form.checked, '/', form.choice, '/', join(form.choices, ','))"></p>
+    </section></template><x-binding-types></x-binding-types>`,
+    expect: { probe: `return [q('input.number').value, q('input.range').value, q('input.check').checked, q('input.radio').checked, q('input.text').value, q('output').getAttribute('value'), q('select.choice').value, Array.from(q('select.multiple').selectedOptions, e => e.value), q('p').textContent];`,
+      result: ["4", "4", false, false, "Ready", "Ready", "b", ["b"], "Ready/4/false/b/b"], after: [
+        { action: `const e = document.querySelector('input.number'); e.value = '7'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["7", "7", false, false, "Ready", "Ready", "b", ["b"], "Ready/7/false/b/b"] },
+        { action: `const e = document.querySelector('input.check'); e.checked = true; e.dispatchEvent(new Event('change', { bubbles: true }));`, result: ["7", "7", true, true, "Ready", "Ready", "b", ["b"], "Ready/7/true/b/b"] },
+        { action: `const e = document.querySelector('input.radio'); e.checked = false; e.dispatchEvent(new Event('change', { bubbles: true }));`, result: ["7", "7", true, false, "Ready", "Ready", "b", ["b"], "Ready/7/true/b/b"] },
+        { action: `const e = document.querySelector('output'); e.value = 'Generic'; e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["7", "7", true, false, "Generic", "Generic", "b", ["b"], "Generic/7/true/b/b"] },
+        { action: `const e = document.querySelector('select.multiple'); for (const o of e.options) o.selected = true; e.dispatchEvent(new Event('change', { bubbles: true }));`, result: ["7", "7", true, false, "Generic", "Generic", "b", ["a", "b"], "Generic/7/true/b/a,b"] },
+        { action: `document.querySelector('button.remove').click();`, result: ["7", "7", true, false, "Generic", "Generic", "", ["a", "b"], "Generic/7/true/b/a,b"] },
+        { action: `document.querySelector('button.restore').click();`, result: ["7", "7", true, false, "Generic", "Generic", "b", ["a", "b"], "Generic/7/true/b/a,b"] },
+      ] },
+  },
+
   {
     name: "guarded nested handlers preserve types and sequential computed reads",
     source: `<template component="x-handler-path" status="early" summary="Nested handlers."><defs>
@@ -338,7 +401,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
                 const q = (s) => document.querySelector(s);
                 const qa = (s) => Array.from(document.querySelectorAll(s));
                 ${testCase.expect.probe}`;
-              const requiresHydration = testCase.expect.probe.includes(".validity.");
+              const requiresHydration = testCase.hydrationOnlyProbe === true || testCase.expect.probe.includes(".validity.");
               try {
                 await svelte.waitForFunction(() => document.querySelector("main")?.childElementCount !== 0, undefined, { timeout: 3_000 });
               } catch (error) {
@@ -354,9 +417,16 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
               if (!requiresHydration) assert.deepEqual(withoutStylingMarkers(serverResult), withoutStylingMarkers(liveResult), "public Svelte server behavior differs");
               await assertPixelsEqual(svelte, await capturePixels(svelte), await capturePixels(live), "public Svelte rendered pixels differ", live);
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Svelte server-rendered pixels differ", live);
+              if (testCase.beforeHydration !== undefined) {
+                await Promise.all([live, svelte, hydrated].map((page) => page.evaluate((action) => Function(action)(), testCase.beforeHydration!)));
+              }
               await hydrated.addScriptTag({ path: output.bundle });
               const hydratedResult = await hydrated.evaluate((script) => Function(script)(), program);
-              assert.deepEqual(withoutStylingMarkers(hydratedResult), withoutStylingMarkers(liveResult), "public Svelte hydrated behavior differs");
+              assert.deepEqual(withoutStylingMarkers(hydratedResult), withoutStylingMarkers(testCase.editedResult ?? liveResult), "public Svelte hydrated behavior differs");
+              if (testCase.editedResult !== undefined) {
+                assert.deepEqual(await live.evaluate((script) => Function(script)(), program), testCase.editedResult, "native edit characterization differs");
+                assert.deepEqual(await svelte.evaluate((script) => Function(script)(), program), testCase.editedResult, "client native edit differs");
+              }
               await assertPixelsEqual(hydrated, await capturePixels(hydrated), await capturePixels(live), "public Svelte hydrated pixels differ", live);
               for (const step of testCase.expect.after ?? []) {
                 await Promise.all([live, svelte, hydrated].map((page) => page.evaluate((action) => Function(action)(), step.action)));

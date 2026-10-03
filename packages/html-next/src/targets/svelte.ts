@@ -17,6 +17,7 @@ export interface SvelteConversionOptions {
   readonly propsSpecifier?: string;
   readonly htmlSpecifier?: string;
   readonly eventsSpecifier?: string;
+  readonly controlSpecifier?: string;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -24,7 +25,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -65,11 +66,11 @@ function checkSupported(definition: ComponentDefinition): void {
     }
     for (const attribute of node.attributes) {
       // Svelte's native boolean attribute path also sets the reflected disabled property.
-      if (attribute.kind === "property" && attribute.name !== "disabled" ||
+      if (attribute.kind === "property" && attribute.name !== "disabled" && !nativeControlBinding(node.name, attribute.name) ||
         attribute.kind === "attribute" && attribute.twoWay === true && (
           node.name.includes("-") ||
           ["input", "textarea", "select"].includes(node.name) && !nativeControlBinding(node.name, attribute.name) ||
-          attribute.writablePath?.length !== 1 || typeof attribute.writablePath[0] !== "string"
+          attribute.writablePath === undefined || typeof attribute.writablePath[0] !== "string"
         )) {
         fail("HT030", "Svelte conversion does not yet support property or two-way bindings on this element.");
       }
@@ -89,6 +90,10 @@ interface RenderContext {
   readonly retentions: Map<number, { readonly initial?: string }>;
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
+  usesControls: boolean;
+  usesNestedBindings: boolean;
+  boundSelect: boolean;
+  readonly controlAttachmentName: string;
   readonly bindingHelperName: string;
   readonly bindingValueName: string;
   readonly rootAttributeBindings: Set<string>;
@@ -244,16 +249,53 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const literals: string[] = [];
   const bindings: string[] = [];
   const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
-    attribute.kind === "attribute" && attribute.twoWay && !nativeControlBinding(node.name, attribute.name))
+    attribute.kind === "attribute" && attribute.twoWay)
     .map((attribute) => attribute.name));
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
   const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
+  const controlBinding = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" | "property" }>): void => {
+    context.usesControls = true;
+    const value = lowering.value(attribute.expressionPlan!.ast, scope);
+    const nativeProperty = attribute.kind === "property";
+    const multiple = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
+    const serialized = attribute.name === "checked" ? `Boolean(${value})`
+      : node.name === "select" && multiple && !nativeProperty ? `(Array.isArray(${value}) ? ${value}.map(String) : [])`
+      : nativeProperty && node.name === "select" ? `String(${value})` : `(${value} == null ? "" : String(${value}))`;
+    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${serialized} } : {})}`);
+    else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
+    const literalValue = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "value");
+    const defaults = attribute.name === "checked" ? `{ checked: ${node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked")} }`
+      : `{ value: ${quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "")} }`;
+    if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
+    let update = "undefined";
+    if (attribute.kind === "attribute" && attribute.twoWay) update = bindingWriter(attribute);
+    bindings.push(`{@attach ${context.controlAttachmentName}(${quote(attribute.name)}, () => ${value}, ${defaults}, ${update}, ${nativeProperty})}`);
+    if (root) context.rootAttributeBindings.add(attribute.name);
+  };
+  const bindingWriter = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): string => {
+    const path = attribute.writablePath!;
+    const destination = scope.code.get(path[0] as string)!;
+    const value = context.bindingValueName;
+    const check = handlerDestinationCheck(scope.types.get(path[0] as string)?.type, path, 1, value, scope, lowering);
+    if (path.length > 1) context.usesNestedBindings = true;
+    const write = path.length === 1 ? `${destination} = ${value} as typeof ${destination};`
+      : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
+    return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${value} == null || ${check})`}) { ${write} } }`;
+  };
+  if (node.name === "option" && context.boundSelect) {
+    const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
+    bindings.push(`{...(typeof document === 'undefined' ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
+  }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
       if (controlledNames.has(attribute.name)) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
+      if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
+        bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
+        continue;
+      }
       const declared = childProp(attribute.name);
       if (declared === undefined) literals.push(`${attribute.name}=${quote(attribute.value)}`);
       else {
@@ -270,7 +312,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
       if (attribute.twoWay === true) {
-        if (nativeControlBinding(node.name, attribute.name)) bindings.push(`bind:${attribute.name}={${attribute.writablePath![0]}}`);
+        if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
         else {
           // Ordinary elements reflect the attribute, and feed their native value back on input.
           context.usesAttributeBinding = true;
@@ -279,7 +321,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           // Svelte optimizes value= into a property write even on <output>. Keep the
           // server attribute declarative, and use only setAttribute/removeAttribute on the client.
           bindings.push(`{...(typeof document === 'undefined' ? { ${quote(name)}: ${value} } : {})}`);
-          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${value}, (${context.bindingValueName}: any) => { ${attribute.writablePath![0]} = ${context.bindingValueName}; })}`);
+          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${value}, ${bindingWriter(attribute)})}`);
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
@@ -290,7 +332,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
-      bindings.push(`${attribute.name}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
+      if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
+      else bindings.push(`${attribute.name}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
     }
   }
   const attributes = [...literals];
@@ -336,7 +379,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
+  const previousBoundSelect = context.boundSelect;
+  if (node.name === "select") context.boundSelect = context.usesControls && node.attributes.some((entry) => entry.name === "value" && (entry.kind === "property" || entry.kind === "attribute" && entry.twoWay));
   const children = content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
+  context.boundSelect = previousBoundSelect;
   return `${open}${children}</${name}>`;
 }
 
@@ -401,7 +447,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
@@ -461,11 +507,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
         ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
     return `  ${guard}{ const ${next}: unknown = ${lowering.value(step.value.ast, handlerScope)}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
-  const usesNestedWrites = handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
+  const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const script = [
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
-    ...(hasProps ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || context.usesControls ? ['import { untrack } from "svelte";'] : []),
+    ...(context.usesControls ? [`import { attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
@@ -493,6 +540,18 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  else if (hadProto) element.removeAttribute('__proto__');",
     "  hadProto = proto;",
     "});",
+    ...(context.usesControls ? [
+      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, nativeProperty = false) {`,
+      "  return (element: Element) => {",
+      "    const authored = controlDefaults(element, defaults);",
+      "    const initial = untrack(read);",
+      "    const dispose = attachBoundControl(element, name, initial, authored, update, nativeProperty, initial !== Symbol.for('html-next.invalid-result'));",
+      "    $effect(() => { const value = read(); syncBoundControl(element, name, value, authored, nativeProperty, value !== Symbol.for('html-next.invalid-result')); });",
+      "    const stop = observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); });",
+      "    return () => { dispose?.(); stop(); };",
+      "  };",
+      "}",
+    ] : []),
     ...(context.usesAttributeBinding ? [
       `function ${context.bindingHelperName}(name: string, read: () => unknown, update: (value: any) => void) {`,
       "  return (element: Element) => {",
@@ -587,5 +646,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(hasProps || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
+      ...(context.usesControls ? ["control" as const] : []),
     ] };
 }

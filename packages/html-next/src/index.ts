@@ -19,6 +19,7 @@ export {
   sveltePropsArtifact,
   svelteHtmlArtifact,
   svelteEventsArtifact,
+  svelteControlArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

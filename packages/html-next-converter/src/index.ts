@@ -17,6 +17,7 @@ import {
   sveltePropsArtifact,
   svelteHtmlArtifact,
   svelteEventsArtifact,
+  svelteControlArtifact,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -385,6 +386,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
         htmlSpecifier: relativeImport(componentPath, "svelte/html.ts").replace(/\.ts$/, ""),
         eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
+        controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
       })).component : (reactConversion = generateReactConversion(definition, {
         slotsByTag,
         propsByTag,
@@ -462,6 +464,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   if (options.target === "svelte" && neededHelpers.has("html")) {
     claim(svelteHtmlArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("control")) {
+    claim(svelteControlArtifact(), "helper");
   }
   if (options.target === "svelte" && neededHelpers.has("events")) {
     claim(svelteEventsArtifact(hasDeclaredEvents), "helper");
