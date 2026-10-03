@@ -23,6 +23,11 @@ export interface SvelteConversionOutput {
 }
 
 function checkSupported(definition: ComponentDefinition): void {
+  for (const prop of Object.values(definition.contract.props)) {
+    if (prop.select !== undefined && definition.contract.props[prop.select.from] === undefined) {
+      fail("HT030", "Svelte conversion does not yet support props selected by component state.");
+    }
+  }
   for (const declaration of definition.declarations ?? []) {
     if (declaration.kind !== "state" && declaration.kind !== "computed" && declaration.kind !== "handler") {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
@@ -257,10 +262,16 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const destructured = target.props.map((prop) =>
     `${prop.name}: input${prop.name}${"default" in prop.contract ? ` = ${JSON.stringify(prop.contract.default)}` : ""}`).join(", ");
   const hasProps = target.props.length > 0;
+  const selectors = [...new Set(target.props.flatMap((prop) => prop.contract.select === undefined ? [] : [prop.contract.select.from]))];
   const validityContract = { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) =>
-    [name, { ...prop, type: normalizeType(prop.type) }])) };
-  const checkedPropSources = target.props.map((prop) =>
-    `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(input${prop.name}, ${JSON.stringify(normalizeType(prop.contract.type))}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`);
+    [name, { ...prop, type: prop.select === undefined ? normalizeType(prop.type)
+      : { kind: "union" as const, members: prop.select.options.map((option) => option.type) } }])) };
+  const checkedPropSources = target.props.map((prop) => {
+    const select = prop.contract.select;
+    const type = select === undefined ? JSON.stringify(normalizeType(prop.contract.type))
+      : `selectedPropNode(input${select.from}, ${JSON.stringify(select.options)})`;
+    return `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(input${prop.name}, ${type}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`;
+  });
   const stateSources = states.map((state) =>
     `let ${state.name} = $state(${state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) =>
@@ -273,7 +284,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     '<script lang="ts">',
     'import type { Snippet } from "svelte";',
     ...(hasProps ? ['import { untrack } from "svelte";'] : []),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     `type Props = { ${propTypes} children?: Snippet; [key: string]: unknown; };`,
@@ -285,7 +296,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...checkedPropSources,
       "}));",
       `const propValidityContract = ${JSON.stringify(validityContract)} as const;`,
-      `let propInputValues = $derived({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name}`).join(", ")} });`,
+      `let propInputValues = $derived({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : `input${prop.name}`}`).join(", ")} });`,
       "let rootElement = $state<Element | undefined>(undefined);",
       "$effect(() => {",
       "  const element = rootElement;",

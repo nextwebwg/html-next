@@ -190,3 +190,29 @@ export const html = render(XParent).body;`);
     assert.match(rendered.html, /<output[^>]*data-label="Ready"[^>]*>3<\/output>/);
   }
 });
+
+it("checks a prop against the type selected by another prop", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-selected-prop-"));
+  temporary.push(root);
+  await writeFile(join(root, "selected.html"), `<template component="x-selected" status="early" summary="Selected value."><defs>
+    <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
+    <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+  </defs><output from:data-kind="kind" $value="value"></output></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.match(source, /selectedPropNode\(inputkind,/);
+  compile(source, { filename: "XSelected.svelte", generate: "client" });
+  assert.match(await serverHtml(outDirectory, "XSelected", source, { kind: "number", value: 2 }), /<output[^>]*>2<\/output>/);
+});
+
+it("rejects a state-selected prop until the Svelte initialization boundary is implemented", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-state-selected-"));
+  temporary.push(root);
+  await writeFile(join(root, "selected.html"), `<template component="x-selected" status="early" summary="Selected value."><defs>
+    <state name="kind" type="keyword" values="text, number" value="text"></state>
+    <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+  </defs><output $value="value"></output></template>`);
+  await assert.rejects(convertComponents({ mode: "library", target: "svelte", root, outDirectory: join(root, "out"), entries: ["selected.html"] }),
+    /HTC001: svelte conversion.*props selected by component state/);
+});
