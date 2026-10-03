@@ -100,6 +100,7 @@ describe("generated Vue prop boundary", () => {
       ["boolean", false], ["boolean", "false"],
       ["number", 42], ["number", "42"], ["number", Infinity],
       ["integer", 3], ["integer", 3.5],
+      ["keyword+", "one two"], ["keyword#", "one,two"],
       ["list(integer)", [1, 2]], ["list(integer)", "[1,2]"],
       ["object({ id: integer, label?: string })", { id: 2 }],
       ["object({ id: integer, label?: string })", "{ id: 2 }"],

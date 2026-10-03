@@ -1,7 +1,7 @@
 {
   "name": "@nextwebwg/html-next-converter",
   "version": "1.0.0-alpha.22",
-  "description": "Vue conversion for Declarative HTML Components.",
+  "description": "Vue and React conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -32,10 +32,14 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "@vue/compiler-sfc": "catalog:",
     "esbuild": "catalog:",
     "parse5": "catalog:",
     "playwright": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "5.9.3",
     "vitest": "catalog:",
     "vue": "catalog:",

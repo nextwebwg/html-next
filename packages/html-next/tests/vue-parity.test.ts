@@ -128,25 +128,25 @@ const cases: readonly ParityCase[] = [
           <handler name="goodStep"><set name="step" value="2px"></set></handler>
           <handler name="save"><set name="saved" expr:value="round(width, step)"></set></handler>
         </defs>
-        <section style:--snapped="round(width, step)" class:valid="round(width, step)"><button class="bad" on:click="badStep">Bad</button><button class="good" on:click="goodStep">Good</button><button class="save" on:click="save">Save</button>
-          <output class="computed" $value="snapped"></output><output class="direct" $value="round(width, step)"></output><output class="fallback" $value="default(round(width, step), 1px)"></output><output class="saved" $value="saved"></output><output class="comparison" $value="round(width, step) = 9px"></output><i $if="round(width, step) = 9px">Ready</i><template $match><em $when="round(width, step) = 9px">Nine</em><b $else>Other</b></template></section>
+        <section style:--snapped="round(width, step)" class:valid="round(width, step)" class:from-object="{ value: round(width, step) }.value = '9px'" from:data-array="['x', round(width, step)]"><button class="bad" on:click="badStep">Bad</button><button class="good" on:click="goodStep">Good</button><button class="save" on:click="save">Save</button>
+          <output class="computed" $value="snapped"></output><output class="direct" $value="round(width, step)"></output><output class="array" $value="['x', round(width, step)]"></output><output class="fallback" $value="default(round(width, step), 1px)"></output><output class="saved" $value="saved"></output><output class="comparison" $value="round(width, step) = 9px"></output><i $if="round(width, step) = 9px">Ready</i><template $match><em $when="round(width, step) = 9px">Nine</em><b $else>Other</b></template></section>
       </template>`,
     },
     invocation: `<x-unit-guard id="case"></x-unit-guard>`,
     vueRender: `h(XUnitGuard, { id: "case" })`,
     root: "#case",
-    probe: `({ computed: root.querySelector(".computed")?.textContent, direct: root.querySelector(".direct")?.textContent, fallback: root.querySelector(".fallback")?.textContent, saved: root.querySelector(".saved")?.textContent, comparison: root.querySelector(".comparison")?.textContent, ready: root.querySelector("i")?.textContent ?? null, match: root.querySelector("em, b")?.textContent, style: root.style.getPropertyValue('--snapped'), valid: root.classList.contains('valid'), trace: window.unitTrace ?? [] })`,
+    probe: `({ computed: root.querySelector(".computed")?.textContent, direct: root.querySelector(".direct")?.textContent, array: root.getAttribute('data-array'), arrayText: root.querySelector('.array')?.textContent, fallback: root.querySelector(".fallback")?.textContent, saved: root.querySelector(".saved")?.textContent, comparison: root.querySelector(".comparison")?.textContent, ready: root.querySelector("i")?.textContent ?? null, match: root.querySelector("em, b")?.textContent, style: root.style.getPropertyValue('--snapped'), valid: root.classList.contains('valid'), fromObject: root.classList.contains('from-object'), trace: window.unitTrace ?? [] })`,
     action: `return (async () => {
       root.querySelector('.bad').click();
       root.querySelector('.save').click();
       await new Promise(requestAnimationFrame);
-      window.unitTrace = [root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid')];
+      window.unitTrace = [root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.getAttribute('data-array') + '/' + root.querySelector('.array')?.textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid') + '/' + root.classList.contains('from-object')];
       root.querySelector('.good').click();
       root.querySelector('.save').click();
       await new Promise(requestAnimationFrame);
-      window.unitTrace.push(root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid'));
+      window.unitTrace.push(root.querySelector('.computed').textContent + '/' + root.querySelector('.direct').textContent + '/' + root.getAttribute('data-array') + '/' + root.querySelector('.array')?.textContent + '/' + root.querySelector('.fallback').textContent + '/' + root.querySelector('.saved').textContent + '/' + root.querySelector('.comparison').textContent + '/' + root.querySelector('i')?.textContent + '/' + root.querySelector('em, b')?.textContent + '/' + root.style.getPropertyValue('--snapped') + '/' + root.classList.contains('valid') + '/' + root.classList.contains('from-object'));
     })()`,
-    expectedAfter: { computed: "8px", direct: "8px", fallback: "8px", saved: "8px", comparison: "false", ready: null, match: "Other", style: "8px", valid: true, trace: ["9px/9px/9px/5px/true/Ready/Nine/9px/true", "8px/8px/8px/8px/false/undefined/Other/8px/true"] },
+    expectedAfter: { computed: "8px", direct: "8px", array: "x 8px", arrayText: "x 8px", fallback: "8px", saved: "8px", comparison: "false", ready: null, match: "Other", style: "8px", valid: true, fromObject: false, trace: ["9px/9px/x 9px/x 9px/9px/5px/true/Ready/Nine/9px/true/true", "8px/8px/x 8px/x 8px/8px/8px/false/undefined/Other/8px/true/false"] },
   },
   {
     name: "a missing function operand clears its previous binding",
@@ -976,7 +976,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
 
   it("tracks Vue conversion of every successful live-runtime conformance example", () => {
     const successes = conformanceCases.filter((testCase) => "probe" in testCase.expect);
-    assert.equal(successes.length, 32, "review newly added conformance examples for Vue pixel and behavior coverage");
+    assert.equal(successes.length, 35, "review newly added conformance examples for Vue pixel and behavior coverage");
     for (const testCase of successes) {
       const definition = parseComponent(conformanceScene(testCase.source).definition, testCase.name);
       const gap = knownConversionGaps.get(testCase.name);

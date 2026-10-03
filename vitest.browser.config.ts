@@ -4,6 +4,10 @@ import baseConfig from "./vitest.config.js";
 
 const config = mergeConfig(baseConfig, {
   test: {
+    // Playwright specs launch their own browsers. Keep one spec active at a time.
+    fileParallelism: false,
+    maxWorkers: 1,
+    maxConcurrency: 1,
     env: { HTMLNEXT_BROWSER_TEST: "1" },
     hookTimeout: 60_000,
     testTimeout: 60_000

@@ -56,8 +56,8 @@ describe.skipIf(!enabled)("public Vue converter data URL parity", () => {
     await build({ entryPoints: [livePath], outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
 
     const outDirectory = join(directory, "generated");
-    await convertComponents({ mode: "application", target: "vue", entries: ["components/feed.html"], root: directory, outDirectory, publicRootURL: "/app/" });
-    const component = join(outDirectory, "vue", "XFeed.vue");
+    const manifest = await convertComponents({ mode: "application", target: "vue", entries: ["components/feed.html"], root: directory, outDirectory, publicRootURL: "/app/" });
+    const component = join(outDirectory, manifest.components[0]!.artifact);
     const parsed = parseVue(await readFile(component, "utf8"), { filename: component });
     assert.deepEqual(parsed.errors, []);
     const script = compileScript(parsed.descriptor, { id: "data-parity", inlineTemplate: true });
@@ -65,16 +65,15 @@ describe.skipIf(!enabled)("public Vue converter data URL parity", () => {
     const entry = join(outDirectory, "entry.ts");
     vueBundle = join(outDirectory, "vue.js");
     await writeFile(entry, `import { createApp, h } from "vue";
-import XFeed from "./vue/XFeed";
+import XFeed from "./${manifest.components[0]!.artifact.replace(/\.vue$/, "")}";
 createApp({ render: () => h(XFeed, { id: "case" }) }).mount(document.querySelector("main"));\n`);
     await build({ entryPoints: [entry], outfile: vueBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
 
     for (const mode of ["application", "library"] as const) {
       const hydrationDirectory = mode === "application" ? outDirectory : join(directory, "generated-library");
-      if (mode === "library") {
+      const hydrationManifest = mode === "application" ? manifest :
         await convertComponents({ mode, target: "vue", entries: ["components/feed.html"], root: directory, outDirectory: hydrationDirectory, publicRootURL: "/app/" });
-      }
-      const file = join(hydrationDirectory, "vue", "XFeed.vue");
+      const file = join(hydrationDirectory, hydrationManifest.components[0]!.artifact);
       const descriptor = parseVue(await readFile(file, "utf8"), { filename: file }).descriptor;
       if (mode === "library") {
         await writeFile(file.replace(/\.vue$/, ".ts"), compileScript(descriptor, { id: `data-hydration-${mode}`, inlineTemplate: true }).content);
@@ -123,25 +122,24 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XFeed,
 
     await writeFile(join(directory, "components", "cycle.html"), lifecycleSource);
     const lifecycleOutput = join(directory, "generated-lifecycle");
-    await convertComponents({ mode: "application", target: "vue", entries: ["components/cycle.html"], root: directory, outDirectory: lifecycleOutput, publicRootURL: "/app/" });
-    const lifecycleComponent = join(lifecycleOutput, "vue", "XDataCycle.vue");
+    const lifecycleManifest = await convertComponents({ mode: "application", target: "vue", entries: ["components/cycle.html"], root: directory, outDirectory: lifecycleOutput, publicRootURL: "/app/" });
+    const lifecycleComponent = join(lifecycleOutput, lifecycleManifest.components[0]!.artifact);
     const lifecycleParsed = parseVue(await readFile(lifecycleComponent, "utf8"), { filename: lifecycleComponent });
     assert.deepEqual(lifecycleParsed.errors, []);
     await writeFile(lifecycleComponent.replace(/\.vue$/, ".ts"), compileScript(lifecycleParsed.descriptor, { id: "data-lifecycle-parity", inlineTemplate: true }).content);
     const lifecycleEntry = join(lifecycleOutput, "entry.ts");
     lifecycleVueBundle = join(lifecycleOutput, "vue.js");
     await writeFile(lifecycleEntry, `import { createApp, h } from "vue";
-import XDataCycle from "./vue/XDataCycle";
+import XDataCycle from "./${lifecycleManifest.components[0]!.artifact.replace(/\.vue$/, "")}";
 window.vueApp = createApp({ render: () => h(XDataCycle, { id: "case" }) });
 window.vueApp.mount(document.querySelector("main"));\n`);
     await build({ entryPoints: [lifecycleEntry], outfile: lifecycleVueBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
 
     for (const mode of ["application", "library"] as const) {
       const output = mode === "application" ? lifecycleOutput : join(directory, "generated-lifecycle-library");
-      if (mode === "library") {
+      const hydrationManifest = mode === "application" ? lifecycleManifest :
         await convertComponents({ mode, target: "vue", entries: ["components/cycle.html"], root: directory, outDirectory: output, publicRootURL: "/app/" });
-      }
-      const file = join(output, "vue", "XDataCycle.vue");
+      const file = join(output, hydrationManifest.components[0]!.artifact);
       const descriptor = parseVue(await readFile(file, "utf8"), { filename: file }).descriptor;
       if (mode === "library") {
         await writeFile(file.replace(/\.vue$/, ".ts"), compileScript(descriptor, { id: `data-cycle-hydration-${mode}`, inlineTemplate: true }).content);

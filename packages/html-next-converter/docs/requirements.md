@@ -46,8 +46,12 @@ styles or imported CSS, controller adapters, types, static assets, and an invent
 
 Library conversion emits independently consumable component entries, package exports appropriate
 to the target, declaration files, styles, controllers, preserved ordinary modules, and dependency
-metadata. Generated source must remain compatible with the target's standard compiler and bundler
-pipeline.
+metadata. The inventory's `package.dependencies` lists feature-specific runtime imports such as
+`parse5` for `$html`, and `package.peerDependencies` names the target framework. Publishers merge
+these fields into their package manifest and remain responsible for dependencies imported by their
+own controller modules. A multi-target package may mark each framework peer optional when its
+subpaths are independently usable. Generated source must remain compatible with the target's
+standard compiler and bundler pipeline.
 
 ## Failure behavior
 
@@ -58,6 +62,12 @@ not silently approximate behavior.
 Runtime failures preserve the shared public error, event, type, cancellation, and cleanup
 contract. Target error boundaries may observe those failures but cannot replace required component
 events or leave effects, requests, or controllers active after disposal.
+
+An incompatible React server root is a hydration diagnostic exception, not a component-thrown
+HTML Next error. The application calls React's `hydrateRoot` and may observe recovery through its
+`onRecoverableError` option; generated components do not add an `HR005` wrapper or take over
+hydration. Matching server markup, the recovered render, and subsequent behavior must still meet
+the converter's parity requirements.
 
 ## Optimization boundary
 
@@ -114,9 +124,9 @@ authored components with the live HTML Next runtime and Vue, and compares browse
 screenshots in Chromium, Firefox, and WebKit before and after interactions. It also converts each
 successful live-runtime conformance example and compares the runnable examples in all three engines.
 The same target command now runs every public-converter Vue parity fixture. A separate fixture
-converts all 29 successful shared conformance examples through both the application and library
+converts all 35 successful shared conformance examples through both the application and library
 entry artifacts, then compares the live runtime's expected behavior and exact pixels in Chromium,
-Firefox, and WebKit (168 browser cases). Each case also runs through Vue's SSR compiler: the
+Firefox, and WebKit (210 browser cases). Each case also runs through Vue's SSR compiler: the
 server markup is compared before hydration, then hydrated and compared again for behavior and
 pixels. This verifies that the public graph/packaging path does not silently lose behavior
 covered by direct component generation.
@@ -130,7 +140,7 @@ The Node source parser also follows HTML parser recovery for malformed-but-recov
 such as duplicate attributes. It no longer rejects a resource solely because parse5 reports a
 recoverable parse error; a missing stable carrier source range remains a build diagnostic.
 
-All 29 successful live-runtime conformance examples now
+All 35 successful live-runtime conformance examples now
 convert, including `$html` through a feature-specific safe-markup helper. Every example
 matches the live runtime's browser behavior and pixels, after excluding target-owned styling
 markers from the DOM comparison. Additional interactive fixtures compare rendered pixels and
@@ -375,5 +385,5 @@ and pixels match the live runtime at each stage in all three engines.
 
 `HTMLNEXT_REQUIRE_COMPLETE_VUE_PARITY=1 corepack pnpm test:targets` activates the strict gate; it
 must pass, with the explicit gap inventories empty and all feature areas paired, before a claim of
-complete Vue parity or starting React conversion work. Ordinary `test:targets` keeps the corpus
+complete Vue parity. Ordinary `test:targets` keeps the corpus
 and feature fixtures running while new features are added.

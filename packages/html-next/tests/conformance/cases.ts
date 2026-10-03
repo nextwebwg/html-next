@@ -344,6 +344,31 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "invalid $html expressions retain the last sanitized content",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<handler name="invalidate"><set name="width" value="1rem"></set></handler>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="invalidate">Invalidate</button>` +
+        `<button type="button" on:click="restore">Restore</button>` +
+        `<p class="element" $html="concat('&lt;b&gt;', min(width, 5px), '&lt;/b&gt;')"></p>` +
+        `<span class="template"><template $html="concat('&lt;i&gt;', min(width, 5px), '&lt;/i&gt;')"></template></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { element: r.querySelector('.element b')?.textContent ?? null, ` +
+        `template: r.querySelector('.template i')?.textContent ?? null };`,
+      result: { element: "5px", template: "5px" },
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: { element: "5px", template: "5px" } },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: { element: "2px", template: "2px" } },
+      ],
+    },
+  },
+  {
     name: "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
     source: scene({
       defs: `<state name="textNumber" type="string" value="1"></state>`,
@@ -407,6 +432,63 @@ const successes: ConformanceCase[] = [
         `s3: !!r.querySelector('.s3'), s4: !!r.querySelector('.s4'), s5: !!r.querySelector('.s5'), ` +
         `s6: !!r.querySelector('.s6') };`,
       result: { s1: false, s2: false, s3: false, s4: false, s5: true, s6: true },
+    },
+  },
+  {
+    name: "invalid structural expressions keep the last rendered region until a valid update",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<state name="clear" type="boolean" value="false"></state>` +
+        `<handler name="invalidate"><set name="width" value="1rem"></set></handler>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>` +
+        `<handler name="empty"><set name="clear" value="true"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="invalidate">Invalidate</button>` +
+        `<button type="button" on:click="restore">Restore</button>` +
+        `<button type="button" on:click="empty">Empty</button>` +
+        `<i class="conditional" $if="clear ? [] : [min(width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
+        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of (clear ? [] : [min(width, 5px)])" $value="item"></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { conditional: r.querySelector('.conditional')?.textContent ?? null, ` +
+        `alias: r.querySelector('.alias')?.textContent ?? null, match: r.querySelector('b')?.textContent ?? null, ` +
+        `rows: Array.from(r.querySelectorAll('.row'), (row) => row.textContent) };`,
+      result: { conditional: "shown", alias: "5px", match: "five", rows: ["5px"] },
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: { conditional: "shown", alias: "5px", match: "five", rows: ["5px"] } },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: { conditional: "shown", alias: "2px", match: "other", rows: ["2px"] } },
+        { action: `document.querySelectorAll('#b button')[2].click();`, result: { conditional: null, alias: "2px", match: "other", rows: [] } },
+      ],
+    },
+  },
+  {
+    name: "initially invalid structural expressions render nothing until a valid update",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="1rem"></state>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="restore">Restore</button>` +
+        `<i class="conditional" $if="[min(width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
+        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of [min(width, 5px)]" $value="item"></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { conditional: r.querySelector('.conditional')?.textContent ?? null, ` +
+        `alias: r.querySelector('.alias')?.textContent ?? null, match: r.querySelector('b')?.textContent ?? null, ` +
+        `rows: Array.from(r.querySelectorAll('.row'), (row) => row.textContent) };`,
+      result: { conditional: null, alias: null, match: null, rows: [] },
+      after: [
+        { action: `document.querySelector('#b button').click();`, result: { conditional: "shown", alias: "2px", match: "other", rows: ["2px"] } },
+      ],
     },
   },
   {

@@ -74,7 +74,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         </defs><output from:data-amount="amount"></output></template>
         <template component="x-reading-owner"><defs>
           <prop name="incoming" type="number" max="100">Source value.</prop>
-        </defs><main><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
+        </defs><main from:data-incoming="incoming"><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
           <x-reading-empty id="without-default" from:amount="incoming"></x-reading-empty>
           <x-reading-default id="from-function" from:amount="concat(incoming)"></x-reading-default>
         </main></template>
@@ -106,35 +106,37 @@ describe.skipIf(!enabled)("browser runtime", () => {
               empty: runtime.getComponentHost(empty)?.props.amount?.value,
               fromFunction: runtime.getComponentHost(fromFunction)?.props.amount?.value,
               rendered: [defaulted, empty].map((element) => element.getAttribute("data-amount")),
+              boundRoot: owner.getAttribute("data-incoming"),
               badInput: owner.validity.badInput,
               rangeOverflow: owner.validity.rangeOverflow,
             };
           };
+          const flush = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
           const initial = read();
           runtime.updateComponentProps(owner, { incoming: 2 });
-          await Promise.resolve();
+          await flush();
           const valid = read();
           runtime.updateComponentProps(owner, { incoming: "oops" });
-          await Promise.resolve();
+          await flush();
           const rejected = read();
           runtime.updateComponentProps(owner, { incoming: 7 });
-          await Promise.resolve();
+          await flush();
           const recovered = read();
           runtime.updateComponentProps(owner, { incoming: 130 });
-          await Promise.resolve();
+          await flush();
           return { initial, valid, rejected, recovered, constrained: read() };
         });
         assert.deepEqual(actual, {
           initial: { incoming: null, stateHasIncoming: false, inputValue: "oops", propValue: null, propBadInput: true, checkedBadInput: true, defaultInput: null, defaultValid: true, defaulted: 5, empty: null, fromFunction: 5,
-            rendered: ["5", null], badInput: true, rangeOverflow: false },
+            rendered: ["5", null], boundRoot: null, badInput: true, rangeOverflow: false },
           valid: { incoming: 2, stateHasIncoming: false, inputValue: 2, propValue: 2, propBadInput: false, checkedBadInput: false, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
-            rendered: ["2", "2"], badInput: false, rangeOverflow: false },
+            rendered: ["2", "2"], boundRoot: "2", badInput: false, rangeOverflow: false },
           rejected: { incoming: 2, stateHasIncoming: false, inputValue: "oops", propValue: 2, propBadInput: true, checkedBadInput: true, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
-            rendered: ["2", "2"], badInput: true, rangeOverflow: false },
+            rendered: ["2", "2"], boundRoot: "2", badInput: true, rangeOverflow: false },
           recovered: { incoming: 7, stateHasIncoming: false, inputValue: 7, propValue: 7, propBadInput: false, checkedBadInput: false, defaultInput: 7, defaultValid: true, defaulted: 7, empty: 7, fromFunction: 5,
-            rendered: ["7", "7"], badInput: false, rangeOverflow: false },
+            rendered: ["7", "7"], boundRoot: "7", badInput: false, rangeOverflow: false },
           constrained: { incoming: 130, stateHasIncoming: false, inputValue: 130, propValue: 130, propBadInput: false, checkedBadInput: false, defaultInput: 130, defaultValid: true, defaulted: 130, empty: 130, fromFunction: 5,
-            rendered: ["130", "130"], badInput: false, rangeOverflow: true },
+            rendered: ["130", "130"], boundRoot: "130", badInput: false, rangeOverflow: true },
         });
       } finally { await browser.close(); }
     });
@@ -565,15 +567,19 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
             updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            getComponentHost(element: Element): { props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const root = document.querySelector("#valid")!;
           let rejected = false;
           try { runtime.updateComponentProps(root, { address: "a@-b" }); }
           catch (error) { rejected = String(error).includes("HR002"); }
-          return { nativeValid, nativeInvalid, reflected: root.getAttribute("data-address"), rejected };
+          const address = runtime.getComponentHost(root)?.props.address;
+          return { nativeValid, nativeInvalid, reflected: root.getAttribute("data-address"),
+            accepted: address?.value, inputValue: address?.inputValue, rejected };
         });
-        assert.deepEqual(result, { nativeValid: true, nativeInvalid: true, reflected: "a@-b", rejected: false });
+        assert.deepEqual(result, { nativeValid: true, nativeInvalid: true, reflected: "a@b",
+          accepted: "a@b", inputValue: "a@-b", rejected: false });
       } finally {
         await browser.close();
       }

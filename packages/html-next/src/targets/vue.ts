@@ -35,6 +35,7 @@ import { VUE_HTML_SPECIFIER } from "./vue-html.js";
 import { VUE_CONTROL_SPECIFIER } from "./vue-control.js";
 import { VUE_PROPS_SPECIFIER } from "./vue-props.js";
 import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScript, UNKNOWN, type Scope, type Static } from "./vue-lowering.js";
+import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
@@ -207,7 +208,7 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
   return checks.length === 0 ? undefined : checks.join(" && ");
 }
 
-function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string): string | undefined {
+function guardedBinding(plan: CompiledExpression, names: Names, context: Context, emit: (scope: Scope) => string, structural = false): string | undefined {
   if (plan.dependencies.some((dependency) => {
     const root = dependency.split(".")[0]!;
     return !context.globals.has(root) || names.locals?.has(root);
@@ -217,12 +218,20 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   if (guard === undefined && !retains) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
   if (!retains) {
+    if (structural) {
+      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = { ready: true, value: ${emit(names.script)} }; });`);
+      return name;
+    }
     context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
     return name;
   }
   const output = emit(names.script);
   const raw = retains ? context.lowering.value(plan.ast, names.script) : undefined;
   const next = raw === undefined ? output : raw === output ? "candidate" : output;
+  if (structural) {
+    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = { ready: true, value: ${next} }; });`);
+    return name;
+  }
   context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = ${next}; });`);
   return name;
 }
@@ -337,12 +346,15 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
       { name: "count", type: { kind: "terminal", name: "number" }, optional: false },
     ] }, nullable: false }],
   ]);
-  const list = lowering.list(listNode, names.template, item, {
+  const options = {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
     itemScope: local.template,
     sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
-  });
+  };
+  const list = (flow.listPlan === undefined || !mayProduceInvalidResult(listNode, names.script) ? undefined : guardedBinding(flow.listPlan, names, context, (scope) =>
+    lowering.list(listNode, scope, item, { ...options, itemScope: local.script })))
+    ?? lowering.list(listNode, names.template, item, options);
   const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, local.template);
   const { flow: _flow, ...body } = node;
   const needsLoop = readsLoop(body) || readsLoop(flow.keyPlan?.ast);
@@ -396,7 +408,9 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
   if (flow?.kind === "with") {
     const value = ast(flow.expressionPlan, flow.expr);
     const { flow: _flow, ...body } = node;
-    return `<template v-for=${bound(`${flow.alias} in [${lowering.value(value, names.template)}]`)}>${renderNode(body, withLocal(names, [[flow.alias, typeOf(value, names.template)]]), context)}</template>`;
+    const accepted = flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
+    const values = accepted === undefined ? `[${lowering.value(value, names.template)}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
+    return `<template v-for=${bound(`${flow.alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, typeOf(value, names.template)]]), context)}</template>`;
   }
   if (flow?.kind === "match") {
     if (node.name !== "template") return renderElement(elementMatchRoot(node), names, context, false);
@@ -416,7 +430,9 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       }).join("\n");
     const inner = arms;
     if (value === undefined) return inner;
-    return `<template v-for=${bound(`${flow.alias} in [${lowering.value(value, names.template)}]`)}>${inner}</template>`;
+    const accepted = flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
+    const values = accepted === undefined ? `[${lowering.value(value, names.template)}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
+    return `<template v-for=${bound(`${flow.alias} in ${values}`)}>${inner}</template>`;
   }
   if (flow?.kind === "if") {
     const { flow: _flow, ...body } = node;
@@ -630,99 +646,6 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   return `${open}${children}</${name}>`;
 }
 
-/** A JavaScript predicate for a declared type, so event details are checked as the runtime checks them. */
-function typeCheck(type: TypeNode, value: string): string {
-  switch (type.kind) {
-    case "terminal":
-      switch (type.name) {
-        case "string": return `typeof ${value} === "string"`;
-        case "boolean": return `typeof ${value} === "boolean"`;
-        case "number": return `(typeof ${value} === "number" && Number.isFinite(${value}))`;
-        case "integer": return `Number.isInteger(${value})`;
-        case "null": return `${value} === null`;
-        case "absent": return `${value} === undefined`;
-        case "function": return `typeof ${value} === "function"`;
-        default: return "true";
-      }
-    case "keyword":
-      return `${value} === ${JSON.stringify(type.value)}`;
-    case "separated-list":
-      return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => typeof item === "string"))`;
-    case "union":
-      return `(${type.members.map((member) => typeCheck(member, value)).join(" || ")})`;
-    case "selected":
-      return `(${type.options.map((option) => typeCheck(option.type, value)).join(" || ")})`;
-    case "constrained":
-      return type.values === undefined ? typeCheck(type.base, value)
-        : `(${type.values.map((choice) => `${value} === ${JSON.stringify(choice)}`).join(" || ")})`;
-    case "list":
-      return `(Array.isArray(${value}) && (${value} as unknown[]).every((item: unknown) => ${typeCheck(type.item, "item")}))`;
-    case "record":
-      return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}) && Object.values(${value} as object).every((item: unknown) => ${typeCheck(type.value, "item")}))`;
-    case "object": {
-      const fields = type.fields.map((field) => {
-        const read = `(${value} as Record<string, unknown>)[${quote(field.name)}]`;
-        const check = typeCheck(field.type, read);
-        return field.optional ? `(${read} === undefined || ${check})` : check;
-      });
-      const closed = type.open ? [] : [`Object.keys(${value} as object).every((key) => ${JSON.stringify(type.fields.map((field) => field.name))}.includes(key))`];
-      return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})${[...fields, ...closed].map((check) => ` && ${check}`).join("")})`;
-    }
-  }
-}
-
-/** Handler destinations check their immediate type; nested values keep their authored input. */
-function destinationTypeCheck(type: TypeNode, value: string): string {
-  switch (type.kind) {
-    case "list": return `Array.isArray(${value})`;
-    case "record":
-    case "object": return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}))`;
-    case "union": return `(${type.members.map((member) => destinationTypeCheck(member, value)).join(" || ")})`;
-    case "selected": return `(${type.options.map((option) => destinationTypeCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return destinationTypeCheck(type.base, value);
-    default: return typeCheck(type, value);
-  }
-}
-
-function handlerDestinationCheck(
-  type: TypeNode | undefined,
-  path: readonly WritablePathSegment[],
-  index: number,
-  value: string,
-  scope: Scope,
-  lowering: Lowering,
-): string | undefined {
-  if (type === undefined) return undefined;
-  if (index === path.length) return destinationTypeCheck(type, value);
-  const segment = path[index]!;
-  if (typeof segment !== "object") {
-    return handlerDestinationCheck(typeAtKey(type, segment), path, index + 1, value, scope, lowering);
-  }
-  if (type.kind === "list" || type.kind === "record") {
-    return handlerDestinationCheck(type.kind === "list" ? type.item : type.value,
-      path, index + 1, value, scope, lowering);
-  }
-  if (type.kind === "constrained") {
-    return handlerDestinationCheck(type.base, path, index, value, scope, lowering);
-  }
-  if (type.kind === "union" || type.kind === "selected") {
-    const members = type.kind === "union" ? type.members : type.options.map((option) => option.type);
-    const checks = members.flatMap((member) => {
-      const check = handlerDestinationCheck(member, path, index, value, scope, lowering);
-      return check === undefined ? [] : [check];
-    });
-    return checks.length === 0 ? undefined : `(${checks.join(" || ")})`;
-  }
-  if (type.kind !== "object") return undefined;
-  const key = `String(${lowering.value(segment.expression, scope)})`;
-  const checks = type.fields.map((field) => {
-    const check = handlerDestinationCheck(field.type, path, index + 1, value, scope, lowering) ?? "true";
-    return `(${key} === ${quote(field.name)} && ${check})`;
-  });
-  if (type.open) checks.push(`!${JSON.stringify(type.fields.map((field) => field.name))}.includes(${key})`);
-  return checks.length === 0 ? "false" : `(${checks.join(" || ")})`;
-}
-
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
   const { lowering } = context;
   const lines: string[] = [];
@@ -801,6 +724,9 @@ export interface VueConversionOptions {
   readonly controllerSpecifier?: string;
   /** Emit the live runtime's nested-component lowering bound for a graph that can exceed it. */
   readonly guardNestedDepth?: boolean;
+  /** Public graph output can relocate components into nested source-mirrored directories. */
+  readonly importSpecifier?: (tag: string) => string;
+  readonly helperSpecifier?: (name: "host" | "html" | "control" | "props") => string;
 }
 
 export function generateVue(definition: ComponentDefinition, version: string, options: VueConversionOptions = {}): string {
@@ -1235,15 +1161,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
-    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(VUE_PROPS_SPECIFIER)};`]),
-    ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(VUE_HOST_SPECIFIER)};`]),
-    ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(VUE_HTML_SPECIFIER)};`] : []),
+    ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
+    ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
+    ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
     ...(context.usesHydrationControl ? [`import { ${[
       ...(rootMarkup.includes("readBoundControl(") ? ["readBoundControl"] : []),
       ...(rootMarkup.includes("v-bind-control=") ? ["vBindControl"] : []),
       ...(rootMarkup.includes("<SelectedOptions ") ? ["SelectedOptions"] : []),
-    ].join(", ")} } from ${quote(VUE_CONTROL_SPECIFIER)};`] : []),
-    ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(`./${componentName(tag)}.vue`)};`),
+    ].join(", ")} } from ${quote(options.helperSpecifier?.("control") ?? VUE_CONTROL_SPECIFIER)};`] : []),
+    ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.vue`)};`),
     "",
     "defineOptions({ inheritAttrs: false });",
     "",
