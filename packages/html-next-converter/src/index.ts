@@ -378,6 +378,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
       }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
         importSpecifier,
+        propContractsByTag,
         stylesheetSpecifier: `./${node.definition.contract.name}.css`,
         propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
       })).component : (reactConversion = generateReactConversion(definition, {

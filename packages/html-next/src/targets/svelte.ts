@@ -2,8 +2,9 @@
 import { fail } from "../diagnostics.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
-import { declarationTypeNode, normalizeType } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-system.js";
 import type { ComponentDefinition, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
+import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
 import { escapeHtml, isVoidElement, quote, typeSource } from "./shared.js";
 import { Lowering, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
@@ -12,6 +13,7 @@ export interface SvelteConversionOptions {
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
   readonly propsSpecifier?: string;
+  readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
 export interface SvelteConversionOutput {
@@ -60,6 +62,7 @@ function checkSupported(definition: ComponentDefinition): void {
 
 interface RenderContext {
   readonly imports: Set<string>;
+  readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   nextLoop: number;
 }
 
@@ -155,6 +158,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const component = node.name.includes("-");
   if (component) context.imports.add(node.name);
   const name = component ? componentName(node.name) : node.name;
+  const childProps = component ? context.propContractsByTag?.get(node.name) : undefined;
+  const childProp = (attributeName: string): readonly [string, PropContract] | undefined =>
+    Object.entries(childProps ?? {}).find(([prop]) => prop.toLowerCase() === attributeName || kebabCase(prop) === attributeName);
   const literals: string[] = [];
   const bindings: string[] = [];
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
@@ -162,13 +168,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
       if (root && (attribute.name === "class" || attribute.name === "style")) continue;
-      literals.push(`${attribute.name}=${quote(attribute.value)}`);
+      const declared = childProp(attribute.name);
+      if (declared === undefined) literals.push(`${attribute.name}=${quote(attribute.value)}`);
+      else {
+        const [prop, contract] = declared;
+        const typeNode = normalizeType(contract.type);
+        const parsed = attribute.value === "" && typeNode.kind === "terminal" && typeNode.name === "boolean"
+          ? { ok: true as const, value: true }
+          : parseTypedValue(attribute.value, contract.type, "$", "html");
+        literals.push(`${prop}={${parsed.ok ? JSON.stringify(parsed.value) : quote(attribute.value)}}`);
+      }
       continue;
     }
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
       else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
+      else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
       else bindings.push(`${attribute.name}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
   }
@@ -229,7 +245,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const context: RenderContext = { imports: new Set(), nextLoop: 0 };
+  const context: RenderContext = { imports: new Set(), propContractsByTag: options.propContractsByTag, nextLoop: 0 };
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");

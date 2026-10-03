@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -148,5 +148,45 @@ it("treats an absent list as empty and reports duplicate keyed rows", async () =
     compile(source, { filename: `${name}.svelte`, generate: "client" });
     if (expected === "no rows") assert.doesNotMatch(await serverHtml(outDirectory, `X${name}`, source), /<li/);
     else await assert.rejects(serverHtml(outDirectory, `X${name}`, source), /HR004/);
+  }
+});
+
+it("converts nested-folder component graphs and parses child HTML literals by their declared prop types", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-graph-"));
+  temporary.push(root);
+  await mkdir(join(root, "components", "nested"), { recursive: true });
+  await writeFile(join(root, "components", "parent.html"), `<template component="x-parent" status="early" summary="Parent.">
+    <div><x-child amount="2" from:label="'Ready'"></x-child></div>
+  </template>`);
+  await writeFile(join(root, "components", "nested", "child.html"), `<template component="x-child" status="early" summary="Child."><defs>
+    <prop name="amount" type="number" required>Amount.</prop><prop name="label" type="string">Label.</prop>
+  </defs><output from:data-label="label" $value="amount + 1"></output></template>`);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["components/**"] });
+    assert.deepEqual(manifest.components.map((component) => component.artifact), [
+      "svelte/components/nested/XChild.svelte", "svelte/components/XParent.svelte",
+    ]);
+    const parent = await readFile(join(outDirectory, "svelte/components/XParent.svelte"), "utf8");
+    assert.match(parent, /import XChild from "\.\/nested\/XChild\.svelte"/);
+    assert.match(parent, /amount=\{2\}/);
+    assert.match(parent, /label=\{"Ready"\}/);
+    compile(parent, { filename: "XParent.svelte", generate: "client" });
+    const entry = join(outDirectory, "server-entry.ts");
+    await writeFile(entry, `import { render } from "svelte/server";
+import XParent from "./svelte/components/XParent.svelte";
+export const html = render(XParent).body;`);
+    await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir");
+    const outfile = join(outDirectory, "server.mjs");
+    await build({ entryPoints: [entry], outfile, bundle: true, packages: "external", platform: "node", format: "esm",
+      loader: { ".css": "empty" }, plugins: [{ name: "svelte-server", setup(plugin) {
+        plugin.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({
+          contents: compile(await readFile(path, "utf8"), { filename: path, generate: "server" }).js.code,
+          loader: "js",
+          resolveDir: join(path, ".."),
+        }));
+      } }] });
+    const rendered = await import(pathToFileURL(outfile).href) as { html: string };
+    assert.match(rendered.html, /<output[^>]*data-label="Ready"[^>]*>3<\/output>/);
   }
 });
