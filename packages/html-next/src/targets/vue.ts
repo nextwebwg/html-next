@@ -4,8 +4,6 @@
  * events, and methods map to Vue's own facilities; the controller receives a host generated here from
  * Vue refs, effects, and lifecycle; styles become `<style scoped>`.
  */
-import { parseFragment } from "parse5";
-
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
@@ -28,7 +26,7 @@ import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, typeSource } from "./shared.js";
+import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -39,20 +37,6 @@ import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
-
-// HTML parsing lowercases directive names even inside SVG. Ask the HTML parser for the same
-// SVG adjustment it applies to literal attributes, then force Vue to write that exact attribute.
-const adjustedSvgAttributes = new Map<string, string>();
-function svgAttributeName(name: string): string {
-  let adjusted = adjustedSvgAttributes.get(name);
-  if (adjusted === undefined) {
-    const fragment = parseFragment(`<svg ${name}></svg>`);
-    const svg = fragment.childNodes[0] as { attrs?: readonly { name: string }[] } | undefined;
-    adjusted = svg?.attrs?.[0]?.name ?? name;
-    adjustedSvgAttributes.set(name, adjusted);
-  }
-  return adjusted;
-}
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([

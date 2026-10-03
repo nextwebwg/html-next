@@ -6,7 +6,7 @@ import { declarationTypeNode, normalizeType, parseTypedValue } from "../type-sys
 import type { ComponentDefinition, ElementNode, HandlerDeclaration, ReactiveDeclaration, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, isVoidElement, quote, typeSource } from "./shared.js";
+import { escapeHtml, isVoidElement, quote, svgAttributeName, typeSource } from "./shared.js";
 import { Lowering, present, type Scope, type Static, typeOf } from "./vue-lowering.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
@@ -190,9 +190,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const bindings: string[] = [];
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
+  const rootScope = root ? scope as RootScope : undefined;
+  const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      if (root && (attribute.name === "class" || attribute.name === "style")) continue;
+      if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       const declared = childProp(attribute.name);
       if (declared === undefined) literals.push(`${attribute.name}=${quote(attribute.value)}`);
       else {
@@ -207,17 +209,18 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     if (attribute.kind === "attribute") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
+      if (root && reflectedNames.has(attribute.name) && attribute.twoWay !== true) continue;
       if (attribute.twoWay === true) bindings.push(`bind:${attribute.name}={${attribute.writablePath![0]}}`);
       else if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
       else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
       else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
-      else bindings.push(`${attribute.name}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
+      else bindings.push(`${component ? attribute.name : svgAttributeName(attribute.name)}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
   }
   const attributes = [...literals];
   if (root) {
-    attributes.push("{...rest}");
-    if ((scope as RootScope).props.length > 0) attributes.push("bind:this={rootElement}");
+    attributes.push("{...rootAttrs}");
+    attributes.push("bind:this={rootElement}");
     if (authoredClass?.kind === "literal") {
       attributes.push(`class={[${quote(authoredClass.value)}, rest.class].filter(Boolean).join(" ")}`);
     }
@@ -226,10 +229,18 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
     attributes.push(`data-component=${quote((scope as RootScope).tag)}`);
     if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
-    for (const prop of (scope as RootScope).props) {
-      if (node.attributes.some((attribute) => attribute.name === `data-${kebabCase(prop)}`)) continue;
+    for (const prop of rootScope!.props) {
+      const name = `data-${kebabCase(prop)}`;
+      const authored = node.attributes.find((attribute) => attribute.name === name);
+      const bound = authored?.kind === "attribute";
+      const fallback = authored?.kind === "literal" ? quote(authored.value) : "undefined";
+      const type = normalizeType(rootScope!.propContracts[prop]!.type);
+      const separator = type.kind === "separated-list" ? quote(type.separator === "space" ? " " : ", ") : undefined;
       const value = scope.code.get(prop) ?? prop;
-      attributes.push(`data-${kebabCase(prop)}={${value} == null ? undefined : String(${value})}`);
+      const serialized = separator === undefined
+        ? `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`
+        : `Array.isArray(${value}) ? ${value}.join(${separator}) : String(${value})`;
+      attributes.push(`${name}={${!bound ? `input${prop} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
     }
   }
   attributes.push(...bindings);
@@ -243,6 +254,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
 interface RootScope extends Scope {
   readonly tag: string;
   readonly props: readonly string[];
+  readonly propContracts: Readonly<Record<string, PropContract>>;
   readonly stateNames: readonly string[];
 }
 
@@ -270,6 +282,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const scope: RootScope = {
     tag: definition.contract.tag,
     props: target.props.map((prop) => prop.name),
+    propContracts: definition.contract.props,
     stateNames: styles.stateNames,
     code,
     types,
@@ -280,18 +293,22 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${typeSource(prop.contract.type)};`).join("\n  ");
-  const destructured = target.props.map((prop) =>
-    `${prop.name}: input${prop.name}${"default" in prop.contract ? ` = ${JSON.stringify(prop.contract.default)}` : ""}`).join(", ");
+  const destructured = target.props.map((prop) => `${prop.name}: input${prop.name}`).join(", ");
   const hasProps = target.props.length > 0;
   const selectors = [...new Set(target.props.flatMap((prop) => prop.contract.select === undefined ? [] : [prop.contract.select.from]))];
   const validityContract = { props: Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) =>
     [name, { ...prop, type: prop.select === undefined ? normalizeType(prop.type)
       : { kind: "union" as const, members: prop.select.options.map((option) => option.type) } }])) };
+  const inputSource = (name: string): string => {
+    const prop = definition.contract.props[name]!;
+    return "default" in prop ? `(input${name} === undefined ? ${JSON.stringify(prop.default)} : input${name})` : `input${name}`;
+  };
   const checkedPropSources = target.props.map((prop) => {
     const select = prop.contract.select;
     const type = select === undefined ? JSON.stringify(normalizeType(prop.contract.type))
-      : `selectedPropNode(input${select.from}, ${JSON.stringify(select.options)})`;
-    return `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(input${prop.name}, ${type}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`;
+      : `selectedPropNode(${inputSource(select.from)}, ${JSON.stringify(select.options)})`;
+    const source = inputSource(prop.name);
+    return `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${source}, ${type}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`;
   });
   const stateSources = states.map((state) =>
     `let ${state.name} = $state(${state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope)});`);
@@ -311,6 +328,26 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     `type Props = { ${propTypes} children?: Snippet; [key: string]: unknown; };`,
     `let { ${destructured}${destructured === "" ? "" : ", "}children, ...rest }: Props = $props();`,
+    // Svelte's spread path normalizes these names through an inherited object property.
+    // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
+    "const rootAttrs = $derived.by(() => { const attrs = { ...rest }; if (typeof document !== 'undefined') { delete attrs.constructor; delete attrs.__proto__; } return attrs; });",
+    "let rootElement = $state<Element | undefined>(undefined);",
+    "let specialElement: Element | undefined;",
+    "let hadConstructor = false;",
+    "let hadProto = false;",
+    "$effect(() => {",
+    "  const element = rootElement;",
+    "  if (element === undefined) return;",
+    "  if (element !== specialElement) { specialElement = element; hadConstructor = false; hadProto = false; }",
+    "  const constructor = Object.keys(rest).includes('constructor');",
+    "  if (constructor) element.setAttribute('constructor', String(rest.constructor));",
+    "  else if (hadConstructor) element.removeAttribute('constructor');",
+    "  hadConstructor = constructor;",
+    "  const proto = Object.keys(rest).includes('__proto__');",
+    "  if (proto) element.setAttribute('__proto__', String(rest.__proto__));",
+    "  else if (hadProto) element.removeAttribute('__proto__');",
+    "  hadProto = proto;",
+    "});",
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${quote(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
       "const inputAccepted: Record<string, boolean> = {};",
@@ -318,8 +355,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...checkedPropSources,
       "}));",
       `const propValidityContract = ${JSON.stringify(validityContract)} as const;`,
-      `let propInputValues = $derived({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : `input${prop.name}`}`).join(", ")} });`,
-      "let rootElement = $state<Element | undefined>(undefined);",
+      `let propInputValues = $derived({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : inputSource(prop.name)}`).join(", ")} });`,
       "$effect(() => {",
       "  const element = rootElement;",
       "  if (element === undefined) return;",

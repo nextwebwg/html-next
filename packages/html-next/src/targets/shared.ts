@@ -1,3 +1,5 @@
+import { parseFragment } from "parse5";
+
 import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { kebabCase } from "../names.js";
@@ -11,6 +13,19 @@ const VOID_ELEMENTS = new Set([
 
 export function isVoidElement(name: string): boolean {
   return VOID_ELEMENTS.has(name);
+}
+
+// Bound names are lowercased by the HTML parser. Recover SVG's adjusted attribute spelling.
+const adjustedSvgAttributes = new Map<string, string>();
+export function svgAttributeName(name: string): string {
+  let adjusted = adjustedSvgAttributes.get(name);
+  if (adjusted === undefined) {
+    const fragment = parseFragment(`<svg ${name}></svg>`);
+    const svg = fragment.childNodes[0] as { attrs?: readonly { name: string }[] } | undefined;
+    adjusted = svg?.attrs?.[0]?.name ?? name;
+    adjustedSvgAttributes.set(name, adjusted);
+  }
+  return adjusted;
 }
 
 const NATIVE_BOOLEAN_ATTRIBUTES = new Set([

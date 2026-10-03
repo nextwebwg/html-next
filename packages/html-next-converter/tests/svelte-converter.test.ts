@@ -13,6 +13,7 @@ import { parseFragment, serialize, type DefaultTreeAdapterTypes } from "parse5";
 import { convertComponents } from "../src/index.js";
 
 const temporary: string[] = [];
+let serverSerial = 0;
 
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -20,8 +21,9 @@ afterEach(async () => {
 
 async function serverHtml(outDirectory: string, name: string, source: string, props: Record<string, unknown> = {}): Promise<string> {
   const server = compile(source, { filename: `${name}.svelte`, generate: "server" });
-  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir");
-  const serverPath = join(outDirectory, "server.mjs");
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir")
+    .catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
+  const serverPath = join(outDirectory, `server-${serverSerial++}.mjs`);
   await build({
     stdin: { contents: server.js.code, resolveDir: join(outDirectory, "svelte"), sourcefile: `${name}.js` },
     outfile: serverPath, bundle: true, packages: "external", platform: "node", format: "esm",
@@ -55,6 +57,9 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
     assert.match(html, /class="card outside"/);
+    const defaulted = await serverHtml(outDirectory, "XCard", source);
+    assert.match(defaulted, /aria-label="Ready"/);
+    assert.doesNotMatch(defaulted, /data-label=/);
   }
 });
 
@@ -202,9 +207,10 @@ it("checks a prop against the type selected by another prop", async () => {
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /selectedPropNode\(inputkind,/);
+  assert.match(source, /selectedPropNode\(\(inputkind === undefined \? "text" : inputkind\),/);
   compile(source, { filename: "XSelected.svelte", generate: "client" });
   assert.match(await serverHtml(outDirectory, "XSelected", source, { kind: "number", value: 2 }), /<output[^>]*>2<\/output>/);
+  assert.match(await serverHtml(outDirectory, "XSelected", source, { value: "Ready" }), /<output[^>]*>Ready<\/output>/);
 });
 
 it("rejects a state-selected prop until the Svelte initialization boundary is implemented", async () => {
