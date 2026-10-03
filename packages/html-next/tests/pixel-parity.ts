@@ -4,7 +4,11 @@ import type { Browser, BrowserType, Page } from "playwright";
 
 /** Use one text raster path for both pages in Chromium's cross-page pixel comparisons. */
 export function launchParityBrowser(browserType: BrowserType): Promise<Browser> {
-  return browserType.launch({ headless: true, ...(browserType.name() === "chromium" ? { args: ["--disable-lcd-text"] } : {}) });
+  // Linux partial raster can retain one-channel rounding differences at native control corners after edits.
+  // Full raster preserves exact cross-page pixel checks without changing the controls or their styles.
+  // https://chromium.googlesource.com/chromium/src/+/aa63f203aea2ed4b43e4bfc18a04905813df56d8/content/public/common/content_switches.cc
+  return browserType.launch({ headless: true, ...(browserType.name() === "chromium"
+    ? { args: ["--disable-lcd-text", ...(process.platform === "linux" ? ["--disable-partial-raster"] : [])] } : {}) });
 }
 
 interface PixelDifference {
