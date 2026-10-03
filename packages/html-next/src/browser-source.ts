@@ -116,8 +116,10 @@ export function parseBrowserComponentResource(
     }
     dependencies.push(href);
   }
+  const definitions = Object.freeze(carriers.map((carrier) => parseBrowserComponent(carrier, source)));
   return Object.freeze({
-    definitions: Object.freeze(carriers.map((carrier) => parseBrowserComponent(carrier, source))),
+    definition: definitions[0]!,
+    definitions,
     dependencies: Object.freeze(dependencies),
   });
 }

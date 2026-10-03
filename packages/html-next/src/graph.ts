@@ -43,6 +43,8 @@ export interface BuildGraphOptions {
 }
 
 export interface ParsedComponentResource {
+  /** @deprecated Use `definitions`; this is the first carrier for older callers. */
+  readonly definition: ComponentDefinition;
   readonly definitions: readonly ComponentDefinition[];
   readonly dependencies: readonly string[];
 }

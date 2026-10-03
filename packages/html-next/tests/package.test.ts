@@ -49,8 +49,11 @@ describe("component package assembler", () => {
     const entry = await readFile(join(outDirectory, "vue/index.js"), "utf8");
     assert.match(entry, /default as UiButton/);
     assert.match(entry, /default as UiDialog/);
-    assert.doesNotMatch(entry, /default as Button|export default/);
+    assert.match(entry, /default as Button/);
+    assert.match(entry, /default as Dialog/);
+    assert.doesNotMatch(entry, /export default/);
     assert.match(await readFile(join(outDirectory, "vue/index.d.ts"), "utf8"), /const UiButton/);
+    assert.match(await readFile(join(outDirectory, "vue/index.d.ts"), "utf8"), /const Button/);
     const manifest = JSON.parse(await readFile(join(outDirectory, "package.json"), "utf8"));
     assert.equal(manifest.exports["."]["html-next"], "./html-next/index.js");
     assert.match(await readFile(join(outDirectory, "html-next/index.js"), "utf8"), /export \{ UiButton \} from "\.\.\/components\/library\.html"/);

@@ -57,5 +57,5 @@ export function parseComponentResource(sourceText: string, source: string): Pars
     }
   }
   if (definitions.length === 0) fail("HS001", "A component resource requires at least one <template component>.", source);
-  return Object.freeze({ definitions: Object.freeze(definitions), dependencies: Object.freeze(dependencies) });
+  return Object.freeze({ definition: definitions[0]!, definitions: Object.freeze(definitions), dependencies: Object.freeze(dependencies) });
 }

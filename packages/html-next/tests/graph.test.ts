@@ -3,7 +3,7 @@ import { describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import type { FetchedComponent } from "../src/graph.js";
-import { buildComponentGraph } from "../src/source-graph.js";
+import { buildComponentGraph, parseComponentResource } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
 
 const root = "https://cdn.example/ui/1/";
@@ -36,6 +36,12 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
+  it("retains the singular parser result as an alias for the first definition", () => {
+    const parsed = parseComponentResource(component("ui-button") + component("ui-dialog"), "library.html");
+    assert.equal(parsed.definition, parsed.definitions[0]);
+    assert.deepEqual(parsed.definitions.map((definition) => definition.contract.tag), ["ui-button", "ui-dialog"]);
+  });
+
   it("loads every named component in a resource once and connects sibling definitions", async () => {
     const library = `${root}library.html`;
     const fixtures = fetcher({

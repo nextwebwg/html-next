@@ -94,6 +94,22 @@ function assertPackageSource(source: string, packageRoot: string): void {
   }
 }
 
+function sourceModuleCandidates(candidate: string): readonly string[] {
+  const extension = extname(candidate);
+  if (extension === ".js" || extension === ".jsx") {
+    const base = candidate.slice(0, -extension.length);
+    return [candidate, `${base}.ts`, `${base}.tsx`, `${base}.jsx`];
+  }
+  if (extension === ".mjs" || extension === ".cjs") {
+    return [candidate, `${candidate.slice(0, -4)}.${extension === ".mjs" ? "mts" : "cts"}`];
+  }
+  if (extension !== "") return [candidate];
+  return [candidate, ...["ts", "tsx", "js", "jsx", "mts", "mjs", "cts", "cjs"].map((suffix) => `${candidate}.${suffix}`),
+    ...["ts", "tsx", "js", "jsx", "mts", "mjs", "cts", "cjs"].map((suffix) => resolve(candidate, `index.${suffix}`))];
+}
+
+function isSourceModule(path: string): boolean { return /\.(?:html|[cm]?[jt]sx?)$/.test(path); }
+
 class FrameworkCompiler {
   readonly aliases = new Map<string, string>();
   readonly sources = new Set<string>();
@@ -168,9 +184,8 @@ class FrameworkCompiler {
       const specifier = (ts.isExportDeclaration(statement) || ts.isImportDeclaration(statement)) ? statement.moduleSpecifier : undefined;
       if (specifier === undefined || !ts.isStringLiteral(specifier) || !specifier.text.startsWith(".")) continue;
       const candidate = resolve(dirname(source), specifier.text);
-      const candidates = [candidate, `${candidate}.ts`, `${candidate}.js`, resolve(candidate, "index.ts"), resolve(candidate, "index.js")];
       let resolved: string | undefined;
-      for (const path of candidates) {
+      for (const path of sourceModuleCandidates(candidate)) {
         const metadata = await stat(path).catch((error: unknown) => {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
           throw error;
@@ -192,7 +207,7 @@ class FrameworkCompiler {
     if (extname(source) === ".html") { html.add(source); return; }
     const module = await this.sourceModule(source, packageRoot);
     for (const item of module.imports) {
-      if (/\.(?:html|[cm]?[jt]s)$/.test(item.source)) await this.collectResources(item.source, packageRoot, html, visited);
+      if (isSourceModule(item.source)) await this.collectResources(item.source, packageRoot, html, visited);
     }
   }
 
@@ -239,7 +254,7 @@ class FrameworkCompiler {
     const module = await this.sourceModule(source, packageRoot);
     let rewritten = module.content;
     for (const item of module.imports.toReversed()) {
-      const converted = /\.(?:html|[cm]?[jt]s)$/.test(item.source)
+      const converted = isSourceModule(item.source)
         ? await this.barrel(item.source, packageRoot, cache, seen) : item.source;
       rewritten = rewritten.slice(0, item.start) + JSON.stringify(importPath(output, converted)) + rewritten.slice(item.end);
     }

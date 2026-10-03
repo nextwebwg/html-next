@@ -106,8 +106,18 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
 
 function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Record<string, string>> {
   const entries = [...definitions].sort((left, right) => left.contract.name.localeCompare(right.contract.name));
-  const exportsFor = (extension: string): string => entries.map((definition) =>
-    `export { default as ${definition.contract.name} } from ${JSON.stringify(`./${definition.contract.name}.${extension}`)};`
+  const names = new Set(entries.map((definition) => definition.contract.name));
+  const exported = entries.flatMap((definition) => {
+    const legacy = definition.contract.name.replace(/^Ui(?=[A-Z])/, "");
+    const aliases = [definition.contract.name];
+    if (legacy !== definition.contract.name && !names.has(legacy)) {
+      aliases.push(legacy);
+      names.add(legacy);
+    }
+    return aliases.map((name) => ({ name, definition }));
+  });
+  const exportsFor = (extension: string): string => exported.map(({ name, definition }) =>
+    `export { default as ${name} } from ${JSON.stringify(`./${definition.contract.name}.${extension}`)};`
   ).join("\n") + "\n";
   return Object.freeze({
     "vue/index.js": exportsFor("vue"),
@@ -117,7 +127,7 @@ function targetIndexes(definitions: readonly ComponentDefinition[]): Readonly<Re
     "vue/index.d.ts": [
       'import type { DefineComponent } from "vue";',
       "export interface VueAdapterEventMap { [name: string]: unknown }",
-      ...entries.map((definition) => `export declare const ${definition.contract.name}: DefineComponent<Record<string, unknown>>;`),
+      ...exported.map(({ name }) => `export declare const ${name}: DefineComponent<Record<string, unknown>>;`),
       "",
     ].join("\n"),
   });

@@ -116,6 +116,27 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     assert.equal(content.includes("--unused-component-style"), false, "unused component CSS entered the client bundle");
   }, 60_000);
 
+  it("resolves TypeScript ESM specifiers and TSX hops in a source barrel", async () => {
+    const { root, library } = await fixture();
+    const packagePath = join(library, "package.json");
+    const manifest = JSON.parse(await readFile(packagePath, "utf8")) as { exports: Record<string, { "html-next": string }> };
+    manifest.exports["."] = { "html-next": "./index.ts" };
+    await writeFile(packagePath, JSON.stringify(manifest));
+    await writeFile(join(library, "index.ts"), 'export { Button } from "./bridge.js";\n');
+    await writeFile(join(library, "bridge.tsx"), 'export { UiButton as Button } from "./controls.html";\n');
+    const prepared = await syncHtmlNext({ root, target });
+    assert.ok(prepared.aliases.has("@example/controls"));
+    assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+    const entry = join(root, "src", target === "vue" ? "barrel.ts" : "barrel.tsx");
+    await writeFile(entry, target === "vue"
+      ? 'import { h } from "vue"; import { renderToString } from "vue/server-renderer"; import { Button } from "@example/controls"; export const render = () => renderToString(h(Button, { label: "Save" }));'
+      : 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import { Button } from "@example/controls"; export const render = () => renderToStaticMarkup(<Button label="Save" />);');
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()],
+      build: { ssr: entry, outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "barrel.js")).href) as { render(): string | Promise<string> };
+    assert.match(await output.render(), /Save/);
+  }, 60_000);
+
   it("prepares types without starting Vite and refreshes generated sources after an edit", async () => {
     const { root, library } = await fixture();
     // Workspace/pnpm libraries resolve outside node_modules; they must remain library resources.
