@@ -305,6 +305,9 @@ describe("svelte source adapter", () => {
           <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
           </defs><output $value="value"></output></template>
+        <template component="ui-depth" status="early" summary="Recursive graph."><defs>
+          <prop name="level" type="number" default="0">Depth.</prop></defs>
+          <section><span $value="level"></span><ui-depth $if="level < 2" from:level="level + 1"></ui-depth></section></template>
         <template component="ui-state-selected" status="early" summary="State-selected input."><defs>
           <state name="kind" type="keyword" values="text, number" value="number"></state>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>

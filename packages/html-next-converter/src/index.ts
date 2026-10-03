@@ -382,6 +382,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
       }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
         slotsByTag,
+        guardNestedDepth,
         importSpecifier,
         propContractsByTag,
         stylesheetSpecifier: `./${node.definition.contract.name}.css`,

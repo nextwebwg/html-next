@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
-import { elementMatchRoot } from "../template.js";
+import { definitionMayInvokeComponents, elementMatchRoot } from "../template.js";
 import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -22,6 +22,7 @@ export interface SvelteConversionOptions {
   readonly eventsSpecifier?: string;
   readonly controlSpecifier?: string;
   readonly dataSpecifier?: string;
+  readonly guardNestedDepth?: boolean;
   readonly propContractsByTag?: ReadonlyMap<string, Readonly<Record<string, PropContract>>>;
 }
 
@@ -513,7 +514,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval "
-    + "Props Snippet untrack rootElement specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "Props Snippet untrack getContext setContext rootElement specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const handlerNames = new Map(handlers.map((handler) => [handler.name, declarationName(handler.name)]));
@@ -557,6 +558,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
+  const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
+  const nestedDepthName = freshIdentifier("htmlNextDepth");
   const markup = renderNode(definition.template, true, scope, lowering, context);
   const generics = selectorGenerics(definition.contract.props);
   const genericParameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
@@ -619,6 +622,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
+    ...(nestedDepthLimit === undefined ? [] : ['import { getContext, setContext } from "svelte";']),
     ...(hasProps || context.usesControls || context.usesSampledSlots ? ['import { untrack } from "svelte";'] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
@@ -627,6 +631,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
+    ...(nestedDepthLimit === undefined ? [] : [
+      `const ${nestedDepthName} = getContext<number>("html-next:nested-depth") ?? 0;`,
+      `if (${nestedDepthName} >= ${nestedDepthLimit}) {`,
+      "  const message = 'Component invocations nested deeper than the lowering limit.';",
+      "  throw Object.assign(new Error('HR008: ' + message), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR008', message }) });",
+      "}",
+      `setContext("html-next:nested-depth", ${nestedDepthName} + 1);`,
+    ]),
     `type Props = { ${propTypes} children?: Snippet; slots?: Record<string, Snippet<[Record<string, any>]> | null>; [key: string]: unknown; };`,
     `let { ${destructured}${destructured === "" ? "" : ", "}children, slots, ...rest }: Props = $props();`,
     // Svelte's spread path normalizes these names through an inherited object property.

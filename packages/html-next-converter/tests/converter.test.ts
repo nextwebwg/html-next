@@ -1570,12 +1570,12 @@ void [scoped, staticNode];`);
         await writeFile(join(root, entry), `<template component="x-depth-${index}" status="early" summary="Depth ${index}."><section>${index + 1 < count ? `<x-depth-${index + 1}></x-depth-${index + 1}>` : "Done"}</section></template>`);
       }
       const outDirectory = join(root, `out-${count}`);
-      for (const target of ["vue", "react"] as const) {
+      for (const target of ["vue", "react", "svelte"] as const) {
         const targetOutput = join(outDirectory, target);
         const manifest = await convertComponents({ mode: "application", entries, target, root, outDirectory: targetOutput });
         assert.equal(manifest.components.length, count);
         const guarded = await readFile(join(targetOutput, manifest.components.find(({ tag }) => tag === "x-depth-0")!.artifact), "utf8");
-        assert.equal(guarded.includes(target === "vue" ? "html-next:nested-depth" : "NestedDepthContext"), count === 34);
+        assert.equal(guarded.includes(target === "react" ? "NestedDepthContext" : "html-next:nested-depth"), count === 34);
         assert.equal(manifest.output.artifacts.some((artifact) => artifact.path === "react/depth.ts"), target === "react" && count === 34);
       }
     }
