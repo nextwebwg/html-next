@@ -106,6 +106,11 @@ for (const target of ["vue", "react"] as const) describe(`${target} source adapt
     const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()] });
     try {
       await server.pluginContainer.resolveId("@example/controls");
+      const initial = await server.ssrLoadModule("@example/controls");
+      assert.ok(initial.Button);
+      const initialMarkup = target === "vue" ? await renderToString(h(initial.Button, { label: "Save" }))
+        : renderToStaticMarkup(createElement(initial.Button as ComponentType<{ label: string }>, { label: "Save" }));
+      assert.match(initialMarkup, /Badge/);
       const source = join(library, "controls.html");
       await writeFile(source, (await readFile(source, "utf8")).replace(">Badge</span>", ">Updated</span>"));
       const plugin = server.config.plugins.find((entry) => entry.name === "html-next-framework");
@@ -171,7 +176,9 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
     assert.ok(resolved?.id.endsWith("index.ts"));
     const raw = await server.pluginContainer.resolveId("./controls.html?raw", join(root, "src", "main.ts"));
     assert.ok(raw);
-    assert.equal(normalizePath(raw.id), normalizePath(`${await realpath(join(root, "src", "controls.html"))}?raw`));
+    assert.ok(raw.id.endsWith("?raw"));
+    const rawSource = await realpath(raw.id.slice(0, -"?raw".length));
+    assert.equal(normalizePath(rawSource), normalizePath(await realpath(join(root, "src", "controls.html"))));
   } finally { await server.close(); }
 }, 60_000);
 

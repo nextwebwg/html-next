@@ -410,7 +410,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
         server?.watcher.add([...compiler.sources]);
         // A resource may export several components and types; invalidate their generated module graph together.
         for (const module of context.server.moduleGraph.idToModuleMap.values()) {
-          if (module.id?.includes(`${sep}.html-next${sep}`)) context.server.moduleGraph.invalidateModule(module);
+          if (module.id?.replaceAll("\\", "/").includes("/.html-next/")) context.server.moduleGraph.invalidateModule(module);
         }
         context.server.ws.send({ type: "full-reload" });
       });
