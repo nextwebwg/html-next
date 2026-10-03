@@ -213,6 +213,26 @@ const regressions: readonly ConverterCase[] = [
   },
 
   {
+    name: "delegated component roots share native attributes, refs and declared events",
+    dependencies: { "base.html": `<template component="x-base-button" status="early" summary="Base button.">
+      <button type="button" class="base" style="padding: 4px"><slot></slot></button>
+      <style>:host { border: 2px solid rgb(20 70 130); padding: 4px; font: 16px/24px Arial, sans-serif; }</style></template>` },
+    source: `<template component="x-primary" status="early" summary="Primary button."><defs>
+      <prop name="label" type="string" required>Label.</prop><state name="active" type="boolean" value="false"></state>
+      <event name="change" type="boolean" composed="false" cancelable="true">Change.</event>
+      <handler name="toggle"><set name="active" expr:value="active = false"></set><dispatch event="change" expr:value="active"></dispatch><focus ref="root"></focus></handler>
+      </defs><x-base-button $ref="root" class="primary" style="padding: 6px" class:active="active" from:data-active="active" on:click="toggle"><slot></slot></x-base-button>
+      <style>:host { color: rgb(170 20 20); } :host(.active) { background: rgb(230 240 250); }</style></template>
+      <x-primary id="case" class="outside active" label="Ready">Go</x-primary>`,
+    hydrationOnlyProbe: true,
+    expect: { probe: `const e = q('#case'); return [e.localName, e.getAttribute('data-component'), e.className, e.getAttribute('data-active'), getComputedStyle(e).padding, e.textContent.trim(), e.getAttribute('data-label'), e.validity.valid, document.activeElement === e, window.changes ?? []];`,
+      result: ["button", "x-primary x-base-button", "base primary outside", null, "6px", "Go", "Ready", true, false, []], after: [
+        { action: `window.changes = []; const e = document.querySelector('#case'); e.addEventListener('change', e => window.changes.push([e.detail, e.bubbles, e.composed, e.cancelable])); e.click();`, result: ["button", "x-primary x-base-button", "base primary outside active", "", "6px", "Go", "Ready", true, true, [[true, true, false, true]]] },
+        { action: `document.querySelector('#case').click();`, result: ["button", "x-primary x-base-button", "base primary outside", null, "6px", "Go", "Ready", true, true, [[true, true, false, true], [false, true, false, true]]] },
+      ] },
+  },
+
+  {
     name: "guarded nested handlers preserve types and sequential computed reads",
     source: `<template component="x-handler-path" status="early" summary="Nested handlers."><defs>
       <state name="form" type="object({ rows: list(object({ name: string })), index: number })" value="{ rows: [{ name: 'Ada' }, { name: 'Bea' }], index: 1 }"></state>

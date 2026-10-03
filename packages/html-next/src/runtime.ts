@@ -1692,7 +1692,10 @@ function renderInstance(
   }
   const adopted = candidate instanceof Element && candidate.localName === elementName;
   const element = adopted ? candidate : createTemplateElement(document, elementName, context);
-  if (node === context.rootNode) context.root = element;
+  if (node === context.rootNode) {
+    context.root = element;
+    if (node.name.includes("-")) whenLowered(element, (root) => { context.root = root; });
+  }
   const existingChildren = adopted ? Array.from(element.childNodes) : [];
   const controlState = adopted && (
     element instanceof HTMLInputElement ||

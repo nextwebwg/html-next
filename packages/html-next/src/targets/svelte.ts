@@ -91,6 +91,8 @@ interface RenderContext {
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
   usesProperties: boolean;
+  usesComponentClasses: boolean;
+  readonly componentClassName: string;
   readonly propertyAttachmentName: string;
   usesControls: boolean;
   usesNestedBindings: boolean;
@@ -303,6 +305,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       slotBindings.push(`${quote(slot)}: ${snippet}`);
     }
   }
+  const componentClasses = component ? node.attributes.filter((entry) => entry.kind === "attribute" && entry.target === "class") : [];
+  if (componentClasses.length > 0) context.usesComponentClasses = true;
   const literals: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [`slots={{ ${slotBindings.join(", ")} }}`];
   const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
@@ -347,7 +351,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      if (controlledNames.has(attribute.name)) continue;
+      if (controlledNames.has(attribute.name) || componentClasses.length > 0 && attribute.name === "class") continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
@@ -383,6 +387,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
+      else if (attribute.target === "class" && component) continue;
       else if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
       else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
       else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
@@ -415,14 +420,16 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const attributes = [...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
-    attributes.push("bind:this={rootElement}");
-    if (authoredClass?.kind === "literal") {
+    attributes.push(component
+      ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
+      : "bind:this={rootElement}");
+    if (authoredClass?.kind === "literal" && componentClasses.length === 0) {
       attributes.push(`class={[${quote(authoredClass.value)}, rest.class].filter(Boolean).join(" ")}`);
     }
     if (authoredStyle?.kind === "literal") {
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
     }
-    attributes.push(`data-component=${quote((scope as RootScope).tag)}`);
+    attributes.push(`data-component={[rest["data-component"], ${quote((scope as RootScope).tag)}].filter(Boolean).join(" ")}`);
     if ((scope as RootScope).stateNames.length > 0) attributes.push(`data-${(scope as RootScope).tag}-state={hostState || undefined}`);
     for (const prop of rootScope!.props) {
       const name = `data-${kebabCase(prop)}`;
@@ -437,6 +444,17 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         : `Array.isArray(${value}) ? ${value}.join(${separator}) : String(${value})`;
       attributes.push(`${name}={${!bound ? `input${prop} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
     }
+  }
+  if (componentClasses.length > 0) {
+    const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
+    const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
+    const values = componentClasses.map((entry) => {
+      if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled class binding cannot be converted.");
+      const expression = entry.expressionPlan.ast;
+      const condition = lowering.condition(expression, scope);
+      return `${quote(entry.name)}: ${mayProduceInvalidResult(expression, scope) ? retained(context, condition, "undefined as boolean | undefined") : condition}`;
+    }).join(", ");
+    attributes.push(`class={${context.componentClassName}(${base}, { ${values} })}`);
   }
   attributes.push(...bindings);
   if (!component && context.styleOwner !== undefined) attributes.push(`${SVELTE_OWNER_ATTRIBUTE}=${quote(context.styleOwner)}`);
@@ -524,7 +542,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesProperties: false, propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs: new Set(), refsName: freshIdentifier("htmlNextRefs"),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
@@ -627,6 +645,13 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "    const stop = observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); });",
       "    return () => { dispose?.(); stop(); };",
       "  };",
+      "}",
+    ] : []),
+    ...(context.usesComponentClasses ? [
+      `function ${context.componentClassName}(base: string, values: Record<string, boolean | undefined>): string {`,
+      String.raw`  const tokens = new Set(base.split(/[ \t\r\n\f]+/).filter(Boolean));`,
+      "  for (const [name, enabled] of Object.entries(values)) { if (enabled === undefined) continue; if (enabled) tokens.add(name); else tokens.delete(name); }",
+      "  return [...tokens].join(' ');",
       "}",
     ] : []),
     ...(context.usesScopedSlots ? [

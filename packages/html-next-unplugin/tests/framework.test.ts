@@ -300,7 +300,11 @@ describe("svelte source adapter", () => {
           <ui-rows><template slot="row"><li .title="item.name" $value="item.name"></li></template></ui-rows></section>`)
       + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>
         <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state></defs>
-        <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row"><li>Fallback</li></slot></ul></template>`;
+        <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row"><li>Fallback</li></slot></ul></template>
+        <template component="ui-primary" status="early" summary="Primary."><defs>
+          <prop name="label" type="string" required>Label.</prop><state name="active" type="boolean" value="false"></state>
+          <event name="change" type="boolean">Change.</event><handler name="toggle"><set name="active" expr:value="active = false"></set><dispatch event="change" expr:value="active"></dispatch><focus ref="root"></focus></handler>
+        </defs><ui-button $ref="root" from:label="label" class="primary" class:active="active" on:click="toggle"><slot></slot></ui-button></template>`;
     await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
     const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });

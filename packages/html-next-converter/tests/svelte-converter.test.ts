@@ -50,7 +50,6 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.deepEqual(manifest.package.peerDependencies, { svelte: "^5.57.1" });
     const source = await readFile(join(outDirectory, "svelte/XCard.svelte"), "utf8");
     assert.doesNotMatch(source, /@nextwebwg\/html-next/);
-    assert.match(source, /data-component="x-card"/);
     compile(source, { filename: "XCard.svelte", generate: "client" });
     const html = await serverHtml(outDirectory, "XCard", source, { label: "Hello", id: "case", class: "outside" });
     assert.match(html, /<article[^>]*data-component="x-card"/);
