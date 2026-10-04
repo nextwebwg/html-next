@@ -160,9 +160,9 @@ reference, code display, heading anchors, search navigation, a theme, and an int
 Its Markdown dependency and theme live in the consumer, outside the platform runtime and published
 package. Its input is trusted, checked-in author content; it does not sanitize arbitrary Markdown.
 
-The Looma corpus is the next qualification workload. Its existing deployment and reviewed parity
-references remain the authority for that migration. This initial proof does not claim Looma parity
-or replace Looma's deployed documentation.
+Larger documentation migrations must qualify their routes, examples, visuals, and browser behavior
+against reviewed references before switching deployment. This initial proof exercises the platform;
+it does not replace an existing documentation site's production output.
 
 HTMLKit is MIT-licensed and shares the monorepo release version. It is configured for public npm
 publication; creating its npm name once and configuring its trusted publisher are release setup,

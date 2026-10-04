@@ -64,6 +64,16 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
     const slug = basename(file, ".md");
     const ids = new Map<string, number>();
     const markdown = new Marked({ renderer: {
+      link({ href, title, tokens }) {
+        let target = href;
+        if (href.startsWith("/html-next/")) {
+          const [pathname, hash] = href.split("#", 2);
+          const name = basename(pathname!.replace(/\/$/, ""));
+          const guide = name === "html-next" ? "index" : name;
+          target = guides.includes(`${guide}.md`) ? `${base}guide/${guide}/${hash === undefined ? "" : "#" + hash}` : "https://nextwebwg.org" + href;
+        } else if (href.startsWith("/") && !href.startsWith("//")) target = "https://nextwebwg.org" + href;
+        return `<a href="${escapeHTML(target)}"${title == null ? "" : ` title="${escapeHTML(title)}"`}>${this.parser.parseInline(tokens)}</a>`;
+      },
       heading({ tokens, depth }) {
         const text = this.parser.parseInline(tokens);
         const stem = text.replace(/<[^>]*>/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "heading";
