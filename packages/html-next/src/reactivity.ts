@@ -615,10 +615,15 @@ export class ReactiveScope implements Scope {
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },
       set: (target, key, next, receiver) => {
+        const previousLength = Array.isArray(target) ? target.length : undefined;
         const previous = Reflect.get(target, key, receiver);
         const wrapped = this.#wrap(next as Value);
         const result = Reflect.set(target, key, wrapped, receiver);
         if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+        // Defining an array index can extend length before push writes that same length again.
+        if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+          trigger(objectSubscribers.get(target)?.get("length"));
+        }
         return result;
       },
       deleteProperty: (target, key) => {

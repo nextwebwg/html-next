@@ -34,6 +34,25 @@ describe("reactive scope", () => {
     assert.deepEqual(seen, [null, 4, 14]);
   });
 
+  it("updates serialized arrays when index writes extend their length", () => {
+    const scope = new ReactiveScope([["items", ["a"]]]);
+    const items = scope.get("items") as string[];
+    const seen: string[] = [];
+    createEffect(scope.scheduler, () => { seen.push(String(scope.get("items"))); });
+    assert.deepEqual(seen, ["a"]);
+
+    items.push("b");
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b"]);
+
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b", "a,b,,d"]);
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.equal(seen.length, 3);
+  });
+
   it("does not notify consumers for Object.is-equal signal writes", () => {
     const scheduler = new ReactiveScope().scheduler;
     const object = {};
