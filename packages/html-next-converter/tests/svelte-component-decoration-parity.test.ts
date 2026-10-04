@@ -17,7 +17,7 @@ async function snapshot(page: Page) {
   return {
     behavior: await page.locator("#case").evaluate((element) =>
       [...element.querySelectorAll<HTMLElement>("article, button, i")].map((root) => ({
-        tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"), components: root.getAttribute("data-component"), classes: [...root.classList],
+        tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"), components: root.getAttribute("data-component"), classValue: root.getAttribute("class"), classes: [...root.classList],
         properties: Object.fromEntries([...root.style].map((name) => [name, [root.style.getPropertyValue(name), root.style.getPropertyPriority(name)]])),
         color: getComputedStyle(root).color, padding: getComputedStyle(root).padding,
       }))),

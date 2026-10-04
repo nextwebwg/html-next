@@ -108,6 +108,8 @@ interface RenderContext {
   usesProperties: boolean;
   usesDecorations: boolean;
   usesStyleDecorations: boolean;
+  usesInvocationClasses: boolean;
+  readonly initialClassName: string;
   usesDecorationAttachment: boolean;
   readonly rootDecorations?: SvelteConversionOptions["rootDecorations"];
   readonly decorationAttachmentName: string;
@@ -401,7 +403,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      if (controlledNames.has(attribute.name) || !component && (ownsClasses && attribute.name === "class" || ownsStyles && attribute.name === "style")) continue;
+      if (controlledNames.has(attribute.name) || (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
@@ -483,7 +485,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : component
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
-    if (authoredClass?.kind === "literal" && (component || !decoratesClasses)) {
+    if (authoredClass?.kind === "literal" && !decoratesClasses) {
       attributes.push(`class={[${quote(authoredClass.value)}, rest.class].filter(Boolean).join(" ")}`);
     }
     if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
@@ -506,8 +508,15 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
   }
   if (hasDecorations) {
-    if (component) attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
-    else {
+    if (component) {
+      if (decoratesClasses) {
+        context.usesInvocationClasses = true;
+        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
+        const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
+        attributes.push(`class={${context.initialClassName}(${base}, ${rules})}`);
+      }
+      attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
+    } else {
       context.usesDecorationAttachment = true;
       if (decoratesClasses) {
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
@@ -634,7 +643,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesDecorationAttachment: false, rootDecorations: options.rootDecorations, decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -734,7 +743,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
-    ...(hasProps || context.usesControls || context.usesSampledSlots || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || context.usesControls || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
@@ -789,6 +798,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "    const stop = observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); });",
       "    return () => { dispose?.(); stop(); };",
       "  };",
+      "}",
+    ] : []),
+    ...(context.usesInvocationClasses ? [
+      `function ${context.initialClassName}(base: string, decorations: readonly Decoration[]): string {`,
+      "  return untrack(() => classText(base, decorations));",
       "}",
     ] : []),
     ...(context.usesDecorationAttachment ? [

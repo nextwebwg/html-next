@@ -8,13 +8,15 @@ const SOURCE = `export interface Decoration {
 
 export function classText(base: string, decorations: readonly Decoration[]): string {
   const tokens = new Set(base.split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
+  let value = base;
   for (const decoration of decorations) {
     if (decoration.kind !== 'class') continue;
-    const value = decoration.read();
-    if (value === Symbol.for('html-next.invalid-result')) continue;
-    if (value) tokens.add(decoration.name); else tokens.delete(decoration.name);
+    const candidate = decoration.read();
+    if (candidate === Symbol.for('html-next.invalid-result') || Boolean(candidate) === tokens.has(decoration.name)) continue;
+    if (candidate) tokens.add(decoration.name); else tokens.delete(decoration.name);
+    value = [...tokens].join(' ');
   }
-  return [...tokens].join(' ');
+  return value;
 }
 `;
 
