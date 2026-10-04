@@ -35,7 +35,10 @@ normalized component plan through those facilities.
 Converted output has **no runtime dependency on HTML Next**: it imports the target framework,
 feature-specific generated helpers, and the component's own modules (its controller and preserved
 ordinary modules), never an HTML Next package or live runtime. The generated `$html` helper also
-imports `parse5` for deterministic server-side fragment parsing. HTML Next either runs a component
+imports `parse5` for deterministic server-side fragment parsing. Svelte output with style bindings
+uses `cssstyle` and the public `css-tree/parser` entry for server CSSOM operations. A generated
+helper package maps its server entry to a browser entry through the standard `browser` field;
+client bindings use the actual element's `classList` and `CSSStyleDeclaration` directly. HTML Next either runs a component
 itself or converts it; once converted, it is gone. Whatever the target cannot express directly is
 part of the generated output.
 

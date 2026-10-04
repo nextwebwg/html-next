@@ -312,6 +312,7 @@ describe("svelte source adapter", () => {
         <template component="ui-reserved" status="early" summary="Public slot names."><defs><prop name="children" type="string">Public children.</prop><prop name="slots" type="string">Public slots.</prop></defs><section><output $value="concat(children, '/', slots)"></output><slot name="title"></slot><slot></slot></section></template>
         <template component="ui-names" status="early" summary="Import collisions."><defs><state name="UiReserved" value="Ready"></state><state name="Map" value="1"></state><state name="String" value="Ready"></state><state name="Symbol" value="Kept"></state><state name="absent" type="number"></state><handler name="UiControlled"><set name="absent" expr:value="1"></set></handler></defs><section><ui-reserved from:children="UiReserved" slots="Public"><b slot="title">Title</b><span $value="UiReserved"></span></ui-reserved><ui-controlled $ref="controlled" on:click="UiControlled"></ui-controlled><output .title="absent" $value="concat(String, '/', Map, '/', Symbol)"></output></section></template>
         <template component="ui-bound" status="early" summary="Component binding."><defs><state name="form" type="object({ amount: number })" value="{ amount: 2 }"></state></defs><section><ui-controlled bind:amount="form.amount"></ui-controlled></section></template>
+        <template component="ui-decorated" status="early" summary="Delegated decoration."><defs><state name="active" type="boolean" value="false"></state><state name="color" type="string" value="red"></state></defs><ui-controlled class="decorated active" style="color: blue !important" class:active="active" style:color="color"></ui-controlled></template>
         <template component="ui-cycle" status="early" summary="Computed cycle."><defs>
           <computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><output $value="left"></output></template>
         <template component="ui-depth" status="early" summary="Recursive graph."><defs>
@@ -370,15 +371,17 @@ describe("svelte source adapter", () => {
     const entry = join(root, "src", "entry.ts");
     await writeFile(entry, `import { render } from "svelte/server";
       import { Button } from "@example/controls";
-      import { UiBadge } from "./controls.html";
-      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body;`);
+      import { UiBadge, UiDecorated } from "./controls.html";
+      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body + render(UiDecorated).body;`);
     await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
       build: { ssr: entry, outDir: "dist", minify: false } });
     const output = await import(pathToFileURL(join(root, "dist", "entry.js")).href) as { markup(): string };
     assert.match(output.markup(), /Save/);
     assert.match(output.markup(), /Badge/);
+    assert.match(output.markup(), /class="decorated"/);
+    assert.match(output.markup(), /style="color: red;"/);
     const bundle = await readFile(join(root, "dist", "entry.js"), "utf8");
-    assert.equal(/<ui-button|<ui-badge|UNUSED_COMPONENT_MARKER|parseComponent|html-next\/live/.test(bundle), false, "unused components and HTML Next runtime must be absent");
+    assert.equal(/<ui-button|<ui-badge|UNUSED_COMPONENT_MARKER|parse(?:BrowserComponent|Component(?:Nodes|Resource)?)\b|html-next\/live/.test(bundle), false, "unused components and HTML Next runtime must be absent");
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
       strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
     }, include: ["src"] }));

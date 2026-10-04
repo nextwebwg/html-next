@@ -22,6 +22,8 @@ import {
   svelteReactivityArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
+  svelteDecorationsArtifact,
+  svelteStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -286,6 +288,40 @@ function needsNestedDepthGuard(graph: ComponentGraph): boolean {
   return [...edges.keys()].some((tag) => visit(tag) > 33);
 }
 
+function decoratedRoots(graph: ComponentGraph): Map<string, { classes: boolean; styles: boolean }> {
+  const receivers = new Map<string, { classes: boolean; styles: boolean }>();
+  const pending: string[] = [];
+  const add = (tag: string, classes: boolean, styles: boolean): boolean => {
+    const previous = receivers.get(tag);
+    if ((!classes || previous?.classes) && (!styles || previous?.styles)) return false;
+    receivers.set(tag, { classes: classes || previous?.classes === true, styles: styles || previous?.styles === true });
+    pending.push(tag);
+    return true;
+  };
+  for (const node of graph.nodes.values()) {
+    const visit = (template: TemplateNode): void => {
+      if (template.kind === "slot") for (const child of template.fallback ?? []) visit(child);
+      else if (template.kind === "element") {
+        if (template.name.includes("-")) add(template.name,
+          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class"),
+          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "style"));
+        for (const child of template.children) visit(child);
+      }
+    };
+    visit(node.definition.template);
+  }
+  while (pending.length > 0) {
+    const tag = pending.pop()!;
+    const id = graph.tags.get(tag);
+    const root = id === undefined ? undefined : graph.nodes.get(id)?.definition.root;
+    if (root?.kind === "component") {
+      const receiver = receivers.get(tag)!;
+      add(root.tag, receiver.classes, receiver.styles);
+    }
+  }
+  return receivers;
+}
+
 export async function convertComponents(options: ConvertOptions): Promise<ConversionManifest> {
   if (options.entries.length === 0) throw new Error("Framework conversion requires at least one component entry.");
   const targetVersion = targetVersions[options.target];
@@ -328,6 +364,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     node.definition.contract.props] as const));
   const guardNestedDepth = needsNestedDepthGuard(graph);
+  const decorationReceivers = options.target === "svelte" ? decoratedRoots(graph) : undefined;
   const manifestComponents: ConversionManifest["components"][number][] = [];
   const planned: Array<{ artifact: GeneratedArtifact; kind: ConversionOutput["kind"]; source?: string }> = [];
   const neededHelpers = new Set<string>();
@@ -386,6 +423,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
       }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
         slotsByTag,
         guardNestedDepth,
+        rootDecorations: decorationReceivers?.get(tag),
+        decorationsSpecifier: relativeImport(componentPath, "svelte/decorations.ts").replace(/\.ts$/, ""),
+        styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
         hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
@@ -478,6 +518,12 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   if (options.target === "svelte" && neededHelpers.has("control")) {
     claim(svelteControlArtifact(), "helper");
   }
+  if (options.target === "svelte" && neededHelpers.has("decorations")) {
+    claim(svelteDecorationsArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("style")) {
+    for (const artifact of svelteStyleArtifacts()) claim(artifact, "helper");
+  }
   if (options.target === "svelte" && neededHelpers.has("connection")) {
     claim(svelteConnectionArtifact(), "helper");
   }
@@ -544,7 +590,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     targetVersion,
     graph: options.mode,
     package: Object.freeze({
-      dependencies: Object.freeze(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}),
+      dependencies: Object.freeze({ ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
       peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
     }),
     entries: Object.freeze(conversionEntries),

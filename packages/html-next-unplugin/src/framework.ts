@@ -132,10 +132,11 @@ class FrameworkCompiler {
       dependencies?: Record<string, string>; peerDependencies?: Record<string, string>;
     };
     const names = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})]);
-    // $html's generated helper imports parse5; the adapter supplies it without an extra app install.
+    // Feature-specific server helpers are supplied by the adapter without an extra app install.
     names.add("parse5");
+    if (this.options.target === "svelte") { names.add("cssstyle"); names.add("css-tree"); }
     for (const name of names) {
-      const target = name === "parse5" ? await packageDirectory(dirname(require.resolve("parse5")), name)
+      const target = ["parse5", "cssstyle", "css-tree"].includes(name) ? await packageDirectory(dirname(require.resolve(name)), name)
         : await packageDirectory(packageRoot, name);
       if (target === undefined) continue;
       const link = resolve(cache, "node_modules", name);

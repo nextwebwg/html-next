@@ -15,11 +15,15 @@ import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 // A NUL cannot appear in an authored HTML attribute or a declared public prop name.
 const SLOTS_PROP = "\0html-next:slots";
+const DECORATIONS_PROP = "\0html-next:decorations";
 
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
+  readonly rootDecorations?: { readonly classes: boolean; readonly styles: boolean } | undefined;
+  readonly decorationsSpecifier?: string;
+  readonly styleSpecifier?: string;
   readonly propsSpecifier?: string;
   readonly htmlSpecifier?: string;
   readonly eventsSpecifier?: string;
@@ -36,7 +40,7 @@ export interface SvelteConversionOutput {
   readonly component: string;
   readonly css: string;
   readonly usesHtml: boolean;
-  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection")[];
+  readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style")[];
 }
 
 function nativeControlBinding(tag: string, name: string): boolean {
@@ -102,8 +106,11 @@ interface RenderContext {
   usesAttributeBinding: boolean;
   usesComponentBindings: boolean;
   usesProperties: boolean;
-  usesComponentClasses: boolean;
-  readonly componentClassName: string;
+  usesDecorations: boolean;
+  usesStyleDecorations: boolean;
+  usesDecorationAttachment: boolean;
+  readonly rootDecorations?: SvelteConversionOptions["rootDecorations"];
+  readonly decorationAttachmentName: string;
   readonly propertyAttachmentName: string;
   usesControls: boolean;
   usesNestedBindings: boolean;
@@ -331,8 +338,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       slotBindings.push(`${quote(slot)}: ${snippet}`);
     }
   }
-  const componentClasses = component ? node.attributes.filter((entry) => entry.kind === "attribute" && entry.target === "class") : [];
-  if (componentClasses.length > 0) context.usesComponentClasses = true;
+  const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style"));
+  const ownsClasses = decorations.some((entry) => entry.kind === "attribute" && entry.target === "class");
+  const ownsStyles = decorations.some((entry) => entry.kind === "attribute" && entry.target === "style");
+  const decoratesClasses = ownsClasses || root && context.rootDecorations?.classes === true;
+  const decoratesStyles = ownsStyles || root && context.rootDecorations?.styles === true;
+  const hasDecorations = decoratesClasses || decoratesStyles;
+  const ownedRules = decorations.map((entry) => {
+    if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled decoration cannot be converted.");
+    const plan = entry.expressionPlan;
+    const guard = declaredReferenceGuard(plan, scope, context.definition);
+    const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : lowering.text(plan.ast, scope);
+    return `{ kind: ${quote(entry.target!)} as const, name: ${quote(entry.name)}, read: () => (${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}) }`;
+  });
+  if (root && context.rootDecorations !== undefined) ownedRules.push(`...((rest[${quote(DECORATIONS_PROP)}] as readonly Decoration[] | undefined) ?? [])`);
+  const rules = `[${ownedRules.join(", ")}]`;
+  if (hasDecorations) context.usesDecorations = true;
+  if (!component && decoratesStyles) context.usesStyleDecorations = true;
   const literals: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
     ? `slots={{ ${slotBindings.join(", ")} }}`
@@ -379,7 +401,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
-      if (controlledNames.has(attribute.name) || componentClasses.length > 0 && attribute.name === "class") continue;
+      if (controlledNames.has(attribute.name) || !component && (ownsClasses && attribute.name === "class" || ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
@@ -425,9 +447,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
-      else if (attribute.target === "class" && component) continue;
-      else if (attribute.target === "class") bindings.push(`class:${attribute.name}={${lowering.condition(attribute.expressionPlan.ast, scope)}}`);
-      else if (attribute.target === "style") bindings.push(`style:${attribute.name}={${lowering.text(attribute.expressionPlan.ast, scope)}}`);
+      else if (attribute.target === "class" || attribute.target === "style") continue;
       else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
       else bindings.push(`${component ? attribute.name : svgAttributeName(attribute.name)}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
@@ -463,10 +483,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : component
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
-    if (authoredClass?.kind === "literal" && componentClasses.length === 0) {
+    if (authoredClass?.kind === "literal" && (component || !decoratesClasses)) {
       attributes.push(`class={[${quote(authoredClass.value)}, rest.class].filter(Boolean).join(" ")}`);
     }
-    if (authoredStyle?.kind === "literal") {
+    if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
     }
     attributes.push(`data-component={[rest["data-component"], ${quote((scope as RootScope).tag)}].filter(Boolean).join(" ")}`);
@@ -485,16 +505,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       attributes.push(`${name}={${!bound ? `input${prop} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
     }
   }
-  if (componentClasses.length > 0) {
-    const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
-    const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
-    const values = componentClasses.map((entry) => {
-      if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled class binding cannot be converted.");
-      const expression = entry.expressionPlan.ast;
-      const condition = lowering.condition(expression, scope);
-      return `${quote(entry.name)}: ${mayProduceInvalidResult(expression, scope) ? retained(context, condition, "undefined as boolean | undefined") : condition}`;
-    }).join(", ");
-    attributes.push(`class={${context.componentClassName}(${base}, { ${values} })}`);
+  if (hasDecorations) {
+    if (component) attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
+    else {
+      context.usesDecorationAttachment = true;
+      if (decoratesClasses) {
+        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
+        const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
+        attributes.push(`class={typeof document === 'undefined' ? classText(${base}, ${rules}) : ${base}}`);
+      }
+      if (decoratesStyles) {
+        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "style");
+        const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.style" : ""}].filter(Boolean).join("; ")`;
+        const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.style == null || rest.style === false ? undefined : ${quote("")})` : "undefined";
+        attributes.push(`style={(typeof document === 'undefined' ? styleText(${base}, ${rules}) : ${base}) || ${empty}}`);
+      }
+      attributes.push(`{@attach ${context.decorationAttachmentName}(${rules})}`);
+    }
   }
   attributes.push(...bindings);
   if (!component && context.styleOwner !== undefined) attributes.push(`${SVELTE_OWNER_ATTRIBUTE}=${quote(context.styleOwner)}`);
@@ -555,7 +582,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "acceptsBindingDestination Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
@@ -607,7 +634,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesComponentClasses: false, componentClassName: freshIdentifier("htmlNextClasses"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesDecorationAttachment: false, rootDecorations: options.rootDecorations, decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -714,6 +741,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
+    ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
+    ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...(context.usesComponentBindings ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
@@ -731,7 +760,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",
@@ -762,11 +791,16 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  };",
       "}",
     ] : []),
-    ...(context.usesComponentClasses ? [
-      `function ${context.componentClassName}(base: string, values: Record<string, boolean | undefined>): string {`,
-      String.raw`  const tokens = new Set(base.split(/[ \t\r\n\f]+/).filter(Boolean));`,
-      "  for (const [name, enabled] of Object.entries(values)) { if (enabled === undefined) continue; if (enabled) tokens.add(name); else tokens.delete(name); }",
-      "  return [...tokens].join(' ');",
+    ...(context.usesDecorationAttachment ? [
+      `function ${context.decorationAttachmentName}(decorations: readonly Decoration[]) {`,
+      "  return (element: Element) => {",
+      "    for (const decoration of decorations) $effect(() => {",
+      "      const value = decoration.read();",
+      "      if (value === Symbol.for('html-next.invalid-result')) return;",
+      "      if (decoration.kind === 'class') element.classList.toggle(decoration.name, Boolean(value));",
+      "      else (element as HTMLElement).style.setProperty(decoration.name, value == null ? '' : String(value));",
+      "    });",
+      "  };",
       "}",
     ] : []),
     ...(context.usesScopedSlots ? [
@@ -945,6 +979,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),
+      ...(context.usesDecorations ? ["decorations" as const] : []),
+      ...(context.usesStyleDecorations ? ["style" as const] : []),
       ...(data.some((declaration) => declaration.source !== undefined) ? ["data" as const] : []),
       ...(usesController ? ["host" as const] : []),
       ...(usesController || data.some((declaration) => declaration.source !== undefined) ? ["connection" as const] : []),

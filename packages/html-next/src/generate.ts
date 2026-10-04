@@ -11,6 +11,7 @@ import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host
 import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
+import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
 import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
@@ -83,6 +84,14 @@ export function vuePropsArtifact(): GeneratedArtifact {
 /** Target-independent typed invocation rules, copied into React output only when props are used. */
 export function reactPropsArtifact(): GeneratedArtifact {
   return makeReactPropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteDecorationsArtifact(): GeneratedArtifact {
+  return makeSvelteDecorationsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteStyleArtifacts(): readonly GeneratedArtifact[] {
+  return makeSvelteStyleArtifacts(GENERATOR_VERSION);
 }
 
 export function svelteConnectionArtifact(): GeneratedArtifact {

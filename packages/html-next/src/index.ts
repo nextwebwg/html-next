@@ -24,6 +24,8 @@ export {
   svelteReactivityArtifact,
   svelteHostArtifact,
   svelteConnectionArtifact,
+  svelteDecorationsArtifact,
+  svelteStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,

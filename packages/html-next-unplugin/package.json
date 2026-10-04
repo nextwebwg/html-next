@@ -31,6 +31,8 @@
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",
     "@nextwebwg/html-next-converter": "workspace:*",
+    "css-tree": "catalog:",
+    "cssstyle": "catalog:",
     "parse5": "catalog:",
     "svelte2tsx": "0.7.61",
     "typescript": "5.9.3",
