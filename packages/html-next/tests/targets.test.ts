@@ -104,6 +104,29 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("renders inline row paths without allocating a Vue component for each text node", async () => {
+    let valueSource: string | undefined;
+    for (const inline of [false, true]) {
+      const definition = parseComponent(`<template component="x-row-text"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'Ada' }, { id: 2, label: 'Bea' }]"></state>
+        </defs><ul><li $each="row of rows"><span${inline ? "" : ' $value="row.label"'}>${inline ? '{$row.label}' : ""}</span></li></ul></template>`);
+      const source = generateVueComponent(definition);
+      if (inline) assert.equal(source, valueSource, "inline paths and $value must emit identical Vue code");
+      else valueSource = source;
+      const compiled = compileVue(source, "XRowText.vue");
+      const bundle = await build({ stdin: { contents: compiled, loader: "ts", resolveDir: packageRoot },
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+      const module = { exports: {} as { default: Component } };
+      new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+      const app = createSSRApp(module.exports.default);
+      let instances = 0;
+      app.mixin({ beforeCreate() { instances++; } });
+      const html = await renderToString(app);
+      assert.equal(instances, 1, `${inline ? "inline" : "$value"}: row text needs no component instance`);
+      assert.doesNotMatch(source, /RetainedInlineText|inlineTextSegment/);
+      assert.equal(new JSDOM(html).window.document.querySelector("ul")?.textContent, "AdaBea");
+    }
+  });
   it("shares formatter instances between generated Vue and React component instances", async () => {
     // Formatting appears only in the computed value, exercising late helper discovery too.
     const definition = parseComponent(`<template component="x-format-cache"><defs>
