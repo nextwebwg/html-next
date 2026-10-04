@@ -624,6 +624,17 @@ export class ReactiveScope implements Scope {
         if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
           trigger(objectSubscribers.get(target)?.get("length"));
         }
+        // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+        if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+          const length = (target as Value[]).length;
+          for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+            if (typeof property !== "string") continue;
+            const index = Number(property);
+            if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+              trigger(subscribers);
+            }
+          }
+        }
         return result;
       },
       deleteProperty: (target, key) => {

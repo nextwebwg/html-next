@@ -81,6 +81,20 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "truncated arrays invalidate deleted indexed reads and computed values",
+    source: `<template component="x-truncated-rows" status="early" summary="Array truncation."><defs>
+      <state name="rows" type="list(string)" value="['a', 'b', 'c']"></state><computed name="tail" from="rows[2]"></computed>
+      <handler name="truncate"><set name="rows.length" expr:value="1"></set></handler>
+      <handler name="recover"><set name="rows[2]" expr:value="'next'"></set></handler>
+      </defs><section><output class="direct" $value="rows[2]"></output><output class="computed" $value="tail"></output>
+      <button class="truncate" on:click="truncate">Truncate</button><button class="recover" on:click="recover">Recover</button></section></template><x-truncated-rows></x-truncated-rows>`,
+    expect: { probe: `return qa('output').map(e => e.textContent);`, result: ["c", "c"], after: [
+      { action: `document.querySelector('button.truncate').click();`, result: ["", ""] },
+      { action: `document.querySelector('button.recover').click();`, result: ["next", "next"] },
+      { action: `document.querySelector('button.truncate').click();`, result: ["", ""] },
+    ] },
+  },
+  {
     name: "untyped writable state serializes its current shape after scalar initialization",
     source: `<template component="x-changing-shape" status="early" summary="Writable unknown state."><defs>
       <state name="free" value="Seed"></state>

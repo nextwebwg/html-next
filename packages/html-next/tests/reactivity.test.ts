@@ -53,6 +53,33 @@ describe("reactive scope", () => {
     assert.equal(seen.length, 3);
   });
 
+  it("notifies deleted array indices when length shrinks without notifying retained indices", () => {
+    const scope = new ReactiveScope([["items", ["a", "b", "c"]]]);
+    const items = scope.get("items") as string[];
+    const deleted: unknown[] = [];
+    const retained: unknown[] = [];
+    const lengths: unknown[] = [];
+    createEffect(scope.scheduler, () => { deleted.push((scope.get("items") as string[])[2]); });
+    createEffect(scope.scheduler, () => { retained.push((scope.get("items") as string[])[0]); });
+    createEffect(scope.scheduler, () => { lengths.push((scope.get("items") as string[]).length); });
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined]);
+    assert.deepEqual(retained, ["a"]);
+    assert.deepEqual(lengths, [3, 1]);
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.equal(deleted.length, 2);
+    assert.equal(lengths.length, 2);
+
+    items[2] = "next";
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined, "next"]);
+    assert.deepEqual(lengths, [3, 1, 3]);
+  });
+
   it("does not notify consumers for Object.is-equal signal writes", () => {
     const scheduler = new ReactiveScope().scheduler;
     const object = {};
