@@ -8,7 +8,7 @@ completion criteria, measurements, and next evidence separate.
 **Current work.** Minimize the full-capability browser entry by composing Web Platform facilities
 and removing universally redundant runtime machinery.
 
-- Contract: [live browser distributable](https://nextwebwg.org/html-next/)
+- Contract: [live browser distributable](https://nextwebwg.org/declarative-components/)
 - Input boundary: any conforming component graph introduced during the document lifetime
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
 - Current result: 76,223 minified raw bytes and 25,854 gzip bytes
@@ -37,7 +37,7 @@ the incomplete hydration milestones below refer to those delivery products.
 **Tracked goal.** Compile a complete application or library graph to native DOM with one
 graph-scoped support plan.
 
-- Contract: [native application or library build](https://nextwebwg.org/html-next/)
+- Contract: [native application or library build](https://nextwebwg.org/declarative-components/)
 - Input boundary: application entries or a concrete public library entry set
 - Primary metrics: whole application output; full library output; representative consumer subsets
 - Attribution metrics: isolated capability fixtures, reported separately from product output
