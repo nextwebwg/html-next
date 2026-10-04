@@ -81,6 +81,59 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "dynamic implicit option values normalize ASCII whitespace and preserve ordinary letters",
+    source: `<template component="x-dynamic-option" status="early" summary="Dynamic option text."><defs>
+      <state name="choice" type="string" value="First next word"></state><prop name="label" type="string" default="  First&nbsp;next\tword\n  ">Label.</prop>
+      </defs><section><select bind:value="choice"><option>Other</option><option $value="label"></option></select>
+      <select .value="choice"><option>Other</option><option .textContent="label"></option></select></section></template><x-dynamic-option></x-dynamic-option>`,
+    expect: { probe: `return qa('select').map(e => [e.value, e.selectedIndex, Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
+      ["First next word", 1, [["Other", "Other", null], ["First next word", "  First next\tword\n  ", null]]],
+      ["First next word", 1, [["Other", "Other", null], ["First next word", "  First next\tword\n  ", null]]],
+    ] },
+  },
+  {
+    name: "single select SSR chooses the first duplicate native option value",
+    source: `<template component="x-duplicate-options" status="early" summary="Duplicate option values."><defs><state name="choice" type="string" value="Same"></state></defs>
+      <section><select bind:value="choice"><option value="Same">First</option><option>Same</option><option value="Same">Last</option></select></section></template><x-duplicate-options></x-duplicate-options>`,
+    expect: { probe: `return [q('select').value, q('select').selectedIndex, qa('option').map(e => e.selected)];`, result: ["Same", 0, [true, false, false]] },
+  },
+  {
+    name: "implicit option whitespace preserves nonbreaking spaces across multiple and inherited bindings",
+    dependencies: { "select.html": `<template component="x-text-select" status="early" summary="Root option text."><select><option>First</option><option>  A   B  </option></select></template>` },
+    source: `<template component="x-option-modes" status="early" summary="Option modes."><defs>
+      <state name="choice" type="string" value="A B"></state><state name="choices" type="list(string)" value="['A B', 'A B']"></state>
+      </defs><section><x-text-select bind:value="choice"></x-text-select>
+      <select multiple bind:value="choices"><option>First</option><option> \tA\n  B </option><option> A&nbsp;B </option></select>
+      <select .value="choice"><option>First</option><option>  A   B  </option></select></section></template><x-option-modes></x-option-modes>`,
+    expect: { probe: `return qa('select').map(e => [e.value, Array.from(e.selectedOptions, o => o.value), Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
+      ["A B", ["A B"], [["First", "First", null], ["A B", "  A   B  ", null]]],
+      ["A B", ["A B", "A B"], [["First", "First", null], ["A B", " \tA\n  B ", null], ["A B", " A B ", null]]],
+      ["A B", ["A B"], [["First", "First", null], ["A B", "  A   B  ", null]]],
+    ] },
+  },
+  {
+    name: "implicit option values collapse native whitespace without changing authored text",
+    source: `<template component="x-option-text" status="early" summary="Option text."><defs>
+      <state name="choice" type="string" value="A B"></state><state name="label" type="string" value="  A   B  "></state>
+      <handler name="change"><set name="choice" value="First"></set></handler>
+      </defs><section><select class="static" bind:value="choice"><option>First</option><option>  A   B  </option><option> C   D </option></select>
+      <select class="dynamic" bind:value="choice"><option>First</option><option $value="label"></option></select>
+      <select class="entity" bind:value="choice"><option>First</option><option> A&#32;B </option><option> C&#32;D </option></select>
+      <select class="omitted" bind:value="choice"><option>First</option><option from:value="null" $value="label"></option></select>
+      <button on:click="change">Change</button></section></template><x-option-text></x-option-text>`,
+    expect: { probe: `return qa('select').map(e => [e.value, e.selectedIndex, Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
+      ["A B", 1, [["First", "First", null], ["A B", "  A   B  ", null], ["C D", " C   D ", null]]],
+      ["A B", 1, [["First", "First", null], ["A B", "  A   B  ", null]]],
+      ["A B", 1, [["First", "First", null], ["A B", " A B ", null], ["C D", " C D ", null]]],
+      ["A B", 1, [["First", "First", null], ["A B", "  A   B  ", null]]],
+    ], after: [{ action: `document.querySelector('button').click();`, result: [
+      ["First", 0, [["First", "First", null], ["A B", "  A   B  ", null], ["C D", " C   D ", null]]],
+      ["First", 0, [["First", "First", null], ["A B", "  A   B  ", null]]],
+      ["First", 0, [["First", "First", null], ["A B", " A B ", null], ["C D", " C D ", null]]],
+      ["First", 0, [["First", "First", null], ["A B", "  A   B  ", null]]],
+    ] }] },
+  },
+  {
     name: "truncated arrays invalidate deleted indexed reads and computed values",
     source: `<template component="x-truncated-rows" status="early" summary="Array truncation."><defs>
       <state name="rows" type="list(string)" value="['a', 'b', 'c']"></state><computed name="tail" from="rows[2]"></computed>

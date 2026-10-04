@@ -140,6 +140,8 @@ interface RenderContext {
   usesControls: boolean;
   usesNestedBindings: boolean;
   boundSelect: boolean | string;
+  selectSelection?: string | undefined;
+  implicitOptionValueName?: string;
   readonly controlAttachmentName: string;
   readonly bindingHelperName: string;
   readonly bindingValueName: string;
@@ -182,6 +184,19 @@ function selectMultiple(node: ElementNode, root: boolean, scope: Scope, lowering
   const read = conformingRead(binding.expressionPlan!, scope, context, source);
   const candidate = context.freshIdentifier("htmlNextMultiple");
   return `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${fallback} : ${binding.kind === "property" ? `Boolean(${candidate})` : `${candidate} != null && ${candidate} !== false`}; })()`;
+}
+
+/** Public option text expressions can supply exact implicit SSR values. */
+function canMatchOptionText(node: TemplateNode): boolean {
+  if (node.kind === "text") return true;
+  if (node.kind === "slot" || node.name.includes("-")) return false;
+  if (node.name === "option") {
+    const content = node.attributes.find((attribute) => attribute.kind === "directive");
+    if (content !== undefined) return content.name === "value";
+    if (node.attributes.some((attribute) => attribute.kind === "property" && attribute.name === "textContent")) return true;
+    return node.children.every((child) => child.kind === "text");
+  }
+  return node.children.every(canMatchOptionText);
 }
 
 function optionAttribute(value: string, context: RenderContext): string {
@@ -266,8 +281,7 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
   context: RenderContext): string {
   if (node.kind === "text") {
-    // Svelte's server select matching relies on its static option-text normalization.
-    return context.boundSelect ? escapeHtml(node.value) : `{${quote(node.value)}}`;
+    return context.boundSelect && context.selectSelection === undefined ? escapeHtml(node.value) : `{${quote(node.value)}}`;
   }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
@@ -366,6 +380,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
 
   const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
   let content: string | undefined;
+  let optionTextValue: string | undefined;
+  let optionAttributeValue: string | undefined;
+  let optionPropertyValue: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
     const plan = contentDirective.expressionPlan;
     const guard = declaredReadGuard(plan, scope, context);
@@ -373,6 +390,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const value = guard === undefined && !mayProduceInvalidResult(plan.ast, scope) ? source
       : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
     const optionText = node.name === "option" ? context.freshIdentifier("htmlNextOptionText") : undefined;
+    if (node.name === "option" && contentDirective.name !== "html") optionTextValue = value;
     content = contentDirective.name === "html"
       ? `{@html htmlSite${context.htmlSites++}(${value})}`
       : node.name === "option" ? `{(() => { const ${optionText}: unknown = ${value}; return ${optionText} == null ? "" : String(${optionText}); })()}` : `{${value}}`;
@@ -462,6 +480,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
   const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
+  let selectValue: string | undefined;
+  let selectSelectionName: string | undefined;
+  const manualSelection = node.name === "select" && node.children.every(canMatchOptionText);
   const controlBinding = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" | "property" }>): void => {
     context.usesControls = true;
     const read = conformingRead(attribute.expressionPlan!, scope, context, lowering.value(attribute.expressionPlan!.ast, scope));
@@ -489,7 +510,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : `{ value: ${inheritsBinding && node.name === "input" ? `String(${context.rootBindingAttributeName}("value") ?? ${defaultValue})` : defaultValue} }`;
     const candidate = context.freshIdentifier("htmlNextControlValue");
     const serialized = read.invalid ? `(() => { const ${candidate}: unknown = ${value}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).${attribute.name === "checked" ? "checked" : "value"} : ${serialize(candidate)}; })()` : serialize(value);
-    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${serialized} } : {})}`);
+    if (node.name === "select" && attribute.name === "value") {
+      selectValue = serialized;
+      if (manualSelection) selectSelectionName = context.freshIdentifier("htmlNextSelectSelection");
+    }
+    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${selectSelectionName === undefined ? serialized : `Symbol.for('html-next.select-selection')`} } : {})}`);
     else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
     if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
     let update = "undefined";
@@ -506,7 +531,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
     return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
-  if (node.name === "option" && context.boundSelect) {
+  if (node.name === "option" && context.boundSelect && context.selectSelection === undefined) {
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
     bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
   }
@@ -577,6 +602,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const read = conformingRead(attribute.expressionPlan, scope, context, lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name));
           const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
           const value = read.invalid ? retained(context, read.source, literal?.kind === "literal" ? quote(literal.value) : "undefined as any") : read.source;
+          if (node.name === "option" && name === "value") optionAttributeValue = value;
           // Svelte optimizes value= into a property write even on <output>. Keep the
           // server attribute declarative, and use only setAttribute/removeAttribute on the client.
           bindings.push(`{...(typeof document === 'undefined' ? ${node.name === "option" && name === "value" ? optionAttribute(value, context) : `{ ${quote(name)}: ${value} }`} : {})}`);
@@ -598,6 +624,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source})}`);
           if (root) context.rootAttributeBindings.add("value");
         } else if (node.name === "option" && attribute.name === "value") {
+          optionAttributeValue = value;
           // An option's DOM value is always a string. Omitted value attributes use option text.
           context.usesAttributeBinding = true;
           bindings.push(`{...(typeof document === 'undefined' ? ${optionAttribute(value, context)} : {})}`);
@@ -614,6 +641,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         if (attribute.name === "textContent") {
           const value = read.invalid ? retained(context, source, "undefined as unknown") : source;
           content = `{${value} == null ? "" : String(${value})}`;
+          if (node.name === "option") optionTextValue = value;
         } else {
           context.usesProperties = true;
           bindings.push(`{@attach ${context.propertyAttachmentName}(${quote(attribute.name)}, () => ${source})}`);
@@ -632,6 +660,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
               const initial = `(() => { const ${initialAttribute}: unknown = ${initialSource}; const ${initialResult} = ${lowering.attribute({ kind: "id", name: initialAttribute }, unknownValueScope(initialAttribute), name)}; return ${boolean ? `${initialResult} !== undefined` : initialResult}; })()`;
               rendered = retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, initial);
             }
+            if (node.name === "option" && attribute.name === "value") optionPropertyValue = rendered;
             bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
           }
         }
@@ -659,8 +688,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const multiple = node.name === "select" ? selectMultiple(node, root, scope, lowering, context) : "false";
         const candidateScope = unknownValueScope(candidate);
         const serialized = name === "checked" ? lowering.condition({ kind: "id", name: candidate }, candidateScope) : node.name === "select" ? `((${multiple}) ? (Array.isArray(${candidate}) ? ${candidate}.map(String) : []) : (${candidate} == null ? "" : String(${candidate})))` : `(${candidate} == null ? "" : String(${candidate}))`;
+        if (node.name === "select" && name === "value") {
+          selectValue = `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? undefined : ${serialized}; })()`;
+          if (manualSelection) selectSelectionName = context.freshIdentifier("htmlNextSelectSelection");
+        }
         if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
-        else bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
+        else bindings.push(selectSelectionName === undefined
+          ? `{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`
+          : `{...(typeof document === 'undefined' && ${selectSelectionName} !== undefined ? { value: Symbol.for('html-next.select-selection') } : {})}`);
         if (node.name !== "input") {
           const inherited = context.freshIdentifier("htmlNextInheritedAttribute");
           bindings.push(`{@attach ${read} === undefined ? undefined : (() => { const ${inherited} = ${context.rootBindingAttributeName}(${quote(name)}) ?? ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${context.bindingHelperName}(${quote(name)}, () => ${inherited}); })()}`);
@@ -678,8 +713,29 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
     }
   }
+  let selectedOption: string | undefined;
+  if (node.name === "option" && context.selectSelection !== undefined) {
+    const literalText = node.children.map((child) => child.kind === "text" ? child.value : "").join("");
+    const literal = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "value");
+    let normalized = quote(literalText.replace(/[\t\n\f\r ]+/g, " ").replace(/^ | $/g, ""));
+    if (optionTextValue !== undefined && optionPropertyValue === undefined && (optionAttributeValue !== undefined || literal === undefined)) {
+      context.implicitOptionValueName ??= context.freshIdentifier("htmlNextOptionValue");
+      normalized = `${context.implicitOptionValueName}(${optionTextValue})`;
+    }
+    let value = optionPropertyValue ?? (literal?.kind === "literal" ? quote(literal.value) : normalized);
+    if (optionAttributeValue !== undefined && optionPropertyValue === undefined) {
+      const candidate = context.freshIdentifier("htmlNextOptionValue");
+      value = `(() => { const ${candidate}: unknown = ${optionAttributeValue}; return ${candidate} == null ? ${normalized} : String(${candidate}); })()`;
+    }
+    const selected = node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "selected");
+    // Mark defaults only where SSR selection differs from authored selected=.
+    const yes = selected ? "{ selected: true }" : '{ selected: true, "data-html-next-option-default": "false" }';
+    const no = selected ? '{ "data-html-next-option-default": "true" }' : "{}";
+    // The callback keeps SSR-only reads out of per-option client memoization.
+    selectedOption = `{...Reflect.apply(() => typeof document === 'undefined' && (${context.boundSelect}) ? (${context.selectSelection}?.(${value}) ? ${yes} : ${no}) : {}, undefined, [])}`;
+  }
   if (selectedBindings.length > 0) bindings.push(`{...{ ${quote(BINDING_INPUTS_PROP)}: { ${selectedBindings.join(", ")} } }}`);
-  const attributes = [...literals];
+  const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
     if (component) attributes.push(`{...{ ${quote(ROOT_OWNER_PROP)}: true }}`);
@@ -761,10 +817,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const previousBoundSelect = context.boundSelect;
+  const previousSelectSelection = context.selectSelection;
   if (node.name === "select") context.boundSelect = controlledNames.has("value") ? true
     : root && context.rootBindings?.includes("value") ? `${context.nativeBindingReadName}("value") !== undefined` : false;
+  if (node.name === "select") context.selectSelection = selectSelectionName;
   const children = content ?? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   context.boundSelect = previousBoundSelect;
+  context.selectSelection = previousSelectSelection;
   let markup = `${open}${children}</${name}>`;
   if (node.name === "select" && !controlledNames.has("value")) {
     // Public dynamic elements keep SSR value= as an ordinary attribute. A real
@@ -773,6 +832,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const ordinary = `<svelte:element this={"select"}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>${children}</svelte:element>`;
     markup = bridge ? `{#if ${context.nativeBindingReadName}("value") !== undefined}${markup}{:else}${ordinary}{/if}` : ordinary;
   }
+  if (selectSelectionName !== undefined) markup = `{#if true}{@const ${selectSelectionName} = typeof document === 'undefined' ? ((value: unknown) => { if (value === undefined) return undefined; const many = Array.isArray(value); let matched = false; return (option: string) => many ? (value as unknown[]).includes(option) : !matched && (matched = value === option); })(${selectValue}) : undefined}${markup}{/if}`;
   return snippetDeclarations === "" ? markup : `{#if true}${snippetDeclarations}${markup}{/if}`;
 }
 
@@ -1075,6 +1135,13 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  else if (hadProto) element.removeAttribute('__proto__');",
     "  hadProto = proto;",
     "});",
+    ...(context.implicitOptionValueName === undefined ? [] : [
+      `function ${context.implicitOptionValueName}(value: unknown): string {`,
+      "  const text = String(value ?? '');",
+      // Native option values collapse only ASCII whitespace; NBSP is significant.
+      "  return /^[\\t\\n\\f\\r ]|[\\t\\n\\f\\r ]$|[\\t\\n\\f\\r]| {2}/.test(text) ? text.replace(/[\\t\\n\\f\\r ]+/g, ' ').replace(/^ | $/g, '') : text;",
+      "}",
+    ]),
     ...(context.usesControls ? [
       `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, options: { nativeProperty?: boolean; observeOptions?: boolean } = {}) {`,
       "  const { nativeProperty = false, observeOptions = true } = options;",
