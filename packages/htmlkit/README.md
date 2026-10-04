@@ -222,10 +222,10 @@ styles, metadata, and the parsed component graph; browser delivery is added by d
 From this monorepo, after building packages:
 
 ```sh
-corepack pnpm --filter @nextwebwg/htmlkit exec htmlkit build examples/basic
-corepack pnpm --filter @nextwebwg/htmlkit exec htmlkit preview examples/basic
+corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js build examples/basic
+corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js preview examples/basic
 corepack pnpm --filter @nextwebwg/htmlkit build:docs-proof
-corepack pnpm --filter @nextwebwg/htmlkit exec htmlkit preview ../../.context/htmlkit-docs-proof
+corepack pnpm --filter @nextwebwg/htmlkit exec node dist/cli.js preview ../../.context/htmlkit-docs-proof
 ```
 
 The basic application exercises routes, loaders, state, and controllers without documentation
