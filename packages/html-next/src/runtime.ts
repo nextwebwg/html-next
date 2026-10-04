@@ -2577,7 +2577,9 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   instance.rootElement.set(element);
   // A delegated root may already have followers before its first native root is installed.
   if (previous !== element) {
-    for (const owner of [instance, ...instance.delegates]) {
+    // Inner bindings apply before the outer invocation's bindings on a shared root.
+    for (let index = instance.delegates.length; index >= 0; index -= 1) {
+      const owner = index === 0 ? instance : instance.delegates[index - 1]!;
       for (const follow of owner.followers) follow(element);
     }
   }
@@ -2723,10 +2725,14 @@ function commitRuntimeInvocations(
       // This component delegates its root to a component that has not lowered yet. Claim the
       // element so discovery does not lower this component onto it a second time, but install
       // nothing: reflection, public methods, and the host belong on the root that survives.
-      runtimeInstances.set(host, invocation.instance);
+      // An earlier rebind may already have carried an outer owner onto this intermediate root.
+      const owner = runtimeInstances.get(host) ?? invocation.instance;
+      runtimeInstances.set(host, owner);
       whenLowered(host, (finalRoot) => {
-        if (runtimeInstances.get(host) === invocation.instance) runtimeInstances.delete(host);
+        if (runtimeInstances.get(host) === owner) runtimeInstances.delete(host);
+        if (owner !== invocation.instance) runtimeInstances.set(finalRoot, owner);
         adoptComponentRoot(invocation.instance, finalRoot);
+        if (owner !== invocation.instance) attachRoot(owner, finalRoot);
       });
     } else {
       adoptComponentRoot(invocation.instance, host);

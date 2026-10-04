@@ -21,7 +21,7 @@ async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
     behavior: await page.locator("#case").evaluate((element) =>
-      [...element.querySelectorAll<HTMLElement>("article, button, i")].map((root) => ({
+      [...element.querySelectorAll<HTMLElement>("article, button, a, i")].map((root) => ({
         tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"), components: root.getAttribute("data-component"), classes: [...root.classList],
         properties: Object.fromEntries([...root.style].map((name) => [name, [root.style.getPropertyValue(name), root.style.getPropertyPriority(name)]])),
         color: getComputedStyle(root).color, padding: getComputedStyle(root).padding,
@@ -106,8 +106,9 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
               ["parent", "middle"].every((name) => Object.hasOwn((window as unknown as { styleHosts?: object }).styleHosts ?? {}, name)))));
-            const compare = async () => {
+            const compare = async (expectedTag: "button" | "a") => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
+              assert.equal(native.behavior[0]!.tag, expectedTag);
               assert.deepEqual(converted.behavior, native.behavior);
               const owners = await Promise.all(pages.map((page) => page.evaluate(() =>
                 Object.keys((window as unknown as { styleHosts: object }).styleHosts).sort())));
@@ -115,16 +116,21 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               const modules = await Promise.all(pages.map((page) => page.evaluate(() =>
                 [...(window as unknown as { styleModules: string[] }).styleModules].sort())));
               assert.deepEqual(modules, owners, "delegated controller modules must not execute independently");
+              const refs = await Promise.all(pages.map((page) => page.evaluate(() => {
+                const ref = (window as unknown as { styleHosts: { parent: { refs: { shared: Element } } } }).styleHosts.parent.refs.shared;
+                return { tag: ref.localName, connected: ref.isConnected, actualRoot: ref === document.querySelector("#case [data-leaf]") };
+              })));
+              assert.deepEqual(refs, Array.from({ length: 2 }, () => ({ tag: expectedTag, connected: true, actualRoot: true })));
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte decoration pixels differ", live);
             };
-            await compare();
+            await compare("button");
             const methods = await Promise.all(pages.map((page) => page.locator("#case button").evaluate(async (element) => {
-              const root = element as unknown as Element & { outer(): Promise<string>; inner?: unknown; };
-              return { outer: await root.outer(), inner: typeof root.inner };
+              const root = element as unknown as Element & { outer(): Promise<string>; inner?: unknown; innerNoController?: unknown; };
+              return { outer: await root.outer(), inner: typeof root.inner, innerNoController: typeof root.innerNoController };
             })));
-            assert.deepEqual(methods, Array.from({ length: 2 }, () => ({ outer: "button", inner: "undefined" })));
-            await Promise.all(pages.map((page) => page.locator("#case button").click()));
-            await compare();
+            assert.deepEqual(methods, Array.from({ length: 2 }, () => ({ outer: "button", inner: "undefined", innerNoController: "undefined" })));
+            await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").click()));
+            await compare("a");
             for (const [owner, name, value] of [
               ["parent", "color", "orange"], ["middle", "color", "blue"],
               ["middle", "active", false], ["parent", "active", true],
@@ -134,8 +140,13 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 const globals = window as unknown as { styleHosts: Record<string, { state: Record<string, unknown> }> };
                 globals.styleHosts[owner]!.state[name] = value;
               }, { owner, name, value })));
-              await compare();
+              await compare("a");
             }
+            await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").click()));
+            await compare("button");
+            const replacedMethods = await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").evaluate(async (element) =>
+              (element as unknown as { outer(): Promise<string> }).outer())));
+            assert.deepEqual(replacedMethods, ["button", "button"]);
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);
           } catch (error) {
