@@ -135,7 +135,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 const read = (element: Element) => ({ text: element.textContent, value: element.getAttribute("value"), prototype: element.getAttribute("__proto__"), constructor: element.getAttribute("constructor") });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read), `SSR ${id} differs`);
               }
-              for (const id of ["untyped-number", "untyped-flag", "untyped-raw-flag", "radio-first", "radio-second", "untyped-file"]) {
+              for (const id of ["untyped-number", "untyped-flag", "untyped-raw-flag", "raw-binding-flag", "raw-property-flag", "radio-first", "radio-second", "untyped-file"]) {
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));
               }

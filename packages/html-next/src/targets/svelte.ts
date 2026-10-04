@@ -435,7 +435,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const value = read.source;
     const nativeProperty = attribute.kind === "property";
     const multiple = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
-    const serialize = (source: string): string => attribute.name === "checked" ? `Boolean(${source})`
+    const serialize = (source: string): string => attribute.name === "checked" ? nativeProperty ? `Boolean(${source})` : lowering.truthiness(source)
       : node.name === "select" && multiple && !nativeProperty ? `(Array.isArray(${source}) ? ${source}.map(String) : [])`
       : nativeProperty && node.name === "select" ? `String(${source})` : `(${source} == null ? "" : String(${source}))`;
     const literalValue = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "value");

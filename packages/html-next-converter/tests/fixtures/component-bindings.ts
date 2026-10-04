@@ -52,6 +52,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-untyped-text id="untyped-array" bind:value="choices"></x-untyped-text>
   <x-untyped-flag id="untyped-flag" bind:checked="form.checked"></x-untyped-flag>
   <input id="raw-property-flag" type="checkbox" .checked="rawChecked.value">
+  <input id="raw-binding-flag" type="checkbox" bind:checked="rawChecked.value">
   <x-untyped-flag id="untyped-raw-flag" bind:checked="rawChecked.value"></x-untyped-flag>
   <x-untyped-radio id="radio-first" bind:checked="radios.first"></x-untyped-radio>
   <x-untyped-radio id="radio-second" bind:checked="radios.second"></x-untyped-radio>
