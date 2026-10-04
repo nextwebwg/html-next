@@ -49,36 +49,15 @@ Both modes write `html-next.conversion.json` with the inputs, artifacts, target 
 
 ## Package the results
 
-[Ship for Vue and React](/html-next/ship-frameworks) shows a complete library build: convert both targets automatically, compile their JavaScript and types, publish their CSS, and expose native, Vue, and React entries from one package.
+[Ship for Vue and React](/html-next/ship-frameworks) shows a complete library build: convert both targets automatically, compile their JavaScript and types, publish their CSS, and expose Vue and React entries from one package.
 
 ## Prefer conversion during the app build?
 
 Use the [Usage guide](/html-next/usage). It converts local imports and installed source libraries on demand and prepares their types.
 
-## Publish source for application-side conversion {#source-libraries}
+## Publish HTML instead {#source-libraries}
 
-A source library lets consuming Vue and React apps convert your HTML during their own builds. They use the [HTML Next Vite adapter](/html-next/usage/vue) rather than prebuilt framework entries. Native users can load the published HTML resources with the [browser runtime](/html-next/usage#browser-runtime).
-
-Install `@nextwebwg/html-next` as a development dependency, then assemble the source package:
-
-```js title="build-source-library.mjs"
-import { glob, readFile } from "node:fs/promises";
-import { assembleComponentPackage } from "@nextwebwg/html-next";
-
-const metadata = JSON.parse(await readFile("package.json", "utf8"));
-const sources = await Array.fromAsync(glob("components/**/*.html"));
-await assembleComponentPackage({
-  name: metadata.name,
-  version: metadata.version,
-  outDirectory: "package",
-  sourceOnly: true,
-  components: sources.map((source) => ({ source })),
-});
-```
-
-Run `node build-source-library.mjs`. The `package` directory contains your HTML, linked controller modules, and a source entry exposed through the `html-next` package-export condition. The glob includes all HTML definitions under your component folder, so linked definitions are packaged together. Set your license and package metadata, declare controllers' external dependencies, and pack from that directory to test the result before publishing.
-
-In an app configured with the Vue or React adapter, consumers import the library's named component exports from your package name. The adapter finds the published source and converts it for that app. It also generates the framework declarations, as described in [Usage](/html-next/usage).
+For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, or React. You do not need a library build script.
 
 ## Diagnostics
 

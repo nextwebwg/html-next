@@ -17,7 +17,6 @@ Start with a Vite project and save the [component you built](/html-next/quick-st
 ### Install
 
 ```bash
-npm install @nextwebwg/html-next
 npm install --save-dev @nextwebwg/html-next-unplugin
 ```
 
@@ -54,6 +53,27 @@ document.getElementById("app").append(createXCounter());
 ```
 
 Run your project's usual `npm run dev` command. Click the counter and Reset. Vite builds the HTML definition into JavaScript that creates native DOM elements; a production build does not parse component definitions in the browser.
+
+## Use a library {#use-a-library}
+
+Install the library and the Vite plugin:
+
+```bash
+npm install your-library
+npm install --save-dev @nextwebwg/html-next-unplugin
+```
+
+Add `htmlNext()` to your Vite plugins, using the same import shown above. Installed libraries are discovered automatically; you do not need to list their HTML files in `entries`.
+
+Import the factory named in the library's README:
+
+```js
+import { createUiButton } from "your-library";
+
+document.getElementById("app").append(createUiButton());
+```
+
+Here `your-library` and `createUiButton` are examples; use the package and component names your library documents.
 
 ## Use it without a build step {#browser-runtime}
 

@@ -13,6 +13,8 @@ import {
   supportModule,
 } from "../src/index.js";
 
+import { installSourcePackage } from "./source-package.js";
+
 const temporary: string[] = [];
 
 class TestElement {
@@ -61,6 +63,31 @@ afterEach(async () => {
 });
 
 describe("HTML Next unplugin", () => {
+  it("consumes a packed component folder with native factories and no configured entries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-native-package-"));
+    temporary.push(root);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "consumer", type: "module", dependencies: { "@example/controls": "1.0.0" } }));
+    await installSourcePackage(root, {
+      "components/button.html": '<template component="ui-button" status="early" summary="Button."><button>Save</button><style>:host { color: rebeccapurple; }</style></template>',
+      "components/nested/card.html": '<template component="ui-card" status="early" summary="Card."><section>Nested card</section></template>',
+      "components/unused.html": '<template component="ui-unused" status="early" summary="Unused."><aside>UNUSED_COMPONENT_MARKER</aside></template>',
+    });
+    await writeFile(join(root, "main.js"), `export { createUiButton } from "@example/controls";
+      export { createUiCard } from "@example/controls/nested";`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite()],
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
+      build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } } });
+    const output = await readFile(join(root, "dist", "app.js"), "utf8");
+    assert.match(output, /createUiButton/);
+    assert.match(output, /createUiCard/);
+    assert.doesNotMatch(output, /UNUSED_COMPONENT_MARKER|parse5|source-parser|browser-source/);
+    assertClosedOverEntries(output);
+    const css = await readFile(join(root, "dist", "components.css"), "utf8");
+    assert.match(css, /data-component/);
+    assert.match(css, /rebeccapurple/);
+    assert.doesNotMatch(css, /:host/);
+  });
+
   it("builds a closed component graph with one shared support import and an inventory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-"));
     temporary.push(root);
