@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "paths": {
+      "@nextwebwg/html-next": [
+        "../html-next/src/index.ts"
+      ],
+      "@nextwebwg/html-next/node-loader": [
+        "../html-next/src/node-loader.ts"
+      ],
+      "@nextwebwg/html-next/server": [
+        "../html-next/src/server.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
+}

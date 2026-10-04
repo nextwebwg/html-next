@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.27
+
+### Added
+
+- Public `@nextwebwg/htmlkit` application platform with file and registered routes, static generation, Node loaders, development and preview commands, and HTML Next browser adoption.
+- Default and named layouts in `app/layouts`, page layout overrides, and directory layout defaults using ordinary named slots.
+- Page entry selection with `htmlkit:page` metadata and application-wide unique page names, independent of route URLs and browser bundle locations.
+- Declarative title, meta, and link metadata with loader-prop bindings and page overrides. Regular HTML Next resource loaders accept and ignore inert metadata without changing the host document.
+- A documentation consumer that exercises routing, Markdown content, generated component reference data, search, themes, and interactive examples; a concrete design for future request-time rendering.
+
+### Fixed
+
+- Components sharing a source file retain each component's stylesheet in HTMLKit browser builds.
+
 ## 1.0.0-alpha.26
 
 ### Fixed

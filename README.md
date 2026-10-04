@@ -9,8 +9,9 @@ are coming soon.
 [Ship a library](https://nextwebwg.org/html-next/ship)
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it.
-All three packages share one version and publish together. Shared policy and verification live at the
+`@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
+converter and unplugin adapt it to other build workflows.
+All four packages share one version and publish together. Shared policy and verification live at the
 repository root.
 
 | Package | Role | Current scope |
@@ -18,6 +19,7 @@ repository root.
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
+| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and
@@ -163,6 +165,15 @@ import-map entry. Relative HTML and controller edges must stay inside their root
 parsed as inert data and cannot add import maps, scripts, base URLs, or policy metadata.
 Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern their
 module graph, but ESM is not a sandbox.
+
+Component resources may also contain titles, non-policy-changing metadata, and ordinary metadata
+links outside their component carriers. The Node and browser graph loaders accept and ignore these
+nodes: they do not change the consuming document's head, evaluate metadata bindings, or fetch linked
+stylesheets and other assets. Application tooling may interpret them separately. This allowance
+does not admit arbitrary resource-level nodes: `<style>`, every `<script>` type, `<base>`,
+`http-equiv` metadata, HTML Imports, body elements, plain non-component templates, and
+non-whitespace text remain rejected, as do executable event-handler attributes. Scoped `<style>`
+inside a component carrier and its declared controller module keep their existing behavior.
 
 The runnable [live graph example](./packages/html-next/examples/poc/README.md) uses this entry.
 
