@@ -946,6 +946,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
     return `[${quote(name)}]: ${context.initialBindingReadName}(${quote(name)}, (${candidate}: unknown) => ${candidate} === Symbol.for('html-next.invalid-result') ? undefined : ${serialized})`;
   });
+  const dataSources = data.map((declaration) => {
+    if (declaration.source === undefined) return `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`;
+    const parameters = declaration.parameters.map((parameter) => {
+      const read = conformingRead(parameter.expression, scope, context, lowering.value(parameter.expression.ast, scope));
+      return `{ name: ${quote(parameter.name)}, mode: ${quote(parameter.mode)}, read: () => ${read.source} }`;
+    }).join(", ");
+    return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: [${parameters}] });`;
+  });
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
@@ -1130,12 +1138,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     }),
     ...stateSources,
     ...states.map((state) => `setContext(${quote(`html-next:context:${definition.contract.tag}\u0000${state.name}`)}, { get value() { return ${code.get(state.name)}; } });`),
-    ...data.map((declaration) => {
-      if (declaration.source === undefined) return `const ${dataNames.get(declaration)!} = { pending: true, value: null, error: null, ok: false };`;
-      const parameters = declaration.parameters.map((parameter) => `${quote(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
-      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from").map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
-      return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
-    }),
+    ...dataSources,
     ...computedSources,
     ...(scope.preservesRootFocus ? [
       "$effect.pre(() => {",

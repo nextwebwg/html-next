@@ -26,6 +26,24 @@ const sampledSource = `<template component="x-data-cycle" status="early" summary
   </defs><section><button class="sample" on:click="sample">Sample</button><button class="next" on:click="next">Next</button>
     <output class="label" $value="feed.value"></output><output class="pending" $value="feed.pending"></output></section></template>`;
 
+const conformingSource = `<template component="x-data-cycle" status="early" summary="Conforming parameters."><defs>
+  <state name="box" type="object({ query: number, sample: date })" value="{ query: 1, sample: '2024-02-29' }"></state>
+  <data name="feed" src="./api/read" type="string" debounce="80ms" poll="600ms">
+    <param name="query" from:value="box.query"></param><param name="sample" expr:value="box.sample"></param></data>
+  <handler name="invalid"><set name="box" expr:value="{ query: 'bad', sample: 42 }"></set></handler>
+  <handler name="partial"><set name="box" expr:value="{ query: 2, sample: 42 }"></set></handler>
+  <handler name="sample"><set name="box" expr:value="{ query: 'bad', sample: '2025-01-01' }"></set></handler>
+  <handler name="recover"><set name="box" expr:value="{ query: 3, sample: '2026-01-01' }"></set></handler>
+  </defs><section><button class="invalid" on:click="invalid">Invalid</button><button class="partial" on:click="partial">Partial</button><button class="sample" on:click="sample">Sample</button><button class="recover" on:click="recover">Recover</button>
+    <output class="label" $value="feed.value"></output><output class="pending" $value="feed.pending"></output></section></template>`;
+
+const initiallyInvalidSource = conformingSource
+  .replace('<state name="box"', '<state name="count" type="number" value="0"></state><state name="box"')
+  .replace('<param name="query" from:value="box.query"></param>', '<param name="query" from:value="8px / count"></param><param name="other" from:value="box.query"></param>')
+  .replace(' poll="600ms"', '')
+  .replace('</defs>', '<handler name="start"><set name="count" expr:value="2"></set></handler></defs>')
+  .replace('<section>', '<section><button class="start" on:click="start">Start</button>');
+
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
@@ -39,6 +57,8 @@ async function snapshot(page: Page) {
 describe.skipIf(!enabled)("Svelte declared data parity", () => {
   let directory = "";
   let liveBundle = "";
+  const initial = new Map<"application" | "library", { bundle: string; markup: string; css: string }>();
+  const conforming = new Map<"application" | "library", { bundle: string; markup: string; css: string }>();
   const samples = new Map<"application" | "library", { bundle: string; markup: string; css: string }>();
   const outputs = new Map<"application" | "library", { bundle: string; markup: string; css: string }>();
 
@@ -87,12 +107,147 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
     };
     await compileScene("lifecycle", source, outputs);
     await compileScene("sampled", sampledSource, samples);
+    await compileScene("conforming", conformingSource, conforming);
+    await compileScene("initial", initiallyInvalidSource, initial);
   }, 60_000);
 
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
+      it(`${engine} ${mode} seeds accepted parameters before initial recovery and restarts equal URLs`, async () => {
+        const browser = await launchParityBrowser(browserType);
+        const pages: Page[] = [];
+        const output = initial.get(mode)!;
+        const requests = { live: [] as string[], svelte: [] as string[] };
+        const errors: string[] = [];
+        try {
+          for (const kind of ["live", "svelte"] as const) {
+            const page = await browser.newPage(); pages.push(page);
+            page.on("pageerror", (error) => errors.push(error.message));
+            await page.route("https://app.example/**", async route => {
+              if (route.request().resourceType() === "document") {
+                await route.fulfill({ contentType: "text/html", body: kind === "live"
+                  ? `${initiallyInvalidSource}<main><x-data-cycle id="case"></x-data-cycle></main>` : `<style>${output.css}</style><main>${output.markup}</main>` });
+                return;
+              }
+              const url = new URL(route.request().url());
+              const label = `${url.pathname}${url.search}`; requests[kind].push(label);
+              await route.fulfill({ contentType: "text/plain", body: label });
+            });
+            await page.goto(`https://app.example/app/components/${kind === "live" ? "cycle.html" : "svelte"}`);
+          }
+          await pages[0]!.addScriptTag({ path: liveBundle });
+          await pages[0]!.evaluate(() => window.HtmlRuntime.lowerDocument());
+          await pages[1]!.addScriptTag({ path: output.bundle });
+          const act = (name: string) => Promise.all(pages.map(page => page.evaluate(selector =>
+            document.querySelector<HTMLButtonElement>(selector)!.click(), `button.${name}`)));
+          const pending = () => Promise.all(pages.map(page => page.locator("#case .pending").textContent()));
+          await new Promise(resolve => setTimeout(resolve, 150));
+          assert.deepEqual(requests, { live: [], svelte: [] }, "initially invalid from parameters start no request");
+          assert.deepEqual(await pending(), ["true", "true"]);
+          await act("partial");
+          await new Promise(resolve => setTimeout(resolve, 150));
+          assert.deepEqual(requests, { live: [], svelte: [] }, "one invalid parameter does not prevent acceptance of the others");
+          await act("start");
+          const label = "/app/components/api/read?query=4px&other=2&sample=2024-02-29";
+          const waitFor = () => Promise.all(pages.map(page => page.waitForFunction(expected =>
+            document.querySelector("#case .label")?.textContent === expected && document.querySelector("#case .pending")?.textContent === "false", label, { timeout: 5000 })));
+          await waitFor();
+          assert.deepEqual(requests.live, [label], "native samples retain values accepted before the first valid request");
+          assert.deepEqual(requests.svelte, requests.live);
+          const restarted = pages.map(page => page.waitForRequest(request => request.url().endsWith(label), { timeout: 5000 }));
+          await act("partial");
+          await Promise.all(restarted);
+          await waitFor();
+          assert.deepEqual(requests.live, [label, label], "native valid updates restart even with the same URL");
+          assert.deepEqual(requests.svelte, requests.live);
+          assert.deepEqual(errors, []);
+        } finally {
+          try { await Promise.all(pages.map(page => page.close())); }
+          finally { await browser.close(); }
+        }
+      });
+
+      it(`${engine} ${mode} retains conforming request parameters through invalid reads and reconnects`, async () => {
+        const browser = await launchParityBrowser(browserType);
+        const pages: Page[] = [];
+        const output = conforming.get(mode)!;
+        const requests = { live: [] as string[], svelte: [] as string[] };
+        const failed = { live: [] as string[], svelte: [] as string[] };
+        const started = new Map<"live" | "svelte", { promise: Promise<void>; resolve: () => void }>();
+        const errors: string[] = [];
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        try {
+          for (const kind of ["live", "svelte"] as const) {
+            const page = await browser.newPage(); pages.push(page);
+            let resolve!: () => void;
+            const promise = new Promise<void>((ready) => { resolve = ready; });
+            started.set(kind, { promise, resolve });
+            page.on("pageerror", (error) => errors.push(error.message));
+            page.on("requestfailed", (request) => failed[kind].push(request.url()));
+            await page.route("https://app.example/**", async (route) => {
+              if (route.request().resourceType() === "document") {
+                await route.fulfill({ contentType: "text/html", body: kind === "live"
+                  ? `${conformingSource}<main><x-data-cycle id="case"></x-data-cycle></main>` : `<style>${output.css}</style><main>${output.markup}</main>` });
+                return;
+              }
+              const url = new URL(route.request().url());
+              const label = `${url.pathname}${url.search}`;
+              requests[kind].push(label);
+              const first = requests[kind].length === 1;
+              if (first) { started.get(kind)!.resolve(); await gate; }
+              try { await route.fulfill({ contentType: "text/plain", body: label }); }
+              catch (error) { if (!first) throw error; }
+            });
+            await page.goto(`https://app.example/app/components/${kind === "live" ? "cycle.html" : "svelte"}`);
+          }
+          await pages[0]!.addScriptTag({ path: liveBundle });
+          await pages[0]!.evaluate(() => (window.HtmlRuntime as typeof window.HtmlRuntime & { observeDocument(): () => void }).observeDocument());
+          await pages[1]!.addScriptTag({ path: output.bundle });
+          await Promise.all([...started.values()].map(entry => entry.promise));
+          const act = (name: string) => Promise.all(pages.map(page => page.evaluate((selector) =>
+            document.querySelector<HTMLButtonElement>(selector)!.click(), `button.${name}`)));
+          const waitFor = (label: string) => Promise.all(pages.map(page => page.waitForFunction(expected =>
+            document.querySelector("#case .label")?.textContent === expected && document.querySelector("#case .pending")?.textContent === "false", label, { timeout: 5000 })));
+          const firstLabel = "/app/components/api/read?query=1&sample=2024-02-29";
+          assert.deepEqual(requests.live, [firstLabel], "native initial parameter sample");
+          assert.deepEqual(requests.svelte, requests.live);
+          await act("invalid");
+          await new Promise(resolve => setTimeout(resolve, 150));
+          assert.deepEqual(requests.live, [firstLabel], "invalid reactive reads preserve the native in-flight request");
+          assert.deepEqual(requests.svelte, requests.live, "invalid reactive reads must not restart a request");
+          assert.deepEqual(failed.svelte, failed.live, "invalid reactive reads must not abort a request");
+          release();
+          await waitFor(firstLabel);
+          await act("partial");
+          await waitFor("/app/components/api/read?query=2&sample=2024-02-29");
+          await act("sample");
+          await waitFor("/app/components/api/read?query=2&sample=2025-01-01");
+          assert.ok(requests.svelte.every(url => !url.includes("bad") && !url.includes("sample=42")));
+          await Promise.all(pages.map(page => page.evaluate(() => {
+            const root = document.querySelector("#case")!;
+            (window as unknown as { detachedDataRoot: Element }).detachedDataRoot = root; root.remove();
+          })));
+          await new Promise(resolve => setTimeout(resolve, 150));
+          const detached = { live: requests.live.length, svelte: requests.svelte.length };
+          await new Promise(resolve => setTimeout(resolve, 750));
+          assert.deepEqual({ live: requests.live.length, svelte: requests.svelte.length }, detached, "detached resources stop polling");
+          await Promise.all(pages.map(page => page.evaluate(() => document.querySelector("main")!.append(
+            (window as unknown as { detachedDataRoot: Element }).detachedDataRoot))));
+          await new Promise(resolve => setTimeout(resolve, 750));
+          assert.deepEqual({ live: requests.live.length, svelte: requests.svelte.length }, detached, "invalid reconnect cannot restart polling");
+          await act("recover");
+          await waitFor("/app/components/api/read?query=3&sample=2026-01-01");
+          assert.deepEqual(errors, []);
+        } finally {
+          release();
+          try { await Promise.all(pages.map(page => page.close())); }
+          finally { await browser.close(); }
+        }
+      });
+
       it(`${engine} ${mode} samples request-only parameters at send and polling without subscribing`, async () => {
         const browser = await launchParityBrowser(browserType);
         const pages: Page[] = [];
@@ -116,22 +271,36 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
             });
             await page.goto(`https://app.example/app/components/${kind === "live" ? "cycle.html" : "svelte"}`);
           }
+          for (const page of pages) {
+            await page.clock.install({ time: new Date("2030-01-01T00:00:00Z") });
+            await page.clock.pauseAt(new Date("2030-01-01T00:00:01Z"));
+          }
           await pages[0]!.addScriptTag({ path: liveBundle });
           await pages[0]!.evaluate(() => window.HtmlRuntime.lowerDocument());
           await pages[1]!.addScriptTag({ path: output.bundle });
           await Promise.all(pages.map((page) => page.evaluate(() => document.querySelector<HTMLButtonElement>("button.sample")!.click())));
-          const waitFor = async (label: string) => Promise.all(pages.map((page) => page.waitForFunction((expected) =>
-            document.querySelector("#case .label")?.textContent === expected, label, { timeout: 5000 })));
+          const waitFor = async (label: string): Promise<void> => {
+            // Network responses and framework microtasks remain real while browser timers are paused.
+            for (let attempt = 0; attempt < 250; attempt += 1) {
+              const labels = await Promise.all(pages.map(page => page.locator("#case .label").textContent()));
+              if (labels.every(value => value === label)) return;
+              await new Promise(resolve => setTimeout(resolve, 20));
+            }
+            assert.deepEqual(await Promise.all(pages.map(page => page.locator("#case .label").textContent())), pages.map(() => label));
+          };
+          await Promise.all(pages.map(page => page.clock.runFor(80)));
           await waitFor("/app/components/api/After?page=2&tag=a&tag=b");
           assert.deepEqual(requests.svelte, requests.live);
           await Promise.all(pages.map((page) => page.locator("button.sample").click()));
           const counts = { live: requests.live.length, svelte: requests.svelte.length };
-          await new Promise((resolve) => setTimeout(resolve, 120));
+          await Promise.all(pages.map(page => page.clock.runFor(120)));
           assert.deepEqual({ live: requests.live.length, svelte: requests.svelte.length }, counts, "sample-only writes do not trigger reads");
+          await Promise.all(pages.map(page => page.clock.runFor(500)));
           await waitFor("/app/components/api/Before?page=2&tag=a&tag=b");
           await Promise.all(pages.map((page) => page.evaluate(() => {
             const button = document.querySelector<HTMLButtonElement>("button.next")!; button.click(); button.click();
           })));
+          await Promise.all(pages.map(page => page.clock.runFor(80)));
           await waitFor("/app/components/api/Before?page=4&tag=a&tag=b");
           assert.ok(requests.svelte.every((url) => !url.includes("?page=3")), "debounce sends only the latest reactive inputs");
           assert.deepEqual(requests.svelte, requests.live);

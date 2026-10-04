@@ -11,6 +11,12 @@ export interface DataState<T> {
   readonly ok: boolean;
 }
 
+export interface DataParameter {
+  readonly name: string;
+  readonly mode: "from" | "expr";
+  readonly read: () => unknown;
+}
+
 export interface DataReadOptions {
   readonly root: () => Element | null;
   readonly source: string;
@@ -18,8 +24,7 @@ export interface DataReadOptions {
   readonly type?: string;
   readonly debounce?: number;
   readonly poll?: number;
-  readonly sources: () => readonly unknown[];
-  readonly parameters: () => Readonly<Record<string, unknown>>;
+  readonly parameters: readonly DataParameter[];
 }
 
 ${DATA_URL_SOURCE}
@@ -29,9 +34,35 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
   let state = $state.raw<DataState<T>>({ pending: true, value: null, error: null, ok: false });
   let value: T | null = null;
   const connected = useConnection(options.root);
+  const accepted = new Map<string, unknown>();
+  const readParameter = (parameter: DataParameter): { value: unknown; valid: boolean } => {
+    const candidate = parameter.read();
+    if (candidate === Symbol.for('html-next.invalid-result')) {
+      return { value: accepted.get(parameter.name) ?? null, valid: false };
+    }
+    const value = candidate === undefined ? null : candidate;
+    accepted.set(parameter.name, value);
+    return { value, valid: true };
+  };
+  const prepared = { valid: false, values: [] as readonly unknown[] };
+  const sources = $derived.by(() => {
+    if (!connected()) return prepared.values;
+    let valid = true;
+    const values = options.parameters.map((parameter) => {
+      const result = parameter.mode === "from" ? readParameter(parameter) : untrack(() => readParameter(parameter));
+      if (parameter.mode === "from" && !result.valid) valid = false;
+      return result.value;
+    });
+    prepared.valid = valid;
+    // Retaining identity lets Svelte keep an existing request and poll alive on invalid reads.
+    // Every valid evaluation creates a new snapshot, including equal serialized URLs.
+    if (valid) prepared.values = values;
+    return prepared.values;
+  });
   $effect(() => {
-    options.sources();
     if (!connected()) return;
+    void sources;
+    if (!prepared.valid) return;
     const definition = (() => {
       try { return new URL(options.definition, document.baseURI).href; }
       catch { return document.baseURI; }
@@ -46,7 +77,7 @@ export function useDataRead<T>(options: DataReadOptions): DataState<T> {
       state = { pending: true, value, error: null, ok: false };
       try {
         // expr:value is sampled at each send; only from:value subscribes to its inputs.
-        const url = dataURL(options.source, definition, untrack(options.parameters));
+        const url = dataURL(options.source, definition, untrack(() => Object.fromEntries(options.parameters.map((parameter) => [parameter.name, readParameter(parameter).value]))));
         const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw new TypeError(\`Request failed with \${response.status}.\`);
         const next = options.type === "text" || options.type === "string" ? await response.text() : await response.json();
