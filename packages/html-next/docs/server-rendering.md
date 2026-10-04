@@ -4,6 +4,24 @@ The `@nextwebwg/html-next/server` entry renders validated component definitions 
 Node.js. It uses the same general renderer as live browser delivery, rather than a second component
 interpreter. This entry is separate from browser imports.
 
+Text paths and formatting expressions follow the public [template](https://nextwebwg.org/html-next/templating/)
+and [expression](https://nextwebwg.org/html-next/expressions/#formatting-intl-expressions) proposals.
+Pass an explicit locale, and a time zone for instants, when server text must match the browser.
+Civil dates and clock times preserve their authored fields.
+
+Node 22 does not supply `Intl.DurationFormat`. The server worker installs the maintained
+FormatJS polyfill when needed; Node 24 uses its native implementation. This dependency stays out
+of browser imports. Standalone converted Vue or React apps run in their framework's server realm,
+so a Node 22 server entry must install the polyfill before rendering duration expressions:
+
+```ts
+import "@formatjs/intl-durationformat/polyfill.js";
+```
+
+Install `@formatjs/intl-durationformat` in that consuming app. Browser targets use their native Intl
+facilities; a browser without a required formatter needs the corresponding application polyfill.
+Unavailable formatters produce the same invalid-result retention as invalid native options.
+
 ```ts
 import { parseComponent } from "@nextwebwg/html-next";
 import { renderComponents } from "@nextwebwg/html-next/server";

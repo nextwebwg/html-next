@@ -28,7 +28,60 @@ function componentSource(
   return `<template ${attrs}>${group}${template}</template>`;
 }
 
+describe("full text expressions", () => {
+  it("matches nested objects and quoted braces, preserves escapes, and checks expression scope", () => {
+    const definition = parseComponent(String.raw`<template component="x-text-expr"><defs><state name="amount" type="number" value="12"></state></defs><p>Total: {format($amount, 'currency', { currency: 'USD' }, 'en')} / {concat('}', '{')} / \{literal} / $amount / \$amount / \\</p></template>`);
+    const text = definition.template.children[0]!;
+    assert.equal(text.kind, "text");
+    if (text.kind !== "text") return;
+    assert.deepEqual(text.segments?.filter((segment) => segment.expressionPlan !== undefined).map((segment) => segment.expressionPlan?.dependencies), [["amount"], []]);
+    assert.equal(text.segments?.at(-1)?.value, " / {literal} / $amount / \\$amount / \\");
+    for (const value of ["{", "{}", "{ }", "{$missing}", "{1 +}", "{format(}"]) {
+      assert.throws(() => parseComponent(`<template component="x-bad-text"><p>${value}</p></template>`), HtmlDiagnosticError);
+    }
+  });
+  it("leaves dollar paths and punctuation literal outside braces, without scope checks", () => {
+    const definition = parseComponent(String.raw`<template component="x-text"><p>$unknown.name.txt $HOME $1.15 \$ident</p></template>`);
+    assert.deepEqual(definition.template.children, [{ kind: "text", value: String.raw`$unknown.name.txt $HOME $1.15 \$ident` }]);
+  });
+});
+
 describe("parseComponent", () => {
+  it("shares identifier rules across declarations, loops, and aliases", () => {
+    assert.doesNotThrow(() => parseComponent(`<template component="x-names"><defs>
+      <state name="_name" type="string" value="Ada"></state>
+      <state name="Name" type="string" value="Bea"></state>
+      <state name="name" type="string" value="Lin"></state>
+      <state name="café" type="number" value="1"></state>
+      </defs><p>{$_name} / {$Name} / {$name} / {$café}</p></template>`));
+    for (const name of ["$name", "name$tail", "first-name", "-name", "--name", "1name"]) {
+      expectDiagnostic("HC013", `<template component="x-names"><defs><state name="${name}" value="1"></state></defs><p></p></template>`);
+      expectDiagnostic("HT016", `<template component="x-names"><p $each="${name} of [1]">Hi</p></template>`);
+      expectDiagnostic("HT015", `<template component="x-names"><p $with="1 as ${name}">Hi</p></template>`);
+    }
+    expectDiagnostic("HC011", `<template component="x-names"><defs>
+      <prop name="Name" type="string">Name.</prop><prop name="name" type="string">Name.</prop>
+      </defs><p from:title="Name">$name</p></template>`);
+    expectDiagnostic("HT016", `<template component="x-names"><p $each="😀of [1]">Hi</p></template>`);
+  });
+
+  it("parses braced inline paths with literals, punctuation, and loop scope", () => {
+    const definition = parseComponent(String.raw`<template component="x-text"><defs>
+      <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }]"></state>
+      </defs><table><tbody><tr $each="r of $rows" $key="$r.id"><td>Hello {$r.name}. Cost $1.15; $ident; {$rows[0].name}!</td></tr></tbody></table></template>`);
+    const cell = definition.template.children[0];
+    assert.equal(cell?.kind, "element");
+    if (cell?.kind !== "element") return;
+    const row = cell.children[0];
+    assert.equal(row?.kind, "element");
+    if (row?.kind !== "element") return;
+    const td = row.children[0];
+    assert.equal(td?.kind, "element");
+    if (td?.kind !== "element") return;
+    assert.deepEqual(td.children.flatMap((child) => child.kind === "text" ? (child.segments ?? [child]).map((segment) => segment.expressionPlan?.dependencies ?? segment.value) : [null]),
+      ["Hello ", ["r.name"], ". Cost $1.15; $ident; ", ["rows.0.name"], "!"]);
+    expectDiagnostic("HT003", `<template component="x-text"><p>{$unknown}</p></template>`);
+  });
   it("reads from: bindings and rejects the former bare-colon spelling", () => {
     const definition = parseComponent(`<template component="x-from"><defs>
       <prop name="label" type="string">Label.</prop>

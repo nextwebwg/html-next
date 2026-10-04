@@ -6,6 +6,7 @@
  */
 import { parseFragment } from "parse5";
 
+import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
 import { typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
@@ -38,7 +39,7 @@ import { category, Lowering, mayProduceInvalidResult, present, typeOf, typeScrip
 import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
 
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
-const VUE_APIS = ["computed", "defineComponent", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
+const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
 // HTML parsing lowercases directive names even inside SVG. Ask the HTML parser for the same
 // SVG adjustment it applies to literal attributes, then force Vue to write that exact attribute.
@@ -57,12 +58,12 @@ function svgAttributeName(name: string): string {
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
   "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
-  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
+  "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
   "useComponentHost", "createDispatch", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
-  "SanitizedHtml",
-  "String", "Boolean", "Number", "Math", "Object", "Array", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
+  "SanitizedHtml", "RetainedInlineText", "inlineTextSegment", "moduleFormatValue",
+  "String", "Boolean", "Number", "Math", "Object", "Array", "Symbol", "CustomEvent", "Promise", "Proxy", "Reflect", "TypeError",
   "encodeURIComponent", "undefined", "NaN", "Infinity", ...VUE_APIS,
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
   "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null",
@@ -150,6 +151,7 @@ interface Context {
   usesHtml: boolean;
   usesHydrationControl: boolean;
   usesKeyedBoundary: boolean;
+  usesRetainedInlineText: boolean;
 }
 
 function referenceCheck(type: TypeNode, value: string): string {
@@ -175,14 +177,15 @@ function referenceCheck(type: TypeNode, value: string): string {
 }
 
 /** The same declared path checks as the live evaluator, before a generated expression can update. */
-function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition): string | undefined {
+function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>): string | undefined {
   const checks: string[] = [];
   for (const dependency of typeCheckedDependencies(plan)) {
     const [root, ...steps] = dependency.split(".");
-    const declaration = definition.declarations?.find((entry) => entry.name === root);
-    let type: TypeNode | undefined;
+    const lexical = locals?.has(root!);
+    const declaration = lexical ? undefined : definition.declarations?.find((entry) => entry.name === root);
+    let type: TypeNode | undefined = lexical ? scope.types.get(root!)?.type : undefined;
     // Prop boundary handling is separate from these mutable declaration guards.
-    if (definition.contract.props[root!] !== undefined) continue;
+    if (!lexical && definition.contract.props[root!] !== undefined) continue;
     if (declaration?.kind === "state" || declaration?.kind === "computed") {
       type = declarationTypeNode(declaration.type, declaration.shape);
     } else if (declaration?.kind === "data") {
@@ -252,12 +255,12 @@ function renderChildren(nodes: readonly TemplateNode[], names: Names, context: C
 }
 
 /** Names bound by `$each`, `$with`, and `$match`, read the same way in template and script. */
-function withLocal(names: Names, entries: readonly (readonly [string, Static])[]): Names {
+function withLocal(names: Names, entries: readonly (readonly [string, Static, (string | undefined)?])[]): Names {
   const scope = (base: Scope): Scope => {
     const code = new Map(base.code);
     const types = new Map(base.types);
-    for (const [name, type] of entries) {
-      code.set(name, name);
+    for (const [name, type, alias] of entries) {
+      code.set(name, alias ?? name);
       types.set(name, type);
     }
     return { code, types };
@@ -267,6 +270,10 @@ function withLocal(names: Names, entries: readonly (readonly [string, Static])[]
     script: scope(names.script),
     locals: new Set([...(names.locals ?? []), ...entries.map(([name]) => name)]),
   };
+}
+
+function localIdentifier(name: string, context: Context): string {
+  return isScriptIdentifier(name) && !RESERVED.has(name) ? name : context.identifiers.take(name, "Local");
 }
 
 /** Slot props shadow consumer names only when the receiving outlet actually supplies them. */
@@ -299,7 +306,10 @@ function projectedNames(children: readonly TemplateNode[], scope: Scope): readon
     }
   };
   const visit = (node: TemplateNode, inherited: ReadonlySet<string>): void => {
-    if (node.kind === "text") return;
+    if (node.kind === "text") {
+      for (const segment of node.segments ?? [node]) dependencies(segment.expressionPlan, inherited);
+      return;
+    }
     const known = new Set(inherited);
     const flow = node.flow;
     if (flow?.kind === "each") {
@@ -334,11 +344,12 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
   const listNode = ast(flow.listPlan, flow.list);
   const listType = typeOf(listNode, names.template);
   const itemType: Static = listType.type.kind === "list" ? { type: present(listType.type.item).type, nullable: false } : { ...UNKNOWN, nullable: false };
-  const item = flow.item;
-  const index = flow.index ?? context.identifiers.take("index", "Loop");
+  const item = localIdentifier(flow.item, context);
+  const index = flow.index === undefined ? context.identifiers.take("index", "Loop")
+    : localIdentifier(flow.index, context);
   const local = withLocal(names, [
-    [item, itemType],
-    [index, { type: { kind: "terminal", name: "number" }, nullable: false }],
+    [flow.item, itemType, item],
+    [flow.index ?? index, { type: { kind: "terminal", name: "number" }, nullable: false }, index],
     ["loop", { type: { kind: "object", open: false, fields: [
       { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
       { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
@@ -372,7 +383,35 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
 
 function renderNode(node: TemplateNode, names: Names, context: Context, receivingTag?: string): string {
   const { lowering } = context;
-  if (node.kind === "text") return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
+  if (node.kind === "text") {
+    const segments = node.segments ?? [node];
+    if (segments.some((segment) => segment.expressionPlan !== undefined &&
+      segment.expressionPlan.dependencies.some((dependency) => names.locals?.has(dependency.split(".")[0]!)) &&
+      (mayProduceInvalidResult(segment.expressionPlan.ast, names.template) || expressionGuard(segment.expressionPlan, names.template, context.definition, names.locals) !== undefined))) {
+      context.usesRetainedInlineText = true;
+      const parts = segments.map((segment) => {
+        const plan = segment.expressionPlan;
+        if (plan === undefined) return `{ value: ${quote(segment.value)}, text: ${quote(segment.value)}, accepted: true }`;
+        const candidate = context.identifiers.take("candidate", "Text");
+        const local = withLocal(names, [[candidate, typeOf(plan.ast, names.template)]]);
+        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
+      });
+      return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
+    }
+    if (node.segments !== undefined) {
+      const parts = node.segments.map((segment) => {
+        const plan = segment.expressionPlan;
+        return plan === undefined ? quote(segment.value)
+          : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template);
+      });
+      return `{{ [${parts.join(", ")}].join('') }}`;
+    }
+    const plan = node.expressionPlan;
+    if (plan === undefined) return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
+    const value = guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope))
+      ?? lowering.text(plan.ast, names.template);
+    return `{{ ${value} }}`;
+  }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEachNode(node, node.flow, names, context);
     const scoped = (node.props?.length ?? 0) > 0;
@@ -408,14 +447,16 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
   if (flow?.kind === "with") {
     const value = ast(flow.expressionPlan, flow.expr);
     const { flow: _flow, ...body } = node;
+    const alias = localIdentifier(flow.alias, context);
     const accepted = flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
     const values = accepted === undefined ? `[${lowering.value(value, names.template)}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
-    return `<template v-for=${bound(`${flow.alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, typeOf(value, names.template)]]), context)}</template>`;
+    return `<template v-for=${bound(`${alias} in ${values}`)}>${renderNode(body, withLocal(names, [[flow.alias, typeOf(value, names.template), alias]]), context)}</template>`;
   }
   if (flow?.kind === "match") {
     if (node.name !== "template") return renderElement(elementMatchRoot(node), names, context, false);
     const value = flow.expr === undefined ? undefined : ast(flow.expressionPlan, flow.expr);
-    const local = flow.alias === undefined ? names : withLocal(names, [[flow.alias, value === undefined ? UNKNOWN : typeOf(value, names.template)]]);
+    const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, context);
+    const local = flow.alias === undefined ? names : withLocal(names, [[flow.alias, value === undefined ? UNKNOWN : typeOf(value, names.template), alias]]);
     const arms = node.children
       .filter((child): child is ElementNode => child.kind === "element" && (child.flow?.kind === "when" || child.flow?.kind === "else"))
       .map((arm, index) => {
@@ -432,7 +473,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
     if (value === undefined) return inner;
     const accepted = flow.expressionPlan === undefined ? undefined : guardedBinding(flow.expressionPlan, names, context, (scope) => lowering.value(value, scope), true);
     const values = accepted === undefined ? `[${lowering.value(value, names.template)}]` : `(${accepted}.ready ? [${accepted}.value] : [])`;
-    return `<template v-for=${bound(`${flow.alias} in ${values}`)}>${inner}</template>`;
+    return `<template v-for=${bound(`${alias} in ${values}`)}>${inner}</template>`;
   }
   if (flow?.kind === "if") {
     const { flow: _flow, ...body } = node;
@@ -464,7 +505,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       return `defaultChecked: ${node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "checked")}`;
     }
     const literal = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "value");
-    const initial = node.name === "textarea" && node.children.every((child) => child.kind === "text")
+    const initial = node.name === "textarea" && node.children.every((child) => child.kind === "text" && child.expressionPlan === undefined && child.segments === undefined)
       ? node.children.map((child) => child.kind === "text" ? child.value : "").join("")
       : literal?.kind === "literal" ? literal.value : "";
     return `defaultValue: ${quote(initial)}`;
@@ -859,6 +900,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     usesHtml: false,
     usesHydrationControl: false,
     usesKeyedBoundary: false,
+    usesRetainedInlineText: false,
   };
   // A root `$with` always renders one element. Keep its alias reactive in setup instead of
   // adding a v-for fragment around the component's native root.
@@ -1024,6 +1066,22 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     "    attrs[name],",
     "  ]));",
     "}",
+    ...(context.usesRetainedInlineText ? [
+      "type InlineTextSegment = { readonly value: unknown; readonly text: string; readonly accepted: boolean };",
+      "function inlineTextSegment(value: unknown, accepted: boolean, text: (value: any) => string): InlineTextSegment {",
+      "  return { value, accepted, text: accepted && value !== Symbol.for('html-next.invalid-result') ? text(value) ?? '' : '' };",
+      "}",
+      "const RetainedInlineText = defineComponent({",
+      "  props: { segments: { type: Array as PropType<InlineTextSegment[]>, required: true } },",
+      "  setup(props) {",
+      "    const previous: string[] = [];",
+      "    return () => createTextVNode(props.segments.map((segment, index) => {",
+      "      if (segment.accepted && segment.value !== Symbol.for('html-next.invalid-result')) previous[index] = segment.text;",
+      "      return previous[index] ?? '';",
+      "    }).join(''));",
+      "  },",
+      "});",
+    ] : []),
     ...(context.usesKeyedBoundary ? [
       "const KeyedFailure = defineComponent({",
       "  props: { error: { type: null, required: true } },",
@@ -1142,6 +1200,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     }, options.controllerSpecifier ?? definition.controller),
     ...lowering.fallbacks().flatMap((source) => ["", source]),
   );
+  const moduleFallbacks = lowering.moduleFallbacks("moduleFormatValue");
+  if (moduleFallbacks.length > 0) body.unshift("const formatValue = moduleFormatValue;", "");
   // `props` is named only when the script reads it; the template reads props by name.
   if (!body.some((line) => /\bprops\b/.test(line) && !line.startsWith("const props = ")) && !/\bprops\b/.test(rootMarkup)) {
     const index = body.findIndex((line) => line.startsWith("const props = "));
@@ -1153,11 +1213,12 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const shared = ["createDispatch", "useComponentHost", "useDataRead", "runFilteredEvent", "preserveRootFocus"]
     .filter((name) => code.includes(`${name}(`));
   const vueTypes = [
-    ...(target.props.length === 0 ? [] : ["PropType"]),
+    ...(target.props.length === 0 && !context.usesRetainedInlineText ? [] : ["PropType"]),
     ...(context.usesKeyedBoundary ? ["VNode"] : []),
   ];
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
+    ...(moduleFallbacks.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleFallbacks, "</script>", ""]),
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),

@@ -1,3 +1,4 @@
+import { isIdentifier } from "./identifiers.js";
 import { fail } from "./diagnostics.js";
 import { hasExecutableUrl, isUrlAttribute } from "./sanitize.js";
 import type { ComponentContract } from "./types.js";
@@ -23,7 +24,7 @@ export function validateSimplePropExpression(
   contract: ComponentContract,
   source: string,
 ): string {
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(expression) || contract.props[expression] === undefined) {
+  if (!isIdentifier(expression) || contract.props[expression] === undefined) {
     fail("HT003", `\`${expression}\` is not a declared component expression.`, source);
   }
   return expression;

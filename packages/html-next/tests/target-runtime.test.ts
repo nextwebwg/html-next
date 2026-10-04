@@ -641,7 +641,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-vanilla-aot-"));
-    const definition = parseComponent(await readFile(reactiveFixtureUrl, "utf8"), reactiveFixtureUrl.href);
+    const definition = parseComponent((await readFile(reactiveFixtureUrl, "utf8")).replace('<output $value="count"></output>', '<output>{$count}</output>'), reactiveFixtureUrl.href);
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/ReactiveCounter.js")?.content;
     assert.ok(module);
@@ -2709,7 +2709,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         <prop name="label" type="string" default="Ready">Label.</prop>
         <prop name="tone" type="keyword" values="quiet, loud" default="quiet">Tone.</prop>
       </props>
-      <section from:data-count="count" from:data-tone="tone"><output $value="count"></output><span from:aria-label="label"></span><slot></slot></section>
+      <section from:data-count="count" from:data-tone="tone"><output $value="count"></output><span from:aria-label="label">{$label} / {$count}</span><slot></slot></section>
     </template>`);
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/DemoProps.js")?.content;
@@ -2883,6 +2883,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           const label = root.querySelector("span")!;
           const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
           const initial = {
+            mixed: label.textContent,
             // Template-bound attributes show defaults; the unbound label default is not reflected.
             count: root.getAttribute("data-count"),
             text: output.textContent,
@@ -2904,6 +2905,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             text: output.textContent,
             label: label.getAttribute("aria-label"),
             reflected: root.getAttribute("data-label"),
+            mixed: label.textContent,
           };
 
           // data-label records the configuration; writing it is not a prop update.
@@ -2941,9 +2943,9 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             observedTargets: (window as unknown as { observedTargets: string[] }).observedTargets,
           };
         });
-        assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [], projectedMarker: "" });
+        assert.deepEqual(result.initial, { count: "1", text: "1", label: "Ready", tone: "quiet", reflectedLabel: false, ownProperties: [], projectedMarker: "", mixed: "Ready / 1" });
         assert.deepEqual(result.synchronous, { text: "1", label: "Ready" });
-        assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second" });
+        assert.deepEqual(result.batched, { text: "2", label: "Second", reflected: "Second", mixed: "Second / 2" });
         assert.deepEqual(result.external, { label: "Second" });
         assert.deepEqual(result.detached, { text: "2", reflected: "2" });
         assert.deepEqual(result.reconnected, { text: "3", reflected: "3" });

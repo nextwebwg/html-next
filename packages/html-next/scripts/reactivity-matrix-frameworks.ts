@@ -19,22 +19,7 @@ import * as solid from "solid-js/dist/solid.cjs";
 import * as svelte from "svelte/internal/client";
 import { computed as vueComputed, onEffectCleanup, ReactiveEffect, ref } from "@vue/reactivity";
 
-export interface BenchmarkSignal<T> {
-  readonly read: () => T;
-  readonly write: (value: T) => void;
-}
-
-export interface BenchmarkComputed<T> {
-  readonly read: () => T;
-}
-
-export interface BenchmarkFramework {
-  readonly name: string;
-  readonly signal: <T>(initialValue: T) => BenchmarkSignal<T>;
-  readonly computed: <T>(compute: () => T) => BenchmarkComputed<T>;
-  readonly effect: (run: () => void | (() => void)) => () => void;
-  readonly run: (run: () => void) => void;
-}
+import type { BenchmarkFramework } from "./reactivity-benchmark.js";
 
 function alienSignals(): BenchmarkFramework {
   return {

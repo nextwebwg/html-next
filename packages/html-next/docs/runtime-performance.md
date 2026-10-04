@@ -67,3 +67,12 @@ complete live result as a flat metric record without measuring a different bundl
 Chromium, Firefox, and WebKit. Every sample also asserts that adoption preserves root and input
 identity, a live user edit, focus, and selection. The report includes total and per-root median and
 p95 timings; it is a local comparison baseline rather than a fixed CI latency gate.
+
+## Reactive speed gate
+
+The [reactive benchmark guide](./reactivity-benchmarks.md) records the full matrix,
+reproduction commands and CI measurement controls. `pnpm verify:performance`
+compares the six shared HTML Next workloads against main in fresh processes;
+it rejects demonstrated slowdowns over 10% in aggregate or 25% in any workload.
+Unstable controls produce an inconclusive failure after one retry. The Required
+CI job includes this check; the full third-party matrix remains optional.
