@@ -13,6 +13,10 @@ import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, ty
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
+function unknownValueScope(name: string): Scope {
+  return { code: new Map([[name, name]]), types: new Map([[name, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+}
+
 // A NUL cannot appear in an authored HTML attribute or a declared public prop name.
 const SLOTS_PROP = "\0html-next:slots";
 const ROOT_OWNER_PROP = "\0html-next:root-owner";
@@ -400,7 +404,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
     let update = "undefined";
     if (attribute.kind === "attribute" && attribute.twoWay) update = bindingWriter(attribute);
-    bindings.push(`{@attach ${context.controlAttachmentName}(${quote(attribute.name)}, () => ${value}, ${defaults}, ${update}, ${nativeProperty})}`);
+    bindings.push(`{@attach ${context.controlAttachmentName}(${quote(attribute.name)}, () => ${value}, ${defaults}, ${update}${nativeProperty ? ", { nativeProperty: true }" : ""})}`);
     if (root) context.rootAttributeBindings.add(attribute.name);
   };
   const bindingWriter = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): string => {
@@ -522,21 +526,22 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           : `{ value: String(${context.initialBindingsName}[${quote(name)}] ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
         context.usesAttributeBinding = true;
         const unbound = context.freshIdentifier("htmlNextAttributeValue");
-        const unboundScope: Scope = { code: new Map([[unbound, unbound]]), types: new Map([[unbound, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+        const unboundScope = unknownValueScope(unbound);
         const unboundSource = `(() => { const ${unbound}: unknown = Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
         const unboundDefault = name === "checked" ? `(${unboundSource}) !== undefined` : `String((${unboundSource}) ?? "")`;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
         const multiple = node.name === "select" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "multiple");
-        const serialized = name === "checked" ? `Boolean(${candidate})` : multiple ? `(Array.isArray(${candidate}) ? ${candidate}.map(String) : [])` : `(${candidate} == null ? "" : String(${candidate}))`;
+        const candidateScope = unknownValueScope(candidate);
+        const serialized = name === "checked" ? lowering.condition({ kind: "id", name: candidate }, candidateScope) : multiple ? `(Array.isArray(${candidate}) ? ${candidate}.map(String) : [])` : `(${candidate} == null ? "" : String(${candidate}))`;
         if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
         else bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
         if (node.name !== "input") bindings.push(`{@attach ${read} === undefined ? undefined : ${context.bindingHelperName}(${quote(name)}, () => ${context.initialBindingsName}[${quote(name)}] ?? ${literal?.kind === "literal" ? quote(literal.value) : "undefined"})}`);
         if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${name === "checked" ? "defaultChecked" : "defaultValue"}: ${read} === undefined ? ${unboundDefault} : (${defaults}).${name === "checked" ? "checked" : "value"} })}`);
-        bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined${node.name === "select" ? ", false, false" : ""})}`);
+        bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined${node.name === "select" ? ", { observeOptions: false }" : ""})}`);
       } else {
         context.usesAttributeBinding = true;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
-        const local: Scope = { code: new Map([[candidate, candidate]]), types: new Map([[candidate, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+        const local = unknownValueScope(candidate);
         const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
         bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })}`);
       }
@@ -833,7 +838,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const nativeRoot = definition.root?.kind !== "component";
   const initialBindingSources = !nativeRoot ? [] : (context.rootBindings ?? []).map((name) => {
     const candidate = context.freshIdentifier("htmlNextInitialValue");
-    const local: Scope = { code: new Map([[candidate, candidate]]), types: new Map([[candidate, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+    const local = unknownValueScope(candidate);
     const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
     return `${quote(name)}: ${context.initialBindingReadName}(${quote(name)}, (${candidate}: unknown) => ${candidate} === Symbol.for('html-next.invalid-result') ? undefined : ${serialized})`;
   });
@@ -897,7 +902,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  hadProto = proto;",
     "});",
     ...(context.usesControls ? [
-      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, nativeProperty = false, observeOptions = true) {`,
+      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, options: { nativeProperty?: boolean; observeOptions?: boolean } = {}) {`,
+      "  const { nativeProperty = false, observeOptions = true } = options;",
       "  return (element: Element) => {",
       "    const authored = controlDefaults(element, defaults);",
       "    const initial = untrack(read);",

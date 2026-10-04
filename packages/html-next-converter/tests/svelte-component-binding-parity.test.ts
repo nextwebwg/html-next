@@ -31,7 +31,7 @@ async function snapshot(page: Page) {
       })),
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
         value: element.value, checked: element.checked, defaultValue: element.defaultValue,
-        defaultChecked: element.defaultChecked, amount: element.getAttribute("data-amount"),
+        defaultChecked: element.defaultChecked, files: element.type === "file" ? Array.from(element.files ?? [], (file) => file.name) : undefined, amount: element.getAttribute("data-amount"),
         text: element.getAttribute("data-value"), flag: element.getAttribute("data-checked"),
         valid: element.getAttribute("data-valid"),
       })),
@@ -123,7 +123,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               const native = await live.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
               const server = await svelte.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
               assert.deepEqual(server, native, "SSR generic binding differs before hydration");
-              for (const id of ["untyped-number", "untyped-flag"]) {
+              for (const id of ["untyped-number", "untyped-flag", "untyped-raw-flag", "radio-first", "radio-second", "untyped-file"]) {
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));
               }
@@ -220,6 +220,26 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             })));
             await compare();
             assert.equal(await live.locator("#untyped-array").evaluate((element) => (element as HTMLInputElement).defaultValue), "a b");
+            for (const checked of [[], {}, [1], { present: true }, false, true, 0, 1, "", "checked"]) {
+              await Promise.all(pages.map((page) => page.evaluate((value) => {
+                (window as unknown as { fieldsHost: { state: { rawChecked: { value: unknown } } } }).fieldsHost.state.rawChecked.value = value;
+              }, checked)));
+              await compare();
+            }
+            await Promise.all(pages.map((page) => page.locator("#radio-second").check()));
+            await compare();
+            const radios = await live.evaluate(() => (window as unknown as { fieldsHost: { state: { radios: { first: boolean; second: boolean } } } }).fieldsHost.state.radios);
+            assert.deepEqual(radios, { first: true, second: true });
+            assert.deepEqual(await svelte.evaluate(() => (window as unknown as { fieldsHost: { state: { radios: { first: boolean; second: boolean } } } }).fieldsHost.state.radios), radios);
+            await Promise.all(pages.map((page) => page.locator("#radio-first").dispatchEvent("change")));
+            await compare();
+            await Promise.all(pages.map((page) => page.locator("#untyped-file").setInputFiles({ name: "bound.txt", mimeType: "text/plain", buffer: Buffer.from("Bound file") })));
+            await compare();
+            for (const page of pages) assert.match(await page.evaluate(() => (window as unknown as { fieldsHost: { state: { file: string } } }).fieldsHost.state.file), /bound\.txt$/);
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              (window as unknown as { fieldsHost: { state: { file: string } } }).fieldsHost.state.file = "";
+            })));
+            await compare();
             for (const optionValue of ["bb", "b"]) {
               await Promise.all(pages.map((page) => page.evaluate((value) => {
                 const hosts = (window as unknown as { optionHosts: Record<string, { state: { optionValue: string } }> }).optionHosts;

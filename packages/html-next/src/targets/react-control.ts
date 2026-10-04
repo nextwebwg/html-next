@@ -68,7 +68,11 @@ if (typeof document !== "undefined") {
 
 function writeControl(element: Control, name: BoundName, value: unknown, nativeProperty: boolean): void {
   if (name === "checked" && element instanceof HTMLInputElement) {
-    const next = Boolean(value);
+    const next = nativeProperty ? Boolean(value)
+      : Array.isArray(value) ? value.length > 0
+      : value instanceof Error ? true
+      : value !== null && typeof value === "object" ? Object.keys(value).length > 0
+      : Boolean(value);
     if (element.checked !== next) element.checked = next;
   } else if (name === "value" && element instanceof HTMLSelectElement && element.multiple && !nativeProperty) {
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
@@ -99,7 +103,7 @@ function restoreDefault(element: Control, name: BoundName, defaults: BoundDefaul
   } else {
     const current = element.value;
     element.defaultValue = defaults.value ?? "";
-    element.value = current;
+    if (element.value !== current) element.value = current;
   }
 }
 
