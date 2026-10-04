@@ -45,16 +45,22 @@ export function typeCheck(type: TypeNode, value: string): string {
   }
 }
 
+export type StrictTypePredicate = (type: TypeNode, value: string) => string;
+
 /** Handler destinations check their immediate type; nested values keep their authored input. */
-export function destinationTypeCheck(type: TypeNode, value: string): string {
+export function destinationTypeCheck(type: TypeNode, value: string, strict?: StrictTypePredicate): string {
   switch (type.kind) {
     case "list": return `Array.isArray(${value})`;
     case "record":
     case "object": return `(${value} !== null && typeof ${value} === "object" && !Array.isArray(${value}))`;
-    case "union": return `(${type.members.map((member) => destinationTypeCheck(member, value)).join(" || ")})`;
-    case "selected": return `(${type.options.map((option) => destinationTypeCheck(option.type, value)).join(" || ")})`;
-    case "constrained": return destinationTypeCheck(type.base, value);
-    default: return typeCheck(type, value);
+    case "union": return `(${type.members.map((member) => destinationTypeCheck(member, value, strict)).join(" || ")})`;
+    case "selected": return `(${type.options.map((option) => destinationTypeCheck(option.type, value, strict)).join(" || ")})`;
+    case "constrained": return destinationTypeCheck(type.base, value, strict);
+    default:
+      if (type.kind === "terminal" && !["string", "boolean", "number", "integer", "null", "absent", "function", "unknown"].includes(type.name)) {
+        return strict?.(type, value) ?? typeCheck(type, value);
+      }
+      return typeCheck(type, value);
   }
 }
 
@@ -65,24 +71,25 @@ export function handlerDestinationCheck(
   value: string,
   scope: Scope,
   lowering: Lowering,
+  strict?: StrictTypePredicate,
 ): string | undefined {
   if (type === undefined) return undefined;
-  if (index === path.length) return destinationTypeCheck(type, value);
+  if (index === path.length) return destinationTypeCheck(type, value, strict);
   const segment = path[index]!;
   if (typeof segment !== "object") {
-    return handlerDestinationCheck(typeAtKey(type, segment), path, index + 1, value, scope, lowering);
+    return handlerDestinationCheck(typeAtKey(type, segment), path, index + 1, value, scope, lowering, strict);
   }
   if (type.kind === "list" || type.kind === "record") {
     return handlerDestinationCheck(type.kind === "list" ? type.item : type.value,
-      path, index + 1, value, scope, lowering);
+      path, index + 1, value, scope, lowering, strict);
   }
   if (type.kind === "constrained") {
-    return handlerDestinationCheck(type.base, path, index, value, scope, lowering);
+    return handlerDestinationCheck(type.base, path, index, value, scope, lowering, strict);
   }
   if (type.kind === "union" || type.kind === "selected") {
     const members = type.kind === "union" ? type.members : type.options.map((option) => option.type);
     const checks = members.flatMap((member) => {
-      const check = handlerDestinationCheck(member, path, index, value, scope, lowering);
+      const check = handlerDestinationCheck(member, path, index, value, scope, lowering, strict);
       return check === undefined ? [] : [check];
     });
     return checks.length === 0 ? undefined : `(${checks.join(" || ")})`;
@@ -90,7 +97,7 @@ export function handlerDestinationCheck(
   if (type.kind !== "object") return undefined;
   const key = `String(${lowering.value(segment.expression, scope)})`;
   const checks = type.fields.map((field) => {
-    const check = handlerDestinationCheck(field.type, path, index + 1, value, scope, lowering) ?? "true";
+    const check = handlerDestinationCheck(field.type, path, index + 1, value, scope, lowering, strict) ?? "true";
     return `(${key} === ${quote(field.name)} && ${check})`;
   });
   if (type.open) checks.push(`!${JSON.stringify(type.fields.map((field) => field.name))}.includes(${key})`);
@@ -98,7 +105,7 @@ export function handlerDestinationCheck(
 }
 
 /** Declared types constrain expressions at the point each reference is read. */
-export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition): string | undefined {
+export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, strict?: StrictTypePredicate): string | undefined {
   const checks = typeCheckedDependencies(plan).flatMap((path) => {
     const [root, ...steps] = path.split(".");
     const source = scope.code.get(root!);
@@ -112,7 +119,7 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
         type = typeAtKey(type, step);
         if (type === undefined) return [];
       }
-      return [`(${read} == null || ${destinationTypeCheck(type, read)})`];
+      return [`(${read} == null || ${destinationTypeCheck(type, read, strict)})`];
     };
     const prop = definition.contract.props[root!];
     if (prop === undefined) {
@@ -139,7 +146,7 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
         if (next === undefined) return `(${selector} === ${JSON.stringify(option.value)})`;
         type = next;
       }
-      return `(${selector} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(type, read)})`;
+      return `(${selector} === ${JSON.stringify(option.value)} && ${destinationTypeCheck(type, read, strict)})`;
     });
     return [`(${read} == null || (${options.join(" || ")}))`];
   });

@@ -3,7 +3,7 @@ import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
-import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
+import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
@@ -121,6 +121,7 @@ interface RenderContext {
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
   usesComponentBindings: boolean;
+  usesDeclaredFormats: boolean;
   usesProperties: boolean;
   usesDecorations: boolean;
   usesStyleDecorations: boolean;
@@ -152,8 +153,17 @@ interface RenderContext {
   readonly freshIdentifier: (base: string) => string;
 }
 
+function strictTypeCheck(type: TypeNode, value: string, context: RenderContext): string {
+  context.usesDeclaredFormats = true;
+  return `acceptsBindingDestination(${value}, ${JSON.stringify(type)})`;
+}
+
+function declaredReadGuard(plan: CompiledExpression, scope: Scope, context: RenderContext): string | undefined {
+  return declaredReferenceGuard(plan, scope, context.definition, (type, value) => strictTypeCheck(type, value, context));
+}
+
 function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderContext, source: string): { source: string; invalid: boolean } {
-  const guard = declaredReferenceGuard(plan, scope, context.definition);
+  const guard = declaredReadGuard(plan, scope, context);
   return {
     source: guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`,
     invalid: guard !== undefined || mayProduceInvalidResult(plan.ast, scope),
@@ -336,7 +346,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   let content: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
     const plan = contentDirective.expressionPlan;
-    const guard = declaredReferenceGuard(plan, scope, context.definition);
+    const guard = declaredReadGuard(plan, scope, context);
     const source = lowering.text(plan.ast, scope);
     const value = guard === undefined && !mayProduceInvalidResult(plan.ast, scope) ? source
       : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
@@ -399,7 +409,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const ownedRules = decorations.map((entry) => {
     if (entry.kind !== "attribute" || entry.expressionPlan === undefined) fail("HT030", "An uncompiled decoration cannot be converted.");
     const plan = entry.expressionPlan;
-    const guard = declaredReferenceGuard(plan, scope, context.definition);
+    const guard = declaredReadGuard(plan, scope, context);
     const source = entry.target === "class" ? lowering.condition(plan.ast, scope) : lowering.text(plan.ast, scope);
     return `{ kind: ${quote(entry.target!)} as const, name: ${quote(entry.name)}, read: () => (${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}) }`;
   });
@@ -505,13 +515,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const declared = childProp(attribute.name);
           context.usesControls = true;
           if (declared === undefined) {
-            const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
+            const guard = declaredReadGuard(attribute.expressionPlan, scope, context);
             const source = lowering.value(attribute.expressionPlan.ast, scope);
             nativeBindings.push(`[${quote(attribute.name)}]: () => ${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}`);
             bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
             continue;
           }
-          const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
+          const guard = declaredReadGuard(attribute.expressionPlan, scope, context);
           const source = lowering.value(attribute.expressionPlan.ast, scope);
           if (declared[1].select !== undefined) {
             selectedBindings.push(`${quote(declared[0])}: () => ${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}`);
@@ -814,7 +824,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -897,7 +907,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const state = states.find((entry) => entry.name === step.writablePath[0]);
     if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
     const next = context.freshIdentifier(`htmlNextCandidate${index}`);
-    const check = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering);
+    const check = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
     const destination = scope.code.get(state.name)!;
     const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
@@ -949,7 +959,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
-    ...(context.usesComponentBindings ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
@@ -1206,7 +1216,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
   return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || context.usesComponentBindings || target.events.length > 0 ? ["props" as const] : []),
+      ...(hasProps || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),

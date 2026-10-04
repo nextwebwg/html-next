@@ -71,7 +71,50 @@ interface ConverterCase extends ConformanceCase {
   readonly beforeHydration?: string;
   readonly editedResult?: unknown;
 }
+const formatCases = [
+  ["keyword", "ready", "two words", "next"], ["email", "a@example.com", "bad email", "b@example.org"],
+  ["month", "2024-02", "2024-13", "2025-01"], ["week", "2024-W01", "2024-W54", "2025-W02"],
+  ["time", "12:30", "25:30", "13:45"], ["datetime-local", "2024-02-29T12:30", "2024-02-30T12:30", "2025-01-01T13:45"],
+  ["datetime", "2024-02-29T12:30Z", "2024-02-30T12:30Z", "2025-01-01T13:45Z"],
+  ["color-hex", "#abc", "#abcdx", "#123456"], ["percentage", "25%", "25", "50%"], ["duration", "80ms", "80", "2s"],
+] as const;
+const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
+  {
+    name: "remaining strict declared formats reject malformed fields and recover",
+    source: `<template component="x-format-fields" status="early" summary="Format fields."><defs>
+      <state name="box" type="object({ ${formatCases.map(([type], index) => `f${index}: ${type}`).join(", ")} })" value="${formatObject(1)}"></state>
+      <handler name="invalid"><set name="box" expr:value="${formatObject(2)}"></set></handler>
+      <handler name="write">${formatCases.map((entry, index) => `<set name="box.f${index}" expr:value="'${entry[2]}'"></set>`).join("")}</handler>
+      <handler name="recover"><set name="box" expr:value="${formatObject(3)}"></set></handler>
+      </defs><section>${formatCases.map((_entry, index) => `<output $value="box.f${index}"></output>`).join("")}<button class="invalid" on:click="invalid">Invalid</button><button class="write" on:click="write">Write</button><button class="recover" on:click="recover">Recover</button></section></template><x-format-fields></x-format-fields>`,
+    expect: { probe: `return qa('output').map(e => e.textContent);`, result: formatCases.map(entry => entry[1]), after: [
+      { action: `document.querySelector('button.write').click();`, result: formatCases.map(entry => entry[1]) },
+      { action: `document.querySelector('button.invalid').click();`, result: formatCases.map(entry => entry[1]) },
+      { action: `document.querySelector('button.recover').click();`, result: formatCases.map(entry => entry[3]) },
+    ] },
+  },
+  {
+    name: "strict declared formats retain reads and reject handler destinations",
+    source: `<template component="x-strict-reads" status="early" summary="Strict reads."><defs>
+      <state name="box" type="object({ size: length, day: date, paint: color, link: url })" value="{ size: '8px', day: '2024-02-29', paint: 'red', link: 'https://example.com/' }"></state>
+      <state name="size" type="length" value="8px"></state><state name="day" type="date" value="2024-02-29"></state><state name="paint" type="color" value="red"></state><state name="link" type="url" value="https://example.com/"></state>
+      <state name="written" value="Seed"></state><computed name="copied" from="concat(box.size, '/', box.day, '/', box.paint, '/', box.link)"></computed>
+      <handler name="invalid"><set name="box" expr:value="{ size: 'bad', day: '2024-02-30', paint: 'not-a-color', link: 'bad url' }"></set><set name="size" expr:value="'bad'"></set><set name="day" expr:value="'2024-02-30'"></set><set name="paint" expr:value="'not-a-color'"></set><set name="link" expr:value="'bad url'"></set></handler>
+      <handler name="read"><set name="written" expr:value="box.day"></set></handler>
+      <handler name="recover"><set name="box" expr:value="{ size: '12px', day: '2025-01-01', paint: 'blue', link: 'https://example.org/' }"></set></handler>
+      </defs><section><output class="fields" $value="concat(box.size, '/', box.day, '/', box.paint, '/', box.link)"></output><output class="destinations" $value="concat(size, '/', day, '/', paint, '/', link)"></output><output class="copied" $value="copied"></output><output class="written" $value="written"></output>
+      <span from:data-day="box.day" style:margin-left="box.size">Style</span><b $with="box.day as day" $value="day"></b>
+      <button class="invalid" on:click="invalid">Invalid</button><button class="read" on:click="read">Read</button><button class="recover" on:click="recover">Recover</button>
+      </section></template><x-strict-reads></x-strict-reads>`,
+    expect: { probe: `return [qa('output').map(e => e.textContent), q('span').getAttribute('data-day'), q('span').style.marginLeft, q('b').textContent];`,
+      result: [["8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "Seed"], "2024-02-29", "8px", "2024-02-29"], after: [
+        { action: `document.querySelector('button.invalid').click();`, result: [["8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "Seed"], "2024-02-29", "8px", "2024-02-29"] },
+        { action: `document.querySelector('button.read').click();`, result: [["8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "8px/2024-02-29/red/https://example.com/", "Seed"], "2024-02-29", "8px", "2024-02-29"] },
+        { action: `document.querySelector('button.recover').click();`, result: [["12px/2025-01-01/blue/https://example.org/", "8px/2024-02-29/red/https://example.com/", "12px/2025-01-01/blue/https://example.org/", "Seed"], "2025-01-01", "12px", "2025-01-01"] },
+        { action: `document.querySelector('button.read').click();`, result: [["12px/2025-01-01/blue/https://example.org/", "8px/2024-02-29/red/https://example.com/", "12px/2025-01-01/blue/https://example.org/", "2025-01-01"], "2025-01-01", "12px", "2025-01-01"] },
+      ] },
+  },
   {
     name: "handler destinations and raw control writes preserve distinct native boundaries",
     source: `<template component="x-declared-destinations" status="early" summary="Destination boundaries."><defs>
