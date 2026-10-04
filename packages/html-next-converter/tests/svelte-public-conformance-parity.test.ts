@@ -81,6 +81,21 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "untyped writable state serializes its current shape after scalar initialization",
+    source: `<template component="x-changing-shape" status="early" summary="Writable unknown state."><defs>
+      <state name="free" value="Seed"></state>
+      <handler name="array"><set name="free" expr:value="['One', 'Two']"></set></handler>
+      <handler name="object"><set name="free" expr:value="{ label: 'Object' }"></set></handler>
+      <handler name="zero"><set name="free" expr:value="0"></set></handler>
+      </defs><section><output $value="free"></output><span from:data-value="free"></span><p $if="free">Visible</p>
+      <button class="array" on:click="array">Array</button><button class="object" on:click="object">Object</button><button class="zero" on:click="zero">Zero</button></section></template><x-changing-shape></x-changing-shape>`,
+    expect: { probe: `return [q('output').textContent, q('span').getAttribute('data-value'), q('p')?.textContent ?? null];`, result: ["Seed", "Seed", "Visible"], after: [
+      { action: `document.querySelector('button.array').click();`, result: ["One Two", "One Two", "Visible"] },
+      { action: `document.querySelector('button.object').click();`, result: ["", null, "Visible"] },
+      { action: `document.querySelector('button.zero').click();`, result: ["0", "0", null] },
+    ] },
+  },
+  {
     name: "strict separated lists retain malformed reads and accept raw handler strings",
     source: `<template component="x-separated-lists" status="early" summary="Separated lists."><defs>
       <state name="box" type="object({ space: keyword+, comma: keyword# })" value="{ space: ['one', 'two'], comma: ['one', 'two'] }"></state>

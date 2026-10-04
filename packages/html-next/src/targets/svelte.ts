@@ -843,7 +843,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     if (declaration.kind === "computed") computedNames.set(declaration, name);
     code.set(declaration.name, declaration.kind === "computed" ? `${name}.get()` : name);
     const declared = declarationTypeNode(declaration.type, declaration.shape);
-    const inferred = declaration.expression === undefined
+    // An initializer does not constrain later writes to untyped state.
+    const inferred = declaration.kind === "state" || declaration.expression === undefined
       ? { type: { kind: "terminal", name: "unknown" }, nullable: true } as Static
       : typeOf(declaration.expression.ast, expressionScope);
     const typed = declared === undefined ? inferred : present(declared);
