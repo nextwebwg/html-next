@@ -51,7 +51,7 @@ import { defineConfig } from "vite";
 import htmlNext from "@nextwebwg/html-next-unplugin/vite";
 
 export default defineConfig({
-  plugins: [htmlNext({ entries: ["src/counter.html"] })],
+  plugins: [htmlNext({ entries: ["src/app.html"] })],
 });
 ```
 
@@ -93,20 +93,36 @@ Svelte Vite configuration will be available when the adapter ships. Choose anoth
 
 ## Use your component
 
+Build a small workshop check-in app: count guests as they arrive, then reset for the next session. Each example uses the same counter inside an `App` component and shows how to attach that app to the page. In an existing Vue or React project, keep its mounting code and add the counter to its `App` component.
+
 ::: framework-html-next
 
-Save the [component you built](/html-next/quick-start) as `src/counter.html`.
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
+
+```html title="src/app.html"
+<link rel="component" href="./counter.html">
+
+<template component="x-app">
+  <main>
+    <h1>Workshop check-in</h1>
+    <p>Count guests as they arrive. Reset for the next session.</p>
+    <x-counter></x-counter>
+  </main>
+</template>
+```
+
+Attach the app to the page:
 
 ```js title="src/main.js"
-import { createXCounter } from "virtual:html-next/components";
+import { createXApp } from "virtual:html-next/components";
 
-document.getElementById("app").append(createXCounter());
+document.getElementById("app").append(createXApp());
 ```
 
 ```html title="index.html"
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>HTML Next counter</title></head>
+  <head><meta charset="utf-8"><title>Workshop check-in</title></head>
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
@@ -120,17 +136,43 @@ Run your project's usual `npm run dev` command. Click the counter and Reset. Vit
 
 ::: framework-vue
 
-Save the [component you built](/html-next/quick-start) as `src/counter.html`, then import it alongside your existing Vue components:
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
 
-```html title="App.vue"
+```html title="src/App.vue"
 <script setup lang="ts">
 import { XCounter } from "./counter.html";
 </script>
 
 <template>
-  <XCounter />
+  <main>
+    <h1>Workshop check-in</h1>
+    <p>Count guests as they arrive. Reset for the next session.</p>
+    <XCounter />
+  </main>
 </template>
 ```
+
+Attach `App` to the page:
+
+```ts title="src/main.ts"
+import { createApp } from "vue";
+import App from "./App.vue";
+
+createApp(App).mount("#app");
+```
+
+```html title="index.html"
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Workshop check-in</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+```
+
+Run your project's usual `npm run dev` command. Click the counter and Reset.
 
 The result uses Vue and native DOM roots. Generated components import the helpers their features need and have no HTML Next runtime dependency. Editing the HTML definition updates the component in your app.
 
@@ -138,15 +180,43 @@ The result uses Vue and native DOM roots. Generated components import the helper
 
 ::: framework-react
 
-Save the [component you built](/html-next/quick-start) as `src/counter.html`, then import it alongside your existing React components:
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
 
-```tsx title="App.tsx"
+```tsx title="src/App.tsx"
 import { XCounter } from "./counter.html";
 
 export default function App() {
-  return <XCounter />;
+  return (
+    <main>
+      <h1>Workshop check-in</h1>
+      <p>Count guests as they arrive. Reset for the next session.</p>
+      <XCounter />
+    </main>
+  );
 }
 ```
+
+Attach `App` to the page:
+
+```tsx title="src/main.tsx"
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("app")!).render(<App />);
+```
+
+```html title="index.html"
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Workshop check-in</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+Run your project's usual `npm run dev` command. Click the counter and Reset.
 
 The result uses React and native DOM roots. Generated components import the helpers their features need and have no HTML Next runtime dependency. Editing the HTML definition updates the component in your app.
 
@@ -258,18 +328,18 @@ Publishers can already package their HTML source. Consuming it in Svelte will be
 
 ::: framework-html-next
 
-Save `counter.html` beside this page. The module script loads the definition and renders each `<x-counter>` instance:
+Save the `app.html` and `counter.html` files from above beside this page. The module script loads the app and its counter, then renders the `<x-app>` instance:
 
 ```html title="index.html — browser runtime"
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>HTML Next counter</title>
+    <title>Workshop check-in</title>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@nextwebwg/html-next/dist/browser.js"></script>
-    <link rel="component" href="./counter.html">
+    <link rel="component" href="./app.html">
   </head>
-  <body><x-counter></x-counter></body>
+  <body><x-app></x-app></body>
 </html>
 ```
 

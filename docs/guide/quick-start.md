@@ -8,11 +8,11 @@ eyebrow: HTML Next · Build
 
 # Build an HTML Next component
 
-Define a reactive counter in HTML. Choose a framework in any section; the rest of the page follows your choice. The component definition stays the same.
+Build a guest counter for workshop check-in. Choose a framework in any section; the rest of the page follows your choice. The component definition stays the same.
 
 ## Write the component
 
-Save this as `counter.html`. It declares state and two click handlers, with native buttons for incrementing and resetting the count.
+Save this as `counter.html`. Click the count as guests arrive, then Reset for the next session. The definition keeps the count and both button actions together.
 
 ```html title="counter.html"
 <template component="x-counter">
