@@ -1,5 +1,5 @@
 {
-  "generatorVersion": "1.0.0-alpha.26",
+  "generatorVersion": "1.0.0-alpha.27",
   "components": [
     {
       "source": "examples/x-button.html",

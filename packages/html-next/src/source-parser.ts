@@ -3,6 +3,7 @@ import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 import { parseComponentNodes } from "./parser.js";
 import { getDomInterface, resolveDomProperty } from "./platform.js";
 import { fail } from "./diagnostics.js";
+import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import type { ParsedComponentResource } from "./graph.js";
 import type { ComponentDefinition } from "./template.js";
 
@@ -52,8 +53,10 @@ export function parseComponentResource(sourceText: string, source: string): Pars
       const href = node.attrs.find((attr) => attr.name === "href")?.value;
       if (href === undefined || href.trim() === "") fail("HL006", "A component dependency link requires a non-empty `href`.", source);
       dependencies.push(href);
+    } else if ("tagName" in node && isIgnoredResourceMetadata(node.tagName, node.attrs)) {
+      continue;
     } else {
-      fail("HT009", "A component resource may contain only dependency links and inert component carriers.", source);
+      fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source);
     }
   }
   if (definitions.length === 0) fail("HS001", "A component resource requires at least one <template component>.", source);

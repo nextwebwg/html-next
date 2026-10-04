@@ -1,0 +1,54 @@
+{
+  "name": "@nextwebwg/htmlkit",
+  "version": "1.0.0-alpha.27",
+  "description": "HTML Next application platform: file-based routes, layouts, loaders, and static deployment.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13 <23 || >=24 <25"
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "build:docs-proof": "tsx examples/docs/build.ts"
+  },
+  "dependencies": {
+    "@nextwebwg/html-next": "workspace:*",
+    "vite": "catalog:",
+    "parse5": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "playwright": "catalog:",
+    "marked": "18.0.14",
+    "tsx": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nextwebwg/html-next.git",
+    "directory": "packages/htmlkit"
+  },
+  "bin": {
+    "htmlkit": "./dist/cli.js"
+  }
+}

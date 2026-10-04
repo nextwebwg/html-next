@@ -40,7 +40,7 @@ jobs:
           failed=""
           echo "| Package | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          for directory in html-next html-next-converter html-next-unplugin; do
+          for directory in html-next html-next-converter html-next-unplugin htmlkit; do
             name=$(node -p "require('./packages/$directory/package.json').name")
             version=$(node -p "require('./packages/$directory/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
