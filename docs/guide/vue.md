@@ -59,8 +59,22 @@ Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter 
 
 If a component needs declarations before its first import, add `entries: ["src/counter.html"]` to `htmlNext({ target: "vue" })`.
 
-## Use a library or publish your own
+## Use a library
 
-Installed HTML Next source libraries keep their public imports, such as `import { Button } from "@example/ui"`. The adapter discovers the package's `html-next` export; include its generated `src/html-next.d.ts` in your TypeScript project. The package name here is illustrative.
+With the plugin configured above, install an HTML Next library and import its components:
 
-[Source library packaging](/html-next/convert#source-libraries) explains that format. For a library that ships ready-built native, Vue, and React entries, follow [Ship for Vue and React](/html-next/ship-frameworks). If you want to generate Vue source files separately, use the [Converter](/html-next/convert). Unsupported component features produce build errors; see the [adapter reference](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-unplugin#vue-and-react-source-imports) for current coverage.
+```bash
+npm install your-library
+```
+
+```js
+import { UiButton } from "your-library";
+```
+
+Use those exports like other Vue components. The names come from the library's README. Include the generated `src/html-next.d.ts` in your TypeScript project to get its component types.
+
+## Publish your own
+
+We recommend [publishing your HTML files](/html-next/ship) with these Vite-plugin instructions. Apps choose their framework when they build. You can also [publish prebuilt Vue and React entries](/html-next/ship-frameworks) when consumers cannot use the plugin, or use the [Converter](/html-next/convert) to generate framework source separately.
+
+Unsupported component features produce build errors; see the [adapter reference](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-unplugin#vue-and-react-source-imports) for current coverage.

@@ -1,119 +1,74 @@
 ---
-title: Ship for Vue and React
+title: Prebuild Vue and React
 order: 4
-blurb: one package · native, Vue, and React entries
+blurb: optional framework builds · one npm package
 eyebrow: HTML Next · Libraries
 ---
 
-# One library. Native, Vue, and React.
+# Add prebuilt Vue and React versions
 
-Add Vue and React builds to the [native library](/html-next/ship). Publish all three in one package: `your-library` for native HTML Next, `your-library/vue` for Vue, and `your-library/react` for React. Your consumers install one library and use their application's framework.
+**For most libraries, [publish the HTML](/html-next/ship) and give consumers the Vite-plugin instructions.** One source package serves every supported target, and you maintain fewer build tools and outputs.
 
-Keep your existing `components/` folder as the source for every build. Every HTML component in that folder is included; you do not need to name each one in this script. The release scripts below convert both framework targets automatically, build their JavaScript and CSS, and generate their types before packing or publishing the library. Svelte packaging is coming soon.
+Prebuilt versions are useful when consumers cannot add the HTML Next plugin. This guide adds `your-library/vue` and `your-library/react` to the same package. Consumers receive ordinary framework components; the original HTML remains available for apps using the plugin.
 
-## Install the additional build tools
+## Install the build tools
 
-Keep the packaging tool and script from the preceding guide, then install Vite and the framework build tools:
+Start with the package from [Publish a library](/html-next/ship), then install:
 
 ```bash
 npm install --save-dev @nextwebwg/html-next-converter vite@^8 @vitejs/plugin-vue @vitejs/plugin-react vue@^3.5 react@^19.3 typescript@~5.9 vue-tsc @types/react@^19
 ```
 
-Vue and React are development dependencies here because you need them to compile and check your library. The published package will declare them as optional peers, so a Vue app does not have to install React, or vice versa. The script also marks the native runtime as an optional peer: native consumers install it explicitly, while Vue and React consumers do not need it.
+## Convert and build
 
-## Convert and bundle both targets
+Use one Vite configuration for both targets:
 
-Create this script alongside `scripts/build.mjs`. It assembles the native library first, then converts every component for both frameworks. Each framework has its own output folder:
-
-```js title="scripts/build-frameworks.mjs"
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { build } from "vite";
+```js title="vite.config.mjs"
+import { rm } from "node:fs/promises";
+import { convertComponents } from "@nextwebwg/html-next-converter";
+import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import react from "@vitejs/plugin-react";
-import { convertComponents } from "@nextwebwg/html-next-converter";
-import "./build.mjs";
 
-await rm("generated", { recursive: true, force: true });
-const manifest = JSON.parse(await readFile("package/package.json", "utf8"));
-
-for (const target of ["vue", "react"]) {
-  const conversion = await convertComponents({
-    target,
-    mode: "library",
-    entries: ["components/**"],
-    outDirectory: `generated/${target}-target`,
-  });
-  const dependencies = {
-    ...manifest.dependencies,
-    ...conversion.package.dependencies,
-  };
-  const peers = conversion.package.peerDependencies;
-  manifest.dependencies = dependencies;
-  manifest.peerDependencies = { ...manifest.peerDependencies, ...peers };
-  manifest.peerDependenciesMeta = {
-    ...manifest.peerDependenciesMeta,
-    [target]: { optional: true },
-  };
-
-  await build({
-    configFile: false,
-    plugins: [target === "vue" ? vue() : react()],
+export default defineConfig(async ({ mode }) => {
+  if (!["vue", "react"].includes(mode)) throw new Error("Build with --mode vue or --mode react.");
+  const generated = `generated/${mode}-target`;
+  await rm(generated, { recursive: true, force: true });
+  await convertComponents({ target: mode, mode: "library", entries: ["components/"], outDirectory: generated });
+  return {
+    plugins: [mode === "vue" ? vue() : react()],
     build: {
-      outDir: `package/dist/${target}`,
+      outDir: `dist/${mode}`,
       lib: {
-        entry: `generated/${target}-target/${conversion.output.entry}`,
+        entry: `generated/${mode}-target/${mode}/index.ts`,
         formats: ["es"],
         fileName: "index",
         cssFileName: "style",
       },
       rolldownOptions: {
-        external: (id) => Object.keys({ ...dependencies, ...peers })
-          .some((name) => id === name || id.startsWith(`${name}/`)),
+        external: ["vue", "react", "react/jsx-runtime", "parse5"],
       },
     },
-  });
-}
-
-Object.assign(manifest.exports, {
-  "./vue": { types: "./dist/vue/index.d.ts", import: "./dist/vue/index.js" },
-  "./vue/style.css": "./dist/vue/style.css",
-  "./react": { types: "./dist/react/index.d.ts", import: "./dist/react/index.js" },
-  "./react/style.css": "./dist/react/style.css",
+  };
 });
-manifest.peerDependenciesMeta["@nextwebwg/html-next"] = { optional: true };
-await writeFile("package/package.json", `${JSON.stringify(manifest, null, 2)}\n`);
 ```
 
-The converter writes `.vue` or `.tsx` files into `generated/`. Vite compiles those files into JavaScript and extracts their styles. Vue and React stay outside the bundles; the consuming app supplies its own framework. The assembled package keeps its native registration entry in `package/dist/`, with framework builds in `package/dist/vue/` and `package/dist/react/`.
+These commands convert your components, then build their JavaScript and CSS:
 
-The conversion result reports the packages its generated code imports. The script adds these to your manifest automatically. For example, a component using `$html` to render an HTML string needs `parse5` to handle that HTML consistently in the browser and on the server. The converter reports `parse5` as a dependency, so your consumers receive it when they install the library. Components without `$html` do not add that dependency.
-
-If your own controller imports another package, declare that package in `dependencies` yourself. Review the manifest changes as part of each release. For component-relative `<data src>` URLs, set `publicRootURL` to the URL where those data files will be hosted; the converter does not publish those files for you.
-
-## Generate public types
-
-Vite builds JavaScript; run the framework typecheckers afterward to generate declaration files. Use TypeScript's [declaration-only output](https://www.typescriptlang.org/tsconfig/emitDeclarationOnly.html) with these configurations:
-
-```json title="tsconfig.vue.json"
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "allowJs": true,
-    "allowImportingTsExtensions": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
-    "rootDir": "generated/vue-target/vue",
-    "outDir": "package/dist/vue"
-  },
-  "include": ["generated/vue-target/vue/**/*"]
-}
+```bash
+npx vite build --mode vue
+npx vite build --mode react
 ```
 
-```json title="tsconfig.react.json"
+Vue and React stay outside the bundles; consumers use their own framework installation. Controllers are bundled with the components.
+
+If a component renders HTML strings with `$html`, install `parse5` as a dependency of your library: `npm install parse5`. The generated `html-next.conversion.json` lists required dependencies. Declare your controllers' external dependencies as usual, and review that file when adding component features. If component-relative data URLs need a hosted location, set `publicRootURL` in the conversion options above.
+
+## Include component types
+
+Use a shared declaration configuration, then set each target's input and output folders:
+
+```json title="tsconfig.library.json"
 {
   "compilerOptions": {
     "target": "ES2022",
@@ -125,58 +80,97 @@ Vite builds JavaScript; run the framework typecheckers afterward to generate dec
     "allowJs": true,
     "allowImportingTsExtensions": true,
     "declaration": true,
-    "emitDeclarationOnly": true,
+    "emitDeclarationOnly": true
+  }
+}
+```
+
+```json title="tsconfig.vue.json"
+{
+  "extends": "./tsconfig.library.json",
+  "compilerOptions": {
+    "rootDir": "generated/vue-target/vue",
+    "outDir": "dist/vue"
+  },
+  "include": ["generated/vue-target/vue/**/*"]
+}
+```
+
+```json title="tsconfig.react.json"
+{
+  "extends": "./tsconfig.library.json",
+  "compilerOptions": {
     "rootDir": "generated/react-target/react",
-    "outDir": "package/dist/react"
+    "outDir": "dist/react"
   },
   "include": ["generated/react-target/react/**/*"]
 }
 ```
 
-## Expose all three entries
+Run `npx vue-tsc -p tsconfig.vue.json` and `npx tsc -p tsconfig.react.json` after the Vite builds.
 
-The native default export remains intact. The package now has three independent entry points:
+## Expose both versions
 
-| Consumer | Package import | What runs |
-| --- | --- | --- |
-| Native HTML Next app | `your-library` | The native registration entry, backed by the HTML Next runtime. |
-| Vue app | `your-library/vue` | Compiled Vue components, backed by the app's Vue installation. |
-| React app | `your-library/react` | Compiled React components, backed by the app's React installation. |
+Keep your package's name, version, license, and source export. Add `dist` to `files` and expose the framework builds:
 
-Each framework entry exports the components discovered in your HTML files. The converter derives the export names from your component tags; the tag's hyphenated name becomes a PascalCase export. Document those generated names in your library's README.
-
-If your components have no styles, Vite may emit no framework stylesheet. Omit that target's CSS export and consumer import in that case.
-
-## Automate packaging and publishing
-
-Replace only the development project's `build` command. Keep `pack:library` and `publish:library` from the native guide:
-
-```json title="package.json — complete build and release commands"
+```json title="package.json — distribution fields"
 {
-  "scripts": {
-    "build": "node scripts/build-frameworks.mjs && vue-tsc -p tsconfig.vue.json && tsc -p tsconfig.react.json",
-    "pack:library": "npm run build && npm pack ./package",
-    "publish:library": "npm run build && npm publish ./package --access public"
+  "files": ["components", "dist"],
+  "exports": {
+    ".": { "html-next": "./components/" },
+    "./vue": {
+      "types": "./dist/vue/index.d.ts",
+      "import": "./dist/vue/index.js"
+    },
+    "./vue/style.css": "./dist/vue/style.css",
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./react/style.css": "./dist/react/style.css"
+  },
+  "peerDependencies": { "vue": "^3.5.0", "react": "^19.3.0" },
+  "peerDependenciesMeta": {
+    "vue": { "optional": true },
+    "react": { "optional": true }
   }
 }
 ```
 
-Each command builds your current HTML library into all three forms before packing or publishing. Only the assembled `package/` directory is published. Generated framework source stays in the development project's `generated/` directory; consumers receive JavaScript, declarations, and CSS.
+The optional peers let Vue consumers install Vue without React, and React consumers install React without Vue. If you already have other folders in `files` or other exports, keep them. If Vite emits no stylesheet for a target, omit that CSS export and its README import.
 
-This recipe bundles the whole library into one JavaScript entry and one stylesheet per framework. For larger libraries, use separate build entries and package exports per component if consumers need to avoid downloading unused component styles.
+## Build before packing or publishing
 
-## Document framework consumption
+Add these scripts to your existing manifest:
 
-In your README, tell Vue users to import their components from `your-library/vue`, and React users to import from `your-library/react`. They also import the matching `your-library/vue/style.css` or `your-library/react/style.css` stylesheet when your library has styles.
+```json title="package.json — scripts"
+{
+  "scripts": {
+    "build:vue": "vite build --mode vue && vue-tsc -p tsconfig.vue.json",
+    "build:react": "vite build --mode react && tsc -p tsconfig.react.json",
+    "prepack": "npm run build:vue && npm run build:react"
+  }
+}
+```
 
-Consumers render those exports as normal Vue or React components. Neither framework entry needs the HTML Next Vite adapter. Native consumers retain the registration import and use the library's component tags in their HTML.
+`npm pack` and `npm publish` run `prepack` automatically. Publish from your project root, as in the source-library guide. The `generated` folder stays in your project; npm includes the HTML and finished `dist` outputs.
 
-## Test all the published entries
+## Give consumers the matching imports
 
-Run `npm run pack:library` and install the tarball into separate native, Vue, and React apps. Exercise the public components your library actually ships, including their styles, controllers, nested components, and props. Run typechecks and production builds in the framework apps.
+Show Vue users:
 
-Check that the Vue entry works without React installed and that the React entry works without Vue installed. When all three consumer apps pass, publish the same package with `npm run publish:library`.
+```js
+import { UiButton } from "your-library/vue";
+import "your-library/vue/style.css";
+```
 
-## Let applications convert instead
+Show React users:
 
-If you prefer to publish HTML source and have each consuming app convert it during its build, use [source library packaging](/html-next/convert#source-libraries). That approach requires the HTML Next Vite adapter in the consuming app. The compiled package above requires only the consumer's normal framework tools.
+```js
+import { UiButton } from "your-library/react";
+import "your-library/react/style.css";
+```
+
+Use your actual component names. Consumers render these exports as normal Vue or React components, with no HTML Next plugin. Native consumers continue to use the HTML through the [native Vite setup](/html-next/usage#use-a-library).
+
+Test the tarball in separate Vue and React apps, including their typechecks, production builds, styles, and behavior. This recipe produces one stylesheet per framework; importing it includes the whole library's styles. Publishing the HTML lets the consumer's plugin build component styles with the components it uses.

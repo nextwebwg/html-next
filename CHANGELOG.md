@@ -4,12 +4,16 @@
 
 ### Added
 
+- Publish HTML source folders directly, including nested components, and consume the same package with native, Vue, or React Vite plugins without a library build script.
+
 - Source-only Vue and React library imports through the Vite adapter, with on-demand conversion, generated consumer declarations, and standalone type-sync support.
 - Multiple component definitions in one HTML resource, each exposed as a distinct named export while unused components remain tree-shakeable.
 - React 19.3 conversion for application and recursively discovered library component graphs. Generated TSX, plain CSS, controllers, and feature-specific helpers run without the HTML Next runtime.
 - Distributable library output with typed React exports and dependency metadata, alongside native HTML Next and Vue entries.
 
 ### Improved
+
+- Native Vite builds emit the generator’s scoped CSS, and Vue/React adapters leave Vite’s application HTML entry intact.
 
 - React parity for props, state, computed values, events, context, slots, declared data, native form controls, safe HTML, structural templates, controllers, SSR, and hydration.
 - Shared Vue and React generated sanitizer and data-URL logic, while keeping framework-specific rendering and control behavior separate.

@@ -1,7 +1,7 @@
 # `@nextwebwg/html-next-unplugin`
 
 Vite can convert imported Declarative Components sources into Vue or React components. Libraries
-publish their HTML definitions and a source entry; consumers use their normal component imports.
+publish their HTML definitions; consumers use their normal component imports.
 
 ## Vue and React source imports
 
@@ -25,33 +25,36 @@ or component-name mapping is needed for those packages.
 import { Button } from "@some/library";
 ```
 
-The package assembler can emit a source-only distribution:
+## Publish an HTML source library
 
-```ts
-import { assembleComponentPackage } from "@nextwebwg/html-next";
-
-await assembleComponentPackage({
-  name: "@some/library",
-  version: "1.0.0",
-  outDirectory: "package",
-  sourceOnly: true,
-  components: [{ source: "components/controls.html" }],
-});
-```
-
-It writes the HTML files, controllers, inventory, a named source barrel, and the `html-next`
-export condition. Normal assembly also exposes this condition alongside its existing outputs.
-Libraries can author a source barrel to give components shorter public aliases.
-
-For a manually assembled package, expose its source entry in `package.json`:
+The recommended distribution is your HTML files and Vite-plugin instructions. No author build
+script or generated index is required. Point the `html-next` export at your component folder:
 
 ```json
 {
-  "exports": {
-    ".": { "html-next": "./components/index.js" }
-  },
-  "files": ["components"]
+  "name": "your-library",
+  "version": "1.0.0",
+  "type": "module",
+  "files": ["components"],
+  "exports": { ".": { "html-next": "./components/" } }
 }
+```
+
+The adapter includes `.html` resources in that folder and nested folders. Each definition gets a
+named framework export: `<template component="ui-button">` becomes `UiButton`. Native consumers
+import `createUiButton` with `htmlNext()`; Vite discovers installed source libraries automatically.
+Use `npm pack` to test the published files, then publish with npm. Include linked definitions and
+controllers in `files`, preserving relative paths; declare controllers' external dependencies in
+the package manifest. The [publishing guide](https://nextwebwg.org/html-next/ship) covers the README
+and consumption instructions.
+
+Explicit subpaths can point to another component folder or directly to an HTML file. Only
+concrete `html-next` export conditions opt into conversion; wildcard exports are not discovered.
+The folder scan does not follow symlinks. For Vue and React, an authored JS/TS barrel can supply
+aliases instead of exposing every component in a folder:
+
+```json
+{ "exports": { ".": { "html-next": "./components/index.js" } } }
 ```
 
 ```js
@@ -59,12 +62,9 @@ For a manually assembled package, expose its source entry in `package.json`:
 export { UiButton as Button, UiDialog as Dialog } from "./controls.html";
 ```
 
-`controls.html` can contain both `<template component="ui-button">` and
-`<template component="ui-dialog">`. Each has a named export (`UiButton`, `UiDialog`);
-HTML resources have no default export. The adapter preserves the publisher's aliases.
-An explicit package subpath can also point its `html-next` condition directly at an HTML file.
-Include linked definitions and controllers in the published files, and declare controllers'
-external dependencies in the package manifest.
+A multi-component HTML resource exposes a named export for each definition, with no default export.
+The framework adapters preserve authored aliases. Existing `assembleComponentPackage` outputs keep
+working; assembly is optional for source libraries.
 
 ### Generated types
 

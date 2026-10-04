@@ -13,12 +13,14 @@ import {
 } from "@nextwebwg/html-next";
 import { createUnplugin } from "unplugin";
 import { frameworkVitePlugin, type FrameworkPluginOptions } from "./framework.js";
+import { componentSources, sourcePackages } from "./source-packages.js";
 export { syncHtmlNext, type FrameworkPluginOptions, type FrameworkSyncResult } from "./framework.js";
 
 export const componentsModule = "virtual:html-next/components";
 export const supportModule = "virtual:html-next/support";
 const resolvedComponentsModule = "\0html-next:components";
 const resolvedSupportModule = "\0html-next:support";
+const resolvedPackagePrefix = "\0html-next:package:";
 const publicComponentPrefix = `${componentsModule}/`;
 const resolvedPublicComponentPrefix = "\0html-next:public-component:";
 const componentPrefix = "html-next:component:";
@@ -27,7 +29,8 @@ const stylePrefix = "html-next:style:";
 const resolvedStylePrefix = `\0${stylePrefix}`;
 
 export interface HtmlNextNativePluginOptions {
-  readonly entries: readonly string[];
+  /** Local entries; installed HTML source folders are discovered automatically. */
+  readonly entries?: readonly string[];
   readonly root?: string;
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
@@ -74,6 +77,7 @@ export interface HtmlNextBuildManifest {
 
 interface CompiledGraph {
   readonly entry: string;
+  readonly packages: ReadonlyMap<string, string>;
   readonly components: ReadonlyMap<string, string>;
   readonly publicComponents: ReadonlyMap<string, string>;
   readonly styles: ReadonlyMap<string, string>;
@@ -463,16 +467,26 @@ function displayPath(root: string, url: string): string {
 }
 
 async function compileGraph(options: HtmlNextNativePluginOptions): Promise<CompiledGraph> {
-  if (options.entries.length === 0) throw new Error("HTML Next requires at least one component entry.");
   const root = resolve(options.root ?? process.cwd());
+  const installed = await sourcePackages(root);
+  const packageEntries = new Map<string, string[]>();
+  for (const library of installed) {
+    for (const { specifier, source } of library.exports) {
+      const files = await componentSources(source, library.directory);
+      // Authored JS/TS barrels remain a framework-adapter feature.
+      if (files.length > 0) packageEntries.set(specifier, files);
+    }
+  }
   const delivery = options.mode ?? "application";
   if (delivery !== "application" && delivery !== "library") {
     diagnostic("HN012", `Unknown native build mode \`${String(delivery)}\`.`);
   }
-  const entryURLs = options.entries.map((entry) => pathToFileURL(resolve(root, entry)).href);
-  if (new Set(entryURLs).size !== entryURLs.length) {
+  const localURLs = (options.entries ?? []).map((entry) => pathToFileURL(resolve(root, entry)).href);
+  if (new Set(localURLs).size !== localURLs.length) {
     diagnostic("HN004", "A component entry may be configured only once.");
   }
+  const entryURLs = [...new Set([...localURLs, ...[...packageEntries.values()].flat().map((file) => pathToFileURL(file).href)])];
+  if (entryURLs.length === 0) throw new Error("HTML Next requires at least one component entry or an installed HTML source package.");
   const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href });
   const components = new Map<string, string>();
   const publicComponents = new Map<string, string>();
@@ -519,10 +533,10 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
     const definition: ComponentDefinition = node.controller === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
-    const artifact = generateComponent(definition, {
+    const artifacts = generateComponent(definition, {
       noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
-    })
-      .find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
+    });
+    const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
     const encodedURL = encodeURIComponent(node.id);
     const styleId = `${stylePrefix}${encodedURL}.css`;
@@ -540,7 +554,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
     }
     module = routeSupportImports(module, supportImports);
     components.set(resolvedComponentId(node.id), module);
-    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, definition.css);
+    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`)!.content);
     const capabilities = componentCapabilities(definition);
     for (const capability of capabilities) allCapabilities.add(capability);
     manifestComponents.push(Object.freeze({
@@ -573,6 +587,14 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
       delivery === "library" ? componentModule(item.tag) : componentId(graph.tags.get(item.tag)!),
     )};`
   ).join("\n") + "\n";
+  const packages = new Map<string, string>();
+  for (const [specifier, files] of packageEntries) {
+    const urls = new Set(files.map((file) => pathToFileURL(file).href));
+    packages.set(specifier, graph.roots.filter((id) => urls.has(graph.nodes.get(id)!.url)).map((id) => {
+      const node = graph.nodes.get(id)!;
+      return `export { create${node.definition.contract.name} } from ${JSON.stringify(componentId(id))};`;
+    }).join("\n") + "\n");
+  }
   const dynamicManifest = [...dynamicBoundaries.values()].sort((left, right) => left.tag.localeCompare(right.tag))
     .map((boundary) => Object.freeze({
       ...boundary,
@@ -587,11 +609,12 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
 
   return Object.freeze({
     entry,
+    packages,
     components,
     publicComponents,
     styles,
     support: supportSource(supportImports, renderedComponents),
-    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)))]),
+    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
       delivery,
@@ -610,23 +633,28 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
   });
 }
 
-export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options, meta) => {
+export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((options = {}, meta) => {
   if ("target" in options) {
     if (meta.framework !== "vite") throw new Error("Automatic framework conversion currently requires the Vite adapter.");
     return { name: "html-next-framework", vite: frameworkVitePlugin(options) };
   }
   let compiled: Promise<CompiledGraph> | undefined;
-  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph(options);
+  let root = options.root ?? process.cwd();
+  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph({ ...options, root });
 
   return {
     name: "html-next",
     enforce: "pre",
+    vite: { configResolved(config) { root = options.root ?? config.root; } },
     async buildStart() {
-      compiled = compileGraph(options);
+      compiled = compileGraph({ ...options, root });
       const current = await compiled;
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },
-    resolveId(id) {
+    async resolveId(id, importer) {
+      if (importer === resolvedSupportModule && (id === "@nextwebwg/html-next/generated-runtime" || id === "@nextwebwg/html-next/runtime")) {
+        return fileURLToPath(import.meta.resolve(id));
+      }
       if (id === componentsModule) return resolvedComponentsModule;
       if (id === supportModule) return resolvedSupportModule;
       if (id.startsWith(publicComponentPrefix)) {
@@ -634,6 +662,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options, meta) =>
       }
       if (id.startsWith(componentPrefix)) return `\0${id}`;
       if (id.startsWith(stylePrefix)) return `\0${id}`;
+      if ((await graph()).packages.has(id)) return `${resolvedPackagePrefix}${id}`;
       return null;
     },
     load(id) {
@@ -642,11 +671,13 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options, meta) =>
         id !== resolvedSupportModule &&
         !id.startsWith(resolvedPublicComponentPrefix) &&
         !id.startsWith(resolvedComponentPrefix) &&
-        !id.startsWith(resolvedStylePrefix)
+        !id.startsWith(resolvedStylePrefix) &&
+        !id.startsWith(resolvedPackagePrefix)
       ) return null;
       return graph().then((current) => {
         if (id === resolvedComponentsModule) return current.entry;
         if (id === resolvedSupportModule) return current.support;
+        if (id.startsWith(resolvedPackagePrefix)) return current.packages.get(id.slice(resolvedPackagePrefix.length)) ?? null;
         if (id.startsWith(resolvedPublicComponentPrefix)) {
           if (current.manifest.delivery !== "library") {
             diagnostic("HN008", "Stable public component modules are available only in library mode.");

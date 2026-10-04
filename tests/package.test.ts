@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,25 @@ describe("workspace package contracts", () => {
       skipLibCheck: false, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
     const tsc = join(consumer, "node_modules/typescript/bin/tsc");
     execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
+    const libraryManifest = JSON.parse(readFileSync(join(library, "package.json"), "utf8")) as { exports: Record<string, unknown> };
+    libraryManifest.exports["."] = { "html-next": "./components/" };
+    writeFileSync(join(library, "package.json"), JSON.stringify(libraryManifest));
+    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
+    // The packed adapter also supports zero-config native consumption of the same folder.
+    // Model strict dependency installation: the app has no direct core dependency.
+    const coreDependency = join(consumer, "core-dependency");
+    renameSync(join(consumer, "node_modules/@nextwebwg/html-next"), coreDependency);
+    for (const name of ["html-next-unplugin", "html-next-converter"]) {
+      const dependencies = join(consumer, "node_modules/@nextwebwg", name, "node_modules/@nextwebwg");
+      mkdirSync(dependencies, { recursive: true });
+      symlinkSync(coreDependency, join(dependencies, "html-next"), process.platform === "win32" ? "junction" : "dir");
+    }
+    writeFileSync(join(consumer, "vite.config.mjs"), 'import htmlNext from "@nextwebwg/html-next-unplugin/vite"; export default { plugins: [htmlNext()] };');
+    writeFileSync(join(consumer, "src/native.js"), 'import { createUiLabel } from "@example/source-controls"; document.body.append(createUiLabel({ label: "Ready" }));');
+    writeFileSync(join(consumer, "index.html"), '<html><body><script type="module" src="/src/native.js"></script></body></html>');
+    execFileSync(process.execPath, [join(consumer, "node_modules/vite/bin/vite.js"), "build"], { cwd: consumer, encoding: "utf8" });
+    expect(existsSync(join(consumer, "dist/index.html"))).toBe(true);
     writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label={42} />;');
     expect(() => execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8", stdio: "pipe" })).toThrow();
   }, 120_000);
