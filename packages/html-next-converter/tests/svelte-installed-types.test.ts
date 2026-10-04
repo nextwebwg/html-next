@@ -9,6 +9,7 @@ import { convertComponents } from "../src/index.js";
 import assert from "node:assert/strict";
 import { it } from "vitest";
 const run = promisify(execFile);
+const useCommandShell = process.platform === "win32";
 const require = createRequire(new URL('../../html-next-unplugin/package.json', import.meta.url));
 const checker = require.resolve('svelte-check/bin/svelte-check');
 it("checks an independently installed Svelte library with native consumers", async () => {
@@ -24,10 +25,10 @@ it("checks an independently installed Svelte library with native consumers", asy
     await writeFile(join(source, 'types.js'), 'export default function connect(host) {} export async function ping(host) { return 1; }');
     const manifest = await convertComponents({ target: 'svelte', mode: 'library', root: source, outDirectory: pkg, entries: ['types.html'] });
     await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@example/svelte-types-probe', version: '0.0.0', private: true, license: 'MIT', type: 'module', files: ['svelte'], exports: { '.': './svelte/index.ts', './XTyped': './svelte/XTyped.svelte' }, dependencies: manifest.package.dependencies, peerDependencies: manifest.package.peerDependencies }));
-    const packed = await run('npm', ['pack', '--json', '--pack-destination', directory], { cwd: pkg });
+    const packed = await run('npm', ['pack', '--json', '--pack-destination', directory], { cwd: pkg, shell: useCommandShell });
     const archive = join(directory, JSON.parse(packed.stdout)[0].filename);
     await writeFile(join(consumer, 'package.json'), JSON.stringify({ name:'svelte-types-consumer', private:true, type:'module' }));
-    await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', archive], { cwd: consumer });
+    await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', archive], { cwd: consumer, shell: useCommandShell });
     await symlink(fileURLToPath(new URL('../node_modules/svelte', import.meta.url)), join(consumer, 'node_modules', 'svelte'), 'dir');
     const cases: readonly (readonly [string, string])[] = [
       ['generic-positive', '<script lang="ts">import { XTyped } from "@example/svelte-types-probe";</script><XTyped kind="number" value={2} /><XTyped kind="text" value="Ready" />'],

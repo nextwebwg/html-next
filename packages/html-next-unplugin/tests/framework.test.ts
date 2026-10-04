@@ -457,7 +457,7 @@ describe("svelte source adapter", () => {
     };
     await checkSvelte(validationConfig);
     const selectedConsumer = join(validation, "SelectedConsumer.svelte");
-    const selected = validationFiles.find((file) => file.endsWith("/UiSelected.svelte"))!;
+    const selected = validationFiles.find((file) => basename(file) === "UiSelected.svelte")!;
     assert.ok(selected);
     const selectedImport = `./${relative(validation, selected).split("\\").join("/")}`;
     const selectedConfig = join(validation, "tsconfig.consumer.json");
