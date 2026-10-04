@@ -153,4 +153,3 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
   });
   return checks.length === 0 ? undefined : checks.join(" && ");
 }
-

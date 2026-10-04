@@ -55,8 +55,9 @@ Components. Such migrations are consumer-specific and live outside this reposito
 An application build may serve as a complete alternative to a framework application.
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
-must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
-behavior.
+must preserve appearance, interactions, state, events, validation, lifecycle, and successful
+hydration. Frameworks may use their own DOM and SSR representations; acceptance is based on how
+the resulting component looks and acts, including controller connect/disconnect and cleanup.
 
 The detailed contracts and independent progress tracks are in the
 [proposal](https://nextwebwg.org/declarative-components/) and

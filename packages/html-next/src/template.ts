@@ -283,4 +283,3 @@ export function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<s
   iteratedRefs.set(definition, names);
   return names;
 }
-

@@ -14,4 +14,3 @@ export const contextAppSource = `<template component="x-app" status="early" summ
     <x-steps id="inner"><x-step id="inner-one" number="1">Inner one</x-step><x-step id="inner-two" number="2">Inner two</x-step></x-steps>
   </x-steps>
 </main></template>`;
-

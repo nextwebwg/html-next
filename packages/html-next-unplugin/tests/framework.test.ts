@@ -304,6 +304,52 @@ for (const target of ["vue", "react"] as const) it(`${target} supplies the sanit
 
 
 describe("svelte source adapter", () => {
+  it("consumes a packed component folder without an authored index or build script", async () => {
+    const { root, library } = await fixture();
+    await installSourcePackage(root, {
+      "components/controls.html": await readFile(join(library, "controls.html"), "utf8"),
+      "components/nested/card.html": '<template component="ui-card" controller="./card.js" status="early" summary="Card."><section>Nested card</section></template>',
+      "components/nested/card.js": 'export default host => host.root.setAttribute("data-ready", "yes");',
+    });
+    const app = join(root, "src", "App.svelte");
+    await writeFile(app, `<script lang="ts">
+      import { UiButton } from "@example/controls"; import { UiCard } from "@example/controls/nested";
+      </script><main><UiButton label="Save" /><UiCard /></main>`);
+    const entry = join(root, "src", "folder.ts");
+    await writeFile(entry, `import { render } from "svelte/server"; import App from "./App.svelte";
+      export const markup = () => render(App).body;`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { ssr: entry, outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "folder.js")).href) as { markup(): string };
+    assert.match(output.markup(), /Save.*Badge.*Nested card/s);
+    assert.doesNotMatch(await readFile(join(root, "dist", "folder.js"), "utf8"), /UNUSED_COMPONENT_MARKER|parseComponent|parse5/);
+    const prepared = await syncHtmlNext({ root, target: "svelte" });
+    const declarations = await readFile(prepared.declarationsFile, "utf8");
+    assert.match(declarations, /export const UiButton:/);
+    assert.match(declarations, /declare module "@example\/controls\/nested"/);
+    assert.ok(prepared.sourceFiles.includes(await realpath(join(library, "components", "nested", "card.html"))));
+    const config = join(root, "tsconfig.json");
+    await writeFile(config, JSON.stringify({ compilerOptions: {
+      strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
+    }, include: ["src"] }));
+    const checker = require.resolve("svelte-check/bin/svelte-check");
+    await run(process.execPath, [checker, "--tsconfig", config, "--output", "machine"], { cwd: root });
+    await writeFile(join(root, "src", "Invalid.svelte"), `<script lang="ts">import { UiButton } from "@example/controls";</script><UiButton label={42} size="huge" />`);
+    await assert.rejects(run(process.execPath, [checker, "--tsconfig", config, "--output", "machine"], { cwd: root }), (error: unknown) => {
+      const { stdout } = error as { stdout: string };
+      assert.match(stdout, /number.*string/);
+      assert.match(stdout, /huge/);
+      return true;
+    });
+    await rm(join(root, "src", "Invalid.svelte"));
+    await writeFile(join(root, "src", "client.ts"), `import { mount } from "svelte"; import App from "./App.svelte";
+      mount(App, { target: document.getElementById("app")! });`);
+    await writeFile(join(root, "index.html"), '<div id="app"></div><script type="module" src="/src/client.ts"></script>');
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { outDir: "client-dist" } });
+    assert.match(await readFile(join(root, "client-dist", "index.html"), "utf8"), /assets\//);
+  }, 60_000);
+
   it.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("mounts on-demand local imports in Vite and updates native output", async () => {
     const { root, library } = await fixture();
     await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
@@ -351,7 +397,7 @@ describe("svelte source adapter", () => {
           <prop name="value">Value.<type from="kind"><option value="list" type="list(number)"></option><option value="object" type="object({ label: string })"></option><option value="text" type="string"></option></type></prop>
           </defs><output $value="value"></output></template>
         <template component="ui-structured-owner" status="early" summary="Structured input binding."><defs><state name="box" type="object({ value: unknown })" value="{ value: '[1, 2]' }"></state></defs><section><ui-structured from:value="box.value"></ui-structured><ui-structured bind:value="box.value"></ui-structured></section></template>
-        <template component="ui-no-controller" status="early" summary="Method readiness."><defs><method name="ping" returns="promise(undefined)"></method></defs><button class="">Ping</button></template>
+        <template component="ui-no-controller" status="early" summary="Method readiness."><defs><method name="ping" returns="promise(undefined)"></method><method name="·ping" returns="promise(number)"></method><method name="my-method" returns="promise(string)"></method></defs><button class="">Ping</button></template>
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" $ref="link" href="#next">Link</a><button $else $ref="button">Button</button></template></template>
         <template component="ui-controlled" status="early" summary="Controller methods." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><method name="increment" export="increment" returns="promise(number)"></method></defs><section><button $ref="button" $value="count"></button><span $each="row of [count]" $ref="rows" $value="row"></span></section></template>
@@ -444,8 +490,10 @@ describe("svelte source adapter", () => {
       strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
     }, include: ["src"] }));
     await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
-      import { Button } from "@example/controls"; import { UiButton, UiControlled, UiReserved } from "./controls.html";
+      import { Button } from "@example/controls"; import { UiButton, UiControlled, UiReserved, UiNoController } from "./controls.html";
       export const method: Promise<number> = (null! as ReturnType<typeof UiControlled>).increment();
+      export const unusual: Promise<number> = (null! as ReturnType<typeof UiNoController>)['·ping']();
+      export const hyphenated: Promise<string> = (null! as ReturnType<typeof UiNoController>)['my-method']();
       export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
       export const local: ComponentProps<typeof UiButton> = { label: "Save" };
       export const reserved: ComponentProps<typeof UiReserved> = { children: "Child", slots: "Slots" };`);

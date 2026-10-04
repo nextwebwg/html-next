@@ -23,4 +23,3 @@ export function parseHtmlLiteral(
   try { return literal(read(value)); }
   catch { return Symbol.for("html-next.bad-literal"); }
 }
-

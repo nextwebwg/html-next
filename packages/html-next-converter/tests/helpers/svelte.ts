@@ -17,4 +17,3 @@ export function sveltePlugin(generate: "client" | "server"): Plugin {
     }));
   } };
 }
-

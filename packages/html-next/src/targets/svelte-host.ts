@@ -128,9 +128,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         if (typeof name !== "string") return undefined;
         void membership;
         const current = host.root;
+        const slot = name === "default" ? "" : name;
         return Array.from(current.querySelectorAll("[data-slotted]"))
           .filter((element) => element.parentElement?.closest("[data-component]") === current &&
-            (element.getAttribute("slot") ?? "default") === name);
+            (element.getAttribute("slot") ?? "") === slot);
       },
       has: (_target, name) => typeof name === "string" && host.slots[name]!.length > 0,
     }),

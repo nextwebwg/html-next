@@ -76,6 +76,12 @@ compiler or `@sveltejs/vite-plugin-svelte`. Source consumers can use `svelte-che
 emitting declaration files can use `svelte2tsx`. The generated public types cover props, native and
 declared event callbacks, scoped slot fields, and exposed methods. Both graph modes export components; application and library consumers use public `mount`/`hydrate`
 or their framework's usual mounting and hydration flow.
+Svelte 5.57.1 loses focus when it moves a focused keyed row in Chromium and Firefox. The
+[compatibility patch](../../patches/README.md#keyed-focus) preserves focus and native focus events.
+Install it in the consuming application when that behavior is required; this repository's pnpm
+patches do not propagate through generated output or published dependencies. The same document
+covers checker patches needed for CSS-valid method names that require quoted JavaScript exports.
+
 Feature helpers are emitted once per converted graph and imported only by components that need
 them. Style bindings record `cssstyle` and `css-tree` in server dependencies; the generated helper's
 standard `browser` mapping uses the live element's CSSOM in browser builds.

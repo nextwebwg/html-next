@@ -21,13 +21,14 @@ const source = `<template component="x-keyed-list" status="early" summary="Keyed
 </defs><section><button type="button" class="reorder" on:click="reorder">Reorder</button>
   <button type="button" class="duplicate" on:click="duplicate">Duplicate</button>
   <button type="button" class="recover" on:click="recover">Recover</button>
-  <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><span $value="row.label"></span></li></ul>
+  <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><span $value="row.label"></span><input value="Authored" size="6"></li></ul>
 </section><style>:host { display: block; width: 180px; font: 16px/24px Arial, sans-serif; } li { border-bottom: 1px solid black; }</style></template>`;
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   return {
     rows: await page.locator("#case li").evaluateAll((rows) => rows.map((row) => [row.getAttribute("data-id"), row.textContent])),
+    inputs: await page.locator("#case li").evaluateAll(rows => rows.map(row => [row.getAttribute("data-id"), row.querySelector<HTMLInputElement>('input')!.value])),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
   };
 }
@@ -72,6 +73,43 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
       for (const hydrate of [false, true]) {
+        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} preserves focused keyed inputs and native focus events`, async () => {
+          const browser = await launchParityBrowser(browserType);
+          try {
+            const native = await browser.newPage();
+            const converted = await browser.newPage();
+            const output = outputs.get(mode)!;
+            await native.setContent(`${source}<main><x-keyed-list id="case"></x-keyed-list></main>`);
+            await native.addScriptTag({ path: liveBundle });
+            await native.evaluate(() => window.HtmlRuntime.lowerDocument());
+            await converted.setContent(`<style>${output.css}</style><main>${hydrate ? output.markup : ""}</main>`);
+            await converted.addScriptTag({ path: output.bundle });
+            for (const page of [native, converted]) {
+              await page.locator('#case li[data-id="c"] input').waitFor();
+              await page.evaluate(() => {
+                const input = document.querySelector<HTMLInputElement>('#case li[data-id="c"] input')!;
+                input.value = "Edited";
+                input.focus();
+                input.setSelectionRange(1, 4, "backward");
+                const events: string[] = [];
+                for (const type of ["blur", "focusout", "focus", "focusin"]) document.addEventListener(type, event => {
+                  if ((event.target as Element).matches('#case li[data-id="c"] input')) events.push(type);
+                }, true);
+                Object.assign(window, { keyedFocusEvents: events });
+                document.querySelector<HTMLButtonElement>("#case .reorder")!.click();
+              });
+              await page.waitForFunction(() => document.querySelector("#case li")?.getAttribute("data-id") === "c");
+            }
+            const read = (page: Page) => page.evaluate(() => {
+              const state = window as unknown as { keyedFocusEvents: string[] };
+              const input = document.querySelector<HTMLInputElement>('#case li[data-id="c"] input')!;
+              return {
+                value: input.value, selection: [input.selectionStart, input.selectionEnd, input.selectionDirection],
+                focused: document.activeElement === input, events: state.keyedFocusEvents };
+            });
+            assert.deepEqual(await read(converted), await read(native));
+          } finally { await browser.close(); }
+        });
         it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} preserves rows and recovers after duplicate keys`, async () => {
           const browser = await launchParityBrowser(browserType);
           const pages: Page[] = [];
@@ -110,12 +148,12 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               { timeout: 5_000 })));
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.rows, native.rows);
+              assert.deepEqual(converted.inputs, native.inputs);
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte keyed pixels differ", live);
             };
             await compare([["a", "A"], ["b", "B"], ["c", "C"]]);
             await Promise.all(pages.map((page) => page.evaluate(() => {
-              (window as unknown as { originalRows: Map<string, Element> }).originalRows = new Map(
-                Array.from(document.querySelectorAll("#case li"), (row) => [row.getAttribute("data-id")!, row]));
+              document.querySelector<HTMLInputElement>('#case li[data-id="b"] input')!.value = 'Edited B';
             })));
             await Promise.all([live, svelte].map((page) => page.locator("#case .reorder").click()));
             await compare([["c", "C"], ["a", "A"], ["b", "Bee"]]);
@@ -129,9 +167,6 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             JSON.stringify({ diagnostics, pageErrors }));
             await Promise.all([live, svelte].map((page) => page.locator("#case .recover").click()));
             await compare([["b", "B"], ["a", "Again"]]);
-            for (const page of pages) assert.equal(await page.evaluate(() =>
-              Array.from(document.querySelectorAll("#case li")).every((row) =>
-                (window as unknown as { originalRows: Map<string, Element> }).originalRows.get(row.getAttribute("data-id")!) === row)), true);
             for (const messages of pageErrors) assert.equal(messages.some((message) => !message.includes("HR004")), false, JSON.stringify(pageErrors));
           } finally {
             await Promise.all(pages.map((page) => page.close()));

@@ -10,8 +10,8 @@ import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, literalAttribute, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
+import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -66,12 +66,32 @@ function nativeControlBinding(tag: string, name: string): boolean {
     (name === "value" || name === "checked" && tag === "input");
 }
 
+/** Object literal __proto__ keys must be computed to define an ordinary own property. */
+function objectKey(name: string): string {
+  return name === "__proto__" ? `[${quote(name)}]` : quote(name);
+}
+
+function literalValueSource(value: unknown): string {
+  return JSON.stringify(value)?.replaceAll('"__proto__":', '["__proto__"]:') ?? "undefined";
+}
+
+function componentPropAttribute(name: string, value: string): string {
+  return name === "__proto__" ? `{...{ __proto__: null, ...{ ${objectKey(name)}: ${value} } }}` : `${name}={${value}}`;
+}
+
+/** Match native projection marking so controllers can act on rendered slot content. */
+function projectedNode(node: TemplateNode): TemplateNode {
+  if (node.kind !== "element") return node;
+  return { ...node, attributes: [...node.attributes.filter(attribute => attribute.name !== "data-slotted"),
+    { kind: "literal", name: "data-slotted", value: "" }] };
+}
+
 function literalPropValue(value: string, contract: PropContract): string {
   const type = normalizeType(contract.type);
   const parsed = value === "" && type.kind === "terminal" && type.name === "boolean"
     ? { ok: true as const, value: true }
     : parseTypedValue(value, contract.type, "$", "html");
-  return parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`;
+  return parsed.ok ? literalValueSource(parsed.value) : `${quote(value)} as any`;
 }
 
 /** A missing class base differs from an authored empty class attribute. */
@@ -117,6 +137,7 @@ interface RenderContext {
   readonly definition: ComponentDefinition;
   readonly imports: Set<string>;
   readonly handlerNames: ReadonlyMap<string, string>;
+  readonly inputNames: ReadonlyMap<string, string>;
   readonly slotsByTag?: SvelteConversionOptions["slotsByTag"];
   usesScopedSlots: boolean;
   usesSampledSlots: boolean;
@@ -182,6 +203,26 @@ function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderC
   };
 }
 
+/** Preserve invalid results before display conversion can stringify their symbol. */
+function conformingTextRead(plan: CompiledExpression, scope: Scope, lowering: Lowering, context: RenderContext): { source: string; invalid: boolean } {
+  const invalid = mayProduceInvalidResult(plan.ast, scope);
+  if (!invalid || ["boolean", "string", "number", "scalar"].includes(category(typeOf(plan.ast, scope).type))) {
+    return conformingRead(plan, scope, context, lowering.text(plan.ast, scope));
+  }
+  const candidate = context.freshIdentifier("htmlNextText");
+  const read = conformingRead(plan, scope, context, lowering.value(plan.ast, scope));
+  const displayScope: Scope = { code: new Map([[candidate, candidate]]), types: new Map([[candidate, typeOf(plan.ast, scope)]]) };
+  const display = lowering.text({ kind: "id", name: candidate }, displayScope);
+  return { source: `(() => { const ${candidate}: any = ${read.source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${display}; })()`, invalid: true };
+}
+
+function textSource(node: Extract<TemplateNode, { kind: "text" }>, scope: Scope, lowering: Lowering, context: RenderContext): string {
+  if (node.segments !== undefined) return `[${node.segments.map((segment) => textSource(segment, scope, lowering, context)).join(", ")}].map(value => String(value ?? "")).join("")`;
+  if (node.expressionPlan === undefined) return quote(node.value);
+  const read = conformingTextRead(node.expressionPlan, scope, lowering, context);
+  return read.invalid ? retained(context, read.source, "undefined as any") : read.source;
+}
+
 /** Attribute presence and Web IDL Boolean conversion differ for dynamic multiple values. */
 function selectMultiple(node: ElementNode, root: boolean, scope: Scope, lowering: Lowering, context: RenderContext): string {
   const literal = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
@@ -209,6 +250,14 @@ function canMatchOptionText(node: TemplateNode): boolean {
     return node.children.every((child) => child.kind === "text");
   }
   return node.children.every(canMatchOptionText);
+}
+
+/** Native selects reapply their model after option regions change, not after fixed option text updates. */
+function hasOptionRegions(node: TemplateNode): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot" || node.flow !== undefined || node.name.includes("-")) return true;
+  if (node.name !== "option" && node.attributes.some((attribute) => attribute.kind === "directive" && attribute.name === "html")) return true;
+  return node.children.some(hasOptionRegions);
 }
 
 function optionAttribute(value: string, context: RenderContext): string {
@@ -279,9 +328,10 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   const stableSource = read.invalid ? retained(context, read.source, "[] as any[]") : read.source;
   // Native structural reads accept absence, even for an initialized declared list.
   const listSource = listType.type.kind === "list" && (listType.nullable || read.invalid) ? `(${stableSource} ?? [])` : stableSource;
-  const list = lowering.list(listNode, scope, flow.item, {
+  const filterItem = context.freshIdentifier("htmlNextItem");
+  const list = lowering.list(listNode, scope, filterItem, {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
-    itemScope: scopeWith(flow.item, "index", "loop"),
+    itemScope: scopeWith(filterItem, "index", "loop"),
     sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   }, listSource);
@@ -303,7 +353,7 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
   context: RenderContext, blockInputs?: string[]): string {
   if (node.kind === "text") {
-    return context.boundSelect && context.selectSelection === undefined ? escapeHtml(node.value) : `{${quote(node.value)}}`;
+    return context.boundSelect && context.selectSelection === undefined && node.expressionPlan === undefined && node.segments === undefined ? escapeHtml(node.value) : `{${textSource(node, scope, lowering, context)}}`;
   }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
@@ -321,7 +371,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const checked = scoped ? `${context.checkedSlotName}(${supplied}, ${name})` : supplied;
     const values = scoped ? `{ ${node.props!.map((prop) => {
       const source = lowering.value(prop.expressionPlan.ast, scope);
-      return `${quote(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
+      return `${objectKey(prop.name)}: ${mayProduceInvalidResult(prop.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source}`;
     }).join(", ")} }` : "{}";
     const children = !scoped && defaultSlot && hasChildren ? "{:else if children}{@render children()}" : "";
     return `{#if true}${nameDeclaration}{@const ${selected} = ${checked}}{#if ${selected}}{@render ${selected}(${values})}${children}${fallback === "" ? "" : `{:else}${fallback}`}{/if}{/if}`;
@@ -393,7 +443,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (condition === undefined) fail("HT018", "A $match child must be a $when or $else arm.");
       return `{ const ${testName}: any = ${condition.source}; ${condition.invalid ? `if (${testName} === Symbol.for('html-next.invalid-result')) return ${testName}; ` : ""}if (${testName}) return ${selected}; }`;
     }).join(" ");
-    const source = `(() => { ${alias === undefined || expression === undefined ? "" : `const ${alias} = ${expression.source}; ${expression.invalid ? `if (${alias} === Symbol.for('html-next.invalid-result')) return ${alias};` : ""}`} ${selection} return { arm: -1, value: ${alias ?? "undefined"} }; })()`;
+    const sampled = context.freshIdentifier("htmlNextMatchValue");
+    const source = `(() => { ${alias === undefined || expression === undefined ? "" : `const ${sampled} = ${expression.source}; ${expression.invalid ? `if (${sampled} === Symbol.for('html-next.invalid-result')) return ${sampled};` : ""} const ${alias} = ${sampled} as ${typeScript(typeOf(value!, scope))};`} ${selection} return { arm: -1, value: ${alias ?? "undefined"} }; })()`;
     const result = context.freshIdentifier("htmlNextMatch");
     const retainedSource = retainedStructural(context, source);
     const cases = arms.map((_arm, index) => `${index === 0 ? "{#if" : "{:else if"} ${result}.value.arm === ${index}}${markup[index]}`).join("");
@@ -408,10 +459,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   let optionPropertyValue: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
     const plan = contentDirective.expressionPlan;
-    const guard = declaredReadGuard(plan, scope, context);
-    const source = lowering.text(plan.ast, scope);
-    const value = guard === undefined && !mayProduceInvalidResult(plan.ast, scope) ? source
-      : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
+    const read = conformingTextRead(plan, scope, lowering, context);
+    const value = read.invalid ? retained(context, read.source, "undefined as any") : read.source;
     const optionText = node.name === "option" ? context.freshIdentifier("htmlNextOptionText") : undefined;
     if (node.name === "option" && contentDirective.name !== "html") optionTextValue = value;
     if (contentDirective.name === "html") {
@@ -422,6 +471,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
       content = `{@html htmlSite${site}(${value})}`;
     } else content = node.name === "option" ? `{(() => { const ${optionText}: unknown = ${value}; return ${optionText} == null ? "" : String(${optionText}); })()}` : `{${value}}`;
+  }
+  if (content === undefined && node.name === "option" && node.children.every((child) => child.kind === "text") &&
+    node.children.some((child) => child.expressionPlan !== undefined || child.segments !== undefined)) {
+    optionTextValue = `[${node.children.map((child) => textSource(child, scope, lowering, context)).join(", ")}].map(value => String(value ?? "")).join("")`;
+    content = `{${optionTextValue}}`;
   }
   if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
@@ -442,9 +496,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const group = groups.get(assigned.value) ?? [];
       group.push(child); groups.set(assigned.value, group);
     }
-    componentChildren = defaults;
-    if (childProps?.children !== undefined && defaults.length > 0) {
-      groups.set("", defaults);
+    componentChildren = defaults.map(projectedNode);
+    if (groups.has("") || childProps?.children !== undefined && defaults.length > 0) {
+      const unnamed = node.children.filter((child) => {
+        const assigned = child.kind === "element" ? child.attributes.find((entry) => entry.kind === "literal" && entry.name === "slot") : undefined;
+        return assigned?.kind !== "literal" || assigned.value === "";
+      });
+      groups.set("", unnamed);
       componentChildren = [];
     }
     for (const [slot, children] of groups) {
@@ -453,7 +511,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         ?? contracts?.find((entry) => entry.dynamic && (entry.props?.length ?? 0) > 0);
       const scoped = (contract?.props?.length ?? 0) > 0;
       const carrier = children.find((child): child is ElementNode => child.kind === "element" && child.name === "template");
-      if (scoped && carrier === undefined) { slotBindings.push(`${quote(slot)}: null`); continue; }
+      if (scoped && carrier === undefined) { slotBindings.push(`${objectKey(slot)}: null`); continue; }
       const alias = context.freshIdentifier("htmlNextSlotProps");
       const snippet = context.freshIdentifier("htmlNextProjection");
       const projectedScope: Scope = !scoped ? scope : {
@@ -463,10 +521,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       };
       const firstHtml = context.htmlSites;
       const firstRetention = context.retentions.size;
-      const markup = (scoped ? carrier!.children : children).map((child) => renderNode(child, false, projectedScope, lowering, context)).join("");
+      const markup = (scoped ? carrier!.children : children.map(projectedNode)).map((child) => renderNode(child, false, projectedScope, lowering, context)).join("");
       const ownership = localOwnership(context, firstHtml, firstRetention);
       snippetDeclarations += `{#snippet ${snippet}(${alias}: Record<string, any>)}${ownership}${markup}{/snippet}`;
-      slotBindings.push(`${quote(slot)}: ${snippet}`);
+      slotBindings.push(`${objectKey(slot)}: ${snippet}`);
     }
   }
   const decorations = node.attributes.filter((entry) => entry.kind === "attribute" && (entry.target === "class" || entry.target === "style"));
@@ -544,12 +602,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       selectValue = serialized;
       if (manualSelection) selectSelectionName = context.freshIdentifier("htmlNextSelectSelection");
     }
-    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${selectSelectionName === undefined ? serialized : `Symbol.for('html-next.select-selection')`} } : {})}`);
+    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name)}: ${selectSelectionName === undefined ? serialized : `Symbol.for('html-next.select-selection')`} } : {})}`);
     else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
     if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
     let update = "undefined";
     if (attribute.kind === "attribute" && attribute.twoWay) update = bindingWriter(attribute);
-    bindings.push(`{@attach ${context.controlAttachmentName}(${quote(attribute.name)}, () => ${value}, ${defaults}, ${update}${nativeProperty ? ", { nativeProperty: true }" : ""})}`);
+    const options = [nativeProperty ? "nativeProperty: true" : undefined,
+      node.name === "select" && !node.children.some(hasOptionRegions) ? "observeOptions: false" : undefined].filter((entry) => entry !== undefined);
+    bindings.push(`{@attach ${context.controlAttachmentName}(${quote(attribute.name)}, () => ${value}, ${defaults}, ${update}${options.length === 0 ? "" : `, { ${options.join(", ")} }`})}`);
     if (root) context.rootAttributeBindings.add(attribute.name);
   };
   const bindingWriter = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): string => {
@@ -602,17 +662,17 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
       if (root && !component && context.rootBindings?.includes(attribute.name) === true) {
         context.usesAttributeBinding = true;
-        literals.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${quote(attribute.value)} } : {})}`);
+        literals.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name)}: ${quote(attribute.value)} } : {})}`);
         if (!nativeControlBinding(node.name, attribute.name)) bindings.push(`{@attach ${context.bindingHelperName}(${quote(attribute.name)}, () => ${quote(attribute.value)})}`);
         continue;
       }
       const declared = childProp(attribute.name);
       if (declared !== undefined && declared[1].select === undefined && node.attributes.some((entry) =>
         entry.kind === "attribute" && entry.target === undefined && childProp(entry.name)?.[0] === declared[0])) continue;
-      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
+      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" || !component && /^[-+]?\d+(?:\.\d+)?$/.test(attribute.value) ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
-        literals.push(`${prop}={${literalPropValue(attribute.value, contract)}}`);
+        literals.push(componentPropAttribute(prop, literalPropValue(attribute.value, contract)));
         const options = contract.select?.options.map((option) =>
           `[${JSON.stringify(option.value)}, ${literalPropValue(attribute.value, { ...contract, type: option.type })}]`);
         literalInputs.push(`[${quote(prop)}]: { raw: ${quote(attribute.value)}${options === undefined ? "" : `, options: [${options.join(", ")}]`} }`);
@@ -645,7 +705,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const literal = node.attributes.find((entry) => entry.kind === "literal" && childProp(entry.name)?.[0] === declared[0]);
           const initial = literal?.kind === "literal" ? `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
           const value = literal?.kind === "literal" ? boundLiteralInput(declared[0], declared[1], source, guard, literal.value) : retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
-          bindings.push(`${declared[0]}={${value}}`);
+          bindings.push(componentPropAttribute(declared[0], value));
           bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
         } else if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
         else {
@@ -659,7 +719,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           if (node.name === "option" && name === "value") optionAttributeValue = value;
           // Svelte optimizes value= into a property write even on <output>. Keep the
           // server attribute declarative, and use only setAttribute/removeAttribute on the client.
-          bindings.push(`{...(typeof document === 'undefined' ? ${node.name === "option" && name === "value" ? optionAttribute(value, context) : `{ ${quote(name)}: ${value} }`} : {})}`);
+          bindings.push(`{...(typeof document === 'undefined' ? ${node.name === "option" && name === "value" ? optionAttribute(value, context) : `{ ${objectKey(name)}: ${value} }`} : {})}`);
           bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${read.source}, ${bindingWriter(attribute)}${node.name === "option" && name === "value" ? ", true" : ""})}`);
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
@@ -687,7 +747,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           context.usesAttributeBinding = true;
           const nativeAttribute = node.name === "input" && attribute.name === "checked" ? `((value: unknown) => value === false ? undefined : value)(${value})` : value;
           const nativeRead = node.name === "input" && attribute.name === "checked" ? `((value: unknown) => value === false ? undefined : value === true ? "" : value)(${read.source})` : read.source;
-          bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${nativeAttribute} } : {})}`);
+          bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name)}: ${nativeAttribute} } : {})}`);
           // Public default properties keep Svelte hydration from clearing native attribute defaults.
           if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: ${attribute.name === "checked" ? `(${nativeAttribute}) != null` : nativeAttribute} })}`);
           bindings.push(`{@attach ${context.bindingHelperName}(${quote(attribute.name)}, () => ${nativeRead})}`);
@@ -698,7 +758,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           context.usesAttributeBinding = true;
           bindings.push(`{...(typeof document === 'undefined' ? ${optionAttribute(value, context)} : {})}`);
           bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source}, undefined, true)}`);
-        } else bindings.push(`${declared?.[0] ?? (component ? attribute.name : svgAttributeName(attribute.name))}={${value}}`);
+        } else bindings.push(component
+          ? componentPropAttribute(declared?.[0] ?? attribute.name, value)
+          : `${svgAttributeName(attribute.name)}={${value}}`);
       }
     }
     if (attribute.kind === "property") {
@@ -730,7 +792,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
               rendered = retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, initial);
             }
             if (node.name === "option" && attribute.name === "value") optionPropertyValue = rendered;
-            bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
+            bindings.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
           }
         }
         if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(attribute.name.toLowerCase()); }
@@ -763,7 +825,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         }
         if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
         else bindings.push(selectSelectionName === undefined
-          ? `{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`
+          ? `{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${objectKey(name)}: ${serialized} }; })() : {})}`
           : `{...(typeof document === 'undefined' && ${selectSelectionName} !== undefined ? { value: Symbol.for('html-next.select-selection') } : {})}`);
         if (node.name !== "input") {
           const inherited = context.freshIdentifier("htmlNextInheritedAttribute");
@@ -842,7 +904,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       const serialized = separator === undefined
         ? `typeof ${value} === "object" ? JSON.stringify(${value}) : String(${value})`
         : `Array.isArray(${value}) ? ${value}.join(${separator}) : String(${value})`;
-      attributes.push(`${name}={${!bound ? `input${prop} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
+      attributes.push(`${name}={${!bound ? `${context.inputNames.get(prop)} == null ? ${fallback} : ` : ""}${value} == null ? undefined : (${serialized})}`);
     }
   }
   if (hasDecorations) {
@@ -897,6 +959,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   context.boundSelect = previousBoundSelect;
   context.selectSelection = previousSelectSelection;
   let markup = `${open}${children}</${name}>`;
+  if (node.name === "textarea" && content === undefined && node.children.some((child) => child.kind === "text" && (child.expressionPlan !== undefined || child.segments !== undefined))) {
+    markup = `<svelte:element this={"textarea"}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>${children}</svelte:element>`;
+  }
   if (node.name === "select" && !controlledNames.has("value")) {
     // Public dynamic elements keep SSR value= as an ordinary attribute. A real
     // control binding keeps Svelte's select/option SSR selection context.
@@ -929,7 +994,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const contexts = declarations.filter((declaration): declaration is ContextDeclaration => declaration.kind === "context");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
-  const code = new Map(target.props.map((prop) => [prop.name, `checkedProps.${prop.name}`]));
+  const code = new Map(target.props.map((prop) => [prop.name, `checkedProps[${quote(prop.name)}]`]));
   const types = new Map<string, Static>(target.props.map((prop) => [prop.name, { type: prop.contract.select === undefined ? normalizeType(prop.contract.type) : { kind: "union", members: prop.contract.select.options.map((option) => option.type) }, nullable: true }]));
   const expressionScope: Scope = { code, types };
   const dataNames = new Map<DataDeclaration, string>();
@@ -945,8 +1010,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
     + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
-  for (const prop of target.props) reserved.add(`input${prop.name}`);
-  const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
+  const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
+  for (const name of inputNames.values()) reserved.add(name);
+  reserved.add("formatValue");
+  reserved.add("createFormatValue");
+  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
   for (const declaration of contexts) {
     const alias = declaration.as ?? declaration.name;
@@ -993,7 +1061,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     types,
   };
   const lowering = new Lowering();
-  const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
+  const context: RenderContext = { definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
@@ -1032,7 +1100,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   }]));
   const structuredInputs = new Set(target.props.filter((prop) => prop.contract.select?.options.some((option) => hasStructuredHtmlInput(option.type))).map((prop) => prop.name));
   const structuredReader = (name: string): string => structuredInputs.has(name) ? ", parseHtmlLiteral" : "";
-  const destructured = target.props.map((prop) => `${prop.name}: ${selectedInputs.get(prop.name)?.raw ?? `input${prop.name}`}`).join(", ");
+  const destructured = target.props.map((prop) => `${quote(prop.name)}: ${selectedInputs.get(prop.name)?.raw ?? inputNames.get(prop.name)}`).join(", ");
   const hasProps = target.props.length > 0;
   const publicChildren = definition.contract.props.children !== undefined;
   const publicSlots = definition.contract.props.slots !== undefined;
@@ -1043,8 +1111,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       : { kind: "union" as const, members: prop.select.options.map((option) => option.type) } }])) };
   const inputSource = (name: string): string => {
     const prop = definition.contract.props[name]!;
-    const input = selectedInputs.has(name) ? `input${name}.value` : `input${name}`;
-    return "default" in prop ? `(${input} === undefined ? ${JSON.stringify(prop.default)} : ${input})` : input;
+    const input = selectedInputs.has(name) ? `${inputNames.get(name)}.value` : inputNames.get(name)!;
+    return "default" in prop ? `(${input} === undefined ? ${literalValueSource(prop.default)} : ${input})` : input;
   };
   const selectorSource = (name: string): string | undefined => {
     const selector = definition.contract.props[name];
@@ -1059,18 +1127,18 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const propTypeSource = (prop: (typeof target.props)[number], binding = false): string => {
     const select = prop.contract.select;
     if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
-    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${selectorSource(select.from)}, ${JSON.stringify(select.options)})`;
+    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${selectorSource(select.from)}, ${literalValueSource(select.options)})`;
   };
   const selectedInputSources = target.props.flatMap((prop) => {
     const input = selectedInputs.get(prop.name);
     if (input === undefined) return [];
     return [
-      `const ${input.retain} = retainedBindingInput((value: unknown) => { acceptedProps[${quote(prop.name)}] = value; }, ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}${structuredReader(prop.name)});`,
-      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => { value: unknown; attribute: string | undefined } | symbol> | undefined)?.[${quote(prop.name)}], () => ({ value: ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), raw: (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined)?.[${quote(prop.name)}]?.raw ?? ${input.raw} ?? null, html: Object.hasOwn((rest[${quote(LITERAL_INPUTS_PROP)}] as object | undefined) ?? {}, ${quote(prop.name)}) }), ${propTypeSource(prop, true)}));`,
+      `const ${input.retain} = retainedBindingInput((value: unknown) => { acceptedProps[${quote(prop.name)}] = value; }, ${"default" in prop.contract ? literalValueSource(prop.contract.default) : "null"}${structuredReader(prop.name)});`,
+      `let ${inputNames.get(prop.name)} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => { value: unknown; attribute: string | undefined } | symbol> | undefined)?.[${quote(prop.name)}], () => ({ value: ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), raw: (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined)?.[${quote(prop.name)}]?.raw ?? ${input.raw} ?? null, html: Object.hasOwn((rest[${quote(LITERAL_INPUTS_PROP)}] as object | undefined) ?? {}, ${quote(prop.name)}) }), ${propTypeSource(prop, true)}));`,
     ];
   });
   const checkedPropSources = target.props.map((prop) =>
-    `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${inputSource(prop.name)}, ${propTypeSource(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`);
+    `    ${objectKey(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${inputSource(prop.name)}, ${propTypeSource(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`);
   const stateSources = states.map((state) =>
     `let ${code.get(state.name)!} = $state<${typeScript(scope.types.get(state.name)!)}>(${state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) => {
@@ -1148,9 +1216,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     }).join(", ");
     return `const ${dataNames.get(declaration)!} = useDataRead<${dataTypes.get(declaration)!}>({ root: () => rootElement ?? null, source: ${quote(declaration.source)}, definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: [${parameters}] });`;
   });
+  const formatBinding = freshIdentifier("htmlNextFormatValue");
+  const moduleFallbacks = lowering.moduleFallbacks(formatBinding);
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
+    ...(moduleFallbacks.length === 0 ? [] : [`const formatValue = ${formatBinding};`]),
     `import type { HTMLAttributes as ${nativeAttributes} } from "svelte/elements";`,
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 || context.imports.size > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
     ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
@@ -1212,12 +1283,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  const element = rootElement;",
     "  if (element === undefined) return;",
     "  if (element !== specialElement) { specialElement = element; hadConstructor = false; hadProto = false; }",
-    "  const constructor = Object.keys(rest).includes('constructor');",
-    "  if (constructor) element.setAttribute('constructor', String(rest.constructor));",
+    "  const constructorValue: unknown = rest.constructor;",
+    "  const constructor = Object.keys(rest).includes('constructor') && constructorValue != null && constructorValue !== false;",
+    "  if (constructor) element.setAttribute('constructor', String(constructorValue));",
     "  else if (hadConstructor) element.removeAttribute('constructor');",
     "  hadConstructor = constructor;",
-    "  const proto = Object.keys(rest).includes('__proto__');",
-    "  if (proto) element.setAttribute('__proto__', String(rest.__proto__));",
+    "  const protoValue: unknown = rest.__proto__;",
+    "  const proto = Object.keys(rest).includes('__proto__') && protoValue != null && protoValue !== false;",
+    "  if (proto) element.setAttribute('__proto__', String(protoValue));",
     "  else if (hadProto) element.removeAttribute('__proto__');",
     "  hadProto = proto;",
     "});",
@@ -1320,8 +1393,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
         .map(([site, entry]) => `const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`};`),
     ]),
     ...(hasProps ? [
-      `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${quote(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
-      "const inputAccepted: Record<string, boolean> = {};",
+      `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${objectKey(prop.name)}: ${"default" in prop.contract ? literalValueSource(prop.contract.default) : "null"}`).join(", ")} };`,
+      "const inputAccepted = Object.create(null) as Record<string, boolean>;",
       ...(selectedInputs.size === 0 ? [] : [
         `const ${literalInitialsName} = new Map<string, unknown>();`,
         `function ${literalInputName}(name: string, initial: unknown, selector: unknown, once = false): unknown {`,
@@ -1339,8 +1412,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "let checkedProps = $derived.by(() => ({",
       ...checkedPropSources,
       "}));",
-      `const propValidityContract = ${JSON.stringify(validityContract)} as const;`,
-      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `(input${prop.name}.html && rest[${quote(BINDING_INPUTS_PROP)}] !== undefined && Object.hasOwn(rest[${quote(BINDING_INPUTS_PROP)}] as object, ${quote(prop.name)}) ? htmlPropValue(input${prop.name}.raw, ${propTypeSource(prop, true)}${structuredReader(prop.name)}) : input${prop.name}.html ? ${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)}) : ${inputSource(prop.name)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${quote(name)}: ${code.get(name)}`).join("")} }));`,
+      `const propValidityContract = ${literalValueSource(validityContract)} as const;`,
+      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${objectKey(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `(${inputNames.get(prop.name)}.html && rest[${quote(BINDING_INPUTS_PROP)}] !== undefined && Object.hasOwn(rest[${quote(BINDING_INPUTS_PROP)}] as object, ${quote(prop.name)}) ? htmlPropValue(${inputNames.get(prop.name)}.raw, ${propTypeSource(prop, true)}${structuredReader(prop.name)}) : ${inputNames.get(prop.name)}.html ? ${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)}) : ${inputSource(prop.name)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${objectKey(name)}: ${code.get(name)}`).join("")} }));`,
       "$effect(() => {",
       "  const element = rootElement;",
       "  if (element === undefined) return;",
@@ -1415,11 +1488,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
-        `  propInputs: (name: string) => { ${target.props.filter((prop) => selectedInputs.has(prop.name)).map((prop) => `if (name === ${quote(prop.name)}) return input${prop.name}.raw;`).join(" ")} const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.filter((prop) => !selectedInputs.has(prop.name)).map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
+        `  propInputs: (name: string) => { ${target.props.filter((prop) => selectedInputs.has(prop.name)).map((prop) => `if (name === ${quote(prop.name)}) return ${inputNames.get(prop.name)}.raw;`).join(" ")} const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.filter((prop) => !selectedInputs.has(prop.name)).map((prop) => `${objectKey(prop.name)}: ${inputNames.get(prop.name)} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
-      `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
-      `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${quote(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
+      `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
+      `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
@@ -1429,7 +1502,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       const alias = methodNames.get(method.name)!;
       const result = usesController ? `${controllerHostName}.invoke(${quote(method.name)}, ...args)`
         : `Promise.reject(new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}))`;
-      return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${result} as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${method.name} };`;
+      return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${result} as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${isScriptIdentifier(method.name) ? method.name : quote(method.name)} };`;
     }),
     ...(!usesController && target.methods.length > 0 ? [
       "$effect(() => {",
@@ -1440,7 +1513,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...handlerSources,
     ...lowering.fallbacks(),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
-  return { component: `${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
+  return { component: `${moduleFallbacks.length === 0 ? "" : `<script module lang="ts">\n${moduleFallbacks.join("\n").replace(/<\/script/gi, "<\\/script")}\n</script>\n`}${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
     helpers: [
       ...(hasProps || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),

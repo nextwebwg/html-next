@@ -63,19 +63,20 @@ use target-native rendering, reactivity, lifecycle, lists, and hydration.
 - Input boundary: application or library entries plus a target framework and supported version
 - Primary metrics: generated output, HTML Next bridge cost, target framework/runtime cost, and total
   production output
-- Required evidence: cross-target observable conformance, SSR/hydration identity, controller-host
+- Required evidence: cross-target appearance and runtime conformance, successful hydration, controller-host
   parity, request cleanup, and representative consumer bundles
 - Current evidence: conversion has explicit application and library modes, version and collision
   diagnostics, stable entry files and output inventories, and target-native state, computed values,
   updates, and declared event dispatch across React, Vue, and Svelte. Three-engine fixtures cover
   data reads and cancellation, controllers and refs, handler operations, context, flow and keyed
-  identity, two-way native controls, named/scoped slots, safe HTML, SSR, hydration, and diagnostics.
+  updates, two-way native controls, named/scoped slots, safe HTML, SSR, hydration, and diagnostics.
   Converted libraries have dependency inventories and independent installed-consumer checks;
   Vite can convert source imports and generate consumer declarations for all three frameworks.
   Entries export components for consumers to mount or hydrate with the framework's public APIs.
-  Svelte's remaining audit includes state-preserving keyed movement, original controller slot
-  handles, and exact implicit-option SSR behavior. Passing feature fixtures alone does not settle
-  these gaps or prove every feature combination.
+  Svelte's remaining audit includes focus and event behavior during keyed movement and the final
+  runtime, hydration, compatibility, and performance gates. Controller projection checks exercise
+  rendered interactions and lifecycle cleanup. Framework-owned node objects and SSR markup may
+  differ; passing feature fixtures alone does not prove every feature combination.
 - Completion: all supported capabilities map to target-native primitives or measured semantic
   bridges, and application and library outputs satisfy the framework conversion spec
 

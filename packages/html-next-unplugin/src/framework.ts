@@ -263,7 +263,11 @@ class FrameworkCompiler {
       digest.update(await readFile(consumerRequire.resolve(`${name}/package.json`)));
     }
     if (this.options.target === "vue") digest.update(await readFile(require.resolve("vue-tsc/package.json")));
-    if (this.options.target === "svelte") digest.update(await readFile(require.resolve("svelte2tsx/package.json")));
+    if (this.options.target === "svelte") {
+      digest.update(await readFile(require.resolve("svelte2tsx/package.json")));
+      // A pinned tooling patch changes declarations without changing the package version.
+      digest.update(await readFile(new URL(import.meta.resolve("svelte2tsx"))));
+    }
     const fingerprint = digest.digest("hex");
     const metadata = resolve(cache, "declarations.fingerprint");
     if (await readFile(metadata, "utf8").catch(() => "") === fingerprint && await exists(declarationEntry)) return declarationEntry;

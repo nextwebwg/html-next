@@ -15,4 +15,3 @@ export const polymorphicControllerModule = `export default function connect(host
   });
   return () => { stop(); window.switchTrace.push(["disconnect", root.localName]); };
 }`;
-

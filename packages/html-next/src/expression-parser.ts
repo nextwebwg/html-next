@@ -242,4 +242,3 @@ export function parseExpression(source: string): ExpressionNode {
   if (kind !== 0) throw new SyntaxError("Unexpected trailing input in expression.");
   return node;
 }
-

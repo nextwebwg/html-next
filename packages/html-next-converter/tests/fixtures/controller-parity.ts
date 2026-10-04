@@ -42,4 +42,3 @@ export const controllerParityModule = `export default function connect(host) {
   return cleanup;
 }
 export async function increment(host) { host.state.count += 1; return host.state.count; }`;
-

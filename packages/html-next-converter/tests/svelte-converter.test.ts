@@ -12,6 +12,7 @@ import { sveltePlugin } from "./helpers/svelte.js";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes } from "parse5";
 
 import { convertComponents } from "../src/index.js";
+import { formattingSource } from "../../html-next/tests/formatting-fixture.js";
 
 const temporary: string[] = [];
 let serverSerial = 0;
@@ -20,7 +21,7 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function serverHtml(outDirectory: string, name: string, source: string, props: Record<string, unknown> = {}): Promise<string> {
+async function serverComponent(outDirectory: string, name: string, source: string): Promise<Component<Record<string, unknown>>> {
   const server = compile(source, { filename: `${name}.svelte`, generate: "server" });
   await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(outDirectory, "node_modules"), "dir")
     .catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
@@ -31,7 +32,11 @@ async function serverHtml(outDirectory: string, name: string, source: string, pr
     loader: { ".css": "empty" }, plugins: [sveltePlugin("server")],
   });
   const module = await import(pathToFileURL(serverPath).href) as { default: Component<Record<string, unknown>> };
-  return render(module.default, { props }).body;
+  return module.default;
+}
+
+async function serverHtml(outDirectory: string, name: string, source: string, props: Record<string, unknown> = {}): Promise<string> {
+  return render(await serverComponent(outDirectory, name, source), { props }).body;
 }
 
 it("converts a simple component to compilable Svelte 5 in both graph modes", async () => {
@@ -51,6 +56,7 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     assert.deepEqual(manifest.package.peerDependencies, { svelte: "^5.57.1" });
     const source = await readFile(join(outDirectory, "svelte/XCard.svelte"), "utf8");
     assert.doesNotMatch(source, /@nextwebwg\/html-next/);
+    assert.doesNotMatch(source, /createFormatValue|const formatValue/);
     compile(source, { filename: "XCard.svelte", generate: "client" });
     const html = await serverHtml(outDirectory, "XCard", source, { label: "Hello", id: "case", class: "outside" });
     assert.match(html, /<article[^>]*data-component="x-card"/);
@@ -60,6 +66,99 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     const defaulted = await serverHtml(outDirectory, "XCard", source);
     assert.match(defaulted, /aria-label="Ready"/);
     assert.doesNotMatch(defaulted, /data-label=/);
+  }
+});
+
+it("renders shared inline Intl expressions in public Svelte SSR output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-formatting-"));
+  temporary.push(root);
+  await writeFile(join(root, "formatting.html"), formattingSource);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["formatting.html"] });
+    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+    const html = await serverHtml(outDirectory, "XFormatting", source);
+    assert.match(html, /Total: .*\$12\.50.* due\./);
+    assert.match(html, /aria-label="\$12\.50"/);
+    assert.doesNotMatch(html, /\{format\(|Symbol\(html-next.invalid-result\)/);
+  }
+});
+
+it("shares computed-only Intl formatters across SSR instances without authored helper-name collisions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-format-cache-"));
+  temporary.push(root);
+  await writeFile(join(root, "formatting.html"), `<template component="x-format-cache"><defs>
+    <state name="formatValue" type="number" value="12.5"></state>
+    <state name="createFormatValue" type="number" value="2"></state>
+    <computed name="label" from="format($formatValue + $createFormatValue, 'number', {}, 'en-US')"></computed>
+    </defs><output $value="label"></output></template>`);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["formatting.html"] });
+    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+    const Component = await serverComponent(outDirectory, "XFormatCache", source);
+    const original = Intl.NumberFormat;
+    let constructions = 0;
+    Intl.NumberFormat = new Proxy(original, { construct(target, args) { constructions++; return Reflect.construct(target, args); } });
+    try {
+      assert.match(render(Component).body, />14\.5<\/output>/);
+      assert.match(render(Component).body, />14\.5<\/output>/);
+      assert.equal(constructions, 1, "identical options reuse one formatter across component instances");
+    } finally { Intl.NumberFormat = original; }
+  }
+});
+
+it("compiles CSS-valid public method names through quoted Svelte exports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-method-exports-"));
+  temporary.push(root);
+  await writeFile(join(root, "method.html"), `<template component="x-method-name"><defs>
+    <method name="·ping" returns="promise(number)"></method></defs><button>Ready</button></template>`);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["method.html"] });
+    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+    compile(source, { filename: "XMethodName.svelte", generate: "client" });
+    assert.match(await serverHtml(outDirectory, "XMethodName", source), /Ready/);
+  }
+});
+
+it("preserves a declared __proto__ prop as an own value in public SSR output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-proto-prop-"));
+  temporary.push(root);
+  await writeFile(join(root, "proto.html"), `<template component="x-proto-prop"><defs>
+    <prop name="__proto__" type="string" default="Ready">Label.</prop>
+    </defs><output $value="$__proto__"></output></template>
+    <template component="x-proto-owner"><section>
+      <x-proto-prop __proto__="Provided"></x-proto-prop>
+      <x-proto-prop from:__proto__="'Bound'"></x-proto-prop>
+    </section></template>`);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["proto.html"] });
+    const component = manifest.components.find((component) => component.tag === "x-proto-prop")!;
+    const source = await readFile(join(outDirectory, component.artifact), "utf8");
+    const Component = await serverComponent(outDirectory, "XProtoProp", source);
+    for (const [input, expected] of [[undefined, "Ready"], ["Provided", "Provided"], [42, "Ready"]] as const) {
+      assert.match(render(Component, { props: Object.fromEntries([["__proto__", input]]) }).body, new RegExp(`>${expected}</output>`));
+    }
+    const owner = manifest.components.find((component) => component.tag === "x-proto-owner")!;
+    const ownerSource = await readFile(join(outDirectory, owner.artifact), "utf8");
+    assert.match(await serverHtml(outDirectory, "XProtoOwner", ownerSource), />Provided<\/output>.*>Bound<\/output>/s);
+  }
+});
+
+it("preserves escaped literal braces inside rich bound-select option text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-option-literal-"));
+  temporary.push(root);
+  await writeFile(join(root, "option.html"), `<template component="x-option-literal"><defs>
+    <state name="choice" type="string" value="{Ready}"></state></defs>
+    <select bind:value="choice"><option><span>\\{Ready}</span></option></select></template>`);
+  for (const mode of ["application", "library"] as const) {
+    const outDirectory = join(root, mode);
+    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["option.html"] });
+    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+    compile(source, { filename: "XOptionLiteral.svelte", generate: "client" });
+    assert.match(await serverHtml(outDirectory, "XOptionLiteral", source), /(?:\{Ready\}|&#123;Ready&#125;)/);
   }
 });
 
