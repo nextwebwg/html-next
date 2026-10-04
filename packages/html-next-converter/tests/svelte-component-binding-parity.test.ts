@@ -22,6 +22,9 @@ async function snapshot(page: Page) {
       generic: (() => { const output = root.querySelector<HTMLOutputElement>("#untyped-output"); return output === null ? null : {
         attribute: output.getAttribute("value"), value: output.value, defaultValue: output.defaultValue,
       }; })(),
+      genericEdges: Array.from(root.querySelectorAll<HTMLOutputElement>("#unbound-output, #prototype-output"), (element) => ({
+        id: element.id, value: element.value, attribute: element.getAttribute("value"), prototype: element.getAttribute("__proto__"), constructor: element.getAttribute("constructor"),
+      })),
       area: (() => { const element = root.querySelector<HTMLTextAreaElement>("#untyped-area"); return element === null ? null : {
         value: element.value, attribute: element.getAttribute("value"), defaultValue: element.defaultValue,
       }; })(),
@@ -123,6 +126,10 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               const native = await live.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
               const server = await svelte.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
               assert.deepEqual(server, native, "SSR generic binding differs before hydration");
+              for (const id of ["unbound-output", "prototype-output"]) {
+                const read = (element: Element) => ({ text: element.textContent, value: element.getAttribute("value"), prototype: element.getAttribute("__proto__"), constructor: element.getAttribute("constructor") });
+                assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read), `SSR ${id} differs`);
+              }
               for (const id of ["untyped-number", "untyped-flag", "untyped-raw-flag", "radio-first", "radio-second", "untyped-file"]) {
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));

@@ -51,6 +51,8 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-untyped-area id="untyped-area" bind:value="form.text"></x-untyped-area>
   <x-untyped-select id="untyped-select" bind:value="choice"></x-untyped-select>
   <x-untyped-multiple id="untyped-multiple" bind:value="choices"></x-untyped-multiple>
+  <x-untyped-output id="unbound-output" from:value="form.text"></x-untyped-output>
+  <x-untyped-output id="prototype-output" bind:__proto__="form.text" bind:constructor="form.text"></x-untyped-output>
   <x-untyped-output id="untyped-output" bind:value="form.text"></x-untyped-output>
   <x-state-field id="state-selected" bind:value="selected.value"></x-state-field>
   <x-prop-field id="prop-selected" from:mode="mode" bind:value="selected.value"></x-prop-field>
