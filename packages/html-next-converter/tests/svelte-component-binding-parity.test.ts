@@ -12,11 +12,16 @@ import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { componentBindingsSource as sharedSource, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule, componentOwnedModule } from "./fixtures/component-bindings.js";
 
-const source = sharedSource.replace("</form>", `  <x-literal-number id="literal-number" value="14"></x-literal-number>
+const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-from" value="14" from:value="selected.value"></x-literal-number>
+  <x-literal-number id="mixed-bind" value="14" bind:value="selected.value"></x-literal-number>
+  <x-literal-number id="mixed-invalid-from" value="14" from:value="literalInput.value"></x-literal-number>
+  <x-literal-number id="mixed-invalid-bind" value="14" bind:value="literalInput.value"></x-literal-number>
+  <x-literal-number $each="row, index of [1, 2]" from:id="concat('mixed-row-', index)" value="14" from:value="literalInput.value"></x-literal-number>
+  <x-literal-number id="literal-number" value="14"></x-literal-number>
   <x-literal-boolean id="literal-boolean" value></x-literal-boolean>
   <x-literal-list id="literal-list" value="One Two"></x-literal-list>
   <x-prop-field id="literal-selected" value="14" from:mode="mode"></x-prop-field>
-</form>`) + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
+</form>`).replace('<state name="selected"', '<state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="value"></output></template>
 `;
@@ -157,7 +162,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 6 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 12 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
@@ -224,7 +229,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             const compareSelected = async (state: readonly [unknown, unknown, boolean], prop: readonly [unknown, unknown, boolean]) => {
               await compare();
               const actual = (await snapshot(live)).selected;
-              assert.deepEqual(actual, { "state-selected": { value: state[0], input: state[1], valid: state[2] },
+              assert.deepEqual(Object.fromEntries(Object.entries(actual).filter(([id]) => !id.startsWith("mixed-"))), { "state-selected": { value: state[0], input: state[1], valid: state[2] },
                 "prop-selected": { value: prop[0], input: prop[1], valid: prop[2] },
                 "literal-number": { value: 14, input: "14", valid: true },
                 "literal-selected": { value: 14, input: "14", valid: true },
@@ -232,6 +237,9 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 "literal-list": { value: ["One", "Two"], input: "One Two", valid: true } });
             };
             await compareSelected([12, 12, true], [12, 12, true]);
+            const initialMixed = (await snapshot(live)).selected;
+            for (const id of ["mixed-from", "mixed-bind"]) assert.deepEqual(initialMixed[id], { value: 12, input: 12, valid: true });
+            for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1"]) assert.deepEqual(initialMixed[id], { value: 14, input: "14", valid: true });
             await setMode("state", "text");
             await compareSelected([12, 12, false], [12, 12, true]);
             await setSelected("Hello");
@@ -256,6 +264,15 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await compareSelected([17, 17, false], [17, 17, true]);
             await setMode("state", "number");
             await compareSelected([17, 17, true], [17, 17, true]);
+            for (const next of [14, "invalid", 6, null]) {
+              await Promise.all(pages.map((page) => page.evaluate((value) => {
+                (window as unknown as { fieldsHost: { state: { literalInput: { value: unknown } } } }).fieldsHost.state.literalInput.value = value;
+              }, next)));
+              await compare();
+              const mixed = (await snapshot(live)).selected;
+              const value = next === 14 || next === "invalid" ? 14 : 6;
+              for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1"]) assert.deepEqual(mixed[id], { value, input: value, valid: true });
+            }
             await Promise.all(pages.map((page) => page.locator("#untyped-number").fill("23")));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "23")));
             await compare();

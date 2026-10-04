@@ -284,13 +284,14 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   const { flow: _flow, ...body } = node;
   const firstHtmlSite = context.htmlSites;
   const firstRetention = context.retentions.size;
-  const markup = renderNode(body, false, rowScope, lowering, context);
+  const inputs: string[] = [];
+  const markup = renderNode(body, false, rowScope, lowering, context, inputs);
   const declarations = localOwnership(context, firstHtmlSite, firstRetention);
-  return `{#each ${rows} as ${row}${key}}${declarations}${markup}{/each}`;
+  return `{#each ${rows} as ${row}${key}}${declarations}${inputs.join("")}${markup}{/each}`;
 }
 
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
-  context: RenderContext): string {
+  context: RenderContext, blockInputs?: string[]): string {
   if (node.kind === "text") {
     return context.boundSelect && context.selectSelection === undefined ? escapeHtml(node.value) : `{${quote(node.value)}}`;
   }
@@ -478,6 +479,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const literals: string[] = [];
   const selectedBindings: string[] = [];
   const literalInputs: string[] = [];
+  const inputDeclarations: string[] = blockInputs ?? [];
   const nativeBindings: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
     ? `slots={{ ${slotBindings.join(", ")} }}`
@@ -549,6 +551,16 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
     return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
+  const boundLiteralInput = (prop: string, contract: PropContract, raw: string, guard: string | undefined, literal: string): string => {
+    context.usesComponentBindings = true;
+    const candidate = context.freshIdentifier("htmlNextBindingValue");
+    const input = context.freshIdentifier("htmlNextBindingInput");
+    const initial = `{ value: ${literalPropValue(literal, contract)}, raw: ${quote(literal)} } as { value: any; raw: unknown }`;
+    const read = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${raw}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(contract.type))}) ? { value: ${candidate}, raw: ${candidate} } : Symbol.for('html-next.invalid-result'); })()`, initial);
+    inputDeclarations.push(`{@const ${input} = ${read}}`);
+    literalInputs.push(`[${quote(prop)}]: { get raw() { return ${input}.raw; } }`);
+    return `${input}.value`;
+  };
   if (node.name === "option" && context.boundSelect && context.selectSelection === undefined) {
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
     bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
@@ -576,6 +588,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         continue;
       }
       const declared = childProp(attribute.name);
+      if (declared !== undefined && declared[1].select === undefined && node.attributes.some((entry) =>
+        entry.kind === "attribute" && entry.target === undefined && childProp(entry.name)?.[0] === declared[0])) continue;
       if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
@@ -611,7 +625,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const candidate = context.freshIdentifier("htmlNextBindingValue");
           const literal = node.attributes.find((entry) => entry.kind === "literal" && childProp(entry.name)?.[0] === declared[0]);
           const initial = literal?.kind === "literal" ? `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
-          const value = retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
+          const value = literal?.kind === "literal" ? boundLiteralInput(declared[0], declared[1], source, guard, literal.value) : retained(context, `(() => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
           bindings.push(`${declared[0]}={${value}}`);
           bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
         } else if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
@@ -638,7 +652,17 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           ? lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name) : lowering.value(attribute.expressionPlan.ast, scope));
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
         const initial = literal?.kind === "literal" ? declared === undefined ? quote(literal.value) : `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
-        const value = read.invalid ? retained(context, read.source, initial) : read.source;
+        let value: string;
+        if (declared !== undefined && declared[1].select === undefined) {
+          if (literal?.kind === "literal") value = boundLiteralInput(declared[0], declared[1], lowering.value(attribute.expressionPlan.ast, scope), declaredReadGuard(attribute.expressionPlan, scope, context), literal.value);
+          else if (attribute.expressionPlan.ast.kind === "literal" && attribute.expressionPlan.ast.dimension === undefined &&
+            parseTypedValue(attribute.expressionPlan.ast.value, declared[1].type, "$", "value").ok) value = read.source;
+          else {
+            context.usesComponentBindings = true;
+            const candidate = context.freshIdentifier("htmlNextBindingValue");
+            value = retained(context, `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} !== Symbol.for('html-next.invalid-result') && acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
+          }
+        } else value = read.invalid ? retained(context, read.source, initial) : read.source;
         if (node.name === "select" && attribute.name === "value") {
           context.usesAttributeBinding = true;
           bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
@@ -857,6 +881,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     markup = bridge ? `{#if ${context.nativeBindingReadName}("value") !== undefined}${markup}{:else}${ordinary}{/if}` : ordinary;
   }
   if (selectSelectionName !== undefined) markup = `{#if true}{@const ${selectSelectionName} = typeof document === 'undefined' ? ((value: unknown) => { if (value === undefined) return undefined; const many = Array.isArray(value); let matched = false; return (option: string) => many ? (value as unknown[]).includes(option) : !matched && (matched = value === option); })(${selectValue}) : undefined}${markup}{/if}`;
+  if (blockInputs === undefined && inputDeclarations.length > 0) markup = `{#if true}${inputDeclarations.join("")}${markup}{/if}`;
   return snippetDeclarations === "" ? markup : `{#if true}${snippetDeclarations}${markup}{/if}`;
 }
 
