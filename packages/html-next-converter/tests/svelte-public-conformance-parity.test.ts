@@ -81,6 +81,27 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "literal attributes preserve entities and braces through Svelte SSR spreads",
+    source: `<template component="x-entity-attributes" status="early" summary="Literal spread attributes."><defs><state name="choice" type="string" value="A&amp;B"></state></defs>
+      <section title="{root} &amp; &quot;"><select title="{select} &amp; &quot;" bind:value="choice"><option value="A&amp;B" title="{option} &amp; &quot;">Chosen</option></select><p title="{plain} &amp; &quot;">Text</p></section></template><x-entity-attributes></x-entity-attributes>`,
+    expect: { probe: `return [qa('section, select, option, p').map(e => e.getAttribute('title')), q('option').getAttribute('value'), q('select').value];`, result: [[`{root} & "`, `{select} & "`, `{option} & "`, `{plain} & "`], "A&B", "A&B"] },
+  },
+  {
+    name: "sanitized HTML option bodies select by native descendant text during SSR",
+    source: `<template component="x-html-option" status="early" summary="HTML option text."><defs>
+      <state name="choice" type="string" value="A B &amp; C"></state><prop name="label" type="string" default="  &lt;b&gt;A   B&lt;/b&gt; &amp;amp; C  ">Label.</prop>
+      </defs><section><select bind:value="choice"><option>First</option><option $html="label"></option></select><select .value="choice"><option>First</option><option value="A B &amp; C" $html="label"></option></select></section></template><x-html-option></x-html-option>`,
+    expect: { probe: `return [q('select').value, q('select').selectedIndex, qa('option').map(e => [e.value, e.textContent, e.getAttribute('value')]), qa('option b').length];`, result: ["A B & C", 1, [["First", "First", null], ["A B & C", "  A   B & C  ", null], ["First", "First", null], ["A B & C", "  A   B & C  ", "A B & C"]], 2] },
+  },
+  {
+    name: "repeated sanitized HTML options retain independent implicit selection text",
+    source: `<template component="x-html-option-rows" status="early" summary="Repeated HTML option text."><defs>
+      <state name="choices" type="list(string)" value="['A B', 'D E']"></state>
+      <prop name="labels" type="list(string)" default="['  &lt;b&gt;A   B&lt;/b&gt;  ', '&lt;i&gt;D  E&lt;/i&gt;']">Labels.</prop>
+      </defs><section><select multiple bind:value="choices"><option $each="label of labels" $html="label"></option></select></section></template><x-html-option-rows></x-html-option-rows>`,
+    expect: { probe: `return [qa('option').map(e => [e.value, e.textContent, e.selected, e.getAttribute('value')]), qa('option b, option i').map(e => e.tagName)];`, result: [[["A B", "  A   B  ", true, null], ["D E", "D  E", true, null]], ["B", "I"]] },
+  },
+  {
     name: "dynamic implicit option values normalize ASCII whitespace and preserve ordinary letters",
     source: `<template component="x-dynamic-option" status="early" summary="Dynamic option text."><defs>
       <state name="choice" type="string" value="First next word"></state><prop name="label" type="string" default="  First&nbsp;next\tword\n  ">Label.</prop>

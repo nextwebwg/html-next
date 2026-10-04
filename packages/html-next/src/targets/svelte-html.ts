@@ -10,17 +10,36 @@ import { defaultTreeAdapter, html as parse5Html, parseFragment, serialize, type 
 ${SAFE_HTML_SANITIZER_SOURCE}
 
 /** Keep the last safe output if an expression becomes invalid. */
-export function retainedSanitizedHtml(owner?: string): (value: unknown) => string {
+export function retainedSanitizedHtml(owner?: string): (value: unknown) => string;
+export function retainedSanitizedHtml(owner: string | undefined, captureText: true): ((value: unknown) => string) & { text(value: unknown): string };
+export function retainedSanitizedHtml(owner?: string, captureText = false) {
   let previous = "";
-  return (value: unknown): string => {
+  let previousText = "";
+  let previousInput: string | undefined;
+  const read = (value: unknown): string => {
     if (value === Symbol.for("html-next.invalid-result")) return previous;
+    const input = value == null ? "" : String(value);
+    if (input === previousInput) return previous;
     const context = defaultTreeAdapter.createElement("template", HTML_NAMESPACE, []);
-    const fragment = parseFragment(context, value == null ? "" : String(value), {});
+    const fragment = parseFragment(context, input, {});
     sanitizeServer(fragment);
     if (owner !== undefined) markOwned(fragment, owner);
     previous = serialize(fragment);
+    if (captureText) previousText = fragmentText(fragment);
+    previousInput = input;
     return previous;
   };
+  return captureText ? Object.assign(read, { text(value: unknown): string { read(value); return previousText; } }) : read;
+}
+
+/** Sanitization removes script descendants; template contents are not childNodes. */
+function fragmentText(parent: DefaultTreeAdapterTypes.ParentNode): string {
+  let text = "";
+  for (const node of parent.childNodes) {
+    if ("value" in node) text += node.value;
+    else if ("childNodes" in node) text += fragmentText(node);
+  }
+  return text;
 }
 
 function markOwned(parent: DefaultTreeAdapterTypes.ParentNode, owner: string): void {

@@ -118,6 +118,7 @@ interface RenderContext {
   nextLoop: number;
   htmlSites: number;
   readonly localHtmlSites: Set<number>;
+  readonly optionHtmlSites: Set<number>;
   readonly retentions: Map<number, { readonly initial?: string }>;
   readonly localRetentions: Set<number>;
   usesAttributeBinding: boolean;
@@ -192,7 +193,7 @@ function canMatchOptionText(node: TemplateNode): boolean {
   if (node.kind === "slot" || node.name.includes("-")) return false;
   if (node.name === "option") {
     const content = node.attributes.find((attribute) => attribute.kind === "directive");
-    if (content !== undefined) return content.name === "value";
+    if (content !== undefined) return content.name === "value" || content.name === "html";
     if (node.attributes.some((attribute) => attribute.kind === "property" && attribute.name === "textContent")) return true;
     return node.children.every((child) => child.kind === "text");
   }
@@ -222,6 +223,15 @@ function retainedStructural(context: RenderContext, source: string): string {
   return `retained${site}(${source})`;
 }
 
+function retainedHtmlSource(context: RenderContext, site: number): string {
+  const args = context.styleOwner === undefined ? [] : [quote(context.styleOwner)];
+  if (context.optionHtmlSites.has(site)) {
+    if (args.length === 0) args.push("undefined");
+    args.push("true");
+  }
+  return `retainedSanitizedHtml(${args.join(", ")})`;
+}
+
 function localOwnership(context: RenderContext, firstHtmlSite: number, firstRetention: number): string {
   const localHtml = Array.from({ length: context.htmlSites - firstHtmlSite }, (_, index) => firstHtmlSite + index)
     .filter((site) => !context.localHtmlSites.has(site));
@@ -229,7 +239,7 @@ function localOwnership(context: RenderContext, firstHtmlSite: number, firstRete
   const localRetentions = [...context.retentions].filter(([site]) => site >= firstRetention && !context.localRetentions.has(site));
   for (const [site] of localRetentions) context.localRetentions.add(site);
   return [
-    ...localHtml.map((site) => `{@const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)})}`),
+    ...localHtml.map((site) => `{@const htmlSite${site} = ${retainedHtmlSource(context, site)}}`),
     ...localRetentions.map(([site, entry]) => `{@const retained${site} = ${entry.initial === undefined ? "retainedStructuralValue()" : `retainedValue(${entry.initial})`}}`),
   ].join("");
 }
@@ -381,6 +391,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
   let content: string | undefined;
   let optionTextValue: string | undefined;
+  let optionHtmlSite: number | undefined;
   let optionAttributeValue: string | undefined;
   let optionPropertyValue: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
@@ -391,9 +402,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
     const optionText = node.name === "option" ? context.freshIdentifier("htmlNextOptionText") : undefined;
     if (node.name === "option" && contentDirective.name !== "html") optionTextValue = value;
-    content = contentDirective.name === "html"
-      ? `{@html htmlSite${context.htmlSites++}(${value})}`
-      : node.name === "option" ? `{(() => { const ${optionText}: unknown = ${value}; return ${optionText} == null ? "" : String(${optionText}); })()}` : `{${value}}`;
+    if (contentDirective.name === "html") {
+      const site = context.htmlSites++;
+      if (node.name === "option" && context.selectSelection !== undefined) {
+        optionHtmlSite = site;
+        optionTextValue = `htmlSite${site}.text(${value})`;
+      }
+      content = `{@html htmlSite${site}(${value})}`;
+    } else content = node.name === "option" ? `{(() => { const ${optionText}: unknown = ${value}; return ${optionText} == null ? "" : String(${optionText}); })()}` : `{${value}}`;
   }
   if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
@@ -558,7 +574,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         continue;
       }
       const declared = childProp(attribute.name);
-      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${literalAttribute(attribute.value)}`);
+      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${attribute.name === "slot" ? literalAttribute(attribute.value) : `{${quote(attribute.value)}}`}`);
       else {
         const [prop, contract] = declared;
         literals.push(`${prop}={${literalPropValue(attribute.value, contract)}}`);
@@ -719,6 +735,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const literal = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "value");
     let normalized = quote(literalText.replace(/[\t\n\f\r ]+/g, " ").replace(/^ | $/g, ""));
     if (optionTextValue !== undefined && optionPropertyValue === undefined && (optionAttributeValue !== undefined || literal === undefined)) {
+      if (optionHtmlSite !== undefined) context.optionHtmlSites.add(optionHtmlSite);
       context.implicitOptionValueName ??= context.freshIdentifier("htmlNextOptionValue");
       normalized = `${context.implicitOptionValueName}(${optionTextValue})`;
     }
@@ -922,7 +939,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const lowering = new Lowering();
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
-    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
+    nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
@@ -1272,7 +1289,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ] : []),
     ...Array.from({ length: context.htmlSites }, (_, index) => index)
       .filter((site) => !context.localHtmlSites.has(site))
-      .map((site) => `const htmlSite${site} = retainedSanitizedHtml(${context.styleOwner === undefined ? "" : quote(context.styleOwner)});`),
+      .map((site) => `const htmlSite${site} = ${retainedHtmlSource(context, site)};`),
     ...(styles.stateNames.length === 0 ? [] : [
       HOST_STATE_TOKENS_SOURCE,
       `let hostState = $derived([${styles.stateNames.map((state) => `...hostStateTokens(${quote(state)}, ${code.get(state) ?? state})`).join(", ")}].join(" "));`,
