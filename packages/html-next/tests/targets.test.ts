@@ -318,6 +318,37 @@ describe("official target compilers", () => {
     }
   });
 
+  it("types scalar concat output as text while preserving invalid-call results", async () => {
+    const vue = generated(`<template component="x-concat-types">
+      <defs><prop name="label" type="string">Label.</prop></defs>
+      <div from:aria-label="concat(label, 1)">{$label}</div>
+    </template>`).get("vue/XConcatTypes.vue")!;
+    const checked = vue.replace("</script>", `
+const scalar: string | undefined = concat('Label ', 1, true, null, undefined);
+// @ts-expect-error an object can produce the invalid-result sentinel
+const invalidObject: string | undefined = concat({ label: 'invalid' });
+// @ts-expect-error a sentinel input is not a scalar
+const invalidSymbol: string | undefined = concat(Symbol.for('html-next.invalid-result'));
+// @ts-expect-error empty calls produce the invalid-result sentinel
+const invalidEmpty: string | undefined = concat();
+void [scalar, invalidObject, invalidSymbol, invalidEmpty];
+</script>`);
+    const directory = await mkdtemp(join(packageRoot, ".vue-concat-types-"));
+    try {
+      await writeFile(join(directory, "component.ts"), compileVue(checked, "XConcatTypes.vue"));
+      await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await run("corepack", [
+        "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck",
+        "--target", "ES2023", "--module", "ESNext", "--moduleResolution", "Bundler", "--lib", "ES2023,DOM",
+        join(directory, "component.ts"),
+      ], { cwd: packageRoot, shell: process.platform === "win32" }).catch((error: { stdout?: string; stderr?: string }) => {
+        throw new Error(`Concat consumer typecheck failed.\n${error.stdout ?? ""}${error.stderr ?? ""}`, { cause: error });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Vue's modelValue API while binding a native root through its DOM events", () => {
     const outputs = generated(componentSource(
       "x-field",

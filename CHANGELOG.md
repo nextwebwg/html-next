@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.25
+
+### Fixed
+
+- Generated Vue components type nonempty scalar `concat()` calls as text, allowing strict consumer checks for ARIA attributes, IDs, slots, and child-component props. Invalid calls retain their sentinel type and runtime behavior.
+
 ## 1.0.0-alpha.24
 
 ### Added
