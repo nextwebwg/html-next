@@ -6,6 +6,7 @@ import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
 import { parseDuration } from "../duration.js";
+import { getDomInterface } from "../platform.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
@@ -876,6 +877,20 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const generics = selectorGenerics(definition.contract.props);
   const genericParameters = new Map(generics.map(({ from, parameter }) => [from, parameter]));
   const dependentParameters = new Map(generics.map(({ from, parameter }) => [from, `NoInfer<${parameter}>`]));
+  const nativeAttributes = freshIdentifier("HtmlNextNativeAttributes");
+  const rawRest = freshIdentifier("htmlNextRest");
+  const arms = rootArms(definition.template);
+  const rootType = arms === undefined ? getDomInterface(definition.template.name) ?? "HTMLElement"
+    : [...new Set(arms.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
+  const eventCallbacks = target.events.flatMap((event) => [`on${event.name}`, `on${event.name}capture`]
+    .filter((name) => definition.contract.props[name] === undefined)
+    .map((name) => ({ name, type: `((event: CustomEvent<${event.detailType}>) => void) | null` })));
+  const slotType = (slot: SlotContract): string => `Snippet<[${(slot.props?.length ?? 0) === 0 ? "Record<string, any>" : `Readonly<{ ${slot.props!.map((name) => `${quote(name)}: any;`).join(" ")} }>`}]>`;
+  const namedSlots = target.slots.filter((slot) => !slot.dynamic);
+  const dynamicSlots = target.slots.filter((slot) => slot.dynamic);
+  const slotsType = target.slots.length === 0 ? "Record<string, Snippet<[Record<string, any>]> | null>"
+    : `Readonly<{ ${namedSlots.map((slot) => `${quote(slot.name ?? "")}?: ${slotType(slot)} | null;`).join(" ")}${dynamicSlots.length === 0 ? "" : ` [name: string]: ${[...new Set(target.slots.map(slotType))].join(" | ")} | null | undefined;`} }>`;
+  const omittedNative = ["children", "slots", ...target.props.map((prop) => prop.name), ...eventCallbacks.map((event) => event.name)];
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${genericParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, dependentParameters)};`).join("\n  ");
   const selectedInputs = new Map(target.props.filter((prop) => prop.contract.select !== undefined).map((prop) => [prop.name, {
@@ -994,6 +1009,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
+    `import type { HTMLAttributes as ${nativeAttributes} } from "svelte/elements";`,
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
     ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
@@ -1016,8 +1032,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
       `setContext("html-next:nested-depth", ${nestedDepthName} + 1);`,
     ]),
-    `type Props = { ${propTypes} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : "slots?: Record<string, Snippet<[Record<string, any>]> | null>;"} [key: string]: unknown; };`,
-    `let { ${[destructured, ...internalProps, "...rest"].filter(Boolean).join(", ")} }: Props = $props();`,
+    `type Props = Omit<${nativeAttributes}<${rootType}>, ${omittedNative.map(quote).join(" | ")}> & { ${propTypes} ${eventCallbacks.map((event) => `${quote(event.name)}?: ${event.type};`).join(" ")} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : `slots?: ${slotsType};`} [key: string]: unknown; };`,
+    `let { ${[destructured, ...internalProps, `...${rawRest}`].filter(Boolean).join(", ")} }: Props = $props();`,
+    `const rest = ${rawRest} as Record<string, unknown>;`,
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     ...(initialBindingSources.length === 0 ? [] : [
       `function ${context.nativeBindingReadName}(name: string): (() => unknown) | undefined {`,
@@ -1088,7 +1105,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(context.usesScopedSlots ? [
-      `function ${context.checkedSlotName}(slot: Snippet<[Record<string, any>]> | null | undefined, name: string) {`,
+      `function ${context.checkedSlotName}(slot: Snippet<[any]> | null | undefined, name: string) {`,
       "  if (slot === null) {",
       `    const message = 'Scoped slot \u0060' + name + '\u0060 requires a consumer <template slot="' + name + '">.';`,
       "    throw Object.assign(new Error('HR007: ' + message), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
