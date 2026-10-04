@@ -6,8 +6,8 @@ const SOURCE = `export interface Decoration {
   readonly read: () => unknown;
 }
 
-export function classText(base: string, decorations: readonly Decoration[]): string {
-  const tokens = new Set(base.split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
+export function classText(base: string | undefined, decorations: readonly Decoration[]): string | undefined {
+  const tokens = new Set((base ?? '').split(/[ \\t\\r\\n\\f]+/).filter(Boolean));
   let value = base;
   for (const decoration of decorations) {
     if (decoration.kind !== 'class') continue;

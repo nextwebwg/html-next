@@ -58,6 +58,13 @@ function literalPropValue(value: string, contract: PropContract): string {
   return parsed.ok ? JSON.stringify(parsed.value) : `${quote(value)} as any`;
 }
 
+/** A missing class base differs from an authored empty class attribute. */
+function classBaseSource(node: ElementNode, root: boolean): string {
+  const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
+  const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.class == null || rest.class === false ? undefined : ${quote("")})` : "undefined";
+  return `([${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ") || ${empty})`;
+}
+
 function checkSupported(definition: ComponentDefinition): { importedNames: ReadonlySet<string>; refs: Set<string> } {
   const importedNames = new Set<string>();
   const refs = new Set<string>();
@@ -495,7 +502,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
     if (authoredClass?.kind === "literal" && !decoratesClasses) {
-      attributes.push(`class={[${quote(authoredClass.value)}, rest.class].filter(Boolean).join(" ")}`);
+      const base = classBaseSource(node, root);
+      if (component) attributes.push(`class={${base}}`);
+      else {
+        context.usesAttributeBinding = true;
+        context.rootAttributeBindings.add("class");
+        attributes.push(`{...(typeof document === 'undefined' ? { class: ${base} } : {})}`);
+        attributes.push(`{@attach ${context.bindingHelperName}("class", () => ${base})}`);
+      }
     }
     if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
@@ -520,17 +534,18 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (component) {
       if (decoratesClasses) {
         context.usesInvocationClasses = true;
-        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
-        const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
+        const base = classBaseSource(node, root);
         attributes.push(`class={${context.initialClassName}(${base}, ${rules})}`);
       }
       attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
     } else {
       context.usesDecorationAttachment = true;
       if (decoratesClasses) {
-        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
-        const base = `[${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ")`;
-        attributes.push(`class={typeof document === 'undefined' ? classText(${base}, ${rules}) : ${base}}`);
+        const base = classBaseSource(node, root);
+        context.usesAttributeBinding = true;
+        if (root) context.rootAttributeBindings.add("class");
+        attributes.push(`{...(typeof document === 'undefined' ? { class: classText(${base}, ${rules}) } : {})}`);
+        attributes.push(`{@attach ${context.bindingHelperName}("class", () => ${base})}`);
       }
       if (decoratesStyles) {
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "style");
@@ -825,7 +840,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(context.usesInvocationClasses ? [
-      `function ${context.initialClassName}(base: string, decorations: readonly Decoration[]): string {`,
+      `function ${context.initialClassName}(base: string | undefined, decorations: readonly Decoration[]): string | undefined {`,
       "  return untrack(() => classText(base, decorations));",
       "}",
     ] : []),
@@ -866,7 +881,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(context.usesAttributeBinding ? [
-      `function ${context.bindingHelperName}(name: string, read: () => unknown, update: (value: any) => void) {`,
+      `function ${context.bindingHelperName}(name: string, read: () => unknown, update?: (value: any) => void) {`,
       "  return (element: Element) => {",
       "    $effect(() => {",
       "      const value = read();",
@@ -874,7 +889,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "      if (value == null) element.removeAttribute(name);",
       "      else element.setAttribute(name, String(value));",
       "    });",
-      "    return attachGenericBinding(element, update);",
+      ...(context.usesControls ? ["    return update === undefined ? undefined : attachGenericBinding(element, update);"] : []),
       "  };",
       "}",
     ] : []),

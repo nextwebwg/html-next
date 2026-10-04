@@ -16,7 +16,7 @@ async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
     behavior: await page.locator("#case").evaluate((element) =>
-      [...element.querySelectorAll<HTMLElement>("article, button, i")].map((root) => ({
+      [...element.querySelectorAll<HTMLElement | SVGElement>("article, button, i, g")].map((root) => ({
         tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"), components: root.getAttribute("data-component"), classValue: root.getAttribute("class"), classes: [...root.classList],
         properties: Object.fromEntries([...root.style].map((name) => [name, [root.style.getPropertyValue(name), root.style.getPropertyPriority(name)]])),
         color: getComputedStyle(root).color, padding: getComputedStyle(root).padding,
