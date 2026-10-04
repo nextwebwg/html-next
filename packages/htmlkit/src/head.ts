@@ -27,19 +27,20 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
   let title = previous.title;
   let description = previous.description;
   const elements = [...(previous.elements ?? defaultHeadElements)];
-  if (resource.head !== "") {
+  const metadata = resource.components.get(definition.contract.tag)!;
+  if (metadata.head !== "") {
     // Reuse the ordinary parser, declared prop contracts, serializer and DOM renderer.
     // No state, data reads, controllers, or browser subscriptions enter this head scope.
     // Component bodies exclude head elements. Inert spans carry the same attribute/text
     // bindings through the renderer, then become native metadata after evaluation.
-    const fragment = parseFragment(resource.head);
+    const fragment = parseFragment(metadata.head);
     for (const node of fragment.childNodes) {
       if (!("tagName" in node)) continue;
       node.attrs.push({ name: "data-htmlkit-head", value: node.tagName });
       node.tagName = "span";
       node.nodeName = "span";
     }
-    const headDefinition = parseComponent(`<template component="htmlkit-head"><defs>${resource.propDeclarations.get(definition.contract.tag) ?? ""}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
+    const headDefinition = parseComponent(`<template component="htmlkit-head"><defs>${metadata.propDeclarations}</defs><div>${serialize(fragment)}</div></template>`, definition.source.file);
     const rendered = await renderComponents(invoke(headDefinition, { props: result.props ?? {} }), { definitions: [headDefinition], url });
     const root = parseFragment(rendered.html).childNodes.find(node => "tagName" in node);
     if (root === undefined || !("childNodes" in root)) throw new HtmlKitError("Head rendering produced no root.", definition.source.file);

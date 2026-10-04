@@ -72,9 +72,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             '<link rel="canonical" href="https://other.example/">' +
             '<link rel="preload" as="script" href="./ignored.js">' +
             '<link rel="component" href="./child.html"></head>' +
-            '<template component="products-page"><section>Products <product-detail></product-detail></section></template>' :
+            '<template component="products-page"><title $value="missing">Carrier title</title>' +
+            '<meta name="htmlkit:layout" content="admin"><meta name="description" from:content="missing">' +
+            '<link rel="stylesheet" href="./carrier.css"><link rel="preload" as="script" href="./carrier.js">' +
+            '<section>Products <product-detail></product-detail></section></template>' :
             path === "/child.html" ?
-              '<template component="product-detail"><b>detail</b></template>' :
+              '<template component="product-detail"><title>Helper title</title><meta property="og:title" content="Helper social title"><b>detail</b></template>' :
               '<!doctype html><html><head><title>Host title</title>' +
               '<meta name="description" content="Host description">' +
               '<link rel="component" href="/page.html"></head>' +

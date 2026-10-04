@@ -81,7 +81,7 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
       throw new HtmlKitError(`Duplicate page component <${pageName}>: ${previous.component} (${previous.pattern}) and ${route.component} (${route.pattern}).`, route.component);
     }
     pageNames.set(pageName, { component: route.component, pattern: route.pattern, identity });
-    const override = resource.configuration.get("htmlkit:layout");
+    const override = resource.components.get(pageName)!.layout;
     const directory = layoutDefaults.find(([prefix]) => route.pattern.startsWith(prefix));
     let selected = override ?? directory?.[1] ?? options.layout;
     if (selected === undefined && route.layouts.length === 0) {
