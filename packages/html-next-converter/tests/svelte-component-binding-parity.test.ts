@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
-import { componentBindingsSource as source, componentBindingsModule as controller } from "./fixtures/component-bindings.js";
+import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule } from "./fixtures/component-bindings.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -26,6 +26,9 @@ async function snapshot(page: Page) {
         valid: element.getAttribute("data-valid"),
       })),
     })),
+    selected: await page.evaluate(() => Object.fromEntries(Object.entries((window as unknown as {
+      selectedHosts: Record<string, { props: { value: { value: unknown; inputValue: unknown; validity: { valid: boolean } } } }>;
+    }).selectedHosts).sort().map(([id, host]) => [id, { value: host.props.value.value, input: host.props.value.inputValue, valid: host.props.value.validity.valid }]))),
     pixels: await page.locator("#case").screenshot({ animations: "disabled" }),
   };
 }
@@ -39,6 +42,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte component bind
     await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(directory, "node_modules"), "dir");
     await writeFile(join(directory, "fields.html"), source);
     await writeFile(join(directory, "fields.js"), controller);
+    await writeFile(join(directory, "selected.js"), selectedBindingModule);
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],
       outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
@@ -63,6 +67,12 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /data-amount="12"/);
       assert.match(markup, /value="Ready"/);
+      for (const id of ["state-selected", "prop-selected"]) {
+        const input = markup.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
+        assert.ok(input);
+        assert.match(input, /data-value="12"/);
+        assert.match(input, /value="12"/);
+      }
       outputs.set(mode, { bundle, markup, css });
     }
   }, 60_000);
@@ -87,6 +97,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await page.route("https://app.example/**", (route) => {
                 const url = route.request().url();
                 if (url.endsWith("/fields.html")) return route.fulfill({ contentType: "text/html", body: source });
+                if (url.endsWith("/selected.js")) return route.fulfill({ contentType: "text/javascript", body: selectedBindingModule });
                 if (url.endsWith("/fields.js")) return route.fulfill({ contentType: "text/javascript", body: controller });
                 return route.fulfill({ contentType: "text/html", body: page === live
                   ? '<link rel="component" href="/fields.html"><main><x-bound-fields id="case"></x-bound-fields></main>'
@@ -98,10 +109,11 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents());
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined)));
+              (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
+              assert.deepEqual(converted.selected, native.selected);
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte component binding pixels differ", live);
             };
             await compare();
@@ -128,6 +140,42 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await Promise.all(pages.map((page) => page.locator("#number").fill("")));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "")));
             await compare();
+            const setSelected = async (value: unknown) => {
+              await Promise.all(pages.map((page) => page.evaluate((next) => {
+                (window as unknown as { fieldsHost: { state: { selected: { value: unknown } } } }).fieldsHost.state.selected.value = next;
+              }, value)));
+            };
+            const setMode = async (owner: "state" | "prop", mode: "number" | "text") => {
+              await Promise.all(pages.map((page) => page.evaluate(({ owner, mode }) => {
+                const globals = window as unknown as { fieldsHost: { state: { mode: string } }; selectedHosts: Record<string, { state: { mode: string } }> };
+                (owner === "state" ? globals.selectedHosts["state-selected"]! : globals.fieldsHost).state.mode = mode;
+              }, { owner, mode })));
+            };
+            const compareSelected = async (state: readonly [unknown, unknown, boolean], prop: readonly [unknown, unknown, boolean]) => {
+              await compare();
+              const actual = (await snapshot(live)).selected;
+              assert.deepEqual(actual, { "state-selected": { value: state[0], input: state[1], valid: state[2] },
+                "prop-selected": { value: prop[0], input: prop[1], valid: prop[2] } });
+            };
+            await compareSelected([12, 12, true], [12, 12, true]);
+            await setMode("state", "text");
+            await compareSelected([12, 12, false], [12, 12, true]);
+            await setSelected("Hello");
+            await compareSelected(["Hello", "Hello", true], [12, 12, true]);
+            await setMode("prop", "text");
+            await compareSelected(["Hello", "Hello", true], ["Hello", "Hello", true]);
+            await setSelected(42);
+            await compareSelected(["Hello", "Hello", true], ["Hello", "Hello", true]);
+            await setMode("state", "number");
+            await compareSelected([42, 42, true], ["Hello", "Hello", true]);
+            await Promise.all(pages.map((page) => page.locator("#state-selected").fill("5")));
+            await compareSelected([5, 5, true], ["Hello", "Hello", true]);
+            await setMode("prop", "number");
+            await compareSelected([5, 5, true], [5, 5, true]);
+            await Promise.all(pages.map((page) => page.locator("#state-selected").fill("")));
+            await compareSelected([5, 5, true], [5, 5, true]);
+            await setSelected(17);
+            await compareSelected([17, 17, true], [17, 17, true]);
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);
           } catch (error) {

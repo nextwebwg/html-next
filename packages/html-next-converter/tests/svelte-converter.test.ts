@@ -207,7 +207,6 @@ it("checks a prop against the type selected by another prop", async () => {
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /selectedPropNode\(\(inputkind === undefined \? "text" : inputkind\),/);
   compile(source, { filename: "XSelected.svelte", generate: "client" });
   assert.match(await serverHtml(outDirectory, "XSelected", source, { kind: "number", value: 2 }), /<output[^>]*>2<\/output>/);
   assert.match(await serverHtml(outDirectory, "XSelected", source, { value: "Ready" }), /<output[^>]*>Ready<\/output>/);

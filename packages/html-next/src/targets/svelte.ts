@@ -17,6 +17,7 @@ import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 const SLOTS_PROP = "\0html-next:slots";
 const ROOT_OWNER_PROP = "\0html-next:root-owner";
 const DECORATIONS_PROP = "\0html-next:decorations";
+const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
 
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
@@ -359,6 +360,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (hasDecorations) context.usesDecorations = true;
   if (!component && decoratesStyles) context.usesStyleDecorations = true;
   const literals: string[] = [];
+  const selectedBindings: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
     ? `slots={{ ${slotBindings.join(", ")} }}`
     : `{...{ ${quote(SLOTS_PROP)}: { ${slotBindings.join(", ")} } }}`];
@@ -425,11 +427,15 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         if (component) {
           const declared = childProp(attribute.name);
           if (declared === undefined) fail("HT030", "Svelte conversion does not yet support two-way bindings to an undeclared component attribute.");
-          if (declared[1].select !== undefined) fail("HT030", "Svelte conversion does not yet support two-way bindings to a selected component prop.");
           context.usesControls = true;
-          context.usesComponentBindings = true;
           const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
           const source = lowering.value(attribute.expressionPlan.ast, scope);
+          if (declared[1].select !== undefined) {
+            selectedBindings.push(`${quote(declared[0])}: () => ${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}`);
+            bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
+            continue;
+          }
+          context.usesComponentBindings = true;
           const candidate = context.freshIdentifier("htmlNextBindingValue");
           const literal = node.attributes.find((entry) => entry.kind === "literal" && childProp(entry.name)?.[0] === declared[0]);
           const initial = literal?.kind === "literal" ? `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
@@ -478,6 +484,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
     }
   }
+  if (selectedBindings.length > 0) bindings.push(`{...{ ${quote(BINDING_INPUTS_PROP)}: { ${selectedBindings.join(", ")} } }}`);
   const attributes = [...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
@@ -593,7 +600,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
@@ -662,7 +669,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const dependentParameters = new Map(generics.map(({ from, parameter }) => [from, `NoInfer<${parameter}>`]));
   const propTypes = target.props.map((prop) =>
     `${quote(prop.name)}${prop.contract.required ? "" : "?"}: ${genericParameters.get(prop.name) ?? dependentPropTypeSource(prop.contract, dependentParameters)};`).join("\n  ");
-  const destructured = target.props.map((prop) => `${prop.name}: input${prop.name}`).join(", ");
+  const selectedInputs = new Map(target.props.filter((prop) => prop.contract.select !== undefined).map((prop) => [prop.name, {
+    raw: freshIdentifier("htmlNextInput"), retain: freshIdentifier("htmlNextBoundInput"),
+  }]));
+  const destructured = target.props.map((prop) => `${prop.name}: ${selectedInputs.get(prop.name)?.raw ?? `input${prop.name}`}`).join(", ");
   const hasProps = target.props.length > 0;
   const publicChildren = definition.contract.props.children !== undefined;
   const publicSlots = definition.contract.props.slots !== undefined;
@@ -675,14 +685,26 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const prop = definition.contract.props[name]!;
     return "default" in prop ? `(input${name} === undefined ? ${JSON.stringify(prop.default)} : input${name})` : `input${name}`;
   };
-  const checkedPropSources = target.props.map((prop) => {
+  const propTypeSource = (prop: (typeof target.props)[number]): string => {
     const select = prop.contract.select;
-    const type = select === undefined ? JSON.stringify(normalizeType(prop.contract.type))
-      : definition.contract.props[select.from] !== undefined ? `selectedPropNode(${inputSource(select.from)}, ${JSON.stringify(select.options)})`
-      : `selectedPropNode(${code.get(select.from)}, ${JSON.stringify(select.options)})`;
-    const source = inputSource(prop.name);
-    return `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${source}, ${type}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`;
+    if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
+    const selector = definition.contract.props[select.from];
+    // A selecting prop is a finite ordinary type. Read its accepted value without
+    // depending on the aggregate checkedProps, which also reads this selected input.
+    const value = selector === undefined ? code.get(select.from)
+      : `checkedProp(${inputSource(select.from)}, ${JSON.stringify(normalizeType(selector.type))}, ${selector.required}, ${quote(select.from)}, acceptedProps, inputAccepted, false)`;
+    return `selectedPropNode(${value}, ${JSON.stringify(select.options)})`;
+  };
+  const selectedInputSources = target.props.flatMap((prop) => {
+    const input = selectedInputs.get(prop.name);
+    if (input === undefined) return [];
+    return [
+      `const ${input.retain} = retainedBindingInput();`,
+      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${input.raw}, ${propTypeSource(prop)}));`,
+    ];
   });
+  const checkedPropSources = target.props.map((prop) =>
+    `    ${quote(prop.name)}: checkedProp<${typeSource(prop.contract.type)}>(${inputSource(prop.name)}, ${propTypeSource(prop)}, ${prop.contract.required}, ${quote(prop.name)}, acceptedProps, inputAccepted, false),`);
   const stateSources = states.map((state) =>
     `let ${code.get(state.name)!} = $state<${typeScript(scope.types.get(state.name)!)}>(${state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) => {
@@ -755,7 +777,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...(context.usesComponentBindings ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, retainedBindingInput"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     ...(nestedDepthLimit === undefined ? [] : [
@@ -771,7 +793,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",
@@ -881,6 +903,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${quote(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
       "const inputAccepted: Record<string, boolean> = {};",
+      ...selectedInputSources,
       "let checkedProps = $derived.by(() => ({",
       ...checkedPropSources,
       "}));",
