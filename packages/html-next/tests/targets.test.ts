@@ -1,16 +1,25 @@
 import assert from "node:assert/strict";
+import "@formatjs/intl-durationformat/polyfill.js";
+import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, it } from "vitest";
 
 import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { build, transform } from "esbuild";
+import { createSSRApp, type Component } from "vue";
+import { renderToString } from "@vue/server-renderer";
+import { createElement } from "react";
+import { renderToString as renderReactToString } from "react-dom/server";
+import { JSDOM } from "jsdom";
 
-import { generateComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { generateComponent, generateReactComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
+import { renderComponents } from "../src/server.js";
+import { formattingSource } from "./formatting-fixture.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -95,6 +104,73 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("shares formatter instances between generated Vue and React component instances", async () => {
+    // Formatting appears only in the computed value, exercising late helper discovery too.
+    const definition = parseComponent(`<template component="x-format-cache"><defs>
+      <computed name="label" from="format(12, 'currency', { currency: 'USD' }, 'en-US')"></computed>
+      </defs><p>{$label}</p></template>`);
+    for (const target of ["vue", "react"] as const) {
+      const generated = target === "vue" ? compileVue(generateVueComponent(definition), "XFormatCache.vue") : generateReactComponent(definition);
+      const bundle = await build({ stdin: { contents: generated, loader: target === "vue" ? "ts" : "tsx", resolveDir: packageRoot },
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+      const module = { exports: {} as { default: Component & ((props: object) => ReturnType<typeof createElement>) } };
+      new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+      const constructor = Intl.NumberFormat;
+      let count = 0;
+      Intl.NumberFormat = new Proxy(constructor, { construct(ctor, args) { count++; return Reflect.construct(ctor, args); } });
+      try {
+        for (let i = 0; i < 3; i++) {
+          const html = target === "vue" ? await renderToString(createSSRApp(module.exports.default))
+            : renderReactToString(createElement(module.exports.default));
+          assert.match(html, /\$12\.00/);
+        }
+        assert.equal(count, 1, `${target}: cache must outlive component setup/render`);
+      } finally { Intl.NumberFormat = constructor; }
+    }
+  });
+  it("renders Vue Intl expressions in Node with the same text as native SSR", async () => {
+    const definition = parseComponent(formattingSource);
+    const directory = await mkdtemp(join(packageRoot, ".vue-ssr-"));
+    try {
+      const artifacts = generateComponent(definition);
+      for (const artifact of artifacts) {
+        const file = join(directory, artifact.path);
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, artifact.content);
+      }
+      const source = artifacts.find((artifact) => artifact.path === "vue/XFormatting.vue")!.content;
+      const parsed = parseVue(source, { filename: "XFormatting.vue" });
+      assert.deepEqual(parsed.errors, []);
+      const script = compileScript(parsed.descriptor, { id: "formatting", inlineTemplate: true, templateOptions: { ssr: true } });
+      const bundle = await build({ stdin: { contents: script.content, loader: "ts", resolveDir: join(directory, "vue") },
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external", loader: { ".css": "empty" } });
+      const module = { exports: {} as { default: Component } };
+      new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+      const [vue, native] = await Promise.all([
+        renderToString(createSSRApp(module.exports.default)),
+        renderComponents("<x-formatting></x-formatting>", { definitions: [definition] }),
+      ]);
+      const read = (html: string): unknown => {
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("section")!;
+          return { label: root.getAttribute("aria-label"), values: Object.fromEntries(Array.from(root.querySelectorAll("[data-format]"),
+            (element) => [element.getAttribute("data-format"), element.textContent])) };
+        } finally { dom.window.close(); }
+      };
+      assert.deepEqual(read(vue), read(native.html));
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  it("compiles mixed inline text and CSS-derived local names in all targets", async () => {
+    const definition = parseComponent(String.raw`<template component="x-inline"><defs>
+      <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }]"></state>
+      </defs><section><p>Total: {$rows.0.name} due today. $literal costs $1.15.</p>
+      <table><tbody><tr $each="😀 of $rows" $key="$😀.id"><td>Hello {$😀.name}!</td></tr></tbody></table></section></template>`);
+    const outputs = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
+    compileVue(outputs.get("vue/XInline.vue")!, "XInline.vue");
+    await transform(generateReactComponent(definition), { loader: "tsx", format: "esm" });
+    await transform(outputs.get("vanilla/XInline.js")!, { loader: "js", format: "esm" });
+  });
   it("compiles dotted numeric references for Vue and vanilla", async () => {
     const outputs = generated(`<template component="x-indexed"><defs>
       <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
@@ -236,6 +312,37 @@ describe("official target compilers", () => {
         join(directory, "consumer.ts"),
       ], { cwd: packageRoot, shell: process.platform === "win32" }).catch((error: { stdout?: string; stderr?: string }) => {
         throw new Error(`Consumer typecheck failed.\n${error.stdout ?? ""}${error.stderr ?? ""}`, { cause: error });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("types scalar concat output as text while preserving invalid-call results", async () => {
+    const vue = generated(`<template component="x-concat-types">
+      <defs><prop name="label" type="string">Label.</prop></defs>
+      <div from:aria-label="concat(label, 1)">{$label}</div>
+    </template>`).get("vue/XConcatTypes.vue")!;
+    const checked = vue.replace("</script>", `
+const scalar: string | undefined = concat('Label ', 1, true, null, undefined);
+// @ts-expect-error an object can produce the invalid-result sentinel
+const invalidObject: string | undefined = concat({ label: 'invalid' });
+// @ts-expect-error a sentinel input is not a scalar
+const invalidSymbol: string | undefined = concat(Symbol.for('html-next.invalid-result'));
+// @ts-expect-error empty calls produce the invalid-result sentinel
+const invalidEmpty: string | undefined = concat();
+void [scalar, invalidObject, invalidSymbol, invalidEmpty];
+</script>`);
+    const directory = await mkdtemp(join(packageRoot, ".vue-concat-types-"));
+    try {
+      await writeFile(join(directory, "component.ts"), compileVue(checked, "XConcatTypes.vue"));
+      await writeFile(join(directory, "props.ts"), vuePropsArtifact().content);
+      await run("corepack", [
+        "pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck",
+        "--target", "ES2023", "--module", "ESNext", "--moduleResolution", "Bundler", "--lib", "ES2023,DOM",
+        join(directory, "component.ts"),
+      ], { cwd: packageRoot, shell: process.platform === "win32" }).catch((error: { stdout?: string; stderr?: string }) => {
+        throw new Error(`Concat consumer typecheck failed.\n${error.stdout ?? ""}${error.stderr ?? ""}`, { cause: error });
       });
     } finally {
       await rm(directory, { recursive: true, force: true });

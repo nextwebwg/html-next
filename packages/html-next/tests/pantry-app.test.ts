@@ -9,7 +9,7 @@
  *  - pre-compiled: a Vite build parses the graph and ships only the definitions.
  *
  * One scenario drives both, and every step must observe the same DOM: the proposal requires the
- * delivery modes to agree on the observable result (https://nextwebwg.org/html-next/). Engine
+ * delivery modes to agree on the observable result (https://nextwebwg.org/declarative-components/). Engine
  * coverage is the conformance suite's job, so this test uses Chromium.
  *
  * Run with:  HTMLNEXT_BROWSER_TEST=1 pnpm exec vitest run --config vitest.browser.config.ts \

@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 
 import { JSDOM, VirtualConsole } from "jsdom";
+import "@formatjs/intl-durationformat/polyfill.js";
 
 import { parseBrowserProjectedSlot } from "./browser-source.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";

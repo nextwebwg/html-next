@@ -1,9 +1,10 @@
 /** Pure source-to-AST parsing, shared with generated literal input helpers. */
+import { IDENTIFIER, IDENTIFIER_START } from "./identifiers.js";
 import type { ExpressionNode } from "./expression.js";
 
 type TokenKind = 0 | 1 | 2 | 3 | 4 | 5;
 
-const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d+|\.(?![A-Za-z_$\d]))?|\.\d+)(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%(?![A-Za-z_$\d.]|\s*(?:\d|\.\d|\$)))?|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.?:{}[\]-])|$)/y;
+const TOKEN = new RegExp(String.raw`\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d+|\.(?!${IDENTIFIER_START}|[\d$]))?|\.\d+)(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%(?!${IDENTIFIER_START}|[\d$.]|\s*(?:\d|\.\d|\$)))?|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|(\$?${IDENTIFIER})|([=<>+*/%(),.?:{}[\]\-])|$)`, "uy");
 const ESCAPE = /\\([\s\S])/g;
 
 const PRECEDENCE: Readonly<Record<string, number>> = {
@@ -26,7 +27,10 @@ function isFunction(name: string): boolean {
     || name === "abs"
     || name === "default"
     || name === "concat"
-    || name === "join";
+    || name === "join"
+    || name === "format"
+    || name === "formatRange"
+    || name === "formatParts";
 }
 
 /** Scans directly into the AST: no token array and no token objects. */
@@ -129,7 +133,8 @@ export function parseExpression(source: string): ExpressionNode {
     let object = primary();
     while (kind === 4) {
       if (eat(".")) {
-        if ((kind as TokenKind) !== 3 && ((kind as TokenKind) !== 1 || !/^\d+$/.test(numericLexeme))) {
+        if ((kind as TokenKind) === 3 && String(token).startsWith("$") ||
+          (kind as TokenKind) !== 3 && ((kind as TokenKind) !== 1 || !/^\d+$/.test(numericLexeme))) {
           throw new SyntaxError("Expected a property name after `.`.");
         }
         const numeric = (kind as TokenKind) === 1;
@@ -188,7 +193,7 @@ export function parseExpression(source: string): ExpressionNode {
       if (!eat("}")) {
         do {
           if (token === "}") break;
-          if (kind !== 3 && kind !== 2) {
+          if (kind !== 3 && kind !== 2 || kind === 3 && String(token).startsWith("$")) {
             throw new SyntaxError("Object keys must be identifiers or strings.");
           }
           const key = token as string;

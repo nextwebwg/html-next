@@ -214,3 +214,9 @@ export function frameworkBindingExpression(
   }
   return `${value} ? ${emptyStringLiteral} : undefined`;
 }
+
+/** CSS-derived names can include characters outside JavaScript's binding-identifier grammar. */
+export function isScriptIdentifier(name: string): boolean {
+  return /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u.test(name)
+    && !/^(?:await|break|case|catch|class|const|continue|debugger|default|delete|do|else|enum|export|extends|false|finally|for|function|if|implements|import|in|instanceof|interface|let|new|null|package|private|protected|public|return|static|super|switch|this|throw|true|try|typeof|var|void|while|with|yield|arguments|eval)$/.test(name);
+}

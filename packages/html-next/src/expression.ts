@@ -1,4 +1,6 @@
 import { parseExpression } from "./expression-parser.js";
+import { formatValue, formattingType } from "./format.js";
+import type { TypeNode } from "./type-system.js";
 
 /** A missing read or an operation on missing/typed-invalid data. */
 export const ABSENT = Symbol("absent");
@@ -23,6 +25,7 @@ export type Value =
 /** Expressions only look names up, so any `Map` or reactive scope layer can supply them. */
 export interface Scope {
   get(name: string): Value | undefined;
+  typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
   /** Declared type of a reference, when the host has one. */
   typeOfPath?: ((path: string) => "length" | "percentage" | "duration" | undefined) | undefined;
 }
@@ -228,6 +231,14 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
 
 function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): Value {
   const { args, fn } = node;
+  if (fn === "format" || fn === "formatRange" || fn === "formatParts") {
+    const values = args.map((argument) => evalNode(argument, scope));
+    if (values.includes(NONCONFORMING)) return NONCONFORMING;
+    if (values.includes(ABSENT)) return ABSENT;
+    if (args.length < (fn === "formatRange" ? 2 : 1)) return NONCONFORMING;
+    const result = formatValue(values[0], expressionFormattingType(args[0]!, scope), fn, ...values.slice(1));
+    return result === Symbol.for("html-next.invalid-result") ? NONCONFORMING : result === undefined ? ABSENT : result;
+  }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
     const value = evalNode(args[0]!, scope);
@@ -335,6 +346,50 @@ export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "
 }
 
 const cache = new Map<string, CompiledExpression>();
+
+/** Formatting inference uses declared identities and typed operators, never string contents. */
+function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
+  const collection = (type: TypeNode | undefined): boolean => {
+    if (type?.kind === "constrained") return collection(type.base);
+    if (type?.kind === "union") return type.members.every((member) =>
+      member.kind === "terminal" && ["null", "absent"].includes(member.name) || collection(member));
+    if (type?.kind === "selected") return type.options.every((option) => collection(option.type));
+    return type?.kind === "list" || type?.kind === "separated-list" || type?.kind === "record";
+  };
+  const formattingPath = (part: ExpressionNode): string | undefined => {
+    if (part.kind === "member") {
+      const parent = formattingPath(part.object);
+      return parent === undefined ? undefined : `${parent}.${part.key}`;
+    }
+    if (part.kind === "index") {
+      const parent = formattingPath(part.object);
+      if (part.index.kind !== "literal" && (parent === undefined || !collection(scope.typeOfDeclaredPath?.(parent)))) return undefined;
+      const key = part.index.kind === "literal" ? part.index.value : 0;
+      return parent === undefined || typeof key !== "number" && typeof key !== "string" ? undefined : `${parent}.${key}`;
+    }
+    return path(part);
+  };
+  const name = formattingPath(node);
+  if (name !== undefined) return formattingType(scope.typeOfDeclaredPath?.(name));
+  const dimension = dimensionType(node, scope);
+  if (dimension !== undefined) return dimension;
+  if (node.kind === "literal") return typeof node.value === "number" ? "number" : typeof node.value === "string" ? "string" : undefined;
+  if (node.kind === "array" && node.items.every((item) => ["string", "keyword"].includes(expressionFormattingType(item, scope) ?? ""))) return "list";
+  if (node.kind === "binary" && ["+", "-", "*", "/", "%"].includes(node.op) || node.kind === "unary" && node.op === "-") return "number";
+  if (node.kind === "call" && ["min", "max", "abs", "round", "clamp"].includes(node.fn)) return "number";
+  if (node.kind === "call" && ["concat", "join", "format", "formatRange"].includes(node.fn)) return "string";
+  if (node.kind === "call" && node.fn === "default" && node.args.length === 2) {
+    if (node.args[0]?.kind === "literal" && node.args[0].value === null) return expressionFormattingType(node.args[1]!, scope);
+    return expressionFormattingType(node.args[0]!, scope);
+  }
+  if (node.kind === "conditional") {
+    const left = expressionFormattingType(node.consequent, scope);
+    const right = expressionFormattingType(node.alternate, scope);
+    return left === right ? left : node.consequent.kind === "literal" && node.consequent.value === null ? right
+      : node.alternate.kind === "literal" && node.alternate.value === null ? left : undefined;
+  }
+  return undefined;
+}
 
 function path(node: ExpressionNode): string | undefined {
   if (node.kind === "id") return node.name;
@@ -481,7 +536,8 @@ export function checkExpressionSemantics(node: ExpressionNode): void {
     if (value.kind === "array") return { kind: "list" };
     if (value.kind === "object") return { kind: "object" };
     if (value.kind === "call") {
-      if (value.fn === "concat" || value.fn === "join") return { kind: "string" };
+      if (value.fn === "concat" || value.fn === "join" || value.fn === "format" || value.fn === "formatRange") return { kind: "string" };
+      if (value.fn === "formatParts") return { kind: "list" };
       if (value.fn === "default") {
         const first = known(value.args[0]!);
         return first?.kind === "null" ? known(value.args[1]!) : first ?? known(value.args[1]!);
@@ -495,7 +551,9 @@ export function checkExpressionSemantics(node: ExpressionNode): void {
       case "call": {
         for (const argument of value.args) visit(argument);
         const { fn, args } = value;
-        const validCount = fn === "abs" ? args.length === 1
+        const formatting = fn === "format" || fn === "formatRange" || fn === "formatParts";
+        const validCount = formatting ? args.length >= (fn === "formatRange" ? 2 : 1) && args.length <= (fn === "formatRange" ? 5 : 4)
+          : fn === "abs" ? args.length === 1
           : fn === "round" ? args.length === 1 || args.length === 2
           : fn === "min" || fn === "max" || fn === "concat" ? args.length > 0
           : fn === "clamp" ? args.length === 3 : args.length === 2;

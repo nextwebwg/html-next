@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +104,18 @@ describe("workspace package contracts", () => {
       registry: "https://registry.npmjs.org/",
     });
     expect(readFileSync(join(installedRoot, "LICENSE"), "utf8")).toBe(repositoryLicense);
+    const benchmarkDependencies = [
+      "reactive-framework-test-suite", "alien-signals", "anod", "s-js", "signal-polyfill",
+      "@amadeus-it-group/tansu", "@angular/core", "@preact/signals-core", "@reactively/core",
+      "@reatom/core", "@solidjs/signals", "@vue/reactivity", "mobx", "pota", "solid-js", "svelte",
+    ];
+    for (const name of benchmarkDependencies) {
+      expect(manifest.dependencies?.[name], `${name} must remain dev-only`).toBeUndefined();
+      expect(existsSync(join(consumer, "node_modules", name)), `${name} must not be installed for consumers`).toBe(false);
+    }
+    const packedFiles = readdirSync(installedRoot, { recursive: true }).map(String);
+    expect(packedFiles.some((file) => /(?:^|[/\\])(?:scripts|tests|benchmarks)(?:[/\\]|$)|reactivity-(?:benchmark|matrix|regression)/.test(file)),
+      "Published files must exclude benchmark runners, adapters, reports, and tests").toBe(false);
     expect(Object.keys(manifest.exports)).toEqual(publicExports);
     for (const path of publicExports) {
       const entry = manifest.exports[path]!;

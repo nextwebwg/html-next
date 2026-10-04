@@ -9,6 +9,8 @@
  * function in the component, emitted when used.
  */
 import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
+import { formattingType } from "../format.js";
+import { formattingHelperSource } from "./format-source.js";
 import type { TypeNode } from "../type-system.js";
 import { quote } from "./shared.js";
 
@@ -150,7 +152,8 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       };
     }
     case "call": {
-      if (node.fn === "concat" || node.fn === "join") return { ...terminal("string"), nullable: true };
+      if (node.fn === "concat" || node.fn === "join" || node.fn === "format" || node.fn === "formatRange") return { ...terminal("string"), nullable: true };
+      if (node.fn === "formatParts") return UNKNOWN;
       if (node.fn === "default") {
         if (node.args[0] === undefined) return UNKNOWN;
         const selected = node.args[0].kind === "literal" && node.args[0].value === null ? node.args[1] : node.args[0];
@@ -268,11 +271,14 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   number: `function number(value: unknown): number | undefined {
   return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }`,
-  concat: `function concat(...values: unknown[]): string | symbol | undefined {
-  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
-  if (values.some(value => value === undefined)) return undefined;
-  if (values.length === 0 || values.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result");
-  return values.map(value => value === null ? "" : String(value)).join("");
+  concat: `// A nonempty scalar call cannot produce the invalid-result sentinel.
+type ConcatResult<T extends unknown[]> = T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
+  ? string | undefined : string | symbol | undefined;
+function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
+  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  if (values.some(value => value === undefined)) return undefined as ConcatResult<T>;
+  if (values.length === 0 || values.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  return values.map(value => value === null ? "" : String(value)).join("") as ConcatResult<T>;
 }`,
   join: `function join(...values: unknown[]): string | symbol | undefined {
   if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
@@ -420,6 +426,11 @@ export class Lowering {
   /** The fallback functions the emitted code calls. */
   fallbacks(): string[] {
     return Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!);
+  }
+
+  /** Stateful Intl reuse belongs to the module, outside component setup or render. */
+  moduleFallbacks(binding = "formatValue"): string[] {
+    return this.#used.has("formatValue") ? [formattingHelperSource(binding)] : [];
   }
 
   /** The expression's value. */
@@ -652,6 +663,12 @@ export class Lowering {
 
   #call(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): string {
     const values = node.args.map((argument) => this.value(argument, scope)).join(", ");
+    if (["format", "formatRange", "formatParts"].includes(node.fn)) {
+      const input = node.args[0];
+      if (input === undefined) return "Symbol.for('html-next.invalid-result')";
+      const hint = input.kind === "array" && input.items.length === 0 ? "list" : formattingType(typeOf(input, scope).type);
+      return `${this.#use("formatValue")}(${this.value(input, scope)}, ${hint === undefined ? "undefined" : quote(hint)}, ${quote(node.fn)}${node.args.length > 1 ? ", " + node.args.slice(1).map((arg) => this.value(arg, scope)).join(", ") : ""})`;
+    }
     if (node.fn === "default") {
       if (node.args.length !== 2) return "undefined";
       if (node.args[0]?.kind === "literal" && node.args[0].value === null) return this.value(node.args[1]!, scope);

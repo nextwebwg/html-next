@@ -1,5 +1,13 @@
 # HTML Next implementations
 
+Build universal components using the next generation of HTML. Author once, then run them in a
+browser, compile to native DOM, or use them in Vue and React. Svelte Vite adapters and converters
+are coming soon.
+
+[Get started](https://nextwebwg.org/html-next/quick-start) ·
+[Usage](https://nextwebwg.org/html-next/usage) ·
+[Ship a library](https://nextwebwg.org/html-next/ship)
+
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
 `@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it.
 All three packages share one version and publish together. Shared policy and verification live at the
@@ -12,11 +20,11 @@ repository root.
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
 
 The tools package implements both proposals it needs:
-[Declarative HTML Components](https://nextwebwg.org/html-next/) and
+[Declarative HTML Components](https://nextwebwg.org/declarative-components/) and
 [HTML Forms](https://nextwebwg.org/html-forms/). A component is authored once as inert,
 browser-parseable HTML; the same definition can run directly in a browser or compile to
 native DOM, CSS, types, and inspectable package artifacts. The component language is defined by the
-[proposal](https://nextwebwg.org/html-next/); this repository is its JavaScript tooling, verified by
+[proposal](https://nextwebwg.org/declarative-components/); this repository is its JavaScript tooling, verified by
 conformance tests.
 
 HTML Forms lives at [`@nextwebwg/html-next/forms`](./packages/html-next/src/forms.ts) and operates
@@ -51,7 +59,7 @@ must produce the same observable native DOM, state, events, validation, lifecycl
 behavior.
 
 The detailed contracts and independent progress tracks are in the
-[proposal](https://nextwebwg.org/html-next/) and
+[proposal](https://nextwebwg.org/declarative-components/) and
 [delivery goal ledger](./packages/html-next/docs/delivery-goals.md).
 
 ## A working implementation
@@ -65,6 +73,13 @@ structural directives — exercises both the runtime and the Vue target outside 
 
 - [Looma documentation](https://threadlabs.studio/looma/)
 - [Looma source](https://github.com/threadlabs-studio/looma) (MIT)
+
+## Reactive performance
+
+HTML Next ranked **#3 of 15** in a six-workload reactive-primitive benchmark on
+Node 24/macOS ARM64. The [results and reproduction guide](./packages/html-next/docs/reactivity-benchmarks.md)
+includes raw timings, exclusions, measurement limits and clean-checkout commands.
+The full matrix is dev-only; CI runs a smaller regression comparison against main.
 
 ## Install and verify
 
@@ -96,7 +111,7 @@ component dependency graph, not a registration script.
   </defs>
 
   <button $ref="button" type="button">
-    <span $value="label"></span>
+    <span>{$label}</span>
   </button>
 
   <style>
@@ -117,7 +132,7 @@ export default function controller({ refs, state }) {
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
 named and data-derived slots, typed data sources, native form participation, and generalized
-validation. See the [proposal](https://nextwebwg.org/html-next/) for the complete syntax.
+validation. See the [proposal](https://nextwebwg.org/declarative-components/) for the complete syntax.
 
 ## Run a live component graph
 
@@ -226,7 +241,7 @@ against fresh client rendering in Chromium, Firefox and WebKit.
 See [Node rendering and hydration](./packages/html-next/docs/server-rendering.md) for the API,
 platform choices and verification. The server renders the declarative baseline; browser hydration
 connects declared reads and attaches controllers through the live loader or bundled controller
-imports, following the [proposal's lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration).
+imports, following the [proposal's lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration).
 Tests cover both the live loader and a tree-shaken browser bundle, including later controller and
 read updates. The specialized build and converter delivery tracks have separate completion criteria.
 
@@ -262,15 +277,15 @@ only application resolution and trust differ.
 
 ## Repository map
 
-- [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
-- [Tools guide](https://nextwebwg.org/tools/), published from [`docs/guide`](./docs/guide)
+- [Proposal](https://nextwebwg.org/declarative-components/) (the source of truth; not in this repository)
+- [Tools guide](https://nextwebwg.org/html-next/), published from [`docs/guide`](./docs/guide)
 - [Converter requirements](./packages/html-next-converter/docs/requirements.md)
 - [Conformance corpus](./packages/html-next/tests/conformance/README.md)
 - [Style-scoping note](./packages/html-next/docs/style-scoping.md)
 - [Historical component-generation plan](./packages/html-next/docs/mvp-plan.md)
 - [Looma](https://threadlabs.studio/looma/), a UI library built on this implementation
 
-The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
+The public [HTML Next Working Draft](https://nextwebwg.org/declarative-components/) explains and
 motivates the proposal. This repository and its conformance corpus are library-agnostic.
 
 ## License

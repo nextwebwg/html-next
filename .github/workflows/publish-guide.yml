@@ -1,6 +1,6 @@
 name: Publish guide
 
-# The site renders docs/guide at nextwebwg.org/tools from main. After a change lands, start the
+# The site renders docs/guide at nextwebwg.org/html-next from main. After a change lands, start the
 # site's deploy. SITE_DEPLOY_TOKEN is a fine-grained token limited to nextwebwg/site with Actions:
 # read and write. Until it exists here, the job only reports that the deploy must be started by hand.
 on:

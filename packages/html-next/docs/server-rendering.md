@@ -4,6 +4,24 @@ The `@nextwebwg/html-next/server` entry renders validated component definitions 
 Node.js. It uses the same general renderer as live browser delivery, rather than a second component
 interpreter. This entry is separate from browser imports.
 
+Text paths and formatting expressions follow the public [template](https://nextwebwg.org/html-next/templating/)
+and [expression](https://nextwebwg.org/html-next/expressions/#formatting-intl-expressions) proposals.
+Pass an explicit locale, and a time zone for instants, when server text must match the browser.
+Civil dates and clock times preserve their authored fields.
+
+Node 22 does not supply `Intl.DurationFormat`. The server worker installs the maintained
+FormatJS polyfill when needed; Node 24 uses its native implementation. This dependency stays out
+of browser imports. Standalone converted Vue or React apps run in their framework's server realm,
+so a Node 22 server entry must install the polyfill before rendering duration expressions:
+
+```ts
+import "@formatjs/intl-durationformat/polyfill.js";
+```
+
+Install `@formatjs/intl-durationformat` in that consuming app. Browser targets use their native Intl
+facilities; a browser without a required formatter needs the corresponding application polyfill.
+Unavailable formatters produce the same invalid-result retention as invalid native options.
+
 ```ts
 import { parseComponent } from "@nextwebwg/html-next";
 import { renderComponents } from "@nextwebwg/html-next/server";
@@ -29,8 +47,8 @@ must name declared state. Node output matches the browser's declarative baseline
 props, initial state, computeds, template output and projected slots. Declared reads remain in their
 initial pending state. Browser hydration restores the instance, connects reads and attaches its
 controller to the adopted nodes. This follows the proposal's
-[controller lifecycle](https://nextwebwg.org/html-next/javascript/#lifecycle-and-hydration) and
-[connection boundary](https://nextwebwg.org/html-next/reactivity/#lifecycle).
+[controller lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration) and
+[connection boundary](https://nextwebwg.org/declarative-components/reactivity/#lifecycle).
 
 For controller-backed definitions, use the live browser loader (`@nextwebwg/html-next/browser`) with
 component links, or bundle the controller imports alongside runtime registration and observation.
@@ -60,7 +78,7 @@ in a versioned implementation record. It retains projected content that no slot 
 and native form reset defaults. Hydration consumes the records. Executable, opaque and cyclic values
 fail with `HR010` instead of being serialized with different semantics. The versioned record is
 implementation metadata, not a new normative format. Normative behavior remains in the public
-[rendered form proposal](https://nextwebwg.org/html-next/rendered-form/).
+[rendered form proposal](https://nextwebwg.org/declarative-components/rendered-form/).
 
 Slot marks serialize as `<?start ...?>` / `<?end?>` so the receiving browser chooses its native PI
 or comment representation. Structural lists adopt their serialized item ranges and retain keyed

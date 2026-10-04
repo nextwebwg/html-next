@@ -133,7 +133,8 @@ function templateSupported(
   values: ReadonlyMap<string, string>,
   handlers: ReadonlySet<string>,
 ): boolean {
-  if (node.kind === "text") return true;
+  if (node.kind === "text") return (node.segments ?? [node]).every((segment) => segment.expressionPlan === undefined
+    || nativeExpression(segment.expressionPlan.ast, values) !== undefined);
   if (node.kind === "slot") {
     return node.nameExpression === undefined &&
       (node.fallback ?? []).every((child) => templateSupported(child, values, handlers));
