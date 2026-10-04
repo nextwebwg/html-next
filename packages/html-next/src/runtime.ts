@@ -3266,12 +3266,16 @@ function applyComponentProps(
   // The current root: a root `$match` may have replaced the element a caller last saw.
   const element = instance.element!;
   const contract = instance.definition.contract;
-  const next = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
-  for (const prop of Object.values(contract.props)) {
-    if (prop.select !== undefined && contract.props[prop.select.from] === undefined) {
-      next[prop.select.from] = instance.scope.get(prop.select.from);
+  // Source validation stays tracked; reading the child's current model is write bookkeeping.
+  const next = untracked(() => {
+    const values = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
+    for (const prop of Object.values(contract.props)) {
+      if (prop.select !== undefined && contract.props[prop.select.from] === undefined) {
+        values[prop.select.from] = instance.scope.get(prop.select.from);
+      }
     }
-  }
+    return values;
+  });
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) {
@@ -3306,7 +3310,7 @@ function applyComponentProps(
       const selected = selectedPropType(contract, prop, next);
       if (!bound) element.setAttribute(attributeName, reflectedPropValue(input, selected));
     }
-    if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
+    if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
   }
 }
 

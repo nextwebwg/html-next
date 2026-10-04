@@ -447,6 +447,51 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${engine} writes structured child props without subscribing to its own output`, async () => {
+      const browser = await browserType.launch();
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      try {
+        await page.setContent(`<template component="x-structured-child"><defs>
+          <state name="mode" type="keyword" values="list, object" value="list"></state>
+          <prop name="value">Value.<type from="mode"><option value="list" type="list(number)"></option><option value="object" type="object({ count: number })"></option></type></prop>
+        </defs><output $value="value"></output></template>
+        <template component="x-list-child"><defs><prop name="value" type="list(number)">Value.</prop></defs><output $value="value"></output></template>
+        <template component="x-structured-parent"><defs><state name="box" type="object({ value: unknown })" value="{ value: [1, 2] }"></state></defs>
+          <section><x-structured-child id="from" from:value="box.value"></x-structured-child><x-structured-child id="bind" bind:value="box.value"></x-structured-child><x-list-child id="fixed-from" from:value="box.value"></x-list-child><x-list-child id="fixed-bind" bind:value="box.value"></x-list-child></section></template><x-structured-parent></x-structured-parent>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> };
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const host = (id: string) => runtime.getComponentHost(document.getElementById(id)!);
+          const read = () => ["from", "bind", "fixed-from", "fixed-bind"].map((id) => host(id).props.value!.value);
+          const initial = read();
+          const parent = runtime.getComponentHost(document.querySelector("section")!);
+          parent.state.box = { value: [3, 4] };
+          await Promise.resolve();
+          const changed = read();
+          (parent.state.box as { value: number[] }).value[1] = 6;
+          await Promise.resolve();
+          const inPlace = read();
+          host("from").state.mode = "object";
+          host("bind").state.mode = "object";
+          await Promise.resolve();
+          parent.state.box = { value: { count: 3 } };
+          await Promise.resolve();
+          const object = read();
+          (parent.state.box as { value: { count: number } }).value.count = 5;
+          await Promise.resolve();
+          return { initial, changed, inPlace, object, objectInPlace: read() };
+        });
+        assert.deepEqual(actual, { initial: [[1, 2], [1, 2], [1, 2], [1, 2]], changed: [[3, 4], [3, 4], [3, 4], [3, 4]], inPlace: [[3, 6], [3, 6], [3, 6], [3, 6]], object: [{ count: 3 }, { count: 3 }, [3, 6], [3, 6]], objectInPlace: [{ count: 5 }, { count: 5 }, [3, 6], [3, 6]] });
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
     for (const form of ["inline", "named"] as const) {
       it(`${engine} selects a ${form} prop type before parsing an HTML value`, async () => {
         const browser = await browserType.launch({ headless: true });
