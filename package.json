@@ -34,7 +34,9 @@
     "verify:compatibility": "pnpm test:browser && pnpm test:targets && pnpm test:consumer",
     "verify:extended": "pnpm verify:pr && pnpm verify:compatibility",
     "verify:release": "pnpm --filter @nextwebwg/html-next check:release && pnpm test:consumer",
-    "release:dry-run": "pnpm --filter @nextwebwg/html-next release:dry-run"
+    "release:dry-run": "pnpm --filter @nextwebwg/html-next release:dry-run",
+    "verify:performance": "pnpm --filter @nextwebwg/html-next verify:performance",
+    "report:reactivity:suite": "pnpm --filter @nextwebwg/html-next report:reactivity:suite"
   },
   "devDependencies": {
     "@types/node": "catalog:",

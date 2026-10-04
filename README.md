@@ -66,6 +66,13 @@ structural directives — exercises both the runtime and the Vue target outside 
 - [Looma documentation](https://threadlabs.studio/looma/)
 - [Looma source](https://github.com/threadlabs-studio/looma) (MIT)
 
+## Reactive performance
+
+HTML Next ranked **#3 of 15** in a six-workload reactive-primitive benchmark on
+Node 24/macOS ARM64. The [results and reproduction guide](./packages/html-next/docs/reactivity-benchmarks.md)
+includes raw timings, exclusions, measurement limits and clean-checkout commands.
+The full matrix is dev-only; CI runs a smaller regression comparison against main.
+
 ## Install and verify
 
 Use Node 22 or Node 24 and pnpm through Corepack:

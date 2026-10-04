@@ -1,0 +1,235 @@
+{
+  "matrix_checks_pass": 1,
+  "matrix_framework_count": 16,
+  "matrix_third_party_count": 15,
+  "matrix_ranked_count": 15,
+  "matrix_excluded_count": 1,
+  "matrix_process_isolation": 1,
+  "matrix_process_samples_per_framework": 5,
+  "matrix_rotation": 1,
+  "matrix_revision": "a4a420601542660f7e56828c7dc6af7b5624ccda",
+  "matrix_revision_dirty": 0,
+  "matrix_node_version": "v24.20.0",
+  "matrix_platform": "darwin-arm64",
+  "matrix_aa_score_relative_spread": 0.04864957152464888,
+  "matrix_aa_max_relative_spread": 0.11896161946785178,
+  "matrix_aa_workloads_relative_spread": {
+    "signal-write-read": 0.08789439392086051,
+    "effect-propagation": 0.11896161946785178,
+    "computed-chain": 0.03618375224071113,
+    "diamond": 0.004764662212323856,
+    "dynamic-dependencies": 0.0965699745547075,
+    "fan-out-32": 0.0352098667197136
+  },
+  "html_next_matrix_rank": 3,
+  "html_next_matrix_score": 1.3101076970640342,
+  "html_next_signal_write_read_ns": 8.71584,
+  "html_next_effect_propagation_ns": 56.475,
+  "html_next_computed_chain_ns": 312.375,
+  "html_next_diamond_ns": 134.7,
+  "html_next_dynamic_dependencies_ns": 188.5415,
+  "html_next_fan_out_32_ns": 628.375,
+  "matrix": [
+    {
+      "name": "anod",
+      "rank": 1,
+      "score": 1.0960958257584508,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 9.01832,
+        "effect-propagation": 34.4958,
+        "computed-chain": 218.1584,
+        "diamond": 112.85,
+        "dynamic-dependencies": 155.7295,
+        "fan-out-32": 705.583
+      }
+    },
+    {
+      "name": "S.js",
+      "rank": 2,
+      "score": 1.186626677583201,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 6.32,
+        "effect-propagation": 40.8583,
+        "computed-chain": 201.5666,
+        "diamond": 161.0584,
+        "dynamic-dependencies": 184.1665,
+        "fan-out-32": 877.542
+      }
+    },
+    {
+      "name": "HTML Next",
+      "rank": 3,
+      "score": 1.3101076970640342,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 8.71584,
+        "effect-propagation": 56.475,
+        "computed-chain": 312.375,
+        "diamond": 134.7,
+        "dynamic-dependencies": 188.5415,
+        "fan-out-32": 628.375
+      }
+    },
+    {
+      "name": "alien-signals",
+      "rank": 4,
+      "score": 1.442920173990297,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 14.42832,
+        "effect-propagation": 47.1291,
+        "computed-chain": 247.8,
+        "diamond": 133.3,
+        "dynamic-dependencies": 254.417,
+        "fan-out-32": 766.416
+      }
+    },
+    {
+      "name": "@preact/signals-core",
+      "rank": 5,
+      "score": 1.5107837625528304,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 11.8625,
+        "effect-propagation": 60.6417,
+        "computed-chain": 293.875,
+        "diamond": 158.1332,
+        "dynamic-dependencies": 212.9165,
+        "fan-out-32": 810.708
+      }
+    },
+    {
+      "name": "@vue/reactivity",
+      "rank": 6,
+      "score": 1.6505743610472439,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 12.38334,
+        "effect-propagation": 44.525,
+        "computed-chain": 360.4916,
+        "diamond": 227.15,
+        "dynamic-dependencies": 270.4165,
+        "fan-out-32": 803.75
+      }
+    },
+    {
+      "name": "@reactively/core",
+      "rank": 7,
+      "score": 1.8509715559632942,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 21.35582,
+        "effect-propagation": 72.0959,
+        "computed-chain": 363.1582,
+        "diamond": 154.7084,
+        "dynamic-dependencies": 261.9165,
+        "fan-out-32": 861.375
+      }
+    },
+    {
+      "name": "tansu",
+      "rank": 8,
+      "score": 2.621409770618643,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 13.8775,
+        "effect-propagation": 99.6417,
+        "computed-chain": 512.0168,
+        "diamond": 267.55,
+        "dynamic-dependencies": 455.625,
+        "fan-out-32": 1824.541
+      }
+    },
+    {
+      "name": "@angular/core",
+      "rank": 9,
+      "score": 2.9490248088560143,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 14.44,
+        "effect-propagation": 114.75,
+        "computed-chain": 572.5,
+        "diamond": 322.4168,
+        "dynamic-dependencies": 481.958,
+        "fan-out-32": 2165.417
+      }
+    },
+    {
+      "name": "solid-js",
+      "rank": 10,
+      "score": 2.9637441856158406,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 9.3675,
+        "effect-propagation": 92.8709,
+        "computed-chain": 1025.6168,
+        "diamond": 357.55,
+        "dynamic-dependencies": 544.2085,
+        "fan-out-32": 1894.292
+      }
+    },
+    {
+      "name": "mobx",
+      "rank": 11,
+      "score": 4.3047802229604395,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 31.83834,
+        "effect-propagation": 128.0458,
+        "computed-chain": 1028.8168,
+        "diamond": 462.1918,
+        "dynamic-dependencies": 618.521,
+        "fan-out-32": 2575.542
+      }
+    },
+    {
+      "name": "signal-polyfill (TC39)",
+      "rank": 12,
+      "score": 5.392040250882729,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 52.7775,
+        "effect-propagation": 171.4792,
+        "computed-chain": 922.6084,
+        "diamond": 446.3666,
+        "dynamic-dependencies": 899.1875,
+        "fan-out-32": 3558.708
+      }
+    },
+    {
+      "name": "@solidjs/signals",
+      "rank": 13,
+      "score": 6.922082795674646,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 110.6675,
+        "effect-propagation": 248.6875,
+        "computed-chain": 1295.45,
+        "diamond": 546.5668,
+        "dynamic-dependencies": 756.6455,
+        "fan-out-32": 3620.625
+      }
+    },
+    {
+      "name": "svelte",
+      "rank": 14,
+      "score": 14.799238516142193,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 886.45166,
+        "effect-propagation": 1006.6791,
+        "computed-chain": 2562.2916,
+        "diamond": 698.3334,
+        "dynamic-dependencies": 1297.375,
+        "fan-out-32": 2461.084
+      }
+    },
+    {
+      "name": "@reatom/core",
+      "rank": 15,
+      "score": 25.836001787602157,
+      "workloads_ns_per_iteration": {
+        "signal-write-read": 135.425,
+        "effect-propagation": 1515.2875,
+        "computed-chain": 3954.5416,
+        "diamond": 1728.0832,
+        "dynamic-dependencies": 2815.583,
+        "fan-out-32": 36552.917
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "name": "pota",
+      "reason": "Error: Expected 10000, received 0."
+    }
+  ]
+}
