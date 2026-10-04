@@ -15,6 +15,7 @@ import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 // A NUL cannot appear in an authored HTML attribute or a declared public prop name.
 const SLOTS_PROP = "\0html-next:slots";
+const ROOT_OWNER_PROP = "\0html-next:root-owner";
 const DECORATIONS_PROP = "\0html-next:decorations";
 
 export interface SvelteConversionOptions {
@@ -480,6 +481,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const attributes = [...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
+    if (component) attributes.push(`{...{ ${quote(ROOT_OWNER_PROP)}: true }}`);
     attributes.push(rootScope!.preservesRootFocus
       ? "{@attach (element: Element) => { rootElement = element; if (rootFocusPending) { (element as HTMLElement).focus({ preventScroll: true }); rootFocusPending = false; } return () => { rootFocusPending ||= element.ownerDocument.activeElement === element; if (rootElement === element) rootElement = undefined; }; }}"
       : component
@@ -769,7 +771,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",
@@ -959,6 +961,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(usesController ? [
       `const ${controllerHostName} = useComponentHost(() => import(${quote(definition.controller!)}), {`,
       "  root: () => rootElement ?? null,",
+      `  ownsRoot: () => rest[${quote(ROOT_OWNER_PROP)}] !== true,`,
       `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
@@ -980,7 +983,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     }),
     ...(!usesController && target.methods.length > 0 ? [
       "$effect(() => {",
-      "  const element = rootElement; if (element === undefined) return;",
+      `  const element = rootElement; if (element === undefined || rest[${quote(ROOT_OWNER_PROP)}] === true) return;`,
       ...target.methods.map((method) => `  Object.defineProperty(element, ${quote(method.name)}, { configurable: true, enumerable: false, value: ${methodNames.get(method.name)} });`),
       "});",
     ] : []),

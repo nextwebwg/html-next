@@ -12,6 +12,7 @@ export interface StateAccess {
 
 export interface ComponentHostOptions {
   readonly root: () => Element | null;
+  readonly ownsRoot: () => boolean;
   readonly definition: string;
   readonly tag: string;
   readonly controller: string;
@@ -225,6 +226,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     void started.catch(report);
   };
   $effect(() => {
+    if (!options.ownsRoot()) { untrack(disconnect); return; }
     const element = options.root();
     untrack(synchronize);
     if (element === null) return;

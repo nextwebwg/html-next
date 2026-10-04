@@ -13,6 +13,10 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 import { componentDecorationsController } from "./fixtures/component-decorations.js";
 import { delegatedDecorationsSource as source } from "./fixtures/delegated-decorations.js";
 
+const controller = (owner: string): string => `window.styleModules ??= []; window.styleModules.push(${JSON.stringify(owner)});\n`
+  + componentDecorationsController(owner)
+  + "\nexport function outer(host) { return host.root.localName; }";
+
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
@@ -34,7 +38,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte delegated deco
     directory = await mkdtemp(join(tmpdir(), "html-next-svelte-delegated-decorations-"));
     await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(directory, "node_modules"), "dir");
     await writeFile(join(directory, "refs.html"), source);
-    for (const owner of ["middle", "parent"]) await writeFile(join(directory, `${owner}.js`), componentDecorationsController(owner));
+    for (const owner of ["leaf", "middle", "parent"]) await writeFile(join(directory, `${owner}.js`), controller(owner));
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],
       outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
@@ -85,7 +89,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 const url = route.request().url();
                 if (url.endsWith("/refs.html")) return route.fulfill({ contentType: "text/html", body: source });
                 const owner = /\/(leaf|middle|parent)\.js$/.exec(url)?.[1];
-                if (owner !== undefined) return route.fulfill({ contentType: "text/javascript", body: componentDecorationsController(owner) });
+                if (owner !== undefined) return route.fulfill({ contentType: "text/javascript", body: controller(owner) });
                 return route.fulfill({ contentType: "text/html", body: page === live
                   ? '<link rel="component" href="/refs.html"><main><x-styled-parent id="case"></x-styled-parent></main>'
                   : `<style>${output.css}</style><main>${hydrate ? output.markup : ""}</main>` });
@@ -101,13 +105,24 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              Object.keys((window as unknown as { styleHosts?: object }).styleHosts ?? {}).length === 2)));
+              ["parent", "middle"].every((name) => Object.hasOwn((window as unknown as { styleHosts?: object }).styleHosts ?? {}, name)))));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
+              const owners = await Promise.all(pages.map((page) => page.evaluate(() =>
+                Object.keys((window as unknown as { styleHosts: object }).styleHosts).sort())));
+              assert.deepEqual(owners, [["middle", "parent"], ["middle", "parent"]], "delegated controllers must not start independently");
+              const modules = await Promise.all(pages.map((page) => page.evaluate(() =>
+                [...(window as unknown as { styleModules: string[] }).styleModules].sort())));
+              assert.deepEqual(modules, owners, "delegated controller modules must not execute independently");
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte decoration pixels differ", live);
             };
             await compare();
+            const methods = await Promise.all(pages.map((page) => page.locator("#case button").evaluate(async (element) => {
+              const root = element as unknown as Element & { outer(): Promise<string>; inner?: unknown; };
+              return { outer: await root.outer(), inner: typeof root.inner };
+            })));
+            assert.deepEqual(methods, Array.from({ length: 2 }, () => ({ outer: "button", inner: "undefined" })));
             await Promise.all(pages.map((page) => page.locator("#case button").click()));
             await compare();
             for (const [owner, name, value] of [
