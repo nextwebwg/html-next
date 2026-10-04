@@ -800,7 +800,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ? { type: { kind: "terminal", name: "unknown" }, nullable: true } as Static
       : typeOf(declaration.expression.ast, expressionScope);
     const typed = declared === undefined ? inferred : present(declared);
-    types.set(declaration.name, { ...typed, nullable: typed.nullable || declaration.expression === undefined });
+    types.set(declaration.name, { ...typed, nullable: typed.nullable || declaration.expression === undefined || declaration.kind === "computed" });
   }
   const scope: RootScope = {
     tag: definition.contract.tag,
@@ -871,20 +871,22 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const stateSources = states.map((state) =>
     `let ${code.get(state.name)!} = $state<${typeScript(scope.types.get(state.name)!)}>(${state.expression === undefined ? "null" : lowering.value(state.expression.ast, scope)});`);
   const computedSources = computed.map((value) => {
-    const expression = value.expression?.ast;
-    const source = expression === undefined ? "undefined" : lowering.value(expression, scope);
+    const read = value.expression === undefined ? { source: "null", invalid: false }
+      : conformingRead(value.expression, scope, context, lowering.value(value.expression.ast, scope));
     const type = typeScript(scope.types.get(value.name)!);
-    return `const ${computedNames.get(value)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => (${expression !== undefined && mayProduceInvalidResult(expression, scope)
-      ? retained(context, source, "undefined as any") : source}) as ${type});`;
+    return `const ${computedNames.get(value)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => (${read.invalid
+      ? retained(context, read.source, "null as any") : read.source}) as ${type});`;
   });
   const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(): void {\n${handler.steps.map((step, index) => {
     const handlerScope = scope;
-    const guard = step.guard === undefined ? "" : `if ((${lowering.value(step.guard.ast, handlerScope)} as unknown) !== Symbol.for('html-next.invalid-result') && ${lowering.condition(step.guard.ast, handlerScope)}) `;
+    const condition = step.guard === undefined ? undefined : conformingCondition(step.guard, handlerScope, lowering, context);
+    const guardName = condition === undefined ? undefined : context.freshIdentifier("htmlNextGuard");
+    const guard = condition === undefined ? "" : `const ${guardName} = ${condition.source}; if (${condition.invalid ? `(${guardName} as unknown) !== Symbol.for('html-next.invalid-result') && ` : ""}${guardName}) `;
     if (step.kind === "dispatch") {
       const declaration = target.events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
       const detail = context.freshIdentifier(`htmlNextDetail${index}`);
-      const source = step.value === undefined ? "undefined" : lowering.value(step.value.ast, handlerScope);
+      const source = step.value === undefined ? "undefined" : conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope)).source;
       return `  ${guard}{ const ${detail}: unknown = ${source}; if (${detail} !== Symbol.for('html-next.invalid-result')) dispatchDeclared(rootElement ?? null, ${quote(step.event)}, ${detail}, ${JSON.stringify(declarationTypeNode(declaration.type, declaration.shape))}, ${JSON.stringify({ bubbles: declaration.bubbles, composed: declaration.composed, cancelable: declaration.cancelable })}); }`;
     }
     if (step.kind === "focus" || step.kind === "validate") {
@@ -901,7 +903,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
         ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
-    return `  ${guard}{ const ${next}: unknown = ${lowering.value(step.value.ast, handlerScope)}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
+    const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
+    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
   const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const focusReads: string[] = [];

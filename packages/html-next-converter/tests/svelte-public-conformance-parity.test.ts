@@ -73,6 +73,36 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "declared computed and handler reads reject invalid source references",
+    source: `<template component="x-declared-actions" status="early" summary="Conforming actions."><defs>
+      <state name="box" type="object({ input: string, enabled: boolean })" value="{ input: 'Ready', enabled: true }"></state>
+      <state name="written" value="Seed"></state><state name="ticks" type="number" value="0"></state>
+      <computed name="copied" from="box.input"></computed><event name="changed" type="string"></event>
+      <handler name="invalid"><set name="box" expr:value="{ input: 42, enabled: 1 }"></set></handler>
+      <handler name="recover"><set name="box" expr:value="{ input: 'Next', enabled: true }"></set></handler>
+      <handler name="read"><set name="written" expr:value="concat(box.input, '!')"></set><set name="ticks" expr:value="ticks + 1" $if="box.enabled"></set><dispatch event="changed" expr:value="box.input"></dispatch></handler>
+      </defs><section><output class="copied" $value="copied"></output><output class="written" $value="written"></output><output class="ticks" $value="ticks"></output>
+        <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button><button class="read" on:click="read">Read</button>
+      </section></template><x-declared-actions></x-declared-actions>`,
+    expect: { probe: `return [q('output.copied').textContent, q('output.written').textContent, q('output.ticks').textContent, window.actionEvents ?? []];`,
+      result: ["Ready", "Seed", "0", []], after: [
+        { action: `window.actionEvents = []; document.querySelector('section').addEventListener('changed', e => window.actionEvents.push(e.detail)); document.querySelector('button.invalid').click();`, result: ["Ready", "Seed", "0", []] },
+        { action: `document.querySelector('button.read').click();`, result: ["Ready", "Seed", "0", []] },
+        { action: `document.querySelector('button.recover').click();`, result: ["Next", "Seed", "0", []] },
+        { action: `document.querySelector('button.read').click();`, result: ["Next", "Next!", "1", ["Next"]] },
+      ] },
+  },
+  {
+    name: "initially invalid computed reads expose native null until recovery",
+    source: `<template component="x-invalid-computed" status="early" summary="Absent computed."><defs>
+      <state name="count" type="number" value="0"></state><computed name="size" from="40px / count"></computed><computed name="sizes" from="[40px / count]"></computed>
+      <handler name="recover"><set name="count" expr:value="2"></set></handler>
+      </defs><section><button on:click="recover" from:data-null="size = null"><output $value="size"></output></button><ul><li $each="item of sizes" $value="item"></li></ul></section></template><x-invalid-computed></x-invalid-computed>`,
+    expect: { probe: `return [q('button').getAttribute('data-null'), q('output').textContent, qa('li').map(e => e.textContent)];`, result: ["", "", []], after: [
+      { action: `document.querySelector('button').click();`, result: [null, "20px", ["20px"]] },
+    ] },
+  },
+  {
     name: "declared match tests retain arm and alias atomically and short circuit",
     source: `<template component="x-declared-match" status="early" summary="Conforming match."><defs>
       <state name="box" type="object({ first: boolean, second: boolean, label: string })" value="{ first: true, second: false, label: 'Ready' }"></state>
