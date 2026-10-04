@@ -10,7 +10,16 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
-import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule, componentOwnedModule } from "./fixtures/component-bindings.js";
+import { componentBindingsSource as sharedSource, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule, componentOwnedModule } from "./fixtures/component-bindings.js";
+
+const source = sharedSource.replace("</form>", `  <x-literal-number id="literal-number" value="14"></x-literal-number>
+  <x-literal-boolean id="literal-boolean" value></x-literal-boolean>
+  <x-literal-list id="literal-list" value="One Two"></x-literal-list>
+  <x-prop-field id="literal-selected" value="14" from:mode="mode"></x-prop-field>
+</form>`) + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
+<template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="value"></output></template>
+<template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="value"></output></template>
+`;
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -85,11 +94,11 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /data-amount="12"/);
       assert.match(markup, /value="Ready"/);
-      for (const id of ["state-selected", "prop-selected"]) {
+      for (const [id, value] of [["state-selected", "12"], ["prop-selected", "12"], ["literal-selected", "14"]]) {
         const input = markup.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
         assert.ok(input);
-        assert.match(input, /data-value="12"/);
-        assert.match(input, /value="12"/);
+        assert.match(input, new RegExp(`data-value="${value}"`));
+        assert.match(input, new RegExp(`value="${value}"`));
       }
       outputs.set(mode, { bundle, markup, css });
     }
@@ -148,7 +157,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 6 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
@@ -216,7 +225,11 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await compare();
               const actual = (await snapshot(live)).selected;
               assert.deepEqual(actual, { "state-selected": { value: state[0], input: state[1], valid: state[2] },
-                "prop-selected": { value: prop[0], input: prop[1], valid: prop[2] } });
+                "prop-selected": { value: prop[0], input: prop[1], valid: prop[2] },
+                "literal-number": { value: 14, input: "14", valid: true },
+                "literal-selected": { value: 14, input: "14", valid: true },
+                "literal-boolean": { value: true, input: "", valid: true },
+                "literal-list": { value: ["One", "Two"], input: "One Two", valid: true } });
             };
             await compareSelected([12, 12, true], [12, 12, true]);
             await setMode("state", "text");

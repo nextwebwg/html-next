@@ -24,6 +24,7 @@ const SLOTS_PROP = "\0html-next:slots";
 const ROOT_OWNER_PROP = "\0html-next:root-owner";
 const DECORATIONS_PROP = "\0html-next:decorations";
 const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
+const LITERAL_INPUTS_PROP = "\0html-next:literal-inputs";
 const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
 
 export interface SvelteConversionOptions {
@@ -476,6 +477,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (!component && decoratesStyles) context.usesStyleDecorations = true;
   const literals: string[] = [];
   const selectedBindings: string[] = [];
+  const literalInputs: string[] = [];
   const nativeBindings: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
     ? `slots={{ ${slotBindings.join(", ")} }}`
@@ -578,6 +580,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       else {
         const [prop, contract] = declared;
         literals.push(`${prop}={${literalPropValue(attribute.value, contract)}}`);
+        const options = contract.select?.options.map((option) =>
+          `[${JSON.stringify(option.value)}, ${literalPropValue(attribute.value, { ...contract, type: option.type })}]`);
+        literalInputs.push(`[${quote(prop)}]: { raw: ${quote(attribute.value)}${options === undefined ? "" : `, options: [${options.join(", ")}]`} }`);
       }
       continue;
     }
@@ -752,6 +757,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     selectedOption = `{...Reflect.apply(() => typeof document === 'undefined' && (${context.boundSelect}) ? (${context.selectSelection}?.(${value}) ? ${yes} : ${no}) : {}, undefined, [])}`;
   }
   if (selectedBindings.length > 0) bindings.push(`{...{ ${quote(BINDING_INPUTS_PROP)}: { ${selectedBindings.join(", ")} } }}`);
+  // Svelte preserves NUL-named component props; a spread adds a proxy to every invocation.
+  if (literalInputs.length > 0) bindings.push(`${LITERAL_INPUTS_PROP}={{ ${literalInputs.join(", ")} }}`);
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
   if (root) {
     attributes.push("{...rootAttrs}");
@@ -987,22 +994,27 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const prop = definition.contract.props[name]!;
     return "default" in prop ? `(input${name} === undefined ? ${JSON.stringify(prop.default)} : input${name})` : `input${name}`;
   };
+  const selectorSource = (name: string): string | undefined => {
+    const selector = definition.contract.props[name];
+    // A selecting prop is a finite ordinary type. Read its accepted value without
+    // depending on the aggregate checkedProps, which also reads this selected input.
+    return selector === undefined ? code.get(name)
+      : `checkedProp(${inputSource(name)}, ${JSON.stringify(normalizeType(selector.type))}, ${selector.required}, ${quote(name)}, acceptedProps, inputAccepted, false)`;
+  };
+  const literalInputName = freshIdentifier("htmlNextLiteralInput");
+  // Native HTML parses the model once, while selected-type validity follows the current selector.
+  const literalInitialsName = freshIdentifier("htmlNextLiteralInitials");
   const propTypeSource = (prop: (typeof target.props)[number], binding = false): string => {
     const select = prop.contract.select;
     if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
-    const selector = definition.contract.props[select.from];
-    // A selecting prop is a finite ordinary type. Read its accepted value without
-    // depending on the aggregate checkedProps, which also reads this selected input.
-    const value = selector === undefined ? code.get(select.from)
-      : `checkedProp(${inputSource(select.from)}, ${JSON.stringify(normalizeType(selector.type))}, ${selector.required}, ${quote(select.from)}, acceptedProps, inputAccepted, false)`;
-    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${value}, ${JSON.stringify(select.options)})`;
+    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${selectorSource(select.from)}, ${JSON.stringify(select.options)})`;
   };
   const selectedInputSources = target.props.flatMap((prop) => {
     const input = selectedInputs.get(prop.name);
     if (input === undefined) return [];
     return [
       `const ${input.retain} = retainedBindingInput();`,
-      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${input.raw}, ${propTypeSource(prop, true)}));`,
+      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), ${propTypeSource(prop, true)}));`,
     ];
   });
   const checkedPropSources = target.props.map((prop) =>
@@ -1133,7 +1145,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ]),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = Object.assign(Object.create(null) as Record<string, unknown>, rest); ${nativeRoot ? `Reflect.deleteProperty(attrs, ${quote(NATIVE_BINDINGS_PROP)}); ` : ""}${initialBindingSources.length === 0 ? "" : `if (typeof document === 'undefined') for (const [name, value] of Object.entries(${context.initialBindingsName})) { if (value !== undefined) attrs[name] = value; } `}Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { ${nativeRoot ? (context.rootBindings ?? []).map((name) => `Reflect.deleteProperty(attrs, ${quote(name)});`).join(" ") : ""} Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = Object.assign(Object.create(null) as Record<string, unknown>, rest); ${nativeRoot ? `Reflect.deleteProperty(attrs, ${quote(NATIVE_BINDINGS_PROP)}); ` : ""}${initialBindingSources.length === 0 ? "" : `if (typeof document === 'undefined') for (const [name, value] of Object.entries(${context.initialBindingsName})) { if (value !== undefined) attrs[name] = value; } `}Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${hasProps ? `Reflect.deleteProperty(attrs, ${quote(LITERAL_INPUTS_PROP)}); ` : ""}${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { ${nativeRoot ? (context.rootBindings ?? []).map((name) => `Reflect.deleteProperty(attrs, ${quote(name)});`).join(" ") : ""} Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",
@@ -1253,12 +1265,24 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(hasProps ? [
       `const acceptedProps: Record<string, unknown> = { ${target.props.map((prop) => `${quote(prop.name)}: ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"}`).join(", ")} };`,
       "const inputAccepted: Record<string, boolean> = {};",
+      ...(selectedInputs.size === 0 ? [] : [
+        `const ${literalInitialsName} = new Map<string, unknown>();`,
+        `function ${literalInputName}(name: string, initial: unknown, selector: unknown, once = false): unknown {`,
+        `  const literal = (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { options?: readonly (readonly [unknown, unknown])[] }> | undefined)?.[name];`,
+        "  if (literal === undefined) return initial;",
+        `  if (once && ${literalInitialsName}.has(name)) return ${literalInitialsName}.get(name);`,
+        "  const option = literal.options?.find(([value]) => value === selector);",
+        "  const value = option === undefined ? initial : option[1];",
+        `  if (once) ${literalInitialsName}.set(name, value);`,
+        "  return value;",
+        "}",
+      ]),
       ...selectedInputSources,
       "let checkedProps = $derived.by(() => ({",
       ...checkedPropSources,
       "}));",
       `const propValidityContract = ${JSON.stringify(validityContract)} as const;`,
-      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : inputSource(prop.name)}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${quote(name)}: ${code.get(name)}`).join("")} }));`,
+      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${quote(name)}: ${code.get(name)}`).join("")} }));`,
       "$effect(() => {",
       "  const element = rootElement;",
       "  if (element === undefined) return;",
@@ -1333,7 +1357,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
-        `  propInputs: (name: string) => ({ ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name],`,
+        `  propInputs: (name: string) => { const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
       `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
