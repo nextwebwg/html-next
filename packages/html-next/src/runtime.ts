@@ -2575,7 +2575,8 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   runtimeInstances.set(element, instance);
   installPublicMethods(element, instance);
   instance.rootElement.set(element);
-  if (previous !== undefined && previous !== element) {
+  // A delegated root may already have followers before its first native root is installed.
+  if (previous !== element) {
     for (const owner of [instance, ...instance.delegates]) {
       for (const follow of owner.followers) follow(element);
     }
