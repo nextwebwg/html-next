@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
-import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule } from "./fixtures/component-bindings.js";
+import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule } from "./fixtures/component-bindings.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -22,6 +22,13 @@ async function snapshot(page: Page) {
       generic: (() => { const output = root.querySelector<HTMLOutputElement>("#untyped-output"); return output === null ? null : {
         attribute: output.getAttribute("value"), value: output.value, defaultValue: output.defaultValue,
       }; })(),
+      area: (() => { const element = root.querySelector<HTMLTextAreaElement>("#untyped-area"); return element === null ? null : {
+        value: element.value, attribute: element.getAttribute("value"), defaultValue: element.defaultValue,
+      }; })(),
+      selects: Array.from(root.querySelectorAll("select"), (element) => ({
+        value: element.value, attribute: element.getAttribute("value"),
+        options: Array.from(element.options, (option) => ({ value: option.value, selected: option.selected, defaultSelected: option.defaultSelected })),
+      })),
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
         value: element.value, checked: element.checked, defaultValue: element.defaultValue,
         defaultChecked: element.defaultChecked, amount: element.getAttribute("data-amount"),
@@ -46,6 +53,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte component bind
     await writeFile(join(directory, "fields.html"), source);
     await writeFile(join(directory, "fields.js"), controller);
     await writeFile(join(directory, "selected.js"), selectedBindingModule);
+    await writeFile(join(directory, "options.js"), componentOptionsModule);
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],
       outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
@@ -100,6 +108,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await page.route("https://app.example/**", (route) => {
                 const url = route.request().url();
                 if (url.endsWith("/fields.html")) return route.fulfill({ contentType: "text/html", body: source });
+                if (url.endsWith("/options.js")) return route.fulfill({ contentType: "text/javascript", body: componentOptionsModule });
                 if (url.endsWith("/selected.js")) return route.fulfill({ contentType: "text/javascript", body: selectedBindingModule });
                 if (url.endsWith("/fields.js")) return route.fulfill({ contentType: "text/javascript", body: controller });
                 return route.fulfill({ contentType: "text/html", body: page === live
@@ -118,11 +127,16 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));
               }
+              for (const id of ["untyped-area", "untyped-select", "untyped-multiple"]) {
+                const read = (element: Element) => ({ value: (element as HTMLInputElement).value, selected: element instanceof HTMLSelectElement ? Array.from(element.selectedOptions, (option) => option.value) : undefined });
+                assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read), `SSR ${id} differs`);
+              }
+              await Promise.all(pages.map((page) => page.locator("#untyped-area").evaluate((element) => { (element as HTMLTextAreaElement).value = "Native edit"; })));
               await Promise.all(pages.map((page) => page.locator("#untyped-number").evaluate((element) => { (element as HTMLInputElement).value = "31"; })));
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2)));
+              (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 2)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
@@ -206,6 +220,25 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             })));
             await compare();
             assert.equal(await live.locator("#untyped-array").evaluate((element) => (element as HTMLInputElement).defaultValue), "a b");
+            for (const optionValue of ["bb", "b"]) {
+              await Promise.all(pages.map((page) => page.evaluate((value) => {
+                const hosts = (window as unknown as { optionHosts: Record<string, { state: { optionValue: string } }> }).optionHosts;
+                for (const host of Object.values(hosts)) host.state.optionValue = value;
+              }, optionValue)));
+              await compare();
+            }
+            await Promise.all(pages.map((page) => page.locator("#untyped-area").fill("Area edit")));
+            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#label")?.textContent === "Area edit")));
+            await compare();
+            await Promise.all(pages.map((page) => page.locator("#untyped-select").selectOption("c")));
+            await compare();
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              const hosts = (window as unknown as { optionHosts: Record<string, { state: { hasC: boolean } }> }).optionHosts;
+              for (const host of Object.values(hosts)) host.state.hasC = false;
+            })));
+            await compare();
+            await Promise.all(pages.map((page) => page.locator("#untyped-multiple").selectOption(["b"])));
+            await compare();
             await Promise.all(pages.map((page) => page.locator("#case").evaluate((element) => (element as HTMLFormElement).reset())));
             await compare();
             assert.deepEqual(errors, []);

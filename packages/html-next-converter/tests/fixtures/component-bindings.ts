@@ -18,10 +18,14 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 <template component="x-untyped-number" status="early" summary="Undeclared number binding."><input type="number" value="99"></template>
 <template component="x-untyped-text" status="early" summary="Undeclared array binding."><input value="default"></template>
 <template component="x-untyped-flag" status="early" summary="Undeclared checked binding."><input type="checkbox"></template>
+<template component="x-untyped-area" status="early" summary="Undeclared textarea binding."><textarea>Textarea default</textarea></template>
+<template component="x-untyped-select" status="early" summary="Undeclared select binding." controller="./options.js"><defs><state name="optionValue" type="keyword" values="b, bb" value="b"></state><state name="hasC" type="boolean" value="true"></state></defs><select><option value="a" selected>A</option><option from:value="optionValue">B</option><option value="c" $if="hasC">C</option></select></template>
+<template component="x-untyped-multiple" status="early" summary="Undeclared multiple binding." controller="./options.js"><defs><state name="optionValue" type="keyword" values="b, bb" value="b"></state><state name="hasC" type="boolean" value="true"></state></defs><select multiple><option value="a" selected>A</option><option from:value="optionValue">B</option><option value="c" $if="hasC">C</option></select></template>
 <template component="x-untyped-output" status="early" summary="Undeclared generic binding."><output value="authored">Generic</output></template>
 <template component="x-bound-fields" status="early" summary="Nested component bindings." controller="./fields.js"><defs>
   <state name="selected" type="object({ value: unknown })" value="{ value: 12 }"></state>
   <state name="mode" type="keyword" values="number, text" value="number"></state>
+  <state name="choice" type="string" value="b"></state>
   <state name="choices" type="list(string)" value="['a', 'b']"></state>
   <state name="empty" type="number"></state>
   <state name="form" type="object({ amount: number, text: string, checked: boolean })" value="{ amount: 12, text: 'Ready', checked: true }"></state>
@@ -34,6 +38,9 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-untyped-number id="untyped-unbound" from:value="'2'"></x-untyped-number>
   <x-untyped-text id="untyped-array" bind:value="choices"></x-untyped-text>
   <x-untyped-flag id="untyped-flag" bind:checked="form.checked"></x-untyped-flag>
+  <x-untyped-area id="untyped-area" bind:value="form.text"></x-untyped-area>
+  <x-untyped-select id="untyped-select" bind:value="choice"></x-untyped-select>
+  <x-untyped-multiple id="untyped-multiple" bind:value="choices"></x-untyped-multiple>
   <x-untyped-output id="untyped-output" bind:value="form.text"></x-untyped-output>
   <x-state-field id="state-selected" bind:value="selected.value"></x-state-field>
   <x-prop-field id="prop-selected" from:mode="mode" bind:value="selected.value"></x-prop-field>
@@ -43,3 +50,5 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 export const componentBindingsModule = `export default function connect(host) { window.fieldsHost = host; }`;
 
 export const selectedBindingModule = `export default function connect(host) { window.selectedHosts ??= {}; window.selectedHosts[host.root.id] = host; }`;
+
+export const componentOptionsModule = `export default function connect(host) { window.optionHosts ??= {}; window.optionHosts[host.root.id] = host; }`;

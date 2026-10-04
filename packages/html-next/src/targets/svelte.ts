@@ -518,6 +518,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         context.usesControls = true;
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
         const defaults = name === "checked" ? `{ checked: ${context.initialBindingsName}[${quote(name)}] !== undefined || ${literal !== undefined} }`
+          : node.name === "textarea" ? `{ value: ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))} }`
           : `{ value: String(${context.initialBindingsName}[${quote(name)}] ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
         context.usesAttributeBinding = true;
         const unbound = context.freshIdentifier("htmlNextAttributeValue");
@@ -525,10 +526,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const unboundSource = `(() => { const ${unbound}: unknown = Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
         const unboundDefault = name === "checked" ? `(${unboundSource}) !== undefined` : `String((${unboundSource}) ?? "")`;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
-        const serialized = name === "checked" ? `Boolean(${candidate})` : `(${candidate} == null ? "" : String(${candidate}))`;
-        bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
+        const multiple = node.name === "select" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "multiple");
+        const serialized = name === "checked" ? `Boolean(${candidate})` : multiple ? `(Array.isArray(${candidate}) ? ${candidate}.map(String) : [])` : `(${candidate} == null ? "" : String(${candidate}))`;
+        if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
+        else bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
+        if (node.name !== "input") bindings.push(`{@attach ${read} === undefined ? undefined : ${context.bindingHelperName}(${quote(name)}, () => ${context.initialBindingsName}[${quote(name)}] ?? ${literal?.kind === "literal" ? quote(literal.value) : "undefined"})}`);
         if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${name === "checked" ? "defaultChecked" : "defaultValue"}: ${read} === undefined ? ${unboundDefault} : (${defaults}).${name === "checked" ? "checked" : "value"} })}`);
-        bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined)}`);
+        bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined${node.name === "select" ? ", false, false" : ""})}`);
       } else {
         context.usesAttributeBinding = true;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
@@ -621,7 +625,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const previousBoundSelect = context.boundSelect;
-  if (node.name === "select") context.boundSelect = context.usesControls && node.attributes.some((entry) => entry.name === "value" && (entry.kind === "property" || entry.kind === "attribute" && entry.twoWay));
+  if (node.name === "select") context.boundSelect = context.usesControls && (root && context.rootBindings?.includes("value") === true || node.attributes.some((entry) => entry.name === "value" && (entry.kind === "property" || entry.kind === "attribute" && entry.twoWay)));
   const children = content ?? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   context.boundSelect = previousBoundSelect;
   const markup = `${open}${children}</${name}>`;
@@ -893,14 +897,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     "  hadProto = proto;",
     "});",
     ...(context.usesControls ? [
-      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, nativeProperty = false) {`,
+      `function ${context.controlAttachmentName}(name: "value" | "checked", read: () => unknown, defaults: BoundDefaults, update?: (value: unknown) => void, nativeProperty = false, observeOptions = true) {`,
       "  return (element: Element) => {",
       "    const authored = controlDefaults(element, defaults);",
       "    const initial = untrack(read);",
       "    const dispose = attachBoundControl(element, name, initial, authored, update, nativeProperty, initial !== Symbol.for('html-next.invalid-result'));",
       "    $effect(() => { const value = read(); syncBoundControl(element, name, value, authored, nativeProperty, value !== Symbol.for('html-next.invalid-result')); });",
-      "    const stop = observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); });",
-      "    return () => { dispose?.(); stop(); };",
+      "    const stop = observeOptions ? observeBoundOptions(element, () => { const value = untrack(read); syncBoundControl(element, name, value, controlDefaults(element, defaults), nativeProperty, value !== Symbol.for('html-next.invalid-result'), true); }) : undefined;",
+      "    return () => { dispose?.(); stop?.(); };",
       "  };",
       "}",
     ] : []),
