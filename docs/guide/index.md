@@ -52,7 +52,7 @@ For Svelte source imports, see the [Vite adapter documentation](https://github.c
 | --- | --- |
 | Learn to author HTML Next components | [Build your first component](/html-next/quick-start), then [use it natively](/html-next/usage). |
 | Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and has Vue and React setup in its switcher. |
-| Publish a component library | [Ship a native library](/html-next/ship), then [add Vue and React builds](/html-next/ship-frameworks) if your consumers need them. |
+| Publish a component library | [Publish your HTML files](/html-next/ship) with instructions for the consuming app’s Vite plugin. |
 | Generate framework source files | The separate [Converter](/html-next/convert) covers conversion commands and their output. |
 
 HTML Forms has its own [installation and usage guide](/html-next/forms).

@@ -18,6 +18,7 @@ import react from "@vitejs/plugin-react";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import htmlNext from "../src/vite.js";
 import { syncHtmlNext } from "../src/framework.js";
+import { installSourcePackage } from "./source-package.js";
 
 const run = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -59,6 +60,46 @@ async function fixture() {
 }
 
 for (const target of ["vue", "react"] as const) describe(`${target} source adapter`, () => {
+  it("consumes a packed component folder without an authored index or build script", async () => {
+    const { root, library } = await fixture();
+    const controls = await readFile(join(library, "controls.html"), "utf8");
+    await installSourcePackage(root, {
+      "components/controls.html": controls,
+      "components/nested/card.html": '<template component="ui-card" controller="./card.js" status="early" summary="Card."><section>Nested card</section></template>',
+      "components/nested/card.js": 'export default host => host.root.setAttribute("data-ready", "yes");',
+    });
+    const filename = target === "vue" ? "folder.ts" : "folder.tsx";
+    await writeFile(join(root, "src", filename), target === "vue"
+      ? `import { h } from "vue"; import { renderToString } from "vue/server-renderer";
+        import { UiButton } from "@example/controls"; import { UiCard } from "@example/controls/nested";
+        export const render = () => renderToString(h("main", [h(UiButton, { label: "Save" }), h(UiCard)]));`
+      : `import React from "react"; import { renderToStaticMarkup } from "react-dom/server";
+        import { UiButton } from "@example/controls"; import { UiCard } from "@example/controls/nested";
+        export const render = () => renderToStaticMarkup(<main><UiButton label="Save" /><UiCard /></main>);`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()],
+      build: { ssr: join(root, "src", filename), outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "folder.js")).href) as { render(): string | Promise<string> };
+    assert.match(await output.render(), /Save.*Badge.*Nested card/s);
+    const bundle = await readFile(join(root, "dist", "folder.js"), "utf8");
+    assert.doesNotMatch(bundle, /UNUSED_COMPONENT_MARKER|parseComponent|parse5/);
+    const prepared = await syncHtmlNext({ root, target });
+    const declarations = await readFile(prepared.declarationsFile, "utf8");
+    assert.match(declarations, /export const UiButton:/);
+    assert.match(declarations, /declare module "@example\/controls\/nested"/);
+    assert.ok(prepared.sourceFiles.includes(await realpath(join(library, "components", "nested", "card.html"))));
+    const client = target === "vue" ? "client.ts" : "client.tsx";
+    await writeFile(join(root, "src", client), target === "vue"
+      ? `import { createApp, h } from "vue"; import { UiButton } from "@example/controls";
+        createApp({ render: () => h(UiButton, { label: "Save" }) }).mount("#app");`
+      : `import React from "react"; import { createRoot } from "react-dom/client"; import { UiButton } from "@example/controls";
+        createRoot(document.getElementById("app")!).render(<UiButton label="Save" />);`);
+    await writeFile(join(root, "index.html"), `<div id="app"></div><script type="module" src="/src/${client}"></script>`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target }), target === "vue" ? vue() : react()],
+      build: { outDir: "client-dist" } });
+    assert.match(await readFile(join(root, "client-dist", "index.html"), "utf8"), /assets\//);
+
+  }, 60_000);
+
   it("converts a source-only package, preserves aliases, and generates precise consumer declarations", async () => {
     const { root } = await fixture();
     const entry = target === "vue"

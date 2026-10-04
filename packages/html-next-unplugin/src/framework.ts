@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { convertComponents, type FrameworkTarget } from "@nextwebwg/html-next-converter";
 import ts from "typescript";
 import type { Plugin, ViteDevServer } from "vite";
+import { assertPackageSource, componentSources, packageDirectory, sourcePackages } from "./source-packages.js";
 
 const run = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -64,34 +65,6 @@ async function writeGenerated(path: string, content: string): Promise<void> {
   }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
-}
-
-/** Only packages explicitly opting into the html-next export condition are converted. */
-function sourceExports(exports: unknown): readonly [string, string][] {
-  if (exports === null || typeof exports !== "object" || Array.isArray(exports)) return [];
-  const record = exports as Record<string, unknown>;
-  if (typeof record["html-next"] === "string") return [[".", record["html-next"]]];
-  return Object.entries(record).flatMap(([subpath, value]) => {
-    if (!subpath.startsWith(".") || subpath.includes("*")) return [];
-    return sourceExports(value).map(([, source]) => [subpath, source] as [string, string]);
-  });
-}
-async function packageDirectory(root: string, name: string): Promise<string | undefined> {
-  let current = root;
-  while (true) {
-    const candidate = resolve(current, "node_modules", name);
-    if (await exists(resolve(candidate, "package.json"))) return realpath(candidate);
-    const parent = dirname(current);
-    if (parent === current) return undefined;
-    current = parent;
-  }
-}
-
-function assertPackageSource(source: string, packageRoot: string): void {
-  const fromRoot = relative(packageRoot, source);
-  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
-    throw new Error(`HTML Next source import escapes its package: ${source}. Use a declared package dependency.`);
-  }
 }
 
 function sourceModuleCandidates(candidate: string): readonly string[] {
@@ -205,6 +178,11 @@ class FrameworkCompiler {
     assertPackageSource(source, packageRoot);
     if (visited.has(source)) return;
     visited.add(source);
+    if ((await stat(source)).isDirectory()) {
+      this.sources.add(source);
+      for (const path of await componentSources(source, packageRoot)) html.add(path);
+      return;
+    }
     if (extname(source) === ".html") { html.add(source); return; }
     const module = await this.sourceModule(source, packageRoot);
     for (const item of module.imports) {
@@ -247,11 +225,21 @@ class FrameworkCompiler {
 
   /** Preserve library-authored aliases and re-exports while replacing HTML imports with source modules. */
   private async barrel(source: string, packageRoot: string, cache: string, seen: Map<string, string>): Promise<string> {
-    if (extname(source) === ".html") return this.resource(source, packageRoot, cache);
+    const directory = (await stat(source)).isDirectory();
+    if (!directory && extname(source) === ".html") return this.resource(source, packageRoot, cache);
     const previous = seen.get(source);
     if (previous !== undefined) return previous;
-    const output = resolve(cache, "barrels", `${identity(source)}${extname(source)}`);
+    const output = resolve(cache, "barrels", `${identity(source)}${directory ? ".ts" : extname(source)}`);
     seen.set(source, output);
+    if (directory) {
+      const exports: string[] = [];
+      for (const path of await componentSources(source, packageRoot)) {
+        exports.push(`export * from ${JSON.stringify(importPath(output, await this.resource(path, packageRoot, cache)))};`);
+      }
+      await mkdir(dirname(output), { recursive: true });
+      await writeFile(output, exports.join("\n") + "\n", "utf8");
+      return output;
+    }
     const module = await this.sourceModule(source, packageRoot);
     let rewritten = module.content;
     for (const item of module.imports.toReversed()) {
@@ -332,24 +320,9 @@ class FrameworkCompiler {
 
   async prepare(): Promise<FrameworkSyncResult> {
     this.sources.add(resolve(this.root, "package.json"));
-    const manifest = JSON.parse(await readFile(resolve(this.root, "package.json"), "utf8")) as {
-      dependencies?: Record<string, string>; devDependencies?: Record<string, string>;
-    };
-    for (const name of new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.devDependencies ?? {})])) {
-      const directory = await packageDirectory(this.root, name);
-      if (directory === undefined) continue;
-      const packageJSON = resolve(directory, "package.json");
-      const definition = JSON.parse(await readFile(packageJSON, "utf8")) as { exports?: unknown };
-      const exports = sourceExports(definition.exports);
-      if (exports.length === 0) continue;
-      this.sources.add(packageJSON);
+    for (const { directory, manifest, exports: paths } of await sourcePackages(this.root)) {
+      this.sources.add(manifest);
       const cache = resolve(this.root, "node_modules", ".html-next", this.options.target, identity(directory));
-      const paths = exports.map(([subpath, path]) => {
-        if (!path.startsWith("./")) throw new Error(`HTML Next package exports must be relative: ${name} ${path}.`);
-        const source = resolve(directory, path);
-        if (!source.startsWith(`${directory}${sep}`)) throw new Error(`HTML Next export escapes ${name}: ${path}.`);
-        return { specifier: subpath === "." ? name : `${name}/${subpath.slice(2)}`, source };
-      });
       await this.linkDependencies(cache, directory);
       await this.packageResources(paths.map((item) => item.source), directory, cache);
       await rm(resolve(cache, "barrels"), { recursive: true, force: true });
@@ -409,7 +382,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
       await updates;
       const alias = current.aliases.get(id);
       if (alias !== undefined) return alias;
-      if (!id.endsWith(".html") || id.includes("?")) return null;
+      if (resolveOptions.isEntry || !id.endsWith(".html") || id.includes("?")) return null;
       const resolved = await this.resolve(id, importer, { ...resolveOptions, skipSelf: true });
       if (resolved === null || !isAbsolute(resolved.id)) return null;
       const entry = await compiler.localResource(resolved.id);
@@ -426,7 +399,7 @@ export function frameworkVitePlugin(options: FrameworkPluginOptions): Plugin {
     async closeBundle() { await updates; },
     async handleHotUpdate(context) {
       const changed = await realpath(context.file).catch(() => context.file);
-      if (!compiler.sources.has(changed) && !compiler.sources.has(context.file)) return;
+      if (![...compiler.sources].some((source) => source === changed || source === context.file || changed.startsWith(`${source}${sep}`))) return;
       const update = updates.then(async () => {
         const locals = [...compiler.localSources];
         await initialize(server?.config.root ?? compiler.root);
