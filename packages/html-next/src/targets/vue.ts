@@ -405,9 +405,10 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       const parts = node.segments.map((segment) => {
         const plan = segment.expressionPlan;
         return plan === undefined ? quote(segment.value)
-          : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template);
+          : `(${guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template)} ?? '')`;
       });
-      return `{{ [${parts.join(", ")}].join('') }}`;
+      // Begin with a string so adjacent numeric insertions concatenate; absence stays empty.
+      return `{{ '' + ${parts.join(" + ")} }}`;
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
