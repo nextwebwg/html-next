@@ -165,11 +165,13 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
   const checks: string[] = [];
   for (const dependency of typeCheckedDependencies(plan)) {
     const [root, ...steps] = dependency.split(".");
-    const lexical = locals?.has(root!);
-    const declaration = lexical ? undefined : definition.declarations?.find((entry) => entry.name === root);
-    let type: TypeNode | undefined = lexical ? scope.types.get(root!)?.type : undefined;
+    // Loop/with/slot aliases carry inferred types for lowering, not declared read contracts.
+    // Like the live evaluator, do not apply a shadowed component declaration to a local alias.
+    if (locals?.has(root!)) continue;
+    const declaration = definition.declarations?.find((entry) => entry.name === root);
+    let type: TypeNode | undefined;
     // Prop boundary handling is separate from these mutable declaration guards.
-    if (!lexical && definition.contract.props[root!] !== undefined) continue;
+    if (definition.contract.props[root!] !== undefined) continue;
     if (declaration?.kind === "state" || declaration?.kind === "computed") {
       type = declarationTypeNode(declaration.type, declaration.shape);
     } else if (declaration?.kind === "data") {
@@ -368,6 +370,7 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
 function renderNode(node: TemplateNode, names: Names, context: Context, receivingTag?: string): string {
   const { lowering } = context;
   if (node.kind === "text") {
+    if (node.segments?.length === 1) return renderNode(node.segments[0]!, names, context);
     const segments = node.segments ?? [node];
     if (segments.some((segment) => segment.expressionPlan !== undefined &&
       segment.expressionPlan.dependencies.some((dependency) => names.locals?.has(dependency.split(".")[0]!)) &&
@@ -386,9 +389,10 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
       const parts = node.segments.map((segment) => {
         const plan = segment.expressionPlan;
         return plan === undefined ? quote(segment.value)
-          : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template);
+          : `(${guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope)) ?? lowering.text(plan.ast, names.template)} ?? '')`;
       });
-      return `{{ [${parts.join(", ")}].join('') }}`;
+      // Begin with a string so adjacent numeric insertions concatenate; absence stays empty.
+      return `{{ '' + ${parts.join(" + ")} }}`;
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return escapeHtml(node.value).replace(/\{\{/g, "{{ '{{' }}");
@@ -531,12 +535,15 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
       continue;
     } else if (attribute.kind === "directive") {
       const plan = attribute.expressionPlan;
-      const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope));
-      const value = guarded ?? lowering.text(ast(plan, attribute.expression), names.template);
       if (attribute.name === "html") {
+        const guarded = plan === undefined ? undefined : guardedBinding(plan, names, context, (scope) => lowering.text(plan.ast, scope));
+        const value = guarded ?? lowering.text(ast(plan, attribute.expression), names.template);
         context.usesHtml = true;
         content = `<SanitizedHtml :value=${bound(value)} />`;
-      } else content = `{{ ${value} }}`;
+      } else {
+        ast(plan, attribute.expression);
+        content = renderNode({ kind: "text", value: "", expressionPlan: plan! }, names, context);
+      }
     } else if (attribute.kind === "property") {
       const value = ast(attribute.expressionPlan, attribute.expression);
       const type = typeOf(value, names.template);
