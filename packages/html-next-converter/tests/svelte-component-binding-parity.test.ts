@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { convertComponents } from "../src/index.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
-import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule } from "./fixtures/component-bindings.js";
+import { componentBindingsSource as source, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule, componentOwnedModule } from "./fixtures/component-bindings.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -38,7 +38,7 @@ async function snapshot(page: Page) {
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
         value: element.value, checked: element.checked, defaultValue: element.defaultValue,
         defaultChecked: element.defaultChecked, files: element.type === "file" ? Array.from(element.files ?? [], (file) => file.name) : undefined, amount: element.getAttribute("data-amount"),
-        text: element.getAttribute("data-value"), flag: element.getAttribute("data-checked"),
+        text: element.getAttribute("data-value"), local: element.getAttribute("data-local"), flag: element.getAttribute("data-checked"),
         valid: element.getAttribute("data-valid"),
       })),
     })),
@@ -60,6 +60,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte component bind
     await writeFile(join(directory, "fields.js"), controller);
     await writeFile(join(directory, "selected.js"), selectedBindingModule);
     await writeFile(join(directory, "options.js"), componentOptionsModule);
+    await writeFile(join(directory, "owned.js"), componentOwnedModule);
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],
       outfile: liveBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
@@ -114,6 +115,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await page.route("https://app.example/**", (route) => {
                 const url = route.request().url();
                 if (url.endsWith("/fields.html")) return route.fulfill({ contentType: "text/html", body: source });
+                if (url.endsWith("/owned.js")) return route.fulfill({ contentType: "text/javascript", body: componentOwnedModule });
                 if (url.endsWith("/options.js")) return route.fulfill({ contentType: "text/javascript", body: componentOptionsModule });
                 if (url.endsWith("/selected.js")) return route.fulfill({ contentType: "text/javascript", body: selectedBindingModule });
                 if (url.endsWith("/fields.js")) return route.fulfill({ contentType: "text/javascript", body: controller });
@@ -146,13 +148,17 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 2)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 2)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
               assert.deepEqual(converted.selected, native.selected);
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte component binding pixels differ", live);
             };
+            await compare();
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              (window as unknown as { ownedHost: { state: { local: string } } }).ownedHost.state.local = "Child update";
+            })));
             await compare();
             for (const page of pages) {
               await page.locator("#number").fill("17");

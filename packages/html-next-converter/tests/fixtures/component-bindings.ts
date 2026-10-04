@@ -17,6 +17,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 </defs><input type="checkbox" .checked="checked"></template>
 <template component="x-native-switch" status="early" summary="Changing native binding root."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><template $match><input $when="mode = 'field'" value="Field default"><textarea $when="mode = 'area'">Area default</textarea><output $else value="Generic attribute">Generic default</output></template></template>
 <template component="x-native-delegate" status="early" summary="Delegated native binding."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><x-native-switch from:mode="mode"></x-native-switch></template>
+<template component="x-owned-input" status="early" summary="Locally controlled bound root." controller="./owned.js"><defs><state name="local" type="string" value="Own"></state></defs><input value="Own default" .value="local" from:data-local="local"></template>
 <template component="x-untyped-number" status="early" summary="Undeclared number binding."><input type="number" value="99"></template>
 <template component="x-untyped-text" status="early" summary="Undeclared array binding."><input value="default"></template>
 <template component="x-untyped-flag" status="early" summary="Undeclared checked binding."><input type="checkbox"></template>
@@ -44,6 +45,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-flag-field id="flag" bind:checked="form.checked"></x-flag-field>
   <x-native-switch id="native-switch" from:mode="rootMode" bind:value="form.text"></x-native-switch>
   <x-native-delegate id="delegated-switch" from:mode="rootMode" bind:value="form.text"></x-native-delegate>
+  <x-owned-input id="owned-input" bind:value="form.text"></x-owned-input>
   <x-untyped-number id="untyped-number" bind:value="form.amount"></x-untyped-number>
   <x-untyped-number id="untyped-unbound" from:value="'2'"></x-untyped-number>
   <x-untyped-text id="untyped-array" bind:value="choices"></x-untyped-text>
@@ -69,3 +71,5 @@ export const componentBindingsModule = `export default function connect(host) { 
 export const selectedBindingModule = `export default function connect(host) { window.selectedHosts ??= {}; window.selectedHosts[host.root.id] = host; }`;
 
 export const componentOptionsModule = `export default function connect(host) { window.optionHosts ??= {}; window.optionHosts[host.root.id] = host; }`;
+
+export const componentOwnedModule = `export default function connect(host) { window.ownedHost = host; }`;

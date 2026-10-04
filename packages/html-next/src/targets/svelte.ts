@@ -401,8 +401,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${serialized} } : {})}`);
     else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
     const literalValue = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "value");
-    const defaults = attribute.name === "checked" ? `{ checked: ${node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked")} }`
-      : `{ value: ${quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "")} }`;
+    const inheritsBinding = root && context.rootBindings?.includes(attribute.name);
+    const defaultValue = quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "");
+    const defaultChecked = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked");
+    const defaults = attribute.name === "checked" ? `{ checked: ${inheritsBinding ? `${context.rootBindingAttributeName}("checked") !== undefined || ` : ""}${defaultChecked} }`
+      : `{ value: ${inheritsBinding && node.name === "input" ? `String(${context.rootBindingAttributeName}("value") ?? ${defaultValue})` : defaultValue} }`;
     if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
     let update = "undefined";
     if (attribute.kind === "attribute" && attribute.twoWay) update = bindingWriter(attribute);
