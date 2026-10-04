@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { chromium, type Browser, type Route } from "playwright";
+import { chromium, firefox, webkit, type Browser, type Route } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const browserLoaderUrl = new URL("../src/browser-loader.ts", import.meta.url);
@@ -53,6 +53,60 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/parse5/")), false);
     assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
   });
+
+  for (const engine of [chromium, firefox, webkit]) {
+    it(`${engine.name()} loads component resources without promoting their metadata into the document`, async () => {
+      const metadataBrowser = await engine.launch({ headless: true });
+      try {
+        const page = await metadataBrowser.newPage();
+        const requests: string[] = [];
+        await page.route("https://metadata.example/**", async (route) => {
+          const path = new URL(route.request().url()).pathname;
+          requests.push(path);
+          const body = path === "/page.html" ?
+            '<meta name="htmlkit:layout" content="admin"><head>' +
+            '<title $value="missing">Imported title</title>' +
+            '<meta name="description" content="Imported description" from:content="missing">' +
+            '<meta property="og:title" content="Imported social title">' +
+            '<link rel="stylesheet" href="./ignored.css">' +
+            '<link rel="canonical" href="https://other.example/">' +
+            '<link rel="preload" as="script" href="./ignored.js">' +
+            '<link rel="component" href="./child.html"></head>' +
+            '<template component="products-page"><section>Products <product-detail></product-detail></section></template>' :
+            path === "/child.html" ?
+              '<template component="product-detail"><b>detail</b></template>' :
+              '<!doctype html><html><head><title>Host title</title>' +
+              '<meta name="description" content="Host description">' +
+              '<link rel="component" href="/page.html"></head>' +
+              '<body><products-page id="page"></products-page></body></html>';
+          await route.fulfill({ contentType: "text/html", body });
+        });
+        await page.goto("https://metadata.example/");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as { HtmlNextLoader: {
+            startBrowserComponents(): Promise<{ graph: { nodes: Map<string, unknown> }; stop(): void }>;
+          } }).HtmlNextLoader;
+          const started = await api.startBrowserComponents();
+          const value = { components: started.graph.nodes.size,
+            tag: document.querySelector("#page")?.localName,
+            text: document.querySelector("#page")?.textContent,
+            title: document.title,
+            description: document.querySelector('meta[name="description"]')?.getAttribute("content"),
+            layouts: document.querySelectorAll('meta[name="htmlkit:layout"]').length,
+            social: document.querySelectorAll('meta[property="og:title"]').length,
+            links: document.querySelectorAll('link[rel="stylesheet"], link[rel="canonical"], link[rel="preload"]').length };
+          started.stop();
+          return value;
+        });
+        assert.deepEqual(result, { components: 2, tag: "section", text: "Products detail",
+          title: "Host title", description: "Host description", layouts: 0, social: 0, links: 0 });
+        assert.deepEqual(requests.sort(), ["/", "/child.html", "/page.html"]);
+      } finally {
+        await metadataBrowser.close();
+      }
+    });
+  }
 
   it("fetches a multi-component library once and renders both definitions and sibling invocations", async () => {
     const page = await browser.newPage();

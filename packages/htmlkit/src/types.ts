@@ -11,12 +11,26 @@ export interface ApplicationOptions {
   readonly fileRoutes?: boolean;
   /** Additional routes, using the same [param] pattern syntax as discovered pages. */
   readonly routes?: readonly RouteInput[];
+  /** Named layout; default.html is automatic when present. false disables it. */
+  readonly layout?: string | false;
+  /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
+  readonly layoutDefaults?: Readonly<Record<string, string | false>>;
 }
 
 export interface PageHead {
   readonly title?: string;
   readonly description?: string;
   readonly lang?: string;
+}
+
+export interface RenderedHead extends PageHead {
+  /** Rendered native metadata, merged by identity; values are escaped on output. */
+  readonly elements?: readonly HeadElement[];
+}
+
+export interface HeadElement {
+  readonly tag: "meta" | "link";
+  readonly attributes: Readonly<Record<string, string>>;
 }
 
 export interface LoaderResult {
@@ -52,6 +66,8 @@ export interface RouteInput extends RouteLayer {
   readonly layouts?: readonly RouteLayer[];
 }
 export interface ApplicationRoute extends RouteLayer {
+  /** The selected component tag, independent of the route pattern and source file. */
+  readonly pageName: string;
   readonly pattern: string;
   readonly segments: readonly string[];
   readonly params: readonly string[];
@@ -67,7 +83,7 @@ export interface RenderedPage {
   readonly pathname: string;
   readonly html: string;
   readonly css: string;
-  readonly head: PageHead;
+  readonly head: RenderedHead;
   readonly body: string;
   readonly components: readonly BrowserDefinition[];
 }

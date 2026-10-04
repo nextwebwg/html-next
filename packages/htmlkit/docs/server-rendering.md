@@ -3,6 +3,10 @@
 HTMLKit's first production adapter is static. A future request adapter should reuse the route
 manifest, layout chain, loader result contract, component graph, and HTML Next rendering/adoption
 path. Authored pages must not change when a route moves from prerendering to request-time delivery.
+Page entry names, route patterns, and browser bundle locations stay separate in both adapters.
+Named/default layout selection and `htmlkit:page` selection resolve before loader execution;
+declarative head metadata is rendered from each selected layer's props and merged by the same
+identity rules in either adapter. No browser head subscription is required for document navigation.
 This is a tooling implementation design, not a component-language specification.
 
 ## Shared work and adapter responsibilities
@@ -55,7 +59,11 @@ to the adapter and must be tested before it becomes production-supported. Poolin
 
 `data` is private to the loader chain. Only explicit `props` and `state` become public, through
 the existing HTML Next type validation, attribute serialization, and rendered continuation records.
-Titles and descriptions are escaped by the document assembler. Browser entries import controllers
+Titles, descriptions, and native metadata attributes are escaped by the document assembler. Head
+bindings reuse HTML Next's parser and renderer through inert binding carriers, since actual head
+elements are forbidden in component bodies. Only declared props enter that scope: browser reads,
+controller execution, and mutable browser state do not become server head dependencies.
+Browser entries import controllers
 and parsed definitions, never server loaders or their imports. Authentication/session values must
 stay in private loader data unless deliberately reduced to public presentation values.
 

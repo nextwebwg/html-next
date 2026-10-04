@@ -11,7 +11,9 @@ import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite
 import { configure, HtmlKitError } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { discoverRoutes, matchRoute, parameter, validSegment } from "./routes.js";
-import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, PageHead, RouteLayer, ServerModule } from "./types.js";
+import { applicationResource, pageDefinition } from "./resource.js";
+import { renderHead } from "./head.js";
+import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, RenderedHead, RouteLayer, ServerModule } from "./types.js";
 
 function invocation(definition: ComponentDefinition, result: LoaderResult, id: string, child: string, nested: boolean): string {
   const props = result.props ?? {};
@@ -99,12 +101,15 @@ export async function createApplication(options: ApplicationOptions = {}, module
       // Vite owns module caching and dependency invalidation. Per-render results never enter
       // a shared cache; HTML Next owns the DOM worker and declarative component semantics.
       const packages = new Map<string, ReturnType<typeof packageResource>>();
+      const resources = new Map<string, ReturnType<typeof applicationResource>>();
+      const layerURLs = new Set(layers.map(layer => pathToFileURL(layer.component).href));
       const graph = await loadNodeComponents(layers.map(layer => pathToFileURL(layer.component).href), {
         // The graph resolver is synchronous. Prepare its bare imports while asynchronously
         // reading each carrier, using Vite's ESM resolution from the consuming application.
         readComponent: async (url) => {
           const source = await readFile(fileURLToPath(url), "utf8");
-          const parsed = parseComponentResource(source, url);
+          const parsed = layerURLs.has(url) ? applicationResource(source, url) : parseComponentResource(source, url);
+          if ("configuration" in parsed) resources.set(url, parsed);
           const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => definition.controller === undefined ? [] : [definition.controller])];
           for (const specifier of imports) {
             if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier)) continue;
@@ -121,16 +126,20 @@ export async function createApplication(options: ApplicationOptions = {}, module
         },
       });
       const layerDefinitions = layers.map(layer => {
+        if (layer === route) return pageDefinition(resources.get(pathToFileURL(layer.component).href)!, layer.component);
         const roots = graph.roots.filter(id => graph.nodes.get(id)!.url === pathToFileURL(layer.component).href);
         if (roots.length !== 1) throw new HtmlKitError("A page or layout must declare exactly one root component.", layer.component);
         return graph.nodes.get(roots[0]!)!.definition;
       });
+      if (layerDefinitions.at(-1)!.contract.tag !== route.pageName) {
+        throw new HtmlKitError("Page component name changed; rediscover routes before rendering.", route.component);
+      }
       for (const definition of layerDefinitions.slice(0, -1)) {
         if (!definition.slots?.some(slot => slot.name === "page")) throw new HtmlKitError('Layout requires a slot named "page".', definition.source.file);
       }
       const results: LoaderResult[] = [];
       let parent: Readonly<Record<string, unknown>> = Object.freeze({});
-      let head: PageHead = {};
+      let head: RenderedHead = {};
       for (const layer of layers) {
         signal.throwIfAborted();
         const loaded = await module(layer);
@@ -141,7 +150,9 @@ export async function createApplication(options: ApplicationOptions = {}, module
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.server);
         results.push(result);
         parent = Object.freeze({ ...parent, ...result.data });
-        head = { ...head, ...result.head };
+        const index = results.length - 1;
+        head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
+          (definition, values) => invocation(definition, values, "htmlkit-head", "", false));
       }
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       let body = "";

@@ -41,6 +41,7 @@ export const liveRuntimeSubsystemModules = {
   ],
   componentResources: [
     "packages/html-next/src/graph.ts",
+    "packages/html-next/src/resource-metadata.ts",
     "packages/html-next/src/resolve.ts",
   ],
 } as const;

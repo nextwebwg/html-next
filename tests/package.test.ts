@@ -238,17 +238,21 @@ describe("workspace package contracts", () => {
   it("builds a static application through the installed HTMLKit CLI", () => {
     const consumer = join(workspace, "htmlkit-consumer");
     mkdirSync(join(consumer, "app/pages"), { recursive: true });
+    mkdirSync(join(consumer, "app/layouts"), { recursive: true });
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "htmlkit-consumer", private: true, type: "module" }));
     execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", pack("html-next"), pack("htmlkit")], { cwd: consumer, shell: useCommandShell });
     writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/" });');
-    writeFileSync(join(consumer, "app/pages/index.html"), '<template component="packed-page"><defs><prop name="label" type="string" required>Label</prop></defs><main><h1 $value="label"></h1></main></template>');
-    writeFileSync(join(consumer, "app/pages/index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" }, head: { title: "Packed page" } });');
+    writeFileSync(join(consumer, "app/layouts/default.html"), '<title>Layout default</title><template component="packed-shell"><main><slot name="page"></slot></main></template>');
+    writeFileSync(join(consumer, "app/pages/index.html"), '<meta name="htmlkit:page" content="packed-page"><title $value="label"></title><template component="packed-label"><strong>Packaged helper</strong></template><template component="packed-page"><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="label"></h1><packed-label></packed-label></section></template>');
+    writeFileSync(join(consumer, "app/pages/index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
     const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
     const output = execFileSync(process.execPath, [join(installed, "dist/cli.js"), "build"], { cwd: consumer, encoding: "utf8" });
     expect(output).toContain("Generated 1 pages");
     const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
     expect(html).toContain("Installed platform");
-    expect(html).toContain("<title>Packed page</title>");
+    expect(html).toContain("<title>Installed platform</title>");
+    expect(html).toContain('data-component="packed-shell"');
+    expect(html).toContain("Packaged helper");
     expect(html).toContain('src="/packed/_htmlkit/');
     expect(JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).dependencies[componentsPackage]).not.toContain("workspace:");
     expect(readFileSync(join(installed, "LICENSE"), "utf8")).toBe(repositoryLicense);

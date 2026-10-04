@@ -25,6 +25,10 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         const staticContext = await browser.newContext({ javaScriptEnabled: false });
         const staticPage = await staticContext.newPage();
         await staticPage.goto(server.url);
+        expect(await staticPage.title()).toBe("Home & kit");
+        expect(await staticPage.locator('head meta[name="description"]').getAttribute("content")).toBe("/kit/mark.svg");
+        expect(await staticPage.locator('[data-component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
+        expect(await staticPage.locator('[data-component="home-page"]').evaluate(element => getComputedStyle(element).borderTopColor)).toBe("rgb(10, 20, 30)");
         expect(await staticPage.locator("output").textContent()).toBe("4");
         expect(await staticPage.getByText("Loading data", { exact: true }).count()).toBe(1);
         expect(await staticPage.locator("main").evaluate(element => getComputedStyle(element).color)).toBe("rgb(20, 30, 40)");

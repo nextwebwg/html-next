@@ -7,6 +7,7 @@ import { browserSource, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, HtmlKitError, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
+import { matchRoute } from "./routes.js";
 import type { ApplicationOptions, BuildResult } from "./types.js";
 
 async function exists(path: string): Promise<boolean> {
@@ -70,12 +71,15 @@ export async function buildApplication(options: ApplicationOptions = {}): Promis
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });
     const manifest = JSON.parse(await readFile(join(stage, "_htmlkit/vite-manifest.json"), "utf8")) as Manifest;
     const bundles = new Map(Object.values(manifest).filter(chunk => chunk.isEntry).map(chunk => [chunk.name, chunk]));
+    const delivery = [];
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]!;
       const path = join(stage, decodeURIComponent(page.pathname.slice(config.base.length)), "index.html");
       if (await exists(path)) throw new HtmlKitError(`Public asset collision with route ${page.pathname}.`, path);
       const entry = bundles.get(`page-${i}`);
       if (entry === undefined) throw new HtmlKitError(`Missing browser bundle for ${page.pathname}.`);
+      const route = matchRoute(application.routes, page.pathname, config.base)!.route;
+      delivery.push({ pathname: page.pathname, pageName: route.pageName, browserModule: config.base + entry.file });
       // Vite's manifest includes CSS from the entry and its shared static imports.
       const styles = new Set<string>();
       const seen = new Set<ManifestChunk>();
@@ -94,7 +98,7 @@ export async function buildApplication(options: ApplicationOptions = {}): Promis
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");
     await writeFile(join(stage, "404.html"), documentHTML('<main><h1>Page not found</h1></main>', { title: "Page not found" }));
-    await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify({ version: 1, base: config.base, routes }, null, 2) + "\n");
+    await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify({ version: 1, base: config.base, routes, pages: delivery }, null, 2) + "\n");
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);
     try { await rename(stage, config.outDir); }

@@ -13,10 +13,12 @@ it("builds existing Markdown, heading links, generated reference data, and an au
     const guide = await readFile(join(result.outDir, "guide/quick-start/index.html"), "utf8");
     expect(guide).toContain('href="#');
     expect(guide).toContain("<pre>");
+    expect(guide).toContain("<title>quick-start · HTMLKit</title>");
     expect(guide).toContain('href="/proof/guide/usage/"');
     expect(guide).toContain('href="https://nextwebwg.org/declarative-components/');
     const reference = await readFile(join(result.outDir, "reference/counter/index.html"), "utf8");
     expect(reference).toContain("Increment amount.");
+    expect(reference).toContain('<meta name="description" content="Generated component contract and live counter.">');
     expect(reference).toContain('data-component="proof-counter"');
     expect(reference).toContain('href="/proof/guide/quick-start/"');
     expect(result.browserInputs.some(path => /(?:marked|\.server\.|proof\.ts)/.test(path))).toBe(false);

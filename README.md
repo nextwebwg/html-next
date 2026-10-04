@@ -165,6 +165,15 @@ parsed as inert data and cannot add import maps, scripts, base URLs, or policy m
 Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern their
 module graph, but ESM is not a sandbox.
 
+Component resources may also contain titles, non-policy-changing metadata, and ordinary metadata
+links outside their component carriers. The Node and browser graph loaders accept and ignore these
+nodes: they do not change the consuming document's head, evaluate metadata bindings, or fetch linked
+stylesheets and other assets. Application tooling may interpret them separately. This allowance
+does not admit arbitrary resource-level nodes: `<style>`, every `<script>` type, `<base>`,
+`http-equiv` metadata, HTML Imports, body elements, plain non-component templates, and
+non-whitespace text remain rejected, as do executable event-handler attributes. Scoped `<style>`
+inside a component carrier and its declared controller module keep their existing behavior.
+
 The runnable [live graph example](./packages/html-next/examples/poc/README.md) uses this entry.
 
 ## Browser compatibility layer

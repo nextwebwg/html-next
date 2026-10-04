@@ -36,6 +36,30 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
+  it("ignores resource metadata with or without head wrappers while retaining component edges", async () => {
+    const metadata = '<meta name="htmlkit:layout" content="admin">' +
+      '<meta name="description" content="Imported description" from:content="missing">' +
+      '<meta property="og:title" content="Imported social title">' +
+      '<title $value="missing">Imported title</title>' +
+      '<link rel="stylesheet" href="./ignored.css">' +
+      '<link rel="canonical" href="https://other.example/">';
+    for (const prefix of [metadata, `<head>${metadata}</head>`]) {
+      const fixtures = fetcher({
+        [`${root}app.html`]: prefix + component("x-app", '<link rel="component" href="./child.html">'),
+        [`${root}child.html`]: component("x-child"),
+      });
+      const graph = await buildComponentGraph(["@ui/app.html"], {
+        resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+      });
+      assert.deepEqual([...graph.tags.keys()].sort(), ["x-app", "x-child"]);
+      assert.deepEqual([...fixtures.counts.keys()].sort(), [`${root}app.html`, `${root}child.html`]);
+      const parsed = parseComponentResource(prefix + component("x-app"), "page.html");
+      assert.equal(parsed.definitions.length, 1);
+      assert.deepEqual(parsed.dependencies, []);
+      assert.deepEqual(parsed.definition.contract, parseComponentResource(component("x-app"), "page.html").definition.contract);
+    }
+  });
+
   it("retains the singular parser result as an alias for the first definition", () => {
     const parsed = parseComponentResource(component("ui-button") + component("ui-dialog"), "library.html");
     assert.equal(parsed.definition, parsed.definitions[0]);
@@ -186,7 +210,7 @@ describe("component graph", () => {
     }));
   });
 
-  it("rejects tag collisions and active or policy-changing resource markup", async () => {
+  it("rejects tag collisions and unsupported, active, or policy-changing resource markup", async () => {
     await expectDiagnostic("HL007", () => buildComponentGraph(["@ui/a.html", "@ui/b.html"], {
       resolver: resolver(),
       fetchComponent: fetcher({
@@ -197,8 +221,18 @@ describe("component graph", () => {
 
     for (const active of [
       `<script type="importmap">{}</script>`,
+      `<script>bad()</script>`,
+      `<script type="application/ld+json">{}</script>`,
+      `<style>body { display: none }</style>`,
+      `<div>Unrelated body content</div>`,
+      `<template><div>Unrelated template</div></template>`,
+      `Unrelated text`,
       `<base href="https://evil.example/">`,
       `<meta http-equiv="content-security-policy" content="default-src *">`,
+      `<meta http-equiv="refresh" content="0;url=https://evil.example/">`,
+      `<meta name="description" content="Ignored" onclick="bad()">`,
+      `<link rel="import" href="https://evil.example/import.html">`,
+      `<link rel="stylesheet" href="./ignored.css" onload="bad()">`,
     ]) {
       await expectDiagnostic("HT009", () => buildComponentGraph(["@ui/app.html"], {
         resolver: resolver(),

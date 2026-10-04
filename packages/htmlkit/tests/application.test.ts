@@ -11,11 +11,99 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function app(): Promise<string> { const root = await fixture(); roots.push(root); return root; }
 
 describe("application platform", () => {
-  it("discovers routes and ancestor layouts without importing controllers", async () => {
+  it("selects one page among helpers and applies named, directory, default, and disabled layouts", async () => {
+    const root = await app();
+    await rm(join(root, "app/layouts/default.server.ts"));
+    await write(root, "app/layouts/default.html", '<template component="default-shell"><main>Default<slot name="page"></slot></main></template>');
+    await write(root, "app/layouts/admin.html", '<template component="admin-shell"><main>Admin<slot name="page"></slot></main></template>');
+    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="page-products"><meta name="htmlkit:layout" content="admin"><template component="product-label"><strong>Helper</strong></template><template component="page-products"><product-label></product-label></template>');
+    await write(root, "extra/plain.html", '<meta name="htmlkit:layout" content="none"><template component="page-plain"><p>Standalone</p></template>');
+    await write(root, "extra/default.html", '<template component="page-default"><p>Content</p></template>');
+    const options = { root, fileRoutes: false, layoutDefaults: { "/admin/": "admin" }, routes: [
+      { pattern: "/products/", component: "extra/products.html" },
+      { pattern: "/plain/", component: "extra/plain.html" },
+      { pattern: "/default/", component: "extra/default.html" },
+      { pattern: "/admin/", component: "extra/default.html" },
+    ] };
+    const application = await createApplication(options);
+    try {
+      expect(application.routes[0]!.pageName).toBe("page-products");
+      expect((await application.render("/products/")).body).toContain('data-component="admin-shell"');
+      expect((await application.render("/products/")).body).toContain("Helper");
+      expect((await application.render("/plain/")).body).not.toContain("shell");
+      expect((await application.render("/default/")).body).toContain('data-component="default-shell"');
+      expect((await application.render("/admin/")).body).toContain('data-component="admin-shell"');
+    } finally { await application.close(); }
+    await write(root, "extra/products.html", '<template component="product-label"><p>Label</p></template><template component="page-products"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/htmlkit:page/);
+    await write(root, "extra/products.html", '<meta name="htmlkit:page" content="absent-page"><template component="page-products"><p>Page</p></template>');
+    await expect(discoverRoutes(root, options)).rejects.toThrow(/absent-page/);
+  });
+
+  it("renders head bindings from loader props and merges page overrides while preserving repeatable links", async () => {
+    const root = await app();
+    await rm(join(root, "app/layouts/default.server.ts"));
+    await write(root, "app/layouts/default.html", '<title>Site title</title><meta name="description" content="Site description"><meta property="og:title" content="Site"><link rel="canonical" href="https://example.test/"><link rel="stylesheet" href="/shared.css"><link rel="alternate" hreflang="en" href="https://example.test/en/"><template component="head-shell"><main><slot name="page"></slot></main></template>');
+    await write(root, "extra/head.html", '<title $value="title"></title><meta name="description" from:content="description"><meta property="og:title" from:content="title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><template component="page-head"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><p $value="title"></p></template>');
+    await write(root, "extra/head.server.ts", 'export const load = () => ({ props: { title: "Page & title", description: "a < b", canonical: "https://example.test/page/" } });');
+    const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/head.html", server: "extra/head.server.ts" }] });
+    try {
+      const { html } = await application.render("/");
+      const head = html.split("<head>")[1]!.split("</head>")[0]!;
+      expect(head).toContain("<title>Page &amp; title</title>");
+      expect(head).toContain('name="description" content="a &lt; b"');
+      expect(head).toContain('property="og:title" content="Page &amp; title"');
+      expect(head).toContain('href="https://example.test/page/"');
+      expect(head).not.toContain("Site description");
+      expect(head.match(/rel="canonical"/g)).toHaveLength(1);
+      for (const value of ["/shared.css", "/page.css", 'hreflang="en"', 'hreflang="fr"', "a.png", "b.png"]) expect(head).toContain(value);
+      expect(head).not.toMatch(/htmlkit:|from:|\$value/);
+    } finally { await application.close(); }
+  });
+  it("discovers routes and named layouts without importing controllers", async () => {
     const root = await app();
     const routes = await discoverRoutes(root);
     expect(routes.map(route => route.pattern)).toEqual(["/", "/items/[slug]/"]);
-    expect(routes[1]!.layouts).toHaveLength(2);
+    expect(routes[1]!.layouts).toHaveLength(1);
+  });
+
+  it("rejects duplicate page component names across file and registered routes before loading application code", async () => {
+    const root = await app();
+    await write(root, "app/pages/admin/index.html", '<template component="home-page"><h1>Admin</h1></template>');
+    await write(root, "app/pages/admin/index.server.ts", "throw new Error('Loader must not execute during discovery');");
+    await expect(discoverRoutes(root)).rejects.toThrow(/Duplicate page component.*home-page.*index\.html.*\/.*\/admin\//s);
+    await rm(join(root, "app/pages/admin"), { recursive: true });
+    await write(root, "extra/duplicate.html", '<template component="home-page"><h1>Registered page</h1></template>');
+    await expect(discoverRoutes(root, { routes: [{ pattern: "/registered/", component: "extra/duplicate.html" }] }))
+      .rejects.toThrow(/Duplicate page component.*home-page.*registered/s);
+    await expect(createApplication({ root, fileRoutes: false, routes: [
+      { pattern: "/first/", component: "app/pages/index.html" },
+      { pattern: "/second/", component: "extra/duplicate.html" },
+    ] })).rejects.toThrow(/Duplicate page component.*home-page/s);
+  });
+
+  it("keeps route patterns and page names independent and permits aliases of the same page definition", async () => {
+    const root = await app();
+    await write(root, "extra/catalog.html", '<template component="page-products"><h1>Catalog</h1></template>');
+    const routes = await discoverRoutes(root, { fileRoutes: false, routes: [
+      { pattern: "/shop/", component: "extra/catalog.html" },
+      { pattern: "/catalog/", component: "extra/catalog.html" },
+    ] });
+    expect(routes.map(route => ({ pattern: route.pattern, pageName: route.pageName }))).toEqual([
+      { pattern: "/shop/", pageName: "page-products" },
+      { pattern: "/catalog/", pageName: "page-products" },
+    ]);
+    expect(routes[0]!.component).toBe(join(root, "extra/catalog.html"));
+  });
+
+  it("requires rediscovery when a page component is renamed after application creation", async () => {
+    const root = await app();
+    await write(root, "extra/catalog.html", '<template component="page-products"><h1>Catalog</h1></template>');
+    const application = await createApplication({ root, routes: [{ pattern: "/shop/", component: "extra/catalog.html" }] });
+    try {
+      await write(root, "extra/catalog.html", '<template component="home-page"><h1>Changed name</h1></template>');
+      await expect(application.render("/shop/")).rejects.toThrow(/Page component name changed.*rediscover/i);
+    } finally { await application.close(); }
   });
 
   it("renders fresh loader data through nested layouts and the HTML Next serializer", async () => {
@@ -45,6 +133,11 @@ describe("application platform", () => {
     expect(home).not.toContain('aria-invalid="true"');
     expect(home).toContain(">4</output>");
     expect(home).toMatch(/src="\/docs\/_htmlkit\/.*\.js"/);
+    const manifest = JSON.parse(await readFile(join(result.outDir, "_htmlkit/manifest.json"), "utf8"));
+    expect(manifest.pages.map((page: { pathname: string; pageName: string }) => ({ pathname: page.pathname, pageName: page.pageName })))
+      .toEqual([{ pathname: "/docs/", pageName: "home-page" },
+        { pathname: "/docs/items/one/", pageName: "item-page" }, { pathname: "/docs/items/two/", pageName: "item-page" }]);
+    expect(manifest.pages.every((page: { browserModule: string }) => /^\/docs\/_htmlkit\/.*\.js$/.test(page.browserModule))).toBe(true);
     expect(result.browserInputs.some(path => /(?:server-worker|node-loader|jsdom|parse5|\.server\.|browser-source)/.test(path))).toBe(false);
     const server = await previewApplication({ root, port: 0 });
     try {
@@ -156,10 +249,10 @@ describe("application platform", () => {
     await expect(buildApplication({ root })).rejects.toThrow(/request.*static/i);
     await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: {} });");
     await expect(buildApplication({ root })).rejects.toThrow(/required prop/i);
-    await write(root, "app/pages/_layout.html", '<template component="bad-layout"><main>Missing projection</main></template>');
+    await write(root, "app/layouts/default.html", '<template component="bad-layout"><main>Missing projection</main></template>');
     await expect(buildApplication({ root })).rejects.toThrow(/slot.*page/i);
-    await write(root, "app/pages/_layout.html", '<template component="good-layout"><main><slot name="page"></slot></main></template>');
-    await write(root, "app/pages/_layout.server.ts", "export const load = () => ({ data: { owner: 'kit' } });");
+    await write(root, "app/layouts/default.html", '<template component="good-layout"><main><slot name="page"></slot></main></template>');
+    await write(root, "app/layouts/default.server.ts", "export const load = () => ({ data: { owner: 'kit' } });");
     await write(root, "app/pages/index.server.ts", "export const load = () => ({ props: { asset: '/mark.svg' } });");
     await write(root, "public/index.html", "collision");
     await expect(buildApplication({ root })).rejects.toThrow(/collision/i);

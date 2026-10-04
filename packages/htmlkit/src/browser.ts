@@ -9,8 +9,13 @@ const sourceRuntime = packagedRuntime.replace(/[/\\]dist[/\\]runtime\.js$/, "/sr
 const runtime = import.meta.url.endsWith(".ts") && existsSync(sourceRuntime) ? sourceRuntime : packagedRuntime;
 
 export function stylesheetSources(components: readonly BrowserDefinition[]): ReadonlyMap<string, string> {
-  return new Map(components.filter(component => component.styles.css !== "").map(component =>
-    [normalizePath(fileURLToPath(component.definition.source.file)) + ".htmlkit.css", component.styles.css]));
+  const sources = new Map<string, string>();
+  for (const component of components) {
+    if (component.styles.css === "") continue;
+    const id = normalizePath(fileURLToPath(component.definition.source.file)) + ".htmlkit.css";
+    sources.set(id, (sources.get(id) ?? "") + component.styles.css);
+  }
+  return sources;
 }
 
 /** HTML Next owns adoption, observation, reads, controllers, and teardown. */

@@ -371,6 +371,9 @@ importers:
       '@nextwebwg/html-next':
         specifier: workspace:*
         version: link:../html-next
+      parse5:
+        specifier: 'catalog:'
+        version: 8.0.1
       vite:
         specifier: 'catalog:'
         version: 8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15)
@@ -381,9 +384,6 @@ importers:
       marked:
         specifier: 18.0.14
         version: 18.0.14
-      parse5:
-        specifier: 'catalog:'
-        version: 8.0.1
       playwright:
         specifier: 'catalog:'
         version: 1.63.0
