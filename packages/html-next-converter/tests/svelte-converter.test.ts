@@ -94,7 +94,7 @@ it("lowers conditional and aliased child regions without wrapper elements", asyn
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["panel.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /\{#if open\}/);
+  assert.match(await serverHtml(outDirectory, "XPanel", source), /<span>Shown<\/span>/);
   assert.match(source, /\{@const htmlNextAlias =/);
   compile(source, { filename: "XPanel.svelte", generate: "client" });
   compile(source, { filename: "XPanel.svelte", generate: "server" });
@@ -110,7 +110,9 @@ it("lowers a match inside table markup to one selected native row", async () => 
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["table.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-  assert.match(source, /\{#if htmlNextAlias === "ok"\}/);
+  const html = await serverHtml(outDirectory, "XTable", source);
+  assert.match(html, /<td>OK<\/td>/);
+  assert.doesNotMatch(html, /<td>No<\/td>/);
   compile(source, { filename: "XTable.svelte", generate: "client" });
   compile(source, { filename: "XTable.svelte", generate: "server" });
 });

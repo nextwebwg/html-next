@@ -73,6 +73,49 @@ interface ConverterCase extends ConformanceCase {
 }
 const regressions: readonly ConverterCase[] = [
   {
+    name: "declared match tests retain arm and alias atomically and short circuit",
+    source: `<template component="x-declared-match" status="early" summary="Conforming match."><defs>
+      <state name="box" type="object({ first: boolean, second: boolean, label: string })" value="{ first: true, second: false, label: 'Ready' }"></state>
+      <handler name="invalidFirst"><set name="box" expr:value="{ first: 0, second: true, label: 'Next' }"></set></handler>
+      <handler name="invalidSecond"><set name="box" expr:value="{ first: false, second: 0, label: 'Next' }"></set></handler>
+      <handler name="recover"><set name="box" expr:value="{ first: false, second: true, label: 'Next' }"></set></handler>
+      <handler name="skip"><set name="box" expr:value="{ first: true, second: 0, label: 'Ready' }"></set></handler>
+      </defs><section><template $match="box.label as label"><b $when="box.first" $value="concat('First/', label)"></b><b $when="box.second" $value="concat('Second/', label)"></b><b $else $value="concat('Else/', label)"></b></template>
+        <button class="first" on:click="invalidFirst">First</button><button class="second" on:click="invalidSecond">Second</button>
+        <button class="recover" on:click="recover">Recover</button><button class="skip" on:click="skip">Skip</button>
+      </section></template><x-declared-match></x-declared-match>`,
+    expect: { probe: `return q('b').textContent;`, result: "First/Ready", after: [
+      { action: `document.querySelector('button.first').click();`, result: "First/Ready" },
+      { action: `document.querySelector('button.second').click();`, result: "First/Ready" },
+      { action: `document.querySelector('button.recover').click();`, result: "Second/Next" },
+      { action: `document.querySelector('button.first').click();`, result: "Second/Next" },
+      { action: `document.querySelector('button.skip').click();`, result: "First/Ready" },
+    ] },
+  },
+  {
+    name: "declared structural reads retain regions through invalid nested state",
+    source: `<template component="x-declared-regions" status="early" summary="Conforming regions."><defs>
+      <state name="box" type="object({ flag: boolean, label: string, rows: list(unknown) })" value="{ flag: true, label: 'Ready', rows: ['A', 'B'] }"></state>
+      <handler name="invalid"><set name="box" expr:value="{ flag: 0, label: 42, rows: 42 }"></set></handler>
+      <handler name="recover"><set name="box" expr:value="{ flag: false, label: 'Next', rows: ['C'] }"></set></handler>
+      <handler name="absent"><set name="box" expr:value="{ flag: null, label: null, rows: null }"></set></handler>
+      <handler name="empty"><set name="box" expr:value="{}"></set></handler>
+      </defs><section><strong $if="box">Box</strong><u $if="box.rows">Rows</u><b $if="box.flag">Flag</b><i $with="box.label as label" $value="label"></i>
+        <template $match="box.label as label"><em $when="label = 'Ready'" $value="label"></em><em $else $value="label"></em></template>
+        <ul><li $each="row of box.rows" $value="row"></li></ul>
+        <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button><button class="absent" on:click="absent">Absent</button><button class="empty" on:click="empty">Empty</button>
+      </section></template><x-declared-regions></x-declared-regions>`,
+    expect: { probe: `return [q('strong')?.textContent ?? null, q('u')?.textContent ?? null, q('b')?.textContent ?? null, q('i').textContent, q('em').textContent, qa('li').map(e => e.textContent)];`,
+      result: ["Box", "Rows", "Flag", "Ready", "Ready", ["A", "B"]], after: [
+        { action: `document.querySelector('button.invalid').click();`, result: ["Box", "Rows", "Flag", "Ready", "Ready", ["A", "B"]] },
+        { action: `document.querySelector('button.recover').click();`, result: ["Box", "Rows", null, "Next", "Next", ["C"]] },
+        { action: `document.querySelector('button.invalid').click();`, result: ["Box", "Rows", null, "Next", "Next", ["C"]] },
+        { action: `document.querySelector('button.absent').click();`, result: ["Box", null, null, "", "", []] },
+        { action: `document.querySelector('button.empty').click();`, result: [null, null, null, "", "", []] },
+        { action: `document.querySelector('button.recover').click();`, result: ["Box", "Rows", null, "Next", "Next", ["C"]] },
+      ] },
+  },
+  {
     name: "imported component names and children slots props preserve authored scope",
     dependencies: {
       "named-leaf.html": `<template component="x-named-leaf" status="early" summary="Reserved public names."><defs>

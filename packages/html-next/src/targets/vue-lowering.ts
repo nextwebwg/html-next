@@ -492,6 +492,11 @@ export class Lowering {
     }
   }
 
+  /** Apply native expression truthiness to an already evaluated value. */
+  truthiness(source: string): string {
+    return `${this.#use("truthy")}(${source})`;
+  }
+
   /** The expression as a condition, where JavaScript truthiness is enough. */
   condition(node: ExpressionNode, scope: Scope): string {
     if (node.kind === "binary" && (node.op === "and" || node.op === "or")) {

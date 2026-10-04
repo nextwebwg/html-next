@@ -160,6 +160,12 @@ function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderC
   };
 }
 
+function conformingCondition(plan: CompiledExpression, scope: Scope, lowering: Lowering, context: RenderContext): { source: string; invalid: boolean } {
+  const read = conformingRead(plan, scope, context, lowering.value(plan.ast, scope));
+  if (!read.invalid) return { source: lowering.condition(plan.ast, scope), invalid: false };
+  return { source: `((value: any) => value === Symbol.for('html-next.invalid-result') ? value : ${lowering.truthiness("value")})(${read.source})`, invalid: true };
+}
+
 function retained(context: RenderContext, source: string, initial: string): string {
   const site = context.retentions.size;
   context.retentions.set(site, { initial });
@@ -204,17 +210,18 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
     code: new Map([...scope.code, [flow.item, item], ...(flow.index === undefined ? [] : [[flow.index, index] as const]), ["loop", loop]]),
     types: new Map([...scope.types, [flow.item, itemType], ...(flow.index === undefined ? [] : [[flow.index, indexType] as const]), ["loop", loopType]]),
   });
-  const listSource = lowering.value(listNode, scope);
-  const stableSource = mayProduceInvalidResult(listNode, scope) ? retained(context, listSource, "[] as any[]") : listSource;
+  const read = conformingRead(flow.listPlan, scope, context, lowering.value(listNode, scope));
+  const stableSource = read.invalid ? retained(context, read.source, "[] as any[]") : read.source;
+  // Native structural reads accept absence, even for an initialized declared list.
+  const listSource = listType.type.kind === "list" && (listType.nullable || read.invalid) ? `(${stableSource} ?? [])` : stableSource;
   const list = lowering.list(listNode, scope, flow.item, {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
     itemScope: scopeWith(flow.item, "index", "loop"),
     sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
-  }, stableSource);
-  const safeList = listType.type.kind === "list" && listType.nullable ? `(${list} ?? [])` : list;
+  }, listSource);
   const callbackScope = scopeWith("item", "index", "loop");
-  const checked = flow.keyPlan === undefined ? safeList : lowering.uniqueKeys(safeList,
+  const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list,
     `(item, index, loop) => ${lowering.value(flow.keyPlan.ast, callbackScope)}`);
   const rows = lowering.eachRows(checked);
   const rowScope = scopeWith(`${row}.item`, `${row}.index`, `${row}.loop`);
@@ -255,9 +262,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (node.flow?.kind === "if") {
     if (node.flow.testPlan === undefined) fail("HT030", `Expression \`${node.flow.test}\` could not be converted.`);
     const { flow: _flow, ...body } = node;
-    const test = node.flow.testPlan.ast;
-    const condition = lowering.condition(test, scope);
-    return `{#if ${mayProduceInvalidResult(test, scope) ? retained(context, condition, "false") : condition}}${renderNode(body, root, scope, lowering, context)}{/if}`;
+    const read = conformingCondition(node.flow.testPlan, scope, lowering, context);
+    return `{#if ${read.invalid ? retained(context, read.source, "false") : read.source}}${renderNode(body, root, scope, lowering, context)}{/if}`;
   }
   if (node.flow?.kind === "with") {
     if (node.flow.expressionPlan === undefined) fail("HT030", `Expression \`${node.flow.expr}\` could not be converted.`);
@@ -269,12 +275,12 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       code: new Map([...scope.code, [node.flow.alias, alias]]),
       types: new Map([...scope.types, [node.flow.alias, typeOf(value, scope)]]),
     };
-    const source = lowering.value(value, scope);
+    const read = conformingRead(node.flow.expressionPlan, scope, context, lowering.value(value, scope));
     const markup = renderNode(body, root, local, lowering, context);
-    if (!mayProduceInvalidResult(value, scope)) return `{#if true}{@const ${alias} = ${source}}${markup}{/if}`;
+    if (!read.invalid) return `{#if true}{@const ${alias} = ${read.source}}${markup}{/if}`;
     const site = context.retentions.size;
     const result = `htmlNextStructural${site}`;
-    const retainedSource = retainedStructural(context, source);
+    const retainedSource = retainedStructural(context, read.source);
     return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}{@const ${alias} = ${result}.value}${markup}{/if}{/if}`;
   }
   if (node.flow?.kind === "match") {
@@ -288,29 +294,44 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       types: new Map([...scope.types, [flow.alias, value === undefined ? { type: { kind: "terminal", name: "unknown" }, nullable: true } : typeOf(value, scope)]]),
     };
     const arms = node.children.filter((child): child is Extract<TemplateNode, { kind: "element" }> => child.kind === "element");
-    const cases = arms.map((arm, index) => {
-      const armFlow = arm.flow;
+    const expression = flow.expressionPlan === undefined ? undefined : conformingRead(flow.expressionPlan, scope, context, lowering.value(flow.expressionPlan.ast, scope));
+    const conditions = arms.map((arm) => {
+      if (arm.flow?.kind !== "when") return undefined;
+      if (arm.flow.testPlan === undefined) fail("HT030", `Expression \`${arm.flow.test}\` could not be converted.`);
+      return conformingCondition(arm.flow.testPlan, local, lowering, context);
+    });
+    const markup = arms.map((arm) => {
       const { flow: _flow, ...body } = arm;
       const rendered = renderNode(body, root, local, lowering, context);
-      const markup = root && context.resetRootRefs ? `{#key ${context.refsName}.clear()}${rendered}{/key}` : rendered;
-      if (armFlow?.kind === "when") {
-        if (armFlow.testPlan === undefined) fail("HT030", `Expression \`${armFlow.test}\` could not be converted.`);
-        const test = armFlow.testPlan.ast;
-        const condition = lowering.condition(test, local);
-        return `${index === 0 ? "{#if" : "{:else if"} ${mayProduceInvalidResult(test, local) ? retained(context, condition, "false") : condition}}${markup}`;
-      }
-      if (armFlow?.kind === "else") return `{:else}${markup}`;
-      fail("HT018", "A $match child must be a $when or $else arm.");
-    }).join("");
-    const block = `${cases}{/if}`;
-    if (flow.alias === undefined || value === undefined) return block;
-    const source = lowering.value(value, scope);
-    if (!mayProduceInvalidResult(value, scope)) return `{#if true}{@const ${alias} = ${source}}${block}{/if}`;
-    const site = context.retentions.size;
-    const result = `htmlNextStructural${site}`;
+      return root && context.resetRootRefs ? `{#key ${context.refsName}.clear()}${rendered}{/key}` : rendered;
+    });
+    const invalid = expression?.invalid === true || conditions.some((condition) => condition?.invalid === true);
+    if (!invalid) {
+      const cases = arms.map((arm, index) => {
+        if (arm.flow?.kind === "when") return `${index === 0 ? "{#if" : "{:else if"} ${conditions[index]!.source}}${markup[index]}`;
+        if (arm.flow?.kind === "else") return `{:else}${markup[index]}`;
+        fail("HT018", "A $match child must be a $when or $else arm.");
+      }).join("");
+      const block = `${cases}{/if}`;
+      return alias === undefined || expression === undefined ? block : `{#if true}{@const ${alias} = ${expression.source}}${block}{/if}`;
+    }
+    // Choose the arm and alias together: an invalid tested arm retains the entire region.
+    // Tests after the winning arm must remain unevaluated, matching prepareMatch.
+    const testName = context.freshIdentifier("htmlNextMatchTest");
+    const selection = arms.map((arm, index) => {
+      const condition = conditions[index];
+      const selected = `{ arm: ${index}, value: ${alias ?? "undefined"} }`;
+      if (arm.flow?.kind === "else") return `return ${selected};`;
+      if (condition === undefined) fail("HT018", "A $match child must be a $when or $else arm.");
+      return `{ const ${testName}: any = ${condition.source}; ${condition.invalid ? `if (${testName} === Symbol.for('html-next.invalid-result')) return ${testName}; ` : ""}if (${testName}) return ${selected}; }`;
+    }).join(" ");
+    const source = `(() => { ${alias === undefined || expression === undefined ? "" : `const ${alias} = ${expression.source}; ${expression.invalid ? `if (${alias} === Symbol.for('html-next.invalid-result')) return ${alias};` : ""}`} ${selection} return { arm: -1, value: ${alias ?? "undefined"} }; })()`;
+    const result = context.freshIdentifier("htmlNextMatch");
     const retainedSource = retainedStructural(context, source);
-    return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}{@const ${alias} = ${result}.value}${block}{/if}{/if}`;
+    const cases = arms.map((_arm, index) => `${index === 0 ? "{#if" : "{:else if"} ${result}.value.arm === ${index}}${markup[index]}`).join("");
+    return `{#if true}{@const ${result} = ${retainedSource}}{#if ${result}.ready}${alias === undefined ? "" : `{@const ${alias} = ${result}.value.value}`}${cases}{/if}{/if}{/if}`;
   }
+
   const contentDirective = node.attributes.find((attribute) => attribute.kind === "directive");
   let content: string | undefined;
   if (contentDirective?.kind === "directive" && contentDirective.expressionPlan !== undefined) {
@@ -1056,12 +1077,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  };",
       "}",
       ...(Array.from(context.retentions.values()).some((entry) => entry.initial === undefined) ? [
-        "function retainedStructuralValue<T>(): (candidate: T | symbol) => { ready: boolean; value: T } {",
+        "function retainedStructuralValue(): <T>(candidate: T | symbol) => { ready: boolean; value: T } {",
         "  let ready = false;",
-        "  let previous!: T;",
-        "  return (candidate: T | symbol) => {",
-        "    if (candidate !== Symbol.for('html-next.invalid-result')) { ready = true; previous = candidate as T; }",
-        "    return { ready, value: previous };",
+        "  let previous: unknown;",
+        "  return function<T>(candidate: T | symbol) {",
+        "    if (candidate !== Symbol.for('html-next.invalid-result')) { ready = true; previous = candidate; }",
+        "    return { ready, value: previous as T };",
         "  };",
         "}",
       ] : []),
