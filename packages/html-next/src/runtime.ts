@@ -902,8 +902,10 @@ function ownEffect(
   scope: ReactiveScope,
   run: () => void | (() => void),
   priority = 1,
-): void {
-  context.owned.effects.push(createEffect(scope.scheduler, run, priority));
+): ReturnType<typeof createEffect> {
+  const effect = createEffect(scope.scheduler, run, priority);
+  context.owned.effects.push(effect);
+  return effect;
 }
 
 function resolveWritablePath(scope: ReactiveScope, path: WritablePath): (string | number)[] | undefined {
@@ -1764,10 +1766,10 @@ function renderInstance(
           setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
         }
       };
-      ownEffect(context, scope, applyBinding);
+      const bindingEffect = ownEffect(context, scope, applyBinding);
       if (node.name.includes("-")) whenLowered(element, (root) => {
         bindingTarget = root;
-        applyBinding();
+        bindingEffect.execute();
       });
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         let target = element;

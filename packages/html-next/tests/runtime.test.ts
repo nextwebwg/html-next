@@ -414,28 +414,33 @@ describe.skipIf(!enabled)("browser runtime", () => {
         </defs><input from:type="type" from:value="value"></template>
         <template component="x-parent-source"><defs>
           <state name="mode" type="keyword" values="text, number" value="text"></state>
-          <state name="entry" type="number"></state>
+          <state name="entry" type="number"></state><state name="draft" type="number" value="2.5"></state>
           <handler name="switch"><set name="mode" value="number"></set><set name="entry" value="2.5"></set></handler>
-        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child></div></template>
+        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child><x-selected-child id="unchanged-from" from:type="mode" from:value="draft"></x-selected-child><x-selected-child id="unchanged-bind" from:type="mode" bind:value="draft"></x-selected-child></div></template>
         <x-parent-source id="parent"></x-parent-source>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const parent = document.querySelector("#parent")!;
           const child = document.querySelector("#child")!;
-          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value });
+          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value,
+            unchanged: ["unchanged-from", "unchanged-bind"].map((id) => {
+              const host = runtime.getComponentHost(document.querySelector(`#${id}`)!)!;
+              return { type: host.props.type!.value, value: host.props.value!.value, input: host.props.value!.inputValue };
+            }),
+          });
           const initial = read();
           parent.querySelector("button")!.click();
           await Promise.resolve();
           return { initial, changed: read() };
         });
         assert.deepEqual(actual, {
-          initial: { type: "text", value: null },
-          changed: { type: "number", value: 2.5 },
+          initial: { type: "text", value: null, unchanged: [{ type: "text", value: "2.5", input: "2.5" }, { type: "text", value: "2.5", input: "2.5" }] },
+          changed: { type: "number", value: 2.5, unchanged: [{ type: "number", value: 2.5, input: 2.5 }, { type: "number", value: 2.5, input: 2.5 }] },
         });
       } finally {
         await browser.close();
