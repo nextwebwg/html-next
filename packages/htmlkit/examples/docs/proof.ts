@@ -33,7 +33,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
   const navigation = [{ label: "Overview", href: base }, ...guides.map(file => ({ label: basename(file, ".md"), href: `${base}guide/${basename(file, ".md")}/` })),
     { label: "Counter reference", href: base + "reference/counter/" }];
   await write("package.json", '{"name":"htmlkit-docs-proof","private":true,"type":"module"}\n');
-  await write("app/layouts/default.html", `<title>HTMLKit documentation proof</title><meta name="description" content="HTML Next application documentation."><template component="proof-shell" controller="./shell.ts"><defs>
+  await write("app/layouts/default.html", `<template component="proof-shell" controller="./shell.ts"><title>HTMLKit documentation proof</title><meta name="description" content="HTML Next application documentation."><defs>
     <prop name="links" type="list(object({ label: string, href: string }))" required>Navigation</prop>
     <state name="dark" type="boolean" value="false"></state></defs>
     <main><header><strong>HTMLKit</strong><button type="button" $ref="theme">Toggle theme</button></header>
@@ -57,7 +57,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
     host.refs.increment.addEventListener('click', click);
     return () => host.refs.increment.removeEventListener('click', click);
   }`);
-  await write("app/pages/index.html", `<title>Overview · HTMLKit</title><meta name="description" content="An application platform exercised by documentation."><template component="page-proof-home"><article><h1>Application platform, exercised by documentation</h1>
+  await write("app/pages/index.html", `<template component="page-proof-home"><title>Overview · HTMLKit</title><meta name="description" content="An application platform exercised by documentation."><article><h1>Application platform, exercised by documentation</h1>
     <p>This consumer builds existing Markdown guides, component metadata, searchable navigation, a theme controller, and a working HTML Next example.</p>
     <p>HTMLKit supplies routing, loaders, rendering, and delivery. This application owns its content and presentation.</p></article></template>`);
   for (const file of guides) {
@@ -83,14 +83,14 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
       },
     } });
     const body = literalContent(await markdown.parse(await readFile(join(contentRoot, file), "utf8")));
-    await write(`app/pages/guide/${slug}.html`, `<title>${escapeHTML(slug)} · HTMLKit</title><template component="page-proof-guide-${slug}"><article>${body}</article>
+    await write(`app/pages/guide/${slug}.html`, `<template component="page-proof-guide-${slug}"><title>${escapeHTML(slug)} · HTMLKit</title><article>${body}</article>
       <style>pre { overflow: auto; padding: 1rem; background: #eef4f8; color: #183047; } a { color: #2785d7; }</style></template>`);
   }
   const definition = parseComponent(counter);
   const rows = Object.entries(definition.contract.props).map(([name, prop]) =>
     `<tr><td>${escapeHTML(name)}</td><td>${escapeHTML(String(prop.type))}</td><td>${escapeHTML(prop.description)}</td></tr>`).join("");
-  await write("app/pages/reference/counter.html", `<title>Counter reference · HTMLKit</title><meta name="description" content="Generated component contract and live counter."><link rel="component" href="../../components/counter.html">
-    <template component="page-proof-reference"><article><h1 id="counter">Counter reference</h1>
+  await write("app/pages/reference/counter.html", `<link rel="component" href="../../components/counter.html">
+    <template component="page-proof-reference"><title>Counter reference · HTMLKit</title><meta name="description" content="Generated component contract and live counter."><article><h1 id="counter">Counter reference</h1>
       <table><caption>Generated from the component contract</caption><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>
       <h2 id="example">Live example</h2><proof-counter step="2"></proof-counter>
       <h2>Source</h2>${literalContent(`<pre><code>${escapeHTML(counter)}</code></pre>`)}</article>

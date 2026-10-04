@@ -11,7 +11,7 @@ export async function write(root: string, file: string, contents: string): Promi
 export async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "htmlkit-app-"));
   await write(root, "package.json", '{"name":"htmlkit-fixture","private":true,"type":"module"}');
-  await write(root, "app/layouts/default.html", `<title>Application default</title><meta name="description" from:content="brand"><template component="app-layout"><defs>
+  await write(root, "app/layouts/default.html", `<template component="app-layout"><title>Application default</title><meta name="description" from:content="brand"><defs>
     <prop name="brand" type="string" required>Brand</prop></defs>
     <main><header $value="brand"></header><slot name="page"></slot></main>
     <style>:host { color: rgb(20, 30, 40); background-image: url('./texture.svg'); }</style></template>`);
@@ -19,9 +19,9 @@ export async function fixture(): Promise<string> {
   await write(root, "app/layouts/default.server.ts", `export function load() {
     return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' }, head: { title: 'Application' } };
   }`);
-  await write(root, "app/pages/index.html", `<meta name="htmlkit:page" content="home-page"><meta name="description" from:content="asset">
+  await write(root, "app/pages/index.html", `<meta name="htmlkit:page" content="home-page">
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
-    <template component="home-page" controller="./home.ts"><defs>
+    <template component="home-page" controller="./home.ts"><meta name="description" from:content="asset"><defs>
     <prop name="asset" type="string" required>Asset URL</prop>
     <state name="count" type="number" value="0"></state>
     <state name="text" type="string" value="initial"></state>
@@ -44,7 +44,7 @@ export async function fixture(): Promise<string> {
   }`);
   await write(root, "app/layouts/items.html", `<template component="items-layout"><defs><prop name="brand" type="string" required>Brand</prop></defs><main><header $value="brand"></header><article><h2>Items</h2><slot name="page"></slot></article></main><style>:host { color: rgb(20, 30, 40); }</style></template>`);
   await write(root, "app/layouts/items.server.ts", `export const load = () => ({ props: { brand: "HTMLKit" }, data: { owner: "kit" } });`);
-  await write(root, "app/pages/items/[slug].html", `<meta name="htmlkit:layout" content="items"><template component="item-page"><defs>
+  await write(root, "app/pages/items/[slug].html", `<template component="item-page"><meta name="htmlkit:layout" content="items"><defs>
     <prop name="label" type="string" required>Label</prop>
     <prop name="tags" type="list(string)" required>Tags</prop></defs>
     <section><h1 $value="label"></h1><p $each="tag of tags" $value="tag"></p></section></template>`);

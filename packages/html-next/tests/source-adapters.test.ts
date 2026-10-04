@@ -45,8 +45,8 @@ describe.skipIf(!enabled)("source adapters", () => {
   for (const [name, browserType] of engines) {
     it(`${name} parses all definitions in a resource with the same names as the source parser`, async () => {
       const source = `<link rel="component" href="./shared.html">
-        <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
-        <template component="ui-select" status="early" summary="Select."><select><slot></slot></select></template>`;
+        <template component="ui-button" status="early" summary="Button."><title $value="missing">Button title</title><meta name="description" content="Button metadata"><button>Save</button></template>
+        <template component="ui-select" status="early" summary="Select."><link rel="canonical" href="/select/"><select><slot></slot></select></template>`;
       const expected = JSON.parse(JSON.stringify(parseComponentResource(source, "library.html")));
       const browser = await browserType.launch({ headless: true });
       try {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.28
+
+### Changed
+
+- HTMLKit page and layout metadata now belongs inside its owning component carrier. File-level `htmlkit:page` selects the entry when a file declares multiple components. Helper metadata never contributes to a selected page or layout.
+- HTML Next accepts and ignores safe direct carrier metadata, preserving one rendered root and excluding metadata from bindings, output, and component dependencies.
+
 ## 1.0.0-alpha.27
 
 ### Added

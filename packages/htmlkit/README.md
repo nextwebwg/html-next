@@ -42,7 +42,10 @@ htmlkit.config.ts             optional configuration
 
 A page resource selects one entry component. A single definition is inferred; a file with helper
 components must select its page using `<meta name="htmlkit:page" content="page-products">`.
-Selection never depends on declaration order. Helpers use ordinary HTML Next component semantics.
+Selection never depends on declaration order. The file-level selector is separate from component-owned
+metadata: each page or layout declares its own title, description, links, and layout choice as direct
+children of its `<template component>`. Helpers use ordinary HTML Next component semantics; their
+metadata never contributes to the page head, even when the page renders them.
 Layouts each declare one root component and project the page through `<slot name="page"></slot>`.
 Component links and controllers use existing HTML Next syntax and resolution rules. Keep non-page
 resources outside `app/pages`; filenames beginning with `_` or `.` are ignored by file routing.
@@ -73,12 +76,12 @@ choosing `admin` replaces the default shell. Nested shells can compose ordinary 
 components explicitly. Adding a parent page never wraps descendant routes.
 
 ```html
-<meta name="htmlkit:layout" content="admin">
-<meta name="description" content="Manage your products.">
-<meta property="og:title" content="Product administration">
-<title>Products · Admin</title>
-
 <template component="page-products">
+  <meta name="htmlkit:layout" content="admin">
+  <meta name="description" content="Manage your products.">
+  <meta property="og:title" content="Product administration">
+  <title>Products · Admin</title>
+
   <article><h1>Products</h1></article>
 </template>
 ```
@@ -86,16 +89,19 @@ components explicitly. Adding a parent page never wraps descendant routes.
 A layout uses normal component syntax:
 
 ```html
-<title>Administration</title>
-<meta name="description" content="Administration tools.">
 <template component="admin-shell">
+  <title>Administration</title>
+  <meta name="description" content="Administration tools.">
   <main><header>Administration</header><slot name="page"></slot></main>
 </template>
 ```
 
 `htmlkit:*` metadata configures the build and is removed from the generated document. Ordinary
-`title`, `meta`, and metadata `link` elements contribute to the document head. No `<head>` wrapper
-is needed. The regular HTML Next resource loader accepts and ignores these metadata elements;
+`title`, `meta`, and metadata `link` elements directly inside a selected carrier contribute to the
+document head. They are siblings of `<defs>`, the rendered root, and `<style>`; no `<head>` wrapper
+is needed. Keep only `htmlkit:page` and component dependency links at file scope. HTMLKit diagnoses
+file-level head metadata instead of silently assigning it to a component. The regular HTML Next
+resource loader accepts and ignores resource-level and direct carrier metadata;
 it does not select layouts, update a host document, or evaluate their bindings. Resource-level
 `style`, `script`, `base`, policy `meta` (`http-equiv`), and arbitrary body nodes are rejected.
 Component styles inside a carrier and controller references retain their normal behavior.
@@ -104,10 +110,10 @@ Head values may bind to the selected component's declared props, populated by it
 the existing HTML Next binding syntax:
 
 ```html
-<title $value="label"></title>
-<meta name="description" from:content="description">
-<link rel="canonical" from:href="canonicalURL">
 <template component="page-item">
+  <title $value="label"></title>
+  <meta name="description" from:content="description">
+  <link rel="canonical" from:href="canonicalURL">
   <defs>
     <prop name="label" type="string" required>Item label</prop>
     <prop name="description" type="string" required>Description</prop>

@@ -1,4 +1,4 @@
-/** Resource metadata belongs to application tooling, never to component registration.
+/** Resource and direct carrier metadata belong to application tooling, never to registration.
  * Keep it inert and outside the definition model; active and policy-changing source
  * still follows the resource parser's rejection path.
  */
