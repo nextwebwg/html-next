@@ -422,8 +422,12 @@ export class Lowering {
 
   /** The fallback functions the emitted code calls. */
   fallbacks(): string[] {
-    return [...Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!),
-      ...(this.#used.has("formatValue") ? [formattingHelperSource()] : [])];
+    return Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!);
+  }
+
+  /** Stateful Intl reuse belongs to the module, outside component setup or render. */
+  moduleFallbacks(binding = "formatValue"): string[] {
+    return this.#used.has("formatValue") ? [formattingHelperSource(binding)] : [];
   }
 
   /** The expression's value. */

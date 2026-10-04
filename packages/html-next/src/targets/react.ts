@@ -1418,6 +1418,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "}",
     ] : []),
     "",
+    ...lowering.moduleFallbacks(),
   ].join("\n");
   return {
     component,

@@ -12,6 +12,8 @@ import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler
 import { build, transform } from "esbuild";
 import { createSSRApp, type Component } from "vue";
 import { renderToString } from "@vue/server-renderer";
+import { createElement } from "react";
+import { renderToString as renderReactToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
 import { generateComponent, generateReactComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
@@ -102,6 +104,30 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("shares formatter instances between generated Vue and React component instances", async () => {
+    // Formatting appears only in the computed value, exercising late helper discovery too.
+    const definition = parseComponent(`<template component="x-format-cache"><defs>
+      <computed name="label" from="format(12, 'currency', { currency: 'USD' }, 'en-US')"></computed>
+      </defs><p>{$label}</p></template>`);
+    for (const target of ["vue", "react"] as const) {
+      const generated = target === "vue" ? compileVue(generateVueComponent(definition), "XFormatCache.vue") : generateReactComponent(definition);
+      const bundle = await build({ stdin: { contents: generated, loader: target === "vue" ? "ts" : "tsx", resolveDir: packageRoot },
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+      const module = { exports: {} as { default: Component & ((props: object) => ReturnType<typeof createElement>) } };
+      new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+      const constructor = Intl.NumberFormat;
+      let count = 0;
+      Intl.NumberFormat = new Proxy(constructor, { construct(ctor, args) { count++; return Reflect.construct(ctor, args); } });
+      try {
+        for (let i = 0; i < 3; i++) {
+          const html = target === "vue" ? await renderToString(createSSRApp(module.exports.default))
+            : renderReactToString(createElement(module.exports.default));
+          assert.match(html, /\$12\.00/);
+        }
+        assert.equal(count, 1, `${target}: cache must outlive component setup/render`);
+      } finally { Intl.NumberFormat = constructor; }
+    }
+  });
   it("renders Vue Intl expressions in Node with the same text as native SSR", async () => {
     const definition = parseComponent(formattingSource);
     const directory = await mkdtemp(join(packageRoot, ".vue-ssr-"));

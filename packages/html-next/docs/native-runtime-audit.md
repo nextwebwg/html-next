@@ -37,6 +37,16 @@ values, and connecting formatting to existing expression dependencies and invali
 Vue/React components with authored formatting. The generated helper has no live-parser dependency.
 Native number/date range methods and structured parts support `formatRange()` and `formatParts()`.
 
+Native formatter objects already support repeated values and parts/ranges. The adapter retains up
+to 128 instances per module, keyed by constructor identity, locale and sorted primitive options;
+FIFO eviction bounds retention. Values, relative-time units and plural messages are never cached.
+Mutable/coercible options and oversized keys bypass reuse, preserving native validation and side
+effects. Browser-default locale keys include `navigator.language`. Instant formatting without an
+explicit time zone also bypasses reuse because the platform has no cheap notification/query for
+default-zone changes; civil values use their fixed UTC anchor. Generated Vue/React factories live
+at module scope, so rerenders and instances of the same component share them. Components without
+formatting emit no factory. No additional observers, scheduling, or browser polyfills are added.
+
 Civil `date`, `time`, and `datetime-local` values have no zone. Their native adapter anchors fields
 in UTC internally and removes unavailable zone-name parts; it does not shift the clock or show an
 invented UTC label. Global `datetime` values retain their instant meaning. CSS percentages supply a

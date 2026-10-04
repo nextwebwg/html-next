@@ -1,13 +1,13 @@
 import ts from "typescript-compiler";
-import { formatValue } from "../format.js";
+import { createFormatValue } from "../format.js";
 
 /**
- * Serialize the shared, closure-free adapter with contextual types restored after transpilation.
+ * Serialize the shared, closure-free factory with contextual types restored after transpilation.
  * Retain its actual parameter names so bundler renaming cannot change the generated behavior.
  * esbuild/tsx's keep-names helper affects only debugging names; a local identity supplies it.
  */
-export function formattingHelperSource(): string {
-  const source = formatValue.toString();
+export function formattingHelperSource(binding = "formatValue"): string {
+  const source = createFormatValue.toString();
   const parsed = ts.createSourceFile("format.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const names = new Set(source.match(/\b__name\d*\b/g) ?? []);
   const transformed = ts.transform(parsed, [(context) => {
@@ -21,7 +21,7 @@ export function formattingHelperSource(): string {
         const declarations = [...names].flatMap((name) => ts.createSourceFile("name.ts", `const ${name} = (fn: any, ..._names: any[]): any => fn;`, ts.ScriptTarget.Latest, true).statements);
         const body = ts.visitEachChild(node.body!, visit, context);
         return context.factory.updateFunctionDeclaration(node, node.modifiers, node.asteriskToken,
-          context.factory.createIdentifier("formatValue"), node.typeParameters,
+          context.factory.createIdentifier("createFormatValue"), node.typeParameters,
           node.parameters.map((parameter) => ts.visitNode(parameter, visit) as ts.ParameterDeclaration),
           context.factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
           context.factory.updateBlock(body, [...declarations, ...body.statements]));
@@ -30,6 +30,6 @@ export function formattingHelperSource(): string {
     };
     return (file) => ts.visitNode(file, visit) as ts.SourceFile;
   }]);
-  try { return ts.createPrinter().printFile(transformed.transformed[0]!); }
+  try { return `${ts.createPrinter().printFile(transformed.transformed[0]!)}\nconst ${binding} = createFormatValue();\n`; }
   finally { transformed.dispose(); }
 }
