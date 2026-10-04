@@ -75,7 +75,7 @@
     "audit:native": "tsx scripts/audit-native-features.ts",
     "build": "pnpm clean && tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
-    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/check-example-generated.ts",
+    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/generate-literal-source.ts --check && tsx scripts/check-example-generated.ts",
     "check:release": "tsx scripts/check-release.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",

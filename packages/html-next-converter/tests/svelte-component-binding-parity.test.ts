@@ -23,13 +23,21 @@ const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-fr
   <x-prop-field id="mixed-selected-prop-bind" value="14" from:mode="mode" bind:value="literalInput.value"></x-prop-field>
   <x-state-field id="mixed-selected-string-from" value="99" from:value="stringInput.value"></x-state-field>
   <x-state-field id="mixed-selected-string-bind" value="99" bind:value="stringInput.value"></x-state-field>
+  <x-structured-list id="mixed-structured-list-from" from:value="structuredInput.list"></x-structured-list>
+  <x-structured-list id="mixed-structured-list-bind" bind:value="structuredInput.list"></x-structured-list>
+  <x-structured-list id="mixed-structured-list-bootstrap-from" from:value="structuredInput.badlist"></x-structured-list>
+  <x-structured-list id="mixed-structured-list-bootstrap-bind" bind:value="structuredInput.badlist"></x-structured-list>
+  <x-structured-object id="mixed-structured-object-from" from:value="structuredInput.object"></x-structured-object>
+  <x-structured-object id="mixed-structured-object-bind" bind:value="structuredInput.object"></x-structured-object>
   <x-literal-number id="literal-number" value="14"></x-literal-number>
   <x-literal-boolean id="literal-boolean" value></x-literal-boolean>
   <x-literal-list id="literal-list" value="One Two"></x-literal-list>
   <x-prop-field id="literal-selected" value="14" from:mode="mode"></x-prop-field>
-</form>`).replace('<state name="selected"', '<state name="stringInput" type="object({ value: unknown })" value="{ value: \'14\' }"></state><state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
+</form>`).replace('<state name="selected"', '<state name="structuredInput" type="object({ list: unknown, object: unknown, badlist: unknown })" value="{ badlist: [\'[-1,2]\'], list: \'[-1, (2),]\', object: &quot;{ label: \'Ready\', count: 2 }&quot; }"></state><state name="stringInput" type="object({ value: unknown })" value="{ value: \'14\' }"></state><state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="value"></output></template>
+<template component="x-structured-list" status="early" summary="Selected structured list." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="list(number)"></option><option value="text" type="string"></option></type></prop></defs><output $value="value"></output></template>
+<template component="x-structured-object" status="early" summary="Selected structured object." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="object({ label: string, count: number })"></option><option value="text" type="string"></option></type></prop></defs><output $value="value"></output></template>
 `;
 
 async function snapshot(page: Page) {
@@ -168,7 +176,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 18 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 24 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
@@ -248,6 +256,14 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1"]) assert.deepEqual(initialMixed[id], { value: 14, input: "14", valid: true });
             for (const id of ["mixed-selected-from", "mixed-selected-bind", "mixed-selected-prop-from", "mixed-selected-prop-bind"]) assert.deepEqual(initialMixed[id], { value: null, input: "invalid", valid: false });
             for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) assert.deepEqual(initialMixed[id], { value: 14, input: "14", valid: true });
+            for (const binding of ["from", "bind"]) assert.deepEqual(initialMixed[`mixed-structured-list-bootstrap-${binding}`], { value: [-1, 2], input: ["[-1,2]"], valid: false });
+            const structuredCases = [
+              ["list", [-1, 2], "[-1, (2),]"],
+              ["object", { label: "Ready", count: 2 }, "{ label: 'Ready', count: 2 }"],
+            ] as const;
+            for (const [name, value, input] of structuredCases) for (const binding of ["from", "bind"]) {
+              assert.deepEqual(initialMixed[`mixed-structured-${name}-${binding}`], { value, input, valid: true });
+            }
             await setMode("state", "text");
             await compareSelected([12, 12, false], [12, 12, true]);
             await setSelected("Hello");
@@ -296,6 +312,49 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await compare();
             const recovered = (await snapshot(live)).selected;
             for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) assert.deepEqual(recovered[id], { value: 18, input: 18, valid: true });
+            for (const mode of ["text", "structured"]) {
+              await Promise.all(pages.map((page) => page.evaluate((next) => {
+                const hosts = (window as unknown as { selectedHosts: Record<string, { state: { mode: string } }> }).selectedHosts;
+                for (const name of ["list", "object"]) for (const binding of ["from", "bind"]) hosts[`mixed-structured-${name}-${binding}`]!.state.mode = next;
+              }, mode)));
+              await compare();
+              const selected = (await snapshot(live)).selected;
+              for (const [name, , input] of structuredCases) for (const binding of ["from", "bind"]) {
+                assert.deepEqual(selected[`mixed-structured-${name}-${binding}`], { value: input, input, valid: mode === "text" });
+              }
+            }
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              const input = (window as unknown as { fieldsHost: { state: { structuredInput: { list: unknown; object: unknown } } } }).fieldsHost.state.structuredInput;
+              input.list = [3, 4]; input.object = { label: "Next", count: 3 };
+            })));
+            await compare();
+            const structuredRecovered = (await snapshot(live)).selected;
+            for (const [name, value] of [["list", [3, 4]], ["object", { label: "Next", count: 3 }]] as const) for (const binding of ["from", "bind"]) {
+              assert.deepEqual(structuredRecovered[`mixed-structured-${name}-${binding}`], { value, input: value, valid: true });
+            }
+            for (const [list, object, valid] of [
+              [[3, "bad"], { label: "Next", count: "bad" }, false],
+              [[5], { label: "Last", count: 5 }, true],
+            ] as const) {
+              await Promise.all(pages.map((page) => page.evaluate(({ list, object }) => {
+                const input = (window as unknown as { fieldsHost: { state: { structuredInput: { list: unknown; object: unknown } } } }).fieldsHost.state.structuredInput;
+                input.list = list; input.object = object;
+              }, { list, object })));
+              await compare();
+              const selected = (await snapshot(live)).selected;
+              for (const [name, input, prior] of [["list", list, [3, 4]], ["object", object, { label: "Next", count: 3 }]] as const) for (const binding of ["from", "bind"]) {
+                assert.deepEqual(selected[`mixed-structured-${name}-${binding}`], { value: valid ? input : prior, input, valid });
+              }
+            }
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              const input = (window as unknown as { fieldsHost: { state: { structuredInput: { list: number[]; object: { label: string; count: number } } } } }).fieldsHost.state.structuredInput;
+              input.list[0] = 7; input.object.count = 7;
+            })));
+            await compare();
+            const inPlace = (await snapshot(live)).selected;
+            for (const [name, value] of [["list", [7]], ["object", { label: "Last", count: 7 }]] as const) for (const binding of ["from", "bind"]) {
+              assert.deepEqual(inPlace[`mixed-structured-${name}-${binding}`], { value, input: value, valid: true });
+            }
             await Promise.all(pages.map((page) => page.locator("#untyped-number").fill("23")));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "23")));
             await compare();

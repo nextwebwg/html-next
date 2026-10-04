@@ -1,7 +1,8 @@
 /** The complete HTML Next value-type grammar and its canonical runtime representation. */
 
 import { deepFreeze } from "./freeze.js";
-import { compileExpression, type ExpressionNode } from "./expression.js";
+import { compileExpression } from "./expression.js";
+import { parseHtmlLiteral } from "./structured-input.js";
 import { CSS_COLOR_KEYWORDS } from "./css-color-keywords.js";
 import { boundFailures, type ValueBounds } from "./value-constraints.js";
 
@@ -413,23 +414,9 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+const readStructuredExpression = (source: string) => compileExpression(source).ast;
 function structuredInput(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const literal = (node: ExpressionNode): unknown => {
-    switch (node.kind) {
-      case "literal": return node.value;
-      case "unary": {
-        const operand = literal(node.operand);
-        if (node.op === "-" && typeof operand === "number") return -operand;
-        throw new SyntaxError("Structured attributes must contain literal values.");
-      }
-      case "array": return node.items.map(literal);
-      case "object": return Object.fromEntries(node.pairs.map(({ key, value: item }) => [key, literal(item)]));
-      default: throw new SyntaxError("Structured attributes must contain literal values.");
-    }
-  };
-  try { return literal(compileExpression(value).ast); }
-  catch { return Symbol.for("html-next.bad-literal"); }
+  return parseHtmlLiteral(value, readStructuredExpression);
 }
 
 function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {

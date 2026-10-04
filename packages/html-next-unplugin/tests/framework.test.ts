@@ -305,6 +305,11 @@ describe("svelte source adapter", () => {
           <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
           <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
           </defs><output $value="value"></output></template>
+        <template component="ui-structured" status="early" summary="Selected structured input." controller="./controlled.js"><defs>
+          <state name="kind" type="keyword" values="list, object, text" value="list"></state>
+          <prop name="value">Value.<type from="kind"><option value="list" type="list(number)"></option><option value="object" type="object({ label: string })"></option><option value="text" type="string"></option></type></prop>
+          </defs><output $value="value"></output></template>
+        <template component="ui-structured-owner" status="early" summary="Structured input binding."><defs><state name="box" type="object({ value: unknown })" value="{ value: '[1, 2]' }"></state></defs><section><ui-structured from:value="box.value"></ui-structured><ui-structured bind:value="box.value"></ui-structured></section></template>
         <template component="ui-no-controller" status="early" summary="Method readiness."><defs><method name="ping" returns="promise(undefined)"></method></defs><button class="">Ping</button></template>
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" $ref="link" href="#next">Link</a><button $else $ref="button">Button</button></template></template>
