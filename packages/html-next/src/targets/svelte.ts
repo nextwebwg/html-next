@@ -671,7 +671,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
@@ -756,7 +756,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const prop = definition.contract.props[name]!;
     return "default" in prop ? `(input${name} === undefined ? ${JSON.stringify(prop.default)} : input${name})` : `input${name}`;
   };
-  const propTypeSource = (prop: (typeof target.props)[number]): string => {
+  const propTypeSource = (prop: (typeof target.props)[number], binding = false): string => {
     const select = prop.contract.select;
     if (select === undefined) return JSON.stringify(normalizeType(prop.contract.type));
     const selector = definition.contract.props[select.from];
@@ -764,14 +764,14 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     // depending on the aggregate checkedProps, which also reads this selected input.
     const value = selector === undefined ? code.get(select.from)
       : `checkedProp(${inputSource(select.from)}, ${JSON.stringify(normalizeType(selector.type))}, ${selector.required}, ${quote(select.from)}, acceptedProps, inputAccepted, false)`;
-    return `selectedPropNode(${value}, ${JSON.stringify(select.options)})`;
+    return `${binding ? "selectedBindingNode" : "selectedPropNode"}(${value}, ${JSON.stringify(select.options)})`;
   };
   const selectedInputSources = target.props.flatMap((prop) => {
     const input = selectedInputs.get(prop.name);
     if (input === undefined) return [];
     return [
       `const ${input.retain} = retainedBindingInput();`,
-      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${input.raw}, ${propTypeSource(prop)}));`,
+      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${input.raw}, ${propTypeSource(prop, true)}));`,
     ];
   });
   const checkedPropSources = target.props.map((prop) =>
@@ -856,7 +856,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...(context.usesComponentBindings ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, retainedBindingInput"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     ...(nestedDepthLimit === undefined ? [] : [

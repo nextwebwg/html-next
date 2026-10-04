@@ -172,7 +172,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 (window as unknown as { fieldsHost: { state: { selected: { value: unknown } } } }).fieldsHost.state.selected.value = next;
               }, value)));
             };
-            const setMode = async (owner: "state" | "prop", mode: "number" | "text") => {
+            const setMode = async (owner: "state" | "prop", mode: "number" | "text" | "none") => {
               await Promise.all(pages.map((page) => page.evaluate(({ owner, mode }) => {
                 const globals = window as unknown as { fieldsHost: { state: { mode: string } }; selectedHosts: Record<string, { state: { mode: string } }> };
                 (owner === "state" ? globals.selectedHosts["state-selected"]! : globals.fieldsHost).state.mode = mode;
@@ -202,6 +202,12 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await Promise.all(pages.map((page) => page.locator("#state-selected").fill("")));
             await compareSelected([5, 5, true], [5, 5, true]);
             await setSelected(17);
+            await compareSelected([17, 17, true], [17, 17, true]);
+            await setMode("state", "none");
+            await compareSelected([17, 17, false], [17, 17, true]);
+            await setSelected(null);
+            await compareSelected([17, 17, false], [17, 17, true]);
+            await setMode("state", "number");
             await compareSelected([17, 17, true], [17, 17, true]);
             await Promise.all(pages.map((page) => page.locator("#untyped-number").fill("23")));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "23")));

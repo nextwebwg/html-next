@@ -238,14 +238,20 @@ function parse(value: unknown, node: TypeNode, path: string): Parsed {
   }
 }
 
-/** Match HTML Next's typed invocation boundary before Vue renders or a controller reads a prop. */
+/** Return the actual selected destination, without a validation fallback. */
+export function selectedBindingNode(
+  selector: unknown,
+  options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[],
+): TypeNode | null {
+  if (selector === null || selector === undefined) return null;
+  return options.find((candidate) => candidate.value === selector)?.type ?? null;
+}
+
 export function selectedPropNode(
   selector: unknown,
   options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[],
 ): TypeNode {
-  if (selector === null || selector === undefined) return { kind: "terminal", name: "null" };
-  const option = options.find((candidate) => candidate.value === selector);
-  return option?.type ?? { kind: "terminal", name: "null" };
+  return selectedBindingNode(selector, options) ?? { kind: "terminal", name: "null" };
 }
 
 interface Bounds { readonly min?: number | string; readonly max?: number | string; readonly minLength?: number; readonly maxLength?: number; readonly pattern?: string }
