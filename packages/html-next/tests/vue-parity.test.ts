@@ -50,6 +50,22 @@ const cases: readonly ParityCase[] = [
     action: `root.querySelector("button").click(); root.querySelectorAll("button")[1].click()`,
   },
   {
+    name: "inline and value row formatters retain invalid results across keyed moves",
+    features: ["inline text", "$value", "format", "keyed lists", "invalid-result retention"],
+    definitions: { "x-row-format": `<template component="x-row-format"><defs>
+      <state name="rows" type="list(object({ id: number, amount: number, currency: string }))" value="[{ id: 1, amount: 12, currency: 'USD' }, { id: 2, amount: 24, currency: 'USD' }]"></state>
+      <handler name="change"><set name="rows" expr:value="[{ id: 2, amount: 99, currency: 'invalid' }, { id: 1, amount: 18, currency: 'USD' }]"></set></handler>
+      </defs><section><button on:click="change">Next</button><ul><li $each="row of rows" $key="row.id">
+      <span class="inline">{format($row.amount, 'currency', { currency: $row.currency }, 'en-US')}</span>
+      <span class="value" $value="format(row.amount, 'currency', { currency: row.currency }, 'en-US')"></span>
+      <span class="mixed">Total: {format($row.amount, 'currency', { currency: $row.currency }, 'en-US')}!</span>
+      </li></ul></section></template>` },
+    invocation: `<x-row-format id="case"></x-row-format>`, vueRender: `h(XRowFormat, { id: "case" })`, root: "#case",
+    probe: `Array.from(root.querySelectorAll('li'), row => Array.from(row.querySelectorAll('span'), span => span.textContent))`,
+    action: `root.querySelector('button').click()`,
+    expectedAfter: [["$24.00", "$24.00", "Total: $24.00!"], ["$18.00", "$18.00", "Total: $18.00!"]],
+  },
+  {
     name: "braced inline expressions preserve mixed content and keyed table rows",
     features: ["inline text", "keyed lists", "case-sensitive names"],
     definitions: { "x-inline": String.raw`<template component="x-inline"><defs>

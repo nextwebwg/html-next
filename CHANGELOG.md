@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.26
+
+### Fixed
+
+- Inline row paths and `$value` now generate identical direct Vue text bindings, without an extra component per row. Loop aliases use inferred types for lowering rather than adding declared-reference guards.
+- Mixed inline Vue text uses direct string concatenation instead of allocating a temporary array, preserving authored whitespace and empty values.
+- Row `$value` expressions that return an invalid result retain the last valid text across keyed moves, matching inline expressions and the live runtime.
+
 ## 1.0.0-alpha.25
 
 ### Fixed

@@ -104,6 +104,31 @@ const featureSource = `<template component="x-feature" status="experimental" sum
 </template>`;
 
 describe("official target compilers", () => {
+  it("renders inline row paths without allocating a Vue component for each text node", async () => {
+    let valueSource: string | undefined;
+    for (const text of [undefined, "{$row.label}", "Hello  {$row.id}{$row.label}{$row.note}{$row.missing}!", "{$row.id}{$row.id}"]) {
+      const inline = text !== undefined;
+      const definition = parseComponent(`<template component="x-row-text"><defs>
+        <state name="rows" type="list(object({ id: number, label: string, note: unknown, missing?: string }))" value="[{ id: 1, label: 'Ada', note: null }, { id: 2, label: 'Bea', note: '?' }]"></state>
+        </defs><ul><li $each="row of rows"><span${inline ? "" : ' $value="row.label"'}>${text ?? ""}</span></li></ul></template>`);
+      const source = generateVueComponent(definition);
+      if (text === "{$row.label}") assert.equal(source, valueSource, "inline paths and $value must emit identical Vue code");
+      else if (!inline) valueSource = source;
+      const compiled = compileVue(source, "XRowText.vue");
+      const bundle = await build({ stdin: { contents: compiled, loader: "ts", resolveDir: packageRoot },
+        bundle: true, write: false, platform: "node", format: "cjs", packages: "external" });
+      const module = { exports: {} as { default: Component } };
+      new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
+      const app = createSSRApp(module.exports.default);
+      let instances = 0;
+      app.mixin({ beforeCreate() { instances++; } });
+      const html = await renderToString(app);
+      assert.equal(instances, 1, `${inline ? "inline" : "$value"}: row text needs no component instance`);
+      assert.doesNotMatch(source, /RetainedInlineText|inlineTextSegment|\.join\(''\)/);
+      const expected = text?.startsWith("Hello") ? "Hello  1Ada!Hello  2Bea?!" : text === "{$row.id}{$row.id}" ? "1122" : "AdaBea";
+      assert.equal(new JSDOM(html).window.document.querySelector("ul")?.textContent, expected);
+    }
+  });
   it("shares formatter instances between generated Vue and React component instances", async () => {
     // Formatting appears only in the computed value, exercising late helper discovery too.
     const definition = parseComponent(`<template component="x-format-cache"><defs>

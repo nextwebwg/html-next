@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-unplugin",
-  "version": "1.0.0-alpha.25",
+  "version": "1.0.0-alpha.26",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
