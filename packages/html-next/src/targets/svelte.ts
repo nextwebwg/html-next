@@ -131,6 +131,7 @@ interface RenderContext {
   readonly initialBindingsName: string;
   readonly initialBindingReadName: string;
   readonly nativeBindingReadName: string;
+  readonly rootBindingAttributeName: string;
   readonly decorationAttachmentName: string;
   readonly propertyAttachmentName: string;
   usesControls: boolean;
@@ -522,9 +523,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (nativeControlBinding(node.name, name)) {
         context.usesControls = true;
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
-        const defaults = name === "checked" ? `{ checked: ${context.initialBindingsName}[${quote(name)}] !== undefined || ${literal !== undefined} }`
+        const defaults = name === "checked" ? `{ checked: ${context.rootBindingAttributeName}(${quote(name)}) !== undefined || ${literal !== undefined} }`
           : node.name === "textarea" ? `{ value: ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))} }`
-          : `{ value: String(${context.initialBindingsName}[${quote(name)}] ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
+          : `{ value: String(${context.rootBindingAttributeName}(${quote(name)}) ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
         context.usesAttributeBinding = true;
         const unbound = context.freshIdentifier("htmlNextAttributeValue");
         const unboundScope = unknownValueScope(unbound);
@@ -536,7 +537,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const serialized = name === "checked" ? lowering.condition({ kind: "id", name: candidate }, candidateScope) : multiple ? `(Array.isArray(${candidate}) ? ${candidate}.map(String) : [])` : `(${candidate} == null ? "" : String(${candidate}))`;
         if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
         else bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
-        if (node.name !== "input") bindings.push(`{@attach ${read} === undefined ? undefined : ${context.bindingHelperName}(${quote(name)}, () => ${context.initialBindingsName}[${quote(name)}] ?? ${literal?.kind === "literal" ? quote(literal.value) : "undefined"})}`);
+        if (node.name !== "input") {
+          const inherited = context.freshIdentifier("htmlNextInheritedAttribute");
+          bindings.push(`{@attach ${read} === undefined ? undefined : (() => { const ${inherited} = ${context.rootBindingAttributeName}(${quote(name)}) ?? ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${context.bindingHelperName}(${quote(name)}, () => ${inherited}); })()}`);
+        }
         if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${name === "checked" ? "defaultChecked" : "defaultValue"}: ${read} === undefined ? ${unboundDefault} : (${defaults}).${name === "checked" ? "checked" : "value"} })}`);
         bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined${node.name === "select" ? ", { observeOptions: false }" : ""})}`);
       } else {
@@ -726,7 +730,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -886,6 +890,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  return ${initialBindingMap}.get(name);`,
       "}",
       `let ${context.initialBindingsName} = $derived.by(() => ({ ${initialBindingSources.join(", ")} }));`,
+      `function ${context.rootBindingAttributeName}(name: string): unknown {`,
+      `  return untrack(() => rootElement === undefined ? (${context.initialBindingsName} as Record<string, unknown>)[name] : rootElement.getAttribute(name) ?? undefined);`,
+      "}",
     ]),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.

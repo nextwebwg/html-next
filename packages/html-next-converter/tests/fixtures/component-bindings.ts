@@ -15,6 +15,8 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 <template component="x-flag-field" status="early" summary="Typed checkbox."><defs>
   <prop name="checked" type="boolean" default="false">Flag.</prop>
 </defs><input type="checkbox" .checked="checked"></template>
+<template component="x-native-switch" status="early" summary="Changing native binding root."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><template $match><input $when="mode = 'field'" value="Field default"><textarea $when="mode = 'area'">Area default</textarea><output $else value="Generic attribute">Generic default</output></template></template>
+<template component="x-native-delegate" status="early" summary="Delegated native binding."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><x-native-switch from:mode="mode"></x-native-switch></template>
 <template component="x-untyped-number" status="early" summary="Undeclared number binding."><input type="number" value="99"></template>
 <template component="x-untyped-text" status="early" summary="Undeclared array binding."><input value="default"></template>
 <template component="x-untyped-flag" status="early" summary="Undeclared checked binding."><input type="checkbox"></template>
@@ -27,6 +29,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 <template component="x-bound-fields" status="early" summary="Nested component bindings." controller="./fields.js"><defs>
   <state name="selected" type="object({ value: unknown })" value="{ value: 12 }"></state>
   <state name="mode" type="keyword" values="number, text" value="number"></state>
+  <state name="rootMode" type="keyword" values="field, area, generic" value="field"></state>
   <state name="rawChecked" type="object({ value: unknown })" value="{ value: [] }"></state>
   <state name="radios" type="object({ first: boolean, second: boolean })" value="{ first: true, second: false }"></state>
   <state name="file" type="string" value=""></state>
@@ -39,6 +42,8 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-text-field id="text" bind:value="form.text"></x-text-field>
   <x-number-field id="empty" amount="7" bind:amount="empty"></x-number-field>
   <x-flag-field id="flag" bind:checked="form.checked"></x-flag-field>
+  <x-native-switch id="native-switch" from:mode="rootMode" bind:value="form.text"></x-native-switch>
+  <x-native-delegate id="delegated-switch" from:mode="rootMode" bind:value="form.text"></x-native-delegate>
   <x-untyped-number id="untyped-number" bind:value="form.amount"></x-untyped-number>
   <x-untyped-number id="untyped-unbound" from:value="'2'"></x-untyped-number>
   <x-untyped-text id="untyped-array" bind:value="choices"></x-untyped-text>

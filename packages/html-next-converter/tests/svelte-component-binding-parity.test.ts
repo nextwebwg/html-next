@@ -22,6 +22,9 @@ async function snapshot(page: Page) {
       generic: (() => { const output = root.querySelector<HTMLOutputElement>("#untyped-output"); return output === null ? null : {
         attribute: output.getAttribute("value"), value: output.value, defaultValue: output.defaultValue,
       }; })(),
+      changingRoots: Array.from(root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLOutputElement>("#native-switch, #delegated-switch"), (element) => ({
+        id: element.id, tag: element.localName, value: element.value, defaultValue: element.defaultValue, attribute: element.getAttribute("value"), mode: element.getAttribute("data-mode"),
+      })),
       genericEdges: Array.from(root.querySelectorAll<HTMLOutputElement>("#unbound-output, #prototype-output"), (element) => ({
         id: element.id, value: element.value, attribute: element.getAttribute("value"), prototype: element.getAttribute("__proto__"), constructor: element.getAttribute("constructor"),
       })),
@@ -228,6 +231,18 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             })));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#label")?.textContent === "Edited")));
             await compare();
+            for (const rootMode of ["area", "generic", "area", "field"]) {
+              await Promise.all(pages.map((page) => page.evaluate((mode) => {
+                (window as unknown as { fieldsHost: { state: { rootMode: string } } }).fieldsHost.state.rootMode = mode;
+              }, rootMode)));
+              await compare();
+              if (rootMode === "area") await Promise.all(pages.map((page) => page.locator("#delegated-switch").fill("Area bridged")));
+              else if (rootMode === "generic") await Promise.all(pages.map((page) => page.locator("#delegated-switch").evaluate((element) => {
+                (element as HTMLOutputElement).value = "Generic bridged";
+                element.dispatchEvent(new Event("input", { bubbles: true }));
+              })));
+              await compare();
+            }
             await Promise.all(pages.map((page) => page.evaluate(() => {
               (window as unknown as { fieldsHost: { state: { choices: string[] } } }).fieldsHost.state.choices.push("c");
             })));
