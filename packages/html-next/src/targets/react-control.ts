@@ -8,8 +8,14 @@ export interface BoundDefaults {
   readonly options?: readonly boolean[];
 }
 
+interface HydrationSnapshot {
+  readonly bound: unknown;
+  readonly value: string;
+  readonly checked: boolean;
+  prepared: boolean;
+}
 const boundValues = new WeakMap<Control, unknown>();
-const preHydrationValues = new WeakMap<Control, { readonly bound: unknown; readonly value: string; readonly checked: boolean }>();
+const preHydrationValues = new WeakMap<Control, HydrationSnapshot>();
 
 function snapshot(value: unknown): unknown {
   return Array.isArray(value) ? [...value] : value;
@@ -54,16 +60,27 @@ export function attachGenericBinding(element: Element | null, update: (value: un
 
 // This module runs before framework hydration. Retain native edits before the framework
 // claims controls or replaces a textarea's live value.
-if (typeof document !== "undefined") {
-  for (const element of document.querySelectorAll("input, textarea, select")) {
+if (typeof document !== "undefined") captureHydrationControls(document);
+
+/** Called before a generated subtree claims controls that arrived after its helpers loaded. */
+export function captureHydrationControls(root: ParentNode, preparing = false): void {
+  const pending: HydrationSnapshot[] = [];
+  for (const element of root.querySelectorAll("input, textarea, select")) {
+    if (boundValues.has(element as Control) || preHydrationValues.get(element as Control)?.prepared === true) continue;
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-      preHydrationValues.set(element, {
+      const captured = {
         bound: snapshot(readControl(element)),
         value: element.value,
         checked: element instanceof HTMLInputElement && element.checked,
-      });
+        prepared: preparing,
+      };
+      preHydrationValues.set(element, captured);
+      if (preparing) pending.push(captured);
     }
   }
+  // Independent roots may claim DOM before either root's control attachments run.
+  // Keep that batch's snapshots intact; later hydration can capture fresh native edits.
+  if (pending.length > 0) queueMicrotask(() => { for (const captured of pending) captured.prepared = false; });
 }
 
 function writeControl(element: Control, name: BoundName, value: unknown, nativeProperty: boolean): void {

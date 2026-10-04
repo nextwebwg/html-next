@@ -1,7 +1,21 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { nativeControlModule } from "./react-control.js";
 
+export const CONTROL_CAPTURE_CONTEXT = "\0html-next:control-capture";
+
 const SOURCE = `
+import { getContext, setContext } from "svelte";
+
+/** Public context keeps the capture before DOM claims and once per generated subtree. */
+export function prepareHydrationControls(): void {
+  if (typeof document === 'undefined') return;
+  const capture = getContext<{ prepared: boolean }>(${JSON.stringify(CONTROL_CAPTURE_CONTEXT)}) ??
+    setContext(${JSON.stringify(CONTROL_CAPTURE_CONTEXT)}, { prepared: false });
+  if (capture.prepared) return;
+  capture.prepared = true;
+  captureHydrationControls(document, true);
+}
+
 const authoredOptions = new WeakMap<HTMLOptionElement, boolean>();
 if (typeof document !== "undefined") {
   for (const option of document.querySelectorAll<HTMLOptionElement>('option[data-html-next-option-default]')) {
@@ -12,7 +26,16 @@ if (typeof document !== "undefined") {
 
 export function controlDefaults(element: Element, defaults: BoundDefaults): BoundDefaults {
   if (!(element instanceof HTMLSelectElement)) return defaults;
-  return { ...defaults, options: Array.from(element.options, (option) => authoredOptions.get(option) ?? option.defaultSelected) };
+  const options = Array.from(element.options, (option) => {
+    const marker = option.getAttribute('data-html-next-option-default');
+    if (marker !== null) {
+      // Libraries may load before another server-rendered subtree is inserted.
+      authoredOptions.set(option, marker === 'true');
+      option.removeAttribute('data-html-next-option-default');
+    }
+    return authoredOptions.get(option) ?? option.defaultSelected;
+  });
+  return { ...defaults, options };
 }
 
 /** DOM observation supplies option-list changes that don't change the bound state. */

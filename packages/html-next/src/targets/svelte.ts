@@ -13,6 +13,7 @@ import { targetComponent } from "./backend.js";
 import { escapeHtml, literalAttribute, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
+import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
 
 function hasStructuredHtmlInput(type: TypeNode): boolean {
@@ -199,6 +200,9 @@ function canMatchOptionText(node: TemplateNode): boolean {
   if (node.kind === "text") return true;
   if (node.kind === "slot" || node.name.includes("-")) return false;
   if (node.name === "option") {
+    // An unconditional literal value does not depend on the option's rendered label.
+    if (node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "value") &&
+      !node.attributes.some((attribute) => attribute.kind !== "literal" && attribute.name === "value")) return true;
     const content = node.attributes.find((attribute) => attribute.kind === "directive");
     if (content !== undefined) return content.name === "value" || content.name === "html";
     if (node.attributes.some((attribute) => attribute.kind === "property" && attribute.name === "textContent")) return true;
@@ -588,7 +592,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
         continue;
       }
-      if (controlledNames.has(attribute.name) && childProp(attribute.name)?.[1].select === undefined || (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
+      if (controlledNames.has(attribute.name) && childProp(attribute.name)?.[1].select === undefined ||
+        !component && node.name === "input" && ["value", "checked"].includes(attribute.name) && node.attributes.some((entry) => entry.kind === "attribute" && entry.name === attribute.name && entry.target === undefined) ||
+        (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? {} : { selected: true })}`);
@@ -677,11 +683,15 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
             value = retained(context, `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} !== Symbol.for('html-next.invalid-result') && acceptsBindingDestination(${candidate}, ${JSON.stringify(normalizeType(declared[1].type))}) ? ${candidate} : Symbol.for('html-next.invalid-result'); })()`, initial);
           }
         } else value = read.invalid ? retained(context, read.source, initial) : read.source;
-        if (node.name === "select" && attribute.name === "value") {
+        if (node.name === "select" && attribute.name === "value" || node.name === "input" && ["value", "checked"].includes(attribute.name)) {
           context.usesAttributeBinding = true;
-          bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
-          bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source})}`);
-          if (root) context.rootAttributeBindings.add("value");
+          const nativeAttribute = node.name === "input" && attribute.name === "checked" ? `((value: unknown) => value === false ? undefined : value)(${value})` : value;
+          const nativeRead = node.name === "input" && attribute.name === "checked" ? `((value: unknown) => value === false ? undefined : value === true ? "" : value)(${read.source})` : read.source;
+          bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${nativeAttribute} } : {})}`);
+          // Public default properties keep Svelte hydration from clearing native attribute defaults.
+          if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: ${attribute.name === "checked" ? `(${nativeAttribute}) != null` : nativeAttribute} })}`);
+          bindings.push(`{@attach ${context.bindingHelperName}(${quote(attribute.name)}, () => ${nativeRead})}`);
+          if (root) context.rootAttributeBindings.add(attribute.name);
         } else if (node.name === "option" && attribute.name === "value") {
           optionAttributeValue = value;
           // An option's DOM value is always a string. Omitted value attributes use option text.
@@ -933,7 +943,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
@@ -1142,12 +1152,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
     `import type { HTMLAttributes as ${nativeAttributes} } from "svelte/elements";`,
-    ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
+    ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 || context.imports.size > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
     ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
-    ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
+    ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, prepareHydrationControls, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
     ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
@@ -1164,6 +1174,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
       `setContext("html-next:nested-depth", ${nestedDepthName} + 1);`,
     ]),
+    ...(context.imports.size === 0 ? [] : [
+      // A parent without its own controls must give siblings the same capture owner.
+      `if (getContext(${quote(CONTROL_CAPTURE_CONTEXT)}) === undefined) setContext(${quote(CONTROL_CAPTURE_CONTEXT)}, { prepared: false });`,
+    ]),
+    ...(context.usesControls ? ["prepareHydrationControls();"] : []),
     `type Props = Omit<${nativeAttributes}<${rootType}>, ${omittedNative.map(quote).join(" | ")}> & { ${propTypes} ${eventCallbacks.map((event) => `${quote(event.name)}?: ${event.type};`).join(" ")} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : `slots?: ${slotsType};`} [key: string]: unknown; };`,
     `let { ${[destructured, ...internalProps, `...${rawRest}`].filter(Boolean).join(", ")} }: Props = $props();`,
     `const rest = ${rawRest} as Record<string, unknown>;`,

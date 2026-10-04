@@ -81,6 +81,21 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "one-way native controls preserve authored defaults without duplicate attributes",
+    source: `<template component="x-oneway-defaults" status="early" summary="One-way control defaults."><defs>
+      <state name="value" type="string" value="One"></state><state name="checked" type="boolean" value="false"></state>
+      <handler name="next"><set name="value" expr:value="'Two'"></set><set name="checked" expr:value="true"></set></handler>
+      <handler name="previous"><set name="value" expr:value="'One'"></set><set name="checked" expr:value="false"></set></handler>
+      </defs><form><input value="Draft" from:value="value"><input type="checkbox" checked from:checked="checked"><button type="button" on:click="next">Next</button><button type="button" on:click="previous">Previous</button></form></template><x-oneway-defaults></x-oneway-defaults>`,
+    expect: { probe: `return [q('input').value, q('input').defaultValue, q('input[type=checkbox]').checked, q('input[type=checkbox]').defaultChecked, q('input').getAttribute('value'), q('input[type=checkbox]').getAttribute('checked')];`,
+      result: ["One", "One", false, false, "One", null], after: [
+        { action: `document.querySelector('button').click();`, result: ["Two", "Two", true, true, "Two", ""] },
+        { action: `document.querySelector('input').value = 'Edited'; document.querySelector('input[type=checkbox]').checked = false;`, result: ["Edited", "Two", false, true, "Two", ""] },
+        { action: `document.querySelectorAll('button')[1].click();`, result: ["Edited", "One", false, false, "One", null] },
+        { action: `document.querySelector('form').reset();`, result: ["One", "One", false, false, "One", null] },
+      ] },
+  },
+  {
     name: "literal attributes preserve entities and braces through Svelte SSR spreads",
     source: `<template component="x-entity-attributes" status="early" summary="Literal spread attributes."><defs><state name="choice" type="string" value="A&amp;B"></state></defs>
       <section title="{root} &amp; &quot;"><select title="{select} &amp; &quot;" bind:value="choice"><option value="A&amp;B" title="{option} &amp; &quot;">Chosen</option></select><p title="{plain} &amp; &quot;">Text</p></section></template><x-entity-attributes></x-entity-attributes>`,
