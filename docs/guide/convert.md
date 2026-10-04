@@ -1,7 +1,7 @@
 ---
-title: Convert components
-order: 4
-blurb: Vue and React source · application and library output
+title: Converter
+order: 2
+blurb: generate framework source · inspect conversion output
 eyebrow: HTML Next · Conversion
 ---
 
@@ -26,7 +26,7 @@ npx html-next-convert vue 'components/**' --mode library --out-dir generated/vue
 npx html-next-convert react 'components/**' --mode library --out-dir generated/react-target
 ```
 
-A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. `x-counter` becomes the named export `XCounter`; each carrier in a multi-component HTML file gets its own export.
+A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
 
 | Target | Component output | Styles |
 | --- | --- | --- |
@@ -34,26 +34,51 @@ A directory such as `components/` is also accepted, as are explicit `.html` file
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
 | Svelte | Coming soon | Planned; not emitted today |
 
-The component files import their framework, nested components, copied controllers, and generated helpers required by their features. They have no HTML Next runtime dependency. A safe-HTML helper can require `parse5`; the inventory records that dependency.
+The generated files use Vue or React directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
+
+If a component uses `$html` to render an HTML string, its generated code needs the `parse5` package. Install the dependencies listed under `package.dependencies` in `html-next.conversion.json`; components without `$html` do not need `parse5`.
 
 ## Choose the output shape
 
 | Mode | Entry |
 | --- | --- |
-| `--mode application` | `<target>/application.ts`, exporting the graph's roots |
+| `--mode application` | `<target>/application.ts`, exporting the application entry components |
 | `--mode library` | `<target>/index.ts`, with independently consumable named exports |
 
 Both modes write `html-next.conversion.json` with the inputs, artifacts, target version, and required package dependencies and peers. If a `<data src>` URL is component-relative, pass `--public-root-url /app/` when the conversion root is served at `/app/`.
 
-## Ship the generated files
+## Package the results
 
-Build Vue output with `@vitejs/plugin-vue` and generate types with `vue-tsc`. Build React output with `@vitejs/plugin-react` and TypeScript. Publish the resulting JavaScript, declarations, and CSS; or publish the source for consumers whose bundler handles `.vue` and `.tsx`.
-
-Merge the inventory's `package.dependencies` and `package.peerDependencies` into your package manifest. Declare authored controllers' external dependencies yourself. [Ship a library](/html-next/ship) covers source packages and framework subpaths.
+[Ship for Vue and React](/html-next/ship-frameworks) shows a complete library build: convert both targets automatically, compile their JavaScript and types, publish their CSS, and expose native, Vue, and React entries from one package.
 
 ## Prefer conversion during the app build?
 
-Use the [Vue or React Vite adapter](/html-next/frameworks). It converts local imports and installed source libraries on demand and prepares their types.
+Use the [Usage guide](/html-next/usage). It converts local imports and installed source libraries on demand and prepares their types.
+
+## Publish source for application-side conversion {#source-libraries}
+
+A source library lets consuming Vue and React apps convert your HTML during their own builds. They use the [HTML Next Vite adapter](/html-next/usage/vue) rather than prebuilt framework entries. Native users can load the published HTML resources with the [browser runtime](/html-next/usage#browser-runtime).
+
+Install `@nextwebwg/html-next` as a development dependency, then assemble the source package:
+
+```js title="build-source-library.mjs"
+import { glob, readFile } from "node:fs/promises";
+import { assembleComponentPackage } from "@nextwebwg/html-next";
+
+const metadata = JSON.parse(await readFile("package.json", "utf8"));
+const sources = await Array.fromAsync(glob("components/**/*.html"));
+await assembleComponentPackage({
+  name: metadata.name,
+  version: metadata.version,
+  outDirectory: "package",
+  sourceOnly: true,
+  components: sources.map((source) => ({ source })),
+});
+```
+
+Run `node build-source-library.mjs`. The `package` directory contains your HTML, linked controller modules, and a source entry exposed through the `html-next` package-export condition. The glob includes all HTML definitions under your component folder, so linked definitions are packaged together. Set your license and package metadata, declare controllers' external dependencies, and pack from that directory to test the result before publishing.
+
+In an app configured with the Vue or React adapter, consumers import the library's named component exports from your package name. The adapter finds the published source and converts it for that app. It also generates the framework declarations, as described in [Usage](/html-next/usage).
 
 ## Diagnostics
 

@@ -1,18 +1,18 @@
 ---
-title: Get started
+title: Build components
 order: 0
 navGroup: guide
-blurb: write a component · run it · choose a target
-eyebrow: HTML Next · Get started
+blurb: markup · state · events · bindings
+eyebrow: HTML Next · Build
 ---
 
-# Your first HTML Next component
+# Build an HTML Next component
 
-Write a reactive counter in HTML, then choose how your project will run it.
+Define a reactive counter in HTML. Use the same component in an HTML page, a native Vite app, Vue, or React.
 
 ## Write the component
 
-Save this as `counter.html`. It declares state, a click handler, and one native button as its root.
+Save this as `counter.html`. It declares state and two click handlers, with native buttons for incrementing and resetting the count.
 
 ```html title="counter.html"
 <template component="x-counter">
@@ -21,49 +21,26 @@ Save this as `counter.html`. It declares state, a click handler, and one native 
     <handler name="increment">
       <set name="count" expr:value="count + 1"></set>
     </handler>
+    <handler name="reset">
+      <set name="count" expr:value="0"></set>
+    </handler>
   </defs>
-  <button type="button" on:click="increment">
-    Count: <span $value="count"></span>
-  </button>
+  <div>
+    <button type="button" on:click="increment">
+      Count: <span $value="count"></span>
+    </button>
+    <button type="button" on:click="reset">Reset</button>
+  </div>
 </template>
 ```
 
-`$value` connects the span to `count`. The handler updates that state when the button is clicked. The rendered root is the button itself.
+`$value` connects the span to `count`. The handlers update that state when either button is clicked. The rendered root is the `div` containing both buttons.
 
 Add a `<style>` inside the definition when it needs scoped CSS. An optional `controller="./counter.js"` connects an ordinary ES module for imperative behavior. Start with the markup and add JavaScript where you need it.
 
-## Run it in an HTML page
+## Use what you built
 
-Save an `index.html` beside the component:
-
-```html title="index.html"
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>My first HTML Next component</title>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/@nextwebwg/html-next/dist/browser.js"></script>
-    <link rel="component" href="./counter.html">
-  </head>
-  <body>
-    <x-counter></x-counter>
-  </body>
-</html>
-```
-
-Serve the directory over HTTP with your usual development server, then open the page and click the button. Use a current browser with native CSS `@scope`; the [runtime guide](/html-next/runtime#browser-support) lists the supported versions.
-
-## Use it in your project
-
-| Project | Next step |
-| --- | --- |
-| Vue or React with Vite | [Add the adapter](/html-next/frameworks) and import `{ XCounter }` from `./counter.html`. |
-| HTML page | [Use the live runtime](/html-next/runtime), from a CDN or an installed package. |
-| Native DOM application | [Compile a graph](/html-next/build) with Vite. |
-| Framework source output | [Convert components](/html-next/convert) to `.vue` or `.tsx` files. |
-| Reusable component library | [Ship the sources](/html-next/ship) for consumers to adapt to their framework. |
-
-Vue and React adapters and converters are available today. Svelte support is coming soon; it is not an installable target yet.
+[Use the component](/html-next/usage) with HTML Next. That guide starts with native Vite setup and includes a browser runtime option. Its switcher also covers Vue and React; Svelte support is coming soon.
 
 ## Keep learning
 

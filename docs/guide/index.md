@@ -9,45 +9,51 @@ pager: false
 
 # Universal components. Built with HTML.
 
-Build reactive components using the next generation of HTML. Author once, run them in the browser, or bring them to Vue and React. Svelte support is coming soon.
+Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, or in React. Svelte support is coming soon.
 
-## One component, more places to use it
+## What is HTML Next?
 
-Your components belong to your library, not to one application stack. HTML Next gives an HTML definition state, computed values, events, slots, and scoped styles, then delivers it in the form your project needs.
+HTML Next is a component format and JavaScript tools for building reactive interfaces with HTML. A definition brings markup, state, events, slots, and scoped styles together in one file. Use it natively in an HTML page or with Vite, or import it into Vue and React through their adapters.
+
+The tools implement a public proposal today. Browsers do not support this component syntax on their own; HTML Next runs or builds the definitions for your project.
+
+## Why build components this way?
+
+A reusable component should not need a rewrite every time an application changes frameworks. HTML Next keeps the source in HTML and lets the consuming project choose how to use it. That is useful for component libraries shared by HTML pages, Vue apps, and React apps.
+
+| Approach | How you build | Where it fits |
+| --- | --- | --- |
+| HTML and JavaScript | Write markup and manage behavior with browser APIs. | Pages and interactions where direct control is enough. |
+| HTML Next components | Declare the component's interface, state, and bindings in HTML. | Reactive components you want to use natively or share across frameworks. |
+| Framework components | Use Vue, React, or another framework's own component format. | Applications and libraries built around that framework's conventions and ecosystem. |
+
+Use HTML Next when you want one component library to serve several application stacks. Framework-specific components fit projects that depend on features or libraries tied to that framework. HTML Next's adapters generate framework output from your HTML definitions.
+
+## Build a component. Use it in your project.
+
+[Build your first component](/html-next/quick-start) with a short HTML file. Then follow [Usage](/html-next/usage) to install and render it. HTML Next is the default; Vue and React have their own setup in the same guide.
 
 ::: targets
-HTML you can read
-: Define the interface and markup together. Add ordinary JavaScript when a component needs it.
+[Use HTML Next](/html-next/usage)
+: Use HTML Next natively with Vite, or load definitions directly in an HTML page.
 
-Reactivity you can declare
-: Connect state, values, and events in the component. Let the tools handle updates.
+[Use with Vue](/html-next/usage/vue)
+: Import HTML components alongside your Vue components with the Vite adapter.
 
-Output you can own
-: Ship native DOM or framework source. Inspect the generated code and keep using your usual build tools.
+[Use with React](/html-next/usage/react)
+: Import HTML components alongside your React components with the Vite adapter.
 :::
 
-## Choose how to use it
+## Find your path
 
-::: targets
-[Use Vue or React](/html-next/frameworks)
-: Add the Vite adapter and import HTML components alongside your existing components. Both adapters and converters are available today; Svelte is coming soon.
+| You want to… | Start here |
+| --- | --- |
+| Learn to author HTML Next components | [Build your first component](/html-next/quick-start), then [use it natively](/html-next/usage). |
+| Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and has Vue and React setup in its switcher. |
+| Publish a component library | [Ship a native library](/html-next/ship), then [add Vue and React builds](/html-next/ship-frameworks) if your consumers need them. |
+| Generate framework source files | The separate [Converter](/html-next/convert) covers conversion commands and their output. |
 
-[Run directly in the browser](/html-next/runtime)
-: Add one module script and link your component. The live runtime discovers and updates instances, with no build step.
-
-[Compile to native DOM](/html-next/build)
-: Build a known application or library graph with Vite. Component parsing stays out of the browser bundle.
-:::
-
-## Start small. Ship something reusable.
-
-[Build your first component](/html-next/quick-start) with a short HTML file. Use the same definition in a page, a Vue project, or a React project. When it is ready to share, [ship an HTML source library](/html-next/ship) or [convert it ahead of time](/html-next/convert).
-
-```bash
-npm install @nextwebwg/html-next
-```
-
-For Vue and React projects, add the [Vite adapter](/html-next/frameworks). For generated framework source, use the [converter](/html-next/convert). HTML Forms is available as an [independent subpath](/html-next/forms).
+HTML Forms has its own [installation and usage guide](/html-next/forms).
 
 ## Built on a public proposal
 

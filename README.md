@@ -5,7 +5,7 @@ browser, compile to native DOM, or use them in Vue and React. Svelte Vite adapte
 are coming soon.
 
 [Get started](https://nextwebwg.org/html-next/quick-start) ·
-[Vue & React](https://nextwebwg.org/html-next/frameworks) ·
+[Usage](https://nextwebwg.org/html-next/usage) ·
 [Ship a library](https://nextwebwg.org/html-next/ship)
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.

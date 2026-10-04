@@ -4,8 +4,14 @@
     <handler name="increment">
       <set name="count" expr:value="count + 1"></set>
     </handler>
+    <handler name="reset">
+      <set name="count" expr:value="0"></set>
+    </handler>
   </defs>
-  <button type="button" on:click="increment">
-    Count: <span $value="count"></span>
-  </button>
+  <div>
+    <button type="button" on:click="increment">
+      Count: <span $value="count"></span>
+    </button>
+    <button type="button" on:click="reset">Reset</button>
+  </div>
 </template>

@@ -1,6 +1,6 @@
 ---
 title: HTML Forms
-order: 6
+order: 5
 blurb: request construction · fetch enhancement
 eyebrow: HTML Next · Forms
 ---
