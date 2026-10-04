@@ -322,6 +322,39 @@ function decoratedRoots(graph: ComponentGraph): Map<string, { classes: boolean; 
   return receivers;
 }
 
+function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
+  const receivers = new Map<string, Set<string>>();
+  const pending: string[] = [];
+  const add = (tag: string, name: string): void => {
+    let names = receivers.get(tag);
+    if (names?.has(name)) return;
+    if (names === undefined) receivers.set(tag, names = new Set());
+    names.add(name);
+    pending.push(tag);
+  };
+  for (const node of graph.nodes.values()) {
+    const visit = (template: TemplateNode): void => {
+      if (template.kind === "slot") for (const child of template.fallback ?? []) visit(child);
+      else if (template.kind === "element") {
+        const id = graph.tags.get(template.name);
+        const props = id === undefined ? undefined : graph.nodes.get(id)?.definition.contract.props;
+        if (props !== undefined) for (const attribute of template.attributes) {
+          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) => name.toLowerCase() === attribute.name || name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() === attribute.name)) add(template.name, attribute.name);
+        }
+        for (const child of template.children) visit(child);
+      }
+    };
+    visit(node.definition.template);
+  }
+  while (pending.length > 0) {
+    const tag = pending.pop()!;
+    const id = graph.tags.get(tag);
+    const root = id === undefined ? undefined : graph.nodes.get(id)?.definition.root;
+    if (root?.kind === "component") for (const name of receivers.get(tag)!) add(root.tag, name);
+  }
+  return receivers;
+}
+
 export async function convertComponents(options: ConvertOptions): Promise<ConversionManifest> {
   if (options.entries.length === 0) throw new Error("Framework conversion requires at least one component entry.");
   const targetVersion = targetVersions[options.target];
@@ -364,6 +397,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     node.definition.contract.props] as const));
   const guardNestedDepth = needsNestedDepthGuard(graph);
+  const bindingReceivers = options.target === "svelte" ? nativeBindingRoots(graph) : undefined;
   const decorationReceivers = options.target === "svelte" ? decoratedRoots(graph) : undefined;
   const manifestComponents: ConversionManifest["components"][number][] = [];
   const planned: Array<{ artifact: GeneratedArtifact; kind: ConversionOutput["kind"]; source?: string }> = [];
@@ -424,6 +458,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         slotsByTag,
         guardNestedDepth,
         rootDecorations: decorationReceivers?.get(tag),
+        ...(bindingReceivers?.has(tag) === true ? { rootBindings: [...bindingReceivers.get(tag)!] } : {}),
         decorationsSpecifier: relativeImport(componentPath, "svelte/decorations.ts").replace(/\.ts$/, ""),
         styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
         hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),

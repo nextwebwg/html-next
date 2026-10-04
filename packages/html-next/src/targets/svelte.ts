@@ -18,11 +18,13 @@ const SLOTS_PROP = "\0html-next:slots";
 const ROOT_OWNER_PROP = "\0html-next:root-owner";
 const DECORATIONS_PROP = "\0html-next:decorations";
 const BINDING_INPUTS_PROP = "\0html-next:binding-inputs";
+const NATIVE_BINDINGS_PROP = "\0html-next:native-bindings";
 
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
   readonly stylesheetSpecifier?: string;
+  readonly rootBindings?: readonly string[] | undefined;
   readonly rootDecorations?: { readonly classes: boolean; readonly styles: boolean } | undefined;
   readonly decorationsSpecifier?: string;
   readonly styleSpecifier?: string;
@@ -121,6 +123,9 @@ interface RenderContext {
   readonly initialClassName: string;
   usesDecorationAttachment: boolean;
   readonly rootDecorations?: SvelteConversionOptions["rootDecorations"];
+  readonly rootBindings?: readonly string[] | undefined;
+  readonly initialBindingsName: string;
+  readonly initialBindingReadName: string;
   readonly decorationAttachmentName: string;
   readonly propertyAttachmentName: string;
   usesControls: boolean;
@@ -368,6 +373,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (!component && decoratesStyles) context.usesStyleDecorations = true;
   const literals: string[] = [];
   const selectedBindings: string[] = [];
+  const nativeBindings: string[] = [];
   const bindings: string[] = slotBindings.length === 0 ? [] : [childProps?.slots === undefined
     ? `slots={{ ${slotBindings.join(", ")} }}`
     : `{...{ ${quote(SLOTS_PROP)}: { ${slotBindings.join(", ")} } }}`];
@@ -419,6 +425,12 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
         continue;
       }
+      if (root && !component && context.rootBindings?.includes(attribute.name) === true) {
+        context.usesAttributeBinding = true;
+        literals.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${quote(attribute.value)} } : {})}`);
+        if (!nativeControlBinding(node.name, attribute.name)) bindings.push(`{@attach ${context.bindingHelperName}(${quote(attribute.name)}, () => ${quote(attribute.value)})}`);
+        continue;
+      }
       const declared = childProp(attribute.name);
       if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${quote(attribute.value)}`);
       else {
@@ -433,8 +445,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       if (attribute.twoWay === true) {
         if (component) {
           const declared = childProp(attribute.name);
-          if (declared === undefined) fail("HT030", "Svelte conversion does not yet support two-way bindings to an undeclared component attribute.");
           context.usesControls = true;
+          if (declared === undefined) {
+            const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
+            const source = lowering.value(attribute.expressionPlan.ast, scope);
+            nativeBindings.push(`${quote(attribute.name)}: () => ${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}`);
+            bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
+            continue;
+          }
           const guard = declaredReferenceGuard(attribute.expressionPlan, scope, context.definition);
           const source = lowering.value(attribute.expressionPlan.ast, scope);
           if (declared[1].select !== undefined) {
@@ -488,6 +506,35 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           }
         }
         if (root) { context.rootAttributeBindings.add(attribute.name); context.rootAttributeBindings.add(attribute.name.toLowerCase()); }
+      }
+    }
+  }
+  if (nativeBindings.length > 0) bindings.push(`{...{ ${quote(NATIVE_BINDINGS_PROP)}: { ${nativeBindings.join(", ")} } }}`);
+  if (root && !component) {
+    for (const name of context.rootBindings ?? []) {
+      const read = `(rest[${quote(NATIVE_BINDINGS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(name)}]`;
+      const source = `(${read} === undefined ? Symbol.for('html-next.invalid-result') : ${read}!())`;
+      if (nativeControlBinding(node.name, name)) {
+        context.usesControls = true;
+        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
+        const defaults = name === "checked" ? `{ checked: ${context.initialBindingsName}[${quote(name)}] !== undefined || ${literal !== undefined} }`
+          : `{ value: String(${context.initialBindingsName}[${quote(name)}] ?? ${quote(literal?.kind === "literal" ? literal.value : "")}) }`;
+        context.usesAttributeBinding = true;
+        const unbound = context.freshIdentifier("htmlNextAttributeValue");
+        const unboundScope: Scope = { code: new Map([[unbound, unbound]]), types: new Map([[unbound, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+        const unboundSource = `(() => { const ${unbound}: unknown = Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
+        const unboundDefault = name === "checked" ? `(${unboundSource}) !== undefined` : `String((${unboundSource}) ?? "")`;
+        const candidate = context.freshIdentifier("htmlNextNativeValue");
+        const serialized = name === "checked" ? `Boolean(${candidate})` : `(${candidate} == null ? "" : String(${candidate}))`;
+        bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
+        if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${name === "checked" ? "defaultChecked" : "defaultValue"}: ${read} === undefined ? ${unboundDefault} : (${defaults}).${name === "checked" ? "checked" : "value"} })}`);
+        bindings.push(`{@attach ${read} === undefined ? ${context.bindingHelperName}(${quote(name)}, () => ${unboundSource}) : ${context.controlAttachmentName}(${quote(name)}, () => ${source}, ${defaults}, undefined)}`);
+      } else {
+        context.usesAttributeBinding = true;
+        const candidate = context.freshIdentifier("htmlNextNativeValue");
+        const local: Scope = { code: new Map([[candidate, candidate]]), types: new Map([[candidate, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+        const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
+        bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })}`);
       }
     }
   }
@@ -667,7 +714,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const context: RenderContext = { definition, handlerNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
-    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
+    usesAttributeBinding: false, usesComponentBindings: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
     usesEvents: target.events.length > 0, refs, refsName: freshIdentifier("htmlNextRefs"),
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
@@ -778,11 +825,19 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     }
     if (conditions.length > 0) focusReads.push(`  void (${conditions.join(" || ")});`);
   }
+  const initialBindingMap = freshIdentifier("htmlNextBindingDefaults");
+  const nativeRoot = definition.root?.kind !== "component";
+  const initialBindingSources = !nativeRoot ? [] : (context.rootBindings ?? []).map((name) => {
+    const candidate = context.freshIdentifier("htmlNextInitialValue");
+    const local: Scope = { code: new Map([[candidate, candidate]]), types: new Map([[candidate, { type: { kind: "terminal", name: "unknown" }, nullable: true }]]) };
+    const serialized = lowering.attribute({ kind: "id", name: candidate }, local, name);
+    return `${quote(name)}: ${context.initialBindingReadName}(${quote(name)}, (${candidate}: unknown) => ${candidate} === Symbol.for('html-next.invalid-result') ? undefined : ${serialized})`;
+  });
   const script = [
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
-    ...(hasProps || context.usesControls || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
@@ -806,9 +861,19 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `type Props = { ${propTypes} ${publicChildren ? "" : "children?: Snippet;"} ${publicSlots ? "" : "slots?: Record<string, Snippet<[Record<string, any>]> | null>;"} [key: string]: unknown; };`,
     `let { ${[destructured, ...internalProps, "...rest"].filter(Boolean).join(", ")} }: Props = $props();`,
     ...(publicSlots ? [`let slots = $derived(rest[${quote(SLOTS_PROP)}] as Record<string, Snippet<[Record<string, any>]> | null> | undefined);`] : []),
+    ...(initialBindingSources.length === 0 ? [] : [
+      `const ${initialBindingMap} = new Map<string, unknown>();`,
+      `function ${context.initialBindingReadName}(name: string, serialize: (value: unknown) => unknown): unknown {`,
+      `  const read = (rest[${quote(NATIVE_BINDINGS_PROP)}] as Record<string, () => unknown> | undefined)?.[name];`,
+      "  if (read === undefined) return Symbol.for('html-next.invalid-result');",
+      `  if (!${initialBindingMap}.has(name)) ${initialBindingMap}.set(name, untrack(() => serialize(read())));`,
+      `  return ${initialBindingMap}.get(name);`,
+      "}",
+      `let ${context.initialBindingsName} = $derived.by(() => ({ ${initialBindingSources.join(", ")} }));`,
+    ]),
     // Svelte's spread path normalizes these names through an inherited object property.
     // Keep ordinary passthrough attrs native to Svelte; write only these names with the DOM API.
-    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
+    `const rootAttrs = $derived.by(() => { const attrs = { ...rest }; ${nativeRoot ? `Reflect.deleteProperty(attrs, ${quote(NATIVE_BINDINGS_PROP)}); ` : ""}${initialBindingSources.length === 0 ? "" : `if (typeof document === 'undefined') for (const [name, value] of Object.entries(${context.initialBindingsName})) { if (value !== undefined) attrs[name] = value; } `}Reflect.deleteProperty(attrs, ${quote(ROOT_OWNER_PROP)}); Reflect.deleteProperty(attrs, ${quote(DECORATIONS_PROP)}); Reflect.deleteProperty(attrs, ${quote(BINDING_INPUTS_PROP)}); ${publicSlots ? `Reflect.deleteProperty(attrs, ${quote(SLOTS_PROP)}); ` : ""}${[...context.rootAttributeBindings].map((name) => `delete attrs[${quote(name)}];`).join(" ")} if (typeof document !== 'undefined') { ${nativeRoot ? (context.rootBindings ?? []).map((name) => `Reflect.deleteProperty(attrs, ${quote(name)});`).join(" ") : ""} Reflect.deleteProperty(attrs, 'constructor'); Reflect.deleteProperty(attrs, '__proto__'); } return attrs; });`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     "let specialElement: Element | undefined;",

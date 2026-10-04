@@ -15,9 +15,14 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 <template component="x-flag-field" status="early" summary="Typed checkbox."><defs>
   <prop name="checked" type="boolean" default="false">Flag.</prop>
 </defs><input type="checkbox" .checked="checked"></template>
+<template component="x-untyped-number" status="early" summary="Undeclared number binding."><input type="number" value="99"></template>
+<template component="x-untyped-text" status="early" summary="Undeclared array binding."><input value="default"></template>
+<template component="x-untyped-flag" status="early" summary="Undeclared checked binding."><input type="checkbox"></template>
+<template component="x-untyped-output" status="early" summary="Undeclared generic binding."><output value="authored">Generic</output></template>
 <template component="x-bound-fields" status="early" summary="Nested component bindings." controller="./fields.js"><defs>
   <state name="selected" type="object({ value: unknown })" value="{ value: 12 }"></state>
   <state name="mode" type="keyword" values="number, text" value="number"></state>
+  <state name="choices" type="list(string)" value="['a', 'b']"></state>
   <state name="empty" type="number"></state>
   <state name="form" type="object({ amount: number, text: string, checked: boolean })" value="{ amount: 12, text: 'Ready', checked: true }"></state>
 </defs><form>
@@ -25,6 +30,11 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-text-field id="text" bind:value="form.text"></x-text-field>
   <x-number-field id="empty" amount="7" bind:amount="empty"></x-number-field>
   <x-flag-field id="flag" bind:checked="form.checked"></x-flag-field>
+  <x-untyped-number id="untyped-number" bind:value="form.amount"></x-untyped-number>
+  <x-untyped-number id="untyped-unbound" from:value="'2'"></x-untyped-number>
+  <x-untyped-text id="untyped-array" bind:value="choices"></x-untyped-text>
+  <x-untyped-flag id="untyped-flag" bind:checked="form.checked"></x-untyped-flag>
+  <x-untyped-output id="untyped-output" bind:value="form.text"></x-untyped-output>
   <x-state-field id="state-selected" bind:value="selected.value"></x-state-field>
   <x-prop-field id="prop-selected" from:mode="mode" bind:value="selected.value"></x-prop-field>
   <output id="amount" $value="form.amount"></output><output id="label" $value="form.text"></output><output id="checked" $value="form.checked"></output>

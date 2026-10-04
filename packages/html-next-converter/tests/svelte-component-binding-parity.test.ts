@@ -19,6 +19,9 @@ async function snapshot(page: Page) {
       amount: root.querySelector("#amount")?.textContent,
       text: root.querySelector("#label")?.textContent,
       flag: root.querySelector("#checked")?.textContent,
+      generic: (() => { const output = root.querySelector<HTMLOutputElement>("#untyped-output"); return output === null ? null : {
+        attribute: output.getAttribute("value"), value: output.value, defaultValue: output.defaultValue,
+      }; })(),
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
         value: element.value, checked: element.checked, defaultValue: element.defaultValue,
         defaultChecked: element.defaultChecked, amount: element.getAttribute("data-amount"),
@@ -107,6 +110,16 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await Promise.all([live.goto("https://app.example/live"), svelte.goto("https://app.example/svelte")]);
             await live.addScriptTag({ path: liveBundle });
             await live.evaluate(() => (window as unknown as { HtmlNextLoader: { startBrowserComponents(): Promise<unknown> } }).HtmlNextLoader.startBrowserComponents());
+            if (hydrate) {
+              const native = await live.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
+              const server = await svelte.locator("#untyped-output").evaluate((element) => ({ attribute: element.getAttribute("value"), text: element.textContent }));
+              assert.deepEqual(server, native, "SSR generic binding differs before hydration");
+              for (const id of ["untyped-number", "untyped-flag"]) {
+                const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
+                assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));
+              }
+              await Promise.all(pages.map((page) => page.locator("#untyped-number").evaluate((element) => { (element as HTMLInputElement).value = "31"; })));
+            }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
               (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2)));
@@ -176,6 +189,25 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             await compareSelected([5, 5, true], [5, 5, true]);
             await setSelected(17);
             await compareSelected([17, 17, true], [17, 17, true]);
+            await Promise.all(pages.map((page) => page.locator("#untyped-number").fill("23")));
+            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "23")));
+            await compare();
+            await Promise.all(pages.map((page) => page.locator("#untyped-flag").check()));
+            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#checked")?.textContent === "true")));
+            await compare();
+            await Promise.all(pages.map((page) => page.locator("#untyped-output").evaluate((element) => {
+              (element as HTMLOutputElement).value = "Edited";
+              element.dispatchEvent(new Event("input", { bubbles: true }));
+            })));
+            await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#label")?.textContent === "Edited")));
+            await compare();
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              (window as unknown as { fieldsHost: { state: { choices: string[] } } }).fieldsHost.state.choices.push("c");
+            })));
+            await compare();
+            assert.equal(await live.locator("#untyped-array").evaluate((element) => (element as HTMLInputElement).defaultValue), "a b");
+            await Promise.all(pages.map((page) => page.locator("#case").evaluate((element) => (element as HTMLFormElement).reset())));
+            await compare();
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);
           } catch (error) {
