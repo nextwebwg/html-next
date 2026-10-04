@@ -458,11 +458,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const path = attribute.writablePath!;
     const destination = scope.code.get(path[0] as string)!;
     const value = context.bindingValueName;
-    const check = handlerDestinationCheck(scope.types.get(path[0] as string)?.type, path, 1, value, scope, lowering);
     if (path.length > 1) context.usesNestedBindings = true;
     const write = path.length === 1 ? `${destination} = ${value} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
-    return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${value} == null || ${check})`}) { ${write} } }`;
+    return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
   if (node.name === "option" && context.boundSelect) {
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
@@ -898,13 +897,13 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const state = states.find((entry) => entry.name === step.writablePath[0]);
     if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
     const next = context.freshIdentifier(`htmlNextCandidate${index}`);
-    const check = handlerDestinationCheck(scope.types.get(state.name)?.type, step.writablePath, 1, next, handlerScope, lowering);
+    const check = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering);
     const destination = scope.code.get(state.name)!;
     const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
         ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
-    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} == null || ${check})`}) { ${write} } }`;
+    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} === undefined || ${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
   const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const focusReads: string[] = [];
