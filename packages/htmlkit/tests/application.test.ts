@@ -102,7 +102,7 @@ describe("application platform", () => {
     try {
       const page = await application.render("/");
       expect(page.html).toContain("Package component");
-      expect(page.components.find(component => component.definition.contract.tag === "package-label")?.controller).toContain("controls/controller.js");
+      expect(page.components.find(component => component.definition.contract.tag === "package-label")?.controller).toContain(join("controls", "controller.js"));
     }
     finally { await application.close(); }
   });
