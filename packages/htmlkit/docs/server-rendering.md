@@ -5,7 +5,7 @@ manifest, layout chain, loader result contract, component graph, and HTML Next r
 path. Authored pages must not change when a route moves from prerendering to request-time delivery.
 Page entry names, route patterns, and browser bundle locations stay separate in both adapters.
 Named/default layout selection and `htmlkit:page` selection resolve before loader execution;
-declarative head metadata is rendered from each selected layer's props and merged by the same
+declarative head metadata belongs to each selected component carrier, is rendered from that layer's props, and is merged by the same
 identity rules in either adapter. No browser head subscription is required for document navigation.
 This is a tooling implementation design, not a component-language specification.
 
