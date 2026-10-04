@@ -56,6 +56,7 @@ export function destinationTypeCheck(type: TypeNode, value: string, strict?: Str
     case "union": return `(${type.members.map((member) => destinationTypeCheck(member, value, strict)).join(" || ")})`;
     case "selected": return `(${type.options.map((option) => destinationTypeCheck(option.type, value, strict)).join(" || ")})`;
     case "constrained": return destinationTypeCheck(type.base, value, strict);
+    case "separated-list": return strict?.(type, value) ?? typeCheck(type, value);
     default:
       if (type.kind === "terminal" && !["string", "boolean", "number", "integer", "null", "absent", "function", "unknown"].includes(type.name)) {
         return strict?.(type, value) ?? typeCheck(type, value);

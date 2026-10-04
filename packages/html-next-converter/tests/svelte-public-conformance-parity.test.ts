@@ -81,6 +81,21 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "strict separated lists retain malformed reads and accept raw handler strings",
+    source: `<template component="x-separated-lists" status="early" summary="Separated lists."><defs>
+      <state name="box" type="object({ space: keyword+, comma: keyword# })" value="{ space: ['one', 'two'], comma: ['one', 'two'] }"></state>
+      <state name="words" type="keyword+" value="one two"></state>
+      <handler name="invalid"><set name="box" expr:value="{ space: [], comma: ['two words'] }"></set><set name="words" expr:value="[]"></set></handler>
+      <handler name="recover"><set name="box" expr:value="{ space: 'next good', comma: 'third, fourth' }"></set><set name="words" expr:value="'new words'"></set></handler>
+      </defs><section><output $value="box.space"></output><output $value="box.comma"></output><output $value="words"></output>
+      <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button></section></template><x-separated-lists></x-separated-lists>`,
+    expect: { probe: `return qa('output').map(e => e.textContent);`, result: ["one two", "one two", "one two"], after: [
+      { action: `document.querySelector('button.invalid').click();`, result: ["one two", "one two", "one two"] },
+      { action: `document.querySelector('button.recover').click();`, result: ["next good", "third, fourth", "new words"] },
+      { action: `document.querySelector('button.invalid').click();`, result: ["next good", "third, fourth", "new words"] },
+    ] },
+  },
+  {
     name: "authored text preserves literal braces decoded entities and exact whitespace",
     source: `<template component="x-literal-text" status="early" summary="Literal text."><defs><state name="count" type="number" value="1"></state><handler name="next"><set name="count" value="2"></set></handler></defs><section><p class="literal" title="{count}" data-entity="&amp;amp;">  {count} &amp; &#123;count&#125; {#if count} &lt;b&gt;  </p><pre> first
   second </pre><span class="dynamic" $value="count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
