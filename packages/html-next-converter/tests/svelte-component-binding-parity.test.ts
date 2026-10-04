@@ -25,7 +25,7 @@ async function snapshot(page: Page) {
       changingRoots: Array.from(root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLOutputElement>("#native-switch, #delegated-switch"), (element) => ({
         id: element.id, tag: element.localName, value: element.value, defaultValue: element.defaultValue, attribute: element.getAttribute("value"), mode: element.getAttribute("data-mode"),
       })),
-      genericEdges: Array.from(root.querySelectorAll<HTMLOutputElement>("#unbound-output, #prototype-output"), (element) => ({
+      genericEdges: Array.from(root.querySelectorAll<HTMLOutputElement>("#unbound-output, #prototype-output, #typed-generic"), (element) => ({
         id: element.id, value: element.value, attribute: element.getAttribute("value"), prototype: element.getAttribute("__proto__"), constructor: element.getAttribute("constructor"),
       })),
       area: (() => { const element = root.querySelector<HTMLTextAreaElement>("#untyped-area"); return element === null ? null : {
@@ -36,7 +36,7 @@ async function snapshot(page: Page) {
         options: Array.from(element.options, (option) => ({ value: option.value, selected: option.selected, defaultSelected: option.defaultSelected })),
       })),
       controls: Array.from(root.querySelectorAll("input"), (element) => ({
-        value: element.value, checked: element.checked, defaultValue: element.defaultValue,
+        value: element.value, title: element.title, checked: element.checked, defaultValue: element.defaultValue,
         defaultChecked: element.defaultChecked, files: element.type === "file" ? Array.from(element.files ?? [], (file) => file.name) : undefined, amount: element.getAttribute("data-amount"),
         text: element.getAttribute("data-value"), local: element.getAttribute("data-local"), flag: element.getAttribute("data-checked"),
         valid: element.getAttribute("data-valid"),
@@ -160,6 +160,24 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               (window as unknown as { ownedHost: { state: { local: string } } }).ownedHost.state.local = "Child update";
             })));
             await compare();
+            await Promise.all(pages.map((page) => page.locator("#owned-input").evaluate((element) => {
+              (element as HTMLInputElement).value = "External local";
+              (element as HTMLInputElement).title = "External title";
+              element.setAttribute("data-local", "External data");
+            })));
+            for (const local of [42, "Child recovered"]) {
+              await Promise.all(pages.map((page) => page.evaluate((value) => {
+                (window as unknown as { ownedHost: { state: { local: unknown } } }).ownedHost.state.local = value;
+              }, local)));
+              await compare();
+            }
+            await Promise.all(pages.map((page) => page.locator("#typed-generic").evaluate((element) => element.setAttribute("value", "External attribute"))));
+            for (const text of [42, "Parent recovered"]) {
+              await Promise.all(pages.map((page) => page.evaluate((value) => {
+                (window as unknown as { fieldsHost: { state: { form: { text: unknown } } } }).fieldsHost.state.form.text = value;
+              }, text)));
+              await compare();
+            }
             for (const page of pages) {
               await page.locator("#number").fill("17");
               await page.locator("#text").fill("Changed");

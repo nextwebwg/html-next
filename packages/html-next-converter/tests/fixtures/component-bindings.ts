@@ -17,7 +17,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 </defs><input type="checkbox" .checked="checked"></template>
 <template component="x-native-switch" status="early" summary="Changing native binding root."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><template $match><input $when="mode = 'field'" value="Field default"><textarea $when="mode = 'area'">Area default</textarea><output $else value="Generic attribute">Generic default</output></template></template>
 <template component="x-native-delegate" status="early" summary="Delegated native binding."><defs><prop name="mode" type="keyword" values="field, area, generic" default="field">Root.</prop></defs><x-native-switch from:mode="mode"></x-native-switch></template>
-<template component="x-owned-input" status="early" summary="Locally controlled bound root." controller="./owned.js"><defs><state name="local" type="string" value="Own"></state></defs><input value="Own default" .value="local" from:data-local="local"></template>
+<template component="x-owned-input" status="early" summary="Locally controlled bound root." controller="./owned.js"><defs><state name="local" type="string" value="Own"></state></defs><input value="Own default" .value="local" .title="local" from:data-local="local"></template>
 <template component="x-untyped-number" status="early" summary="Undeclared number binding."><input type="number" value="99"></template>
 <template component="x-untyped-text" status="early" summary="Undeclared array binding."><input value="default"></template>
 <template component="x-untyped-flag" status="early" summary="Undeclared checked binding."><input type="checkbox"></template>
@@ -63,6 +63,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-untyped-select id="unbound-select" from:value="choice"></x-untyped-select>
   <x-untyped-select id="untyped-select" bind:value="choice"></x-untyped-select>
   <x-untyped-multiple id="untyped-multiple" bind:value="choices"></x-untyped-multiple>
+  <output id="typed-generic" bind:value="form.text"></output>
   <x-untyped-output id="unbound-output" from:value="form.text"></x-untyped-output>
   <x-untyped-output id="prototype-output" bind:__proto__="form.text" bind:constructor="form.text"></x-untyped-output>
   <x-untyped-output id="untyped-output" bind:value="form.text"></x-untyped-output>

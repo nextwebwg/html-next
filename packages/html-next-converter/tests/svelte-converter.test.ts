@@ -277,9 +277,18 @@ it.each([
     root: '<div><output bind:value="boundValue"></output><b $value="boundAttribute"></b></div>', expected: /<output[^>]*value="Ready"[^>]*><\/output><b>kept<\/b>/ },
   { name: "nullable reflected properties", defs: '<state name="record" type="object" value="{}"></state>',
     root: '<button .title="null" .name="record.missing"></button>', expected: /title="null"[^>]*name="undefined"/ },
+  { name: "initially invalid reflected string property", defs: '<state name="count" type="number" value="0"></state>',
+    root: '<button title="Authored" .title="40px / count"></button>', expected: /<button[^>]*title="Authored"/ },
+  { name: "initially invalid reflected boolean property", defs: '<state name="count" type="number" value="0"></state>',
+    root: '<button disabled .disabled="40px / count"></button>', expected: /<button[^>]* disabled/ },
+  { name: "initially invalid property with incoming attribute", defs: '<state name="count" type="number" value="0"></state>',
+    root: '<button title="Authored" .title="40px / count"></button>', props: { title: "Incoming" }, expected: /<button[^>]*title="Incoming"/ },
+  { name: "initially invalid control property", defs: '<state name="count" type="number" value="0"></state>',
+    root: '<input value="Authored" .value="40px / count">', expected: /<input[^>]*value="Authored"/ },
   { name: "native scroll property", defs: '', root: '<div .scrollTop="10"></div>', expected: /<div/ },
   { name: "native property", defs: '', root: '<button .disabled="true"></button>', expected: /<button[^>]* disabled/ },
-])("renders $name in Svelte server output", async ({ defs, root: markup, expected }) => {
+])("renders $name in Svelte server output", async (testCase) => {
+  const { defs, root: markup, expected } = testCase;
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-shared-"));
   temporary.push(root);
   await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Shared behavior."><defs>${defs}</defs>${markup}</template>`);
@@ -287,7 +296,7 @@ it.each([
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
   compile(source, { filename: "XCase.svelte", generate: "client" });
-  const html = (await serverHtml(outDirectory, "XCase", source)).replace(/<!--[\s\S]*?-->/g, "");
+  const html = (await serverHtml(outDirectory, "XCase", source, "props" in testCase ? testCase.props : {})).replace(/<!--[\s\S]*?-->/g, "");
   assert.match(html, expected);
 });
 

@@ -1,5 +1,6 @@
 /** Svelte 5 output from the shared, checked component definition. */
 import { fail } from "../diagnostics.js";
+import type { CompiledExpression } from "../expression.js";
 import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression } from "../type-system.js";
@@ -149,6 +150,14 @@ interface RenderContext {
   readonly refTargetName: string;
   readonly writePathName: string;
   readonly freshIdentifier: (base: string) => string;
+}
+
+function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderContext, source: string): { source: string; invalid: boolean } {
+  const guard = declaredReferenceGuard(plan, scope, context.definition);
+  return {
+    source: guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`,
+    invalid: guard !== undefined || mayProduceInvalidResult(plan.ast, scope),
+  };
 }
 
 function retained(context: RenderContext, source: string, initial: string): string {
@@ -401,20 +410,23 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
   const controlBinding = (attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" | "property" }>): void => {
     context.usesControls = true;
-    const value = lowering.value(attribute.expressionPlan!.ast, scope);
+    const read = conformingRead(attribute.expressionPlan!, scope, context, lowering.value(attribute.expressionPlan!.ast, scope));
+    const value = read.source;
     const nativeProperty = attribute.kind === "property";
     const multiple = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
-    const serialized = attribute.name === "checked" ? `Boolean(${value})`
-      : node.name === "select" && multiple && !nativeProperty ? `(Array.isArray(${value}) ? ${value}.map(String) : [])`
-      : nativeProperty && node.name === "select" ? `String(${value})` : `(${value} == null ? "" : String(${value}))`;
-    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${serialized} } : {})}`);
-    else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
+    const serialize = (source: string): string => attribute.name === "checked" ? `Boolean(${source})`
+      : node.name === "select" && multiple && !nativeProperty ? `(Array.isArray(${source}) ? ${source}.map(String) : [])`
+      : nativeProperty && node.name === "select" ? `String(${source})` : `(${source} == null ? "" : String(${source}))`;
     const literalValue = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "value");
     const inheritsBinding = root && context.rootBindings?.includes(attribute.name);
     const defaultValue = quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "");
     const defaultChecked = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked");
     const defaults = attribute.name === "checked" ? `{ checked: ${inheritsBinding ? `${context.rootBindingAttributeName}("checked") !== undefined || ` : ""}${defaultChecked} }`
       : `{ value: ${inheritsBinding && node.name === "input" ? `String(${context.rootBindingAttributeName}("value") ?? ${defaultValue})` : defaultValue} }`;
+    const candidate = context.freshIdentifier("htmlNextControlValue");
+    const serialized = read.invalid ? `(() => { const ${candidate}: unknown = ${value}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).${attribute.name === "checked" ? "checked" : "value"} : ${serialize(candidate)}; })()` : serialize(value);
+    if (node.name !== "textarea") bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name)}: ${serialized} } : {})}`);
+    else content = `{typeof document === 'undefined' ? ${serialized} : ${quote(node.children.filter((child) => child.kind === "text").map((child) => child.value).join(""))}}`;
     if (node.name === "input") bindings.push(`{...(typeof document === 'undefined' ? {} : { ${attribute.name === "checked" ? "defaultChecked" : "defaultValue"}: (${defaults}).${attribute.name === "checked" ? "checked" : "value"} })}`);
     let update = "undefined";
     if (attribute.kind === "attribute" && attribute.twoWay) update = bindingWriter(attribute);
@@ -499,42 +511,59 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           context.usesAttributeBinding = true;
           context.usesControls = true;
           const name = svgAttributeName(attribute.name);
-          const value = lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
+          const read = conformingRead(attribute.expressionPlan, scope, context, lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name));
+          const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
+          const value = read.invalid ? retained(context, read.source, literal?.kind === "literal" ? quote(literal.value) : "undefined as any") : read.source;
           // Svelte optimizes value= into a property write even on <output>. Keep the
           // server attribute declarative, and use only setAttribute/removeAttribute on the client.
           bindings.push(`{...(typeof document === 'undefined' ? { ${quote(name)}: ${value} } : {})}`);
-          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${value}, ${bindingWriter(attribute)})}`);
+          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${read.source}, ${bindingWriter(attribute)})}`);
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
       else if (attribute.target === "class" || attribute.target === "style") continue;
-      else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
-      else if (node.name === "select" && attribute.name === "value") {
-        context.usesAttributeBinding = true;
-        const value = lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
-        bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
-        bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
-        if (root) context.rootAttributeBindings.add("value");
+      else {
+        const declared = childProp(attribute.name);
+        const read = conformingRead(attribute.expressionPlan, scope, context, declared === undefined
+          ? lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name) : lowering.value(attribute.expressionPlan.ast, scope));
+        const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
+        const initial = literal?.kind === "literal" ? declared === undefined ? quote(literal.value) : `${literalPropValue(literal.value, declared[1])} as any` : "undefined as any";
+        const value = read.invalid ? retained(context, read.source, initial) : read.source;
+        if (node.name === "select" && attribute.name === "value") {
+          context.usesAttributeBinding = true;
+          bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
+          bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source})}`);
+          if (root) context.rootAttributeBindings.add("value");
+        } else bindings.push(`${declared?.[0] ?? (component ? attribute.name : svgAttributeName(attribute.name))}={${value}}`);
       }
-      else bindings.push(`${component ? attribute.name : svgAttributeName(attribute.name)}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
     if (attribute.kind === "property") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Expression \`${attribute.expression}\` could not be converted.`);
       if (nativeControlBinding(node.name, attribute.name)) controlBinding(attribute);
       else {
-        const source = lowering.value(attribute.expressionPlan.ast, scope);
+        const read = conformingRead(attribute.expressionPlan, scope, context, lowering.value(attribute.expressionPlan.ast, scope));
+        const source = read.source;
         if (attribute.name === "textContent") {
-          const value = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) ? retained(context, source, "undefined as unknown") : source;
+          const value = read.invalid ? retained(context, source, "undefined as unknown") : source;
           content = `{${value} == null ? "" : String(${value})}`;
         } else {
           context.usesProperties = true;
           bindings.push(`{@attach ${context.propertyAttachmentName}(${quote(attribute.name)}, () => ${source})}`);
           if (SSR_BOOLEAN_PROPERTIES.has(attribute.name) || SSR_STRING_PROPERTIES.has(attribute.name)) {
-            const candidate = context.freshIdentifier("htmlNextPropertyValue");
-            const serialized = SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? `Boolean(${candidate})` : `String(${candidate})`;
-            const rendered = mayProduceInvalidResult(attribute.expressionPlan.ast, scope)
-              ? retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? "undefined as boolean | undefined" : "undefined as string | undefined")
-              : SSR_BOOLEAN_PROPERTIES.has(attribute.name) ? `Boolean(${source})` : `String(${source})`;
+            const boolean = SSR_BOOLEAN_PROPERTIES.has(attribute.name);
+            let rendered = boolean ? `Boolean(${source})` : `String(${source})`;
+            if (read.invalid) {
+              const candidate = context.freshIdentifier("htmlNextPropertyValue");
+              const serialized = boolean ? `Boolean(${candidate})` : `String(${candidate})`;
+              const name = attribute.name.toLowerCase();
+              const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === name);
+              const initialValue = literal?.kind === "literal" ? quote(literal.value) : "undefined";
+              const initialAttribute = context.freshIdentifier("htmlNextPropertyAttribute");
+              const initialSource = root ? `(Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${initialValue})` : initialValue;
+              const initialResult = context.freshIdentifier("htmlNextInitialProperty");
+              const initial = `(() => { const ${initialAttribute}: unknown = ${initialSource}; const ${initialResult} = ${lowering.attribute({ kind: "id", name: initialAttribute }, unknownValueScope(initialAttribute), name)}; return ${boolean ? `${initialResult} !== undefined` : initialResult}; })()`;
+              rendered = retained(context, `(() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : ${serialized}; })()`, initial);
+            }
             bindings.push(`{...(typeof document === 'undefined' ? { ${quote(attribute.name.toLowerCase())}: ${rendered} } : {})}`);
           }
         }

@@ -521,7 +521,7 @@ describe.skipIf(!enabled)("public Svelte converter shared conformance parity", (
       describe(`${engine} ${mode}`, () => {
         let browser: Browser;
         beforeAll(async () => { browser = await launchParityBrowser(browserType); });
-        afterAll(async () => { await browser?.close(); });
+        afterAll(async () => { await browser?.close(); }, 30_000);
 
         for (const [index, testCase] of successful.entries()) {
           it(testCase.name, async () => {
