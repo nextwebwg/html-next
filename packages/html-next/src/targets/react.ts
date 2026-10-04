@@ -1,4 +1,5 @@
 /** React output is compiled from the same checked component definition as the browser runtime. */
+import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { compileExpression, typeCheckedDependencies, type CompiledExpression, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
@@ -222,7 +223,7 @@ function selectedOptionDefaults(node: ElementNode): boolean[] {
 
 function authoredControlDefaults(node: ElementNode, name: "value" | "checked"): string {
   const authored = node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "value");
-  const authoredValue = node.name === "textarea" && node.children.every((child) => child.kind === "text")
+  const authoredValue = node.name === "textarea" && node.children.every((child) => child.kind === "text" && child.expressionPlan === undefined && child.segments === undefined)
     ? node.children.map((child) => child.kind === "text" ? child.value : "").join("")
     : authored?.kind === "literal" ? authored.value : "";
   return JSON.stringify(node.name === "select" ? { options: selectedOptionDefaults(node) }
@@ -241,18 +242,55 @@ function withoutAuthoredSelection(node: TemplateNode): TemplateNode {
   };
 }
 
-function localScope(scope: RenderScope, names: readonly (readonly [string, Static])[]): RenderScope {
+function localScope(scope: RenderScope, names: readonly (readonly [string, Static, (string | undefined)?])[]): RenderScope {
   const code = new Map(scope.code);
   const types = new Map(scope.types);
-  for (const [name, type] of names) {
-    code.set(name, name);
+  for (const [name, type, alias] of names) {
+    code.set(name, alias ?? name);
     types.set(name, type);
   }
   return { code, types, local: true };
 }
 
+function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
+  if (isScriptIdentifier(name) && !["formatValue", "Symbol", "Object", "String", "Number", "Array", "Math", "text", "truthy", "attribute", "number", "list", "concat", "join", "math", "arithmetic"].includes(name)) return name;
+  let alias: string;
+  do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
+  while ([...scope.code.values()].includes(alias) || scope.code.has(alias));
+  return alias;
+}
+
 function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, imports: Set<string>, handlers: ReadonlySet<string>, attachments: EventAttachment[], state: RenderState, rootTag?: RootAttributes, projected = false, inSvg = false): string {
-  if (node.kind === "text") return jsxText(node.value);
+  if (node.kind === "text") {
+    if (node.segments !== undefined) {
+      const parts: string[] = [];
+      const retained: { alias: string; value: string; guard?: string }[] = [];
+      for (const segment of node.segments) {
+        const plan = segment.expressionPlan;
+        if (plan === undefined) { parts.push(quote(segment.value)); continue; }
+        const guard = declaredReferenceGuard(plan, scope, state.definition);
+        if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
+          state.usesRetainedValue = true;
+          const alias = `__retained${state.nextRetainedAlias++}`;
+          retained.push({ alias, value: lowering.value(plan.ast, scope), ...(guard === undefined ? {} : { guard }) });
+          const local = localScope(scope, [[alias, typeOf(plan.ast, scope)]]);
+          parts.push(nullableText(lowering.text({ kind: "id", name: alias }, local)));
+        } else parts.push(nullableText(lowering.text(plan.ast, scope)));
+      }
+      let content = `{[${parts.join(", ")}].join("")}`;
+      for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} accepts={() => ${part.guard ?? "true"}} render={(${part.alias}) => <>${content}</>} />`;
+      return content;
+    }
+    const plan = node.expressionPlan;
+    if (plan === undefined) return jsxText(node.value);
+    const guard = declaredReferenceGuard(plan, scope, state.definition);
+    const text = nullableText(lowering.text(plan.ast, scope));
+    if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
+      state.usesRetainedText = true;
+      return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+    }
+    return `{${text}}`;
+  }
   if (node.flow !== undefined) {
     const { flow, ...body } = node;
     if (flow.kind === "if") {
@@ -268,18 +306,21 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (flow.kind === "with") {
       if (flow.expressionPlan === undefined) fail("HT030", `Uncompiled expression ${flow.expr}.`);
       const value = lowering.value(flow.expressionPlan.ast, scope);
-      const scoped = localScope(scope, [[flow.alias, typeOf(flow.expressionPlan.ast, scope)]]);
+      const alias = localIdentifier(flow.alias, scope, state);
+      const scoped = localScope(scope, [[flow.alias, typeOf(flow.expressionPlan.ast, scope), alias]]);
       const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
-      if (!mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${flow.alias} = ${value}; return (${content}); })()}`;
+      if (!mayProduceInvalidResult(flow.expressionPlan.ast, scope)) return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
       state.usesRetainedValue = true;
-      return `<RetainedValue value={${value}} accepts={() => true} render={(${flow.alias}, hasValue) => hasValue ? (${content}) : null} />`;
+      return `<RetainedValue value={${value}} accepts={() => true} render={(${alias}, hasValue) => hasValue ? (${content}) : null} />`;
     }
     if (flow.kind === "each") {
       if (flow.listPlan === undefined) fail("HT030", `Uncompiled list ${flow.list}.`);
+      const item = localIdentifier(flow.item, scope, state);
+      const index = localIdentifier(flow.index ?? "index", scope, state);
       const itemType = typeOf(flow.listPlan.ast, scope).type;
       const scoped = localScope(scope, [
-        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN],
-        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }],
+        [flow.item, itemType.kind === "list" ? present(itemType.item) : UNKNOWN, item],
+        [flow.index ?? "index", { type: { kind: "terminal", name: "number" }, nullable: false }, index],
         ["loop", { type: { kind: "object", open: false, fields: [
           { name: "index", type: { kind: "terminal", name: "number" }, optional: false },
           { name: "first", type: { kind: "terminal", name: "boolean" }, optional: false },
@@ -290,18 +331,17 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const retainedList = mayProduceInvalidResult(flow.listPlan.ast, scope);
       const listAlias = retainedList ? `__retained${state.nextRetainedAlias++}` : undefined;
       const listScope = listAlias === undefined ? scope : localScope(scope, [[listAlias, typeOf(flow.listPlan.ast, scope)]]);
-      const list = lowering.list(listAlias === undefined ? flow.listPlan.ast : { kind: "id", name: listAlias }, listScope, flow.item, {
+      const list = lowering.list(listAlias === undefined ? flow.listPlan.ast : { kind: "id", name: listAlias }, listScope, item, {
         ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
         itemScope: scoped,
         sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
-      const index = flow.index ?? "index";
       const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, scoped);
       const child = renderNode(body, scoped, lowering, imports, handlers, attachments, state, undefined, projected, inSvg);
-      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${flow.item}, ${index}, loop) => ${key}`);
+      const checked = flow.keyPlan === undefined ? list : lowering.uniqueKeys(list, `(${item}, ${index}, loop) => ${key}`);
       const rows = lowering.eachRows(checked);
-      const renderRows = `${rows}.map(({ item: ${flow.item}, index: ${index}, loop }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
+      const renderRows = `${rows}.map(({ item: ${item}, index: ${index}, loop }) => <React.Fragment key={${key}}>${child}</React.Fragment>)`;
       const content = flow.keyPlan === undefined
         ? listAlias === undefined ? `{${renderRows}}` : `<>{${renderRows}}</>`
         : `<KeyedBoundary renderRows={() => ${renderRows}} />`;
@@ -313,17 +353,18 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (flow.kind === "match") {
       if (node.kind !== "element") fail("HT030", "React conversion of this $match is not implemented.");
       if (node.name !== "template") return renderNode(elementMatchRoot(node), scope, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
+      const alias = flow.alias === undefined ? undefined : localIdentifier(flow.alias, scope, state);
       const scoped = flow.alias === undefined ? scope : localScope(scope, [[flow.alias,
-        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope)]]);
+        flow.expressionPlan === undefined ? UNKNOWN : typeOf(flow.expressionPlan.ast, scope), alias]]);
       const withAlias = (content: string): string => {
         if (flow.alias === undefined) return content;
         if (flow.expressionPlan === undefined) fail("HT030", `Uncompiled expression ${flow.expr}.`);
         const value = lowering.value(flow.expressionPlan.ast, scope);
         if (!mayProduceInvalidResult(flow.expressionPlan.ast, scope)) {
-          return `{(() => { const ${flow.alias} = ${value}; return (${content}); })()}`;
+          return `{(() => { const ${alias} = ${value}; return (${content}); })()}`;
         }
         state.usesRetainedValue = true;
-        return `<RetainedValue value={${value}} accepts={() => true} render={(${flow.alias}, hasValue) => hasValue ? (${content}) : null} />`;
+        return `<RetainedValue value={${value}} accepts={() => true} render={(${alias}, hasValue) => hasValue ? (${content}) : null} />`;
       };
       const arms = node.children.filter((child): child is ElementNode => child.kind === "element");
       const retainsChoice = arms.some((arm) => arm.flow?.kind === "when" && arm.flow.testPlan !== undefined &&
@@ -1186,7 +1227,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(renderState.usesRetainedText ? [
       "",
       "function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {",
-      "  const accepted = value !== undefined && value !== Symbol.for('html-next.invalid-result') && (accepts?.() ?? true);",
+      "  const accepted = value !== Symbol.for('html-next.invalid-result') && (accepts?.() ?? true);",
       "  const last = React.useRef(accepted ? text : \"\");",
       "  React.useLayoutEffect(() => { if (accepted) last.current = text; }, [accepted, text]);",
       "  return accepted ? text : last.current;",

@@ -62,6 +62,41 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} updates braced inline expressions without replacing siblings or retained keyed rows`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(String.raw`<template component="x-inline"><defs>
+          <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }, { id: 2, name: 'Bea' }]"></state>
+          <state name="Name" type="string" value="Upper"></state><state name="name" type="string" value="lower"></state>
+          </defs><section><p>Hello {$rows.0.name}! <b>Kept</b> $literal costs $1.15; {$Name}/{$name}.</p>
+          <table><tbody><tr $each="r of $rows" $key="$r.id"><td>{$r.name}</td></tr></tbody></table></section></template>
+          <x-inline id="case"></x-inline>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void; getComponentHost(element: Element): { state: Record<string, unknown> };
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#case")!;
+          const p = root.querySelector("p")!;
+          const bold = p.querySelector("b")!;
+          const initialText = p.textContent;
+          const firstRow = root.querySelector("tr")!;
+          const text = firstRow.querySelector("td")!.firstChild;
+          const host = runtime.getComponentHost(root);
+          host.state.rows = [{ id: 2, name: "Bea" }, { id: 1, name: "<i>Lin</i>" }];
+          host.state.Name = "Changed";
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initialText, afterText: p.textContent, boldKept: p.querySelector("b") === bold,
+            rowKept: root.querySelectorAll("tr")[1] === firstRow, textKept: firstRow.querySelector("td")!.firstChild === text,
+            rows: Array.from(root.querySelectorAll("td"), (td) => td.textContent), markup: root.querySelector("i") !== null };
+        });
+        assert.deepEqual(actual, { initialText: "Hello Ada! Kept $literal costs $1.15; Upper/lower.",
+          afterText: "Hello Bea! Kept $literal costs $1.15; Changed/lower.", boldKept: true, rowKept: true,
+          textKept: true, rows: ["Bea", "<i>Lin</i>"], markup: false });
+      } finally { await browser.close(); }
+    });
     it(`${engine} keeps a typed binding's last accepted value through invalid updates`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

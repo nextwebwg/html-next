@@ -27,7 +27,7 @@ const source = `<template component="x-counter" status="early" summary="Counter.
   from:data-rounded="round(width)" from:data-minimum="min(width, 5px)" from:data-maximum="max(2, count + 1)"
   from:data-clamped="clamp(0, count, 10)" from:data-absolute="abs(-3)" from:data-defaulted="default(null, count)"
   from:data-concatenated="concat('count:', count)" from:data-joined="join(['a', 'b'], ',')" from:data-percent="round(25.5%)" from:data-nested="count >= 0 ? min(width, 5px) : 'skip'" from:data-array="['x', min(width, 5px)]" from:data-numeric-array="[min(2, count + 1), 3]" from:data-indexed="['x', min(width, 5px)][1]">
-  <span $value="double"></span><output $value="min(width, 5px)"></output><small $value="min(width, 5px)"></small><em $value="['x', min(width, 5px)]"></em><sub $value="padded"></sub><i $if="min(width, 5px) = '4px'">Invalid branch</i>
+  <span>{$double}</span><output $value="min(width, 5px)"></output><small $value="min(width, 5px)"></small><em $value="['x', min(width, 5px)]"></em><sub>{$padded}</sub><i $if="min(width, 5px) = '4px'">Invalid branch</i>
   <template $match><b $when="min(width, 5px) = '4px'">Invalid match</b><b $else>Valid match</b></template>
 </button>
 <style>:host { display: inline-block; appearance: none; border: 1px solid rgb(80, 80, 80); padding: 8px; color: rgb(30, 40, 50); } :host-state([count]) { outline: 2px solid rgb(90, 70, 50); }</style>

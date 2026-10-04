@@ -166,7 +166,7 @@ describe("generateComponent", () => {
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
-      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; {literal}<slot></slot></button>`,
+      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; \\{literal}<slot></slot></button>`,
     ));
     const byPath = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
 
