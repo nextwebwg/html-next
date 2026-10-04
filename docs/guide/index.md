@@ -8,7 +8,7 @@ status: 1.0.0-alpha on npm · Stage 0 proposals
 
 # HTML Next tools
 
-JavaScript tools for the HTML Next proposals. Author a component once as HTML, then run it live in the browser, compile it to native DOM, or convert it to Vue.
+JavaScript tools for the HTML Next proposals. Author a component once as HTML, then run it live in the browser, compile it to native DOM, or convert it to Vue, React, or Svelte.
 
 ## Install
 
@@ -24,7 +24,7 @@ The packages publish `1.0.0-alpha` prereleases. The proposals they implement are
 | --- | --- |
 | `@nextwebwg/html-next` | The tools: the live browser runtime, the compiler and CLI, validity on any element, and HTML Forms request construction. |
 | `@nextwebwg/html-next-unplugin` | Compiles a component graph in a Vite build. |
-| `@nextwebwg/html-next-converter` | Converts a component graph to Vue single-file components. |
+| `@nextwebwg/html-next-converter` | Converts a component graph to Vue, React, or Svelte components. |
 
 ## Three ways to deliver a component
 
@@ -34,7 +34,7 @@ The same component definition works in all three modes, with the same observable
 | --- | --- | --- |
 | Live runtime | A page loads components itself, with one script and no build step. | [Run in the browser](/tools/runtime) |
 | Compiled build | An application or library has a known component graph and wants tree-shaken native DOM. | [Compile a graph](/tools/build) |
-| Vue conversion | A Vue project wants plain Vue components with no HTML Next left in them. | [Convert to Vue](/tools/convert) |
+| Framework conversion | A Vue, React, or Svelte project wants framework components with no HTML Next runtime dependency. | [Convert to frameworks](/tools/convert) |
 
 HTML Forms is independent of all three: [its subpath](/tools/forms) works on native forms and imports nothing else.
 

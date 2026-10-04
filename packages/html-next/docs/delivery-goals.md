@@ -67,15 +67,20 @@ use target-native rendering, reactivity, lifecycle, lists, and hydration.
   parity, request cleanup, and representative consumer bundles
 - Current evidence: conversion has explicit application and library modes, version and collision
   diagnostics, stable entry files and output inventories, and target-native state, computed values,
-  updates, and declared event dispatch across React, Vue, and Svelte. Data/resources/effects,
-  controllers, richer handler operations, flow and keyed lists, two-way bindings, dynamic slots,
-  HTML injection, SSR/hydration, executable application bootstraps, and complete publishable
-  library metadata remain incomplete.
+  updates, and declared event dispatch across React, Vue, and Svelte. Three-engine fixtures cover
+  data reads and cancellation, controllers and refs, handler operations, context, flow and keyed
+  identity, two-way native controls, named/scoped slots, safe HTML, SSR, hydration, and diagnostics.
+  Converted libraries have dependency inventories and independent installed-consumer checks;
+  Vite can convert source imports and generate consumer declarations for all three frameworks.
+  Entries export components for consumers to mount or hydrate with the framework's public APIs.
+  Svelte's remaining audit includes state-preserving keyed movement, original controller slot
+  handles, and exact implicit-option SSR behavior. Passing feature fixtures alone does not settle
+  these gaps or prove every feature combination.
 - Completion: all supported capabilities map to target-native primitives or measured semantic
   bridges, and application and library outputs satisfy the framework conversion spec
 
-The next implementation milestone extends the shared conversion plan through lifecycle and flow,
-then proves server rendering and hydration identity for all three targets.
+The next framework milestone closes or explicitly resolves the remaining Svelte semantic gaps,
+then completes the full compatibility, performance, and delivery gates.
 
 ## Measurement rule
 

@@ -1,7 +1,7 @@
 # `@nextwebwg/html-next-converter`
 
-Converts a Declarative Components application or library graph into Vue 3.5 single-file components
-or React 19.3 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
+Converts a Declarative Components application or library graph into Vue 3.5 or Svelte 5 single-file
+components, or React 19.3 TSX components. Once converted, HTML Next is gone. Each `.vue` file imports Vue,
 its nested components, its controller (copied beside it), and only the generated helpers its
 features need. A Vue component using
 `$html` imports `vue/html.ts`; that helper requires `parse5` as an application dependency for
@@ -40,7 +40,7 @@ conversion emits an `index.ts` entry whose named exports are independently consu
 emit `html-next.conversion.json`, which records the input entries, output entry, every artifact,
 the target version, and package-shaped `dependencies` and `peerDependencies`. Copy the relevant
 fields from `package` into the published package's `package.json`. `parse5` appears in
-`dependencies` only when an emitted `$html` helper needs it; Vue or React appears in
+`dependencies` only when an emitted `$html` helper needs it; Vue, React, or Svelte appears in
 `peerDependencies` for its respective output. Dependencies imported by authored controller
 modules remain the publisher's responsibility.
 
@@ -60,34 +60,53 @@ context, declared data, native form controls, safe HTML, and structural template
 conformance corpus and feature-specific React fixtures compare browser behavior, server output,
 hydration, and exact pixels with the live runtime in Chromium, Firefox, and WebKit. Constructs
 that cannot be represented fail conversion explicitly rather than silently changing behavior.
-Svelte is not supported.
+Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle APIs, with `.svelte`
+components and adjacent imported CSS under `generated/svelte/`. It supports props (including generic
+and state-selected types), state/computed/handlers, named and scoped slots, native events and
+methods, context, data reads, controllers and refs, native form controls, safe HTML, structural
+flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
+Svelte's normal compiler owns rendering, SSR, and hydration.
+
+```sh
+html-next-convert svelte 'components/**' --mode library --out-dir generated
+```
+
+The current supported Svelte baseline is 5.57.1. Compile generated files with the standard Svelte
+compiler or `@sveltejs/vite-plugin-svelte`. Source consumers can use `svelte-check`; publishers
+emitting declaration files can use `svelte2tsx`. The generated public types cover props, native and
+declared event callbacks, scoped slot fields, and exposed methods. Both graph modes export components; application and library consumers use public `mount`/`hydrate`
+or their framework's usual mounting and hydration flow.
+Feature helpers are emitted once per converted graph and imported only by components that need
+them. Style bindings record `cssstyle` and `css-tree` in server dependencies; the generated helper's
+standard `browser` mapping uses the live element's CSSOM in browser builds.
 
 React applications use their usual `hydrateRoot` call and error options. If the server root is
 incompatible, React reports the recovery through `onRecoverableError` (or its default reporting);
 the converter does not generate an `HR005` hydration entry or replace React's recovery flow.
 
-For source-only distribution with automatic Vue or React conversion in the consuming app,
-use the [Vite adapter](../html-next-unplugin/README.md#vue-and-react-source-imports). It also
+For source-only distribution with automatic Vue, React, or Svelte conversion in the consuming app,
+use the [Vite adapter](../html-next-unplugin/README.md#framework-source-imports). It also
 generates consumer declarations, so publishers do not need separate framework copies.
 
-To distribute preconverted copies of one authored library in all three forms, assemble the native HTML Next package from
-the `.html` sources, then run the Vue and React library converters over the same quoted glob. Give
-each conversion its own output directory so both `html-next.conversion.json` manifests survive:
+To distribute preconverted copies of one authored library in all four forms, assemble the native HTML Next package from
+the `.html` sources, then run the Vue, React, and Svelte library converters over the same quoted glob. Give
+each conversion its own output directory so each `html-next.conversion.json` manifest survives:
 
 ```sh
 html-next-convert vue 'components/**' --mode library --out-dir package/converted/vue-target
 html-next-convert react 'components/**' --mode library --out-dir package/converted/react-target
+html-next-convert svelte 'components/**' --mode library --out-dir package/converted/svelte-target
 ```
 
-The package can expose the native entry, the converted Vue entry, and the converted React entry as
-separate subpaths. If publishing source output, point `./vue` and `./react` at the generated
-`vue/index.ts` and `react/index.ts`, include their component files and CSS, merge both conversion
+The package can expose the native entry and the converted Vue, React, and Svelte entries as
+separate subpaths. If publishing source output, point `./vue`, `./react`, and `./svelte` at the generated
+`vue/index.ts`, `react/index.ts`, and `svelte/index.ts`, include their component files and CSS, merge the conversion
 inventories' `package.dependencies` and `package.peerDependencies` into the package manifest,
-and mark Vue and React as optional peers when each subpath is independently usable. Consumers
-then compile `.vue` and `.tsx` with their normal bundler plugins. For precompiled distribution,
+and mark Vue, React, and Svelte as optional peers when each subpath is independently usable. Consumers
+then compile `.vue`, `.tsx`, and `.svelte` with their normal bundler plugins. For precompiled distribution,
 emit JavaScript and declarations from those entries and point exports at the built files. The
 [installed-library test](./tests/library-distribution.test.ts) packs and installs the source-output
-shape, then renders both framework entries from that independent consumer.
+shape, then renders the framework entries from that independent consumer.
 
 For guaranteed unused-component **and CSS** pruning in a preconverted package, expose individual
 component subpaths from the conversion inventory, such as `./react/XCard` pointing to

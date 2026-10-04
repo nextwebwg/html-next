@@ -9,7 +9,7 @@ repository root.
 | --- | --- | --- |
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue and React conversion |
+| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/html-next/) and
@@ -36,7 +36,7 @@ modes:
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to Vue or React | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue single-file components or React TSX components, with no HTML Next runtime dependency |
+| **Framework conversion** — to Vue, React, or Svelte | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue or Svelte single-file components, or React TSX components, with no HTML Next runtime dependency |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
