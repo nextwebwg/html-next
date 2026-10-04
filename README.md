@@ -9,8 +9,9 @@ are coming soon.
 [Ship a library](https://nextwebwg.org/html-next/ship)
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it.
-All three packages share one version and publish together. Shared policy and verification live at the
+`@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
+converter and unplugin adapt it to other build workflows.
+All four packages share one version and publish together. Shared policy and verification live at the
 repository root.
 
 | Package | Role | Current scope |
@@ -18,6 +19,7 @@ repository root.
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
 | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue and React conversion |
+| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and

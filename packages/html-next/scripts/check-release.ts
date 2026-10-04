@@ -21,7 +21,7 @@ const manifest = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as PackageManifest;
 const adapterVersions = await Promise.all(
-  ["html-next-converter", "html-next-unplugin"].map(async (directory) => {
+  ["html-next-converter", "html-next-unplugin", "htmlkit"].map(async (directory) => {
     const adapter = JSON.parse(await readFile(
       new URL(`../../${directory}/package.json`, import.meta.url), "utf8",
     )) as { readonly name: string; readonly version: string };

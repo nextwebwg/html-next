@@ -11,7 +11,7 @@ const repositoryLicense = readFileSync(join(root, "LICENSE"), "utf8");
 const workspace = mkdtempSync(join(tmpdir(), "html-next-package-consumer-"));
 const useCommandShell = process.platform === "win32";
 const componentsPackage = "@nextwebwg/html-next";
-const releaseDirectories = ["html-next", "html-next-converter", "html-next-unplugin"] as const;
+const releaseDirectories = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"] as const;
 const publicExports = [
   ".",
   "./runtime",
@@ -215,4 +215,26 @@ describe("workspace package contracts", () => {
     }
     expect([...versions], "All published packages must share one version.").toHaveLength(1);
   });
+
+  it("builds a static application through the installed HTMLKit CLI", () => {
+    const consumer = join(workspace, "htmlkit-consumer");
+    mkdirSync(join(consumer, "app/pages"), { recursive: true });
+    writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "htmlkit-consumer", private: true, type: "module" }));
+    execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", pack("html-next"), pack("htmlkit")], { cwd: consumer, shell: useCommandShell });
+    writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/" });');
+    writeFileSync(join(consumer, "app/pages/index.html"), '<template component="packed-page"><defs><prop name="label" type="string" required>Label</prop></defs><main><h1 $value="label"></h1></main></template>');
+    writeFileSync(join(consumer, "app/pages/index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" }, head: { title: "Packed page" } });');
+    const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
+    const output = execFileSync(process.execPath, [join(installed, "dist/cli.js"), "build"], { cwd: consumer, encoding: "utf8" });
+    expect(output).toContain("Generated 1 pages");
+    const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
+    expect(html).toContain("Installed platform");
+    expect(html).toContain("<title>Packed page</title>");
+    expect(html).toContain('src="/packed/_htmlkit/');
+    expect(JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).dependencies[componentsPackage]).not.toContain("workspace:");
+    expect(readFileSync(join(installed, "LICENSE"), "utf8")).toBe(repositoryLicense);
+    const entry = join(consumer, "platform-types.ts");
+    writeFileSync(entry, 'import { defineConfig, type Application, type LoadContext, type LoaderResult, type RouteInput } from "@nextwebwg/htmlkit"; export const config = defineConfig({ routes: [] satisfies RouteInput[] }); export type PublicTypes = [Application, LoadContext, LoaderResult];');
+    execFileSync("corepack", ["pnpm", "exec", "tsc", "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", entry], { cwd: root, shell: useCommandShell });
+  }, 120_000);
 });
