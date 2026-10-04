@@ -136,7 +136,7 @@ interface RenderContext {
   readonly propertyAttachmentName: string;
   usesControls: boolean;
   usesNestedBindings: boolean;
-  boundSelect: boolean;
+  boundSelect: boolean | string;
   readonly controlAttachmentName: string;
   readonly bindingHelperName: string;
   readonly bindingValueName: string;
@@ -386,6 +386,15 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const controlledNames = new Set(node.attributes.filter((attribute) => attribute.kind === "property" ||
     attribute.kind === "attribute" && attribute.twoWay)
     .map((attribute) => attribute.name));
+  if (root && node.name === "select" && !controlledNames.has("value") && !context.rootBindings?.includes("value")) {
+    context.usesAttributeBinding = true;
+    context.rootAttributeBindings.add("value");
+    const candidate = context.freshIdentifier("htmlNextSelectAttribute");
+    const serialized = lowering.attribute({ kind: "id", name: candidate }, unknownValueScope(candidate), "value");
+    const read = `(() => { const ${candidate}: unknown = rest.value; return ${serialized}; })()`;
+    bindings.push(`{...(typeof document === 'undefined' && Object.keys(rest).includes("value") ? { value: ${read} } : {})}`);
+    bindings.push(`{@attach ${context.bindingHelperName}("value", () => Object.keys(rest).includes("value") ? ${read} : Symbol.for('html-next.invalid-result'))}`);
+  }
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
@@ -424,14 +433,22 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   };
   if (node.name === "option" && context.boundSelect) {
     const selected = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "selected");
-    bindings.push(`{...(typeof document === 'undefined' ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
+    bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? { "data-html-next-option-default": ${quote(String(selected))} } : {})}`);
   }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") {
+      if (node.name === "select" && attribute.name === "value" && !controlledNames.has("value")) {
+        context.usesAttributeBinding = true;
+        literals.push(`{...(typeof document === 'undefined' ? { value: ${quote(attribute.value)} } : {})}`);
+        const candidate = context.freshIdentifier("htmlNextSelectLiteral");
+        const value = root ? `(() => { const ${candidate}: unknown = Object.keys(rest).includes("value") ? rest.value : ${quote(attribute.value)}; return ${lowering.attribute({ kind: "id", name: candidate }, unknownValueScope(candidate), "value")}; })()` : quote(attribute.value);
+        bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
+        continue;
+      }
       if (controlledNames.has(attribute.name) || (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
-        bindings.push(`{...(typeof document === 'undefined' ? {} : { selected: true })}`);
+        bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? {} : { selected: true })}`);
         continue;
       }
       if (root && !component && context.rootBindings?.includes(attribute.name) === true) {
@@ -492,6 +509,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       }
       else if (attribute.target === "class" || attribute.target === "style") continue;
       else if (childProp(attribute.name) !== undefined) bindings.push(`${childProp(attribute.name)![0]}={${lowering.value(attribute.expressionPlan.ast, scope)}}`);
+      else if (node.name === "select" && attribute.name === "value") {
+        context.usesAttributeBinding = true;
+        const value = lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
+        bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
+        bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
+        if (root) context.rootAttributeBindings.add("value");
+      }
       else bindings.push(`${component ? attribute.name : svgAttributeName(attribute.name)}={${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)}}`);
     }
     if (attribute.kind === "property") {
@@ -640,10 +664,18 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   const open = `<${name}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>`;
   if (!component && isVoidElement(node.name)) return open;
   const previousBoundSelect = context.boundSelect;
-  if (node.name === "select") context.boundSelect = context.usesControls && (root && context.rootBindings?.includes("value") === true || node.attributes.some((entry) => entry.name === "value" && (entry.kind === "property" || entry.kind === "attribute" && entry.twoWay)));
+  if (node.name === "select") context.boundSelect = controlledNames.has("value") ? true
+    : root && context.rootBindings?.includes("value") ? `${context.nativeBindingReadName}("value") !== undefined` : false;
   const children = content ?? componentChildren.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   context.boundSelect = previousBoundSelect;
-  const markup = `${open}${children}</${name}>`;
+  let markup = `${open}${children}</${name}>`;
+  if (node.name === "select" && !controlledNames.has("value")) {
+    // Public dynamic elements keep SSR value= as an ordinary attribute. A real
+    // control binding keeps Svelte's select/option SSR selection context.
+    const bridge = root && context.rootBindings?.includes("value");
+    const ordinary = `<svelte:element this={"select"}${attributes.length === 0 ? "" : ` ${attributes.join(" ")}`}>${children}</svelte:element>`;
+    markup = bridge ? `{#if ${context.nativeBindingReadName}("value") !== undefined}${markup}{:else}${ordinary}{/if}` : ordinary;
+  }
   return snippetDeclarations === "" ? markup : `{#if true}${snippetDeclarations}${markup}{/if}`;
 }
 

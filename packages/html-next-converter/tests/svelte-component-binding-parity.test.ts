@@ -139,7 +139,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, checked: (element as HTMLInputElement).checked });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read));
               }
-              for (const id of ["untyped-area", "untyped-select", "untyped-multiple"]) {
+              for (const id of ["untyped-area", "untyped-select", "untyped-multiple", "plain-select", "unbound-select", "literal-select", "plain-root-select"]) {
                 const read = (element: Element) => ({ value: (element as HTMLInputElement).value, selected: element instanceof HTMLSelectElement ? Array.from(element.selectedOptions, (option) => option.value) : undefined });
                 assert.deepEqual(await svelte.locator(`#${id}`).evaluate(read), await live.locator(`#${id}`).evaluate(read), `SSR ${id} differs`);
               }
@@ -148,7 +148,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 2)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 2 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);

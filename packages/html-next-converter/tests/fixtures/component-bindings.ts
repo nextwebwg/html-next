@@ -24,6 +24,7 @@ export const componentBindingsSource = `<template component="x-state-field" stat
 <template component="x-untyped-radio" status="early" summary="Undeclared radio binding."><input type="radio" name="bound-radio"></template>
 <template component="x-untyped-file" status="early" summary="Undeclared file binding."><input type="file"></template>
 <template component="x-untyped-area" status="early" summary="Undeclared textarea binding."><textarea>Textarea default</textarea></template>
+<template component="x-plain-select" status="early" summary="Ordinary select root."><select><option value="a" selected>A</option><option value="b">B</option></select></template>
 <template component="x-untyped-select" status="early" summary="Undeclared select binding." controller="./options.js"><defs><state name="optionValue" type="keyword" values="b, bb" value="b"></state><state name="hasC" type="boolean" value="true"></state></defs><select><option value="a" selected>A</option><option from:value="optionValue">B</option><option value="c" $if="hasC">C</option></select></template>
 <template component="x-untyped-multiple" status="early" summary="Undeclared multiple binding." controller="./options.js"><defs><state name="optionValue" type="keyword" values="b, bb" value="b"></state><state name="hasC" type="boolean" value="true"></state></defs><select multiple><option value="a" selected>A</option><option from:value="optionValue">B</option><option value="c" $if="hasC">C</option></select></template>
 <template component="x-untyped-output" status="early" summary="Undeclared generic binding."><output value="authored">Generic</output></template>
@@ -56,6 +57,10 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <x-untyped-radio id="radio-second" bind:checked="radios.second"></x-untyped-radio>
   <x-untyped-file id="untyped-file" bind:value="file"></x-untyped-file>
   <x-untyped-area id="untyped-area" bind:value="form.text"></x-untyped-area>
+  <x-plain-select id="plain-root-select" from:value="choice"></x-plain-select>
+  <select id="literal-select" value="b"><option value="a" selected>A</option><option value="b">B</option></select>
+  <select id="plain-select" from:value="choice"><option value="a" selected>A</option><option value="b">B</option></select>
+  <x-untyped-select id="unbound-select" from:value="choice"></x-untyped-select>
   <x-untyped-select id="untyped-select" bind:value="choice"></x-untyped-select>
   <x-untyped-multiple id="untyped-multiple" bind:value="choices"></x-untyped-multiple>
   <x-untyped-output id="unbound-output" from:value="form.text"></x-untyped-output>
