@@ -271,11 +271,14 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   number: `function number(value: unknown): number | undefined {
   return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }`,
-  concat: `function concat(...values: unknown[]): string | symbol | undefined {
-  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
-  if (values.some(value => value === undefined)) return undefined;
-  if (values.length === 0 || values.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result");
-  return values.map(value => value === null ? "" : String(value)).join("");
+  concat: `// A nonempty scalar call cannot produce the invalid-result sentinel.
+type ConcatResult<T extends unknown[]> = T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
+  ? string | undefined : string | symbol | undefined;
+function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
+  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  if (values.some(value => value === undefined)) return undefined as ConcatResult<T>;
+  if (values.length === 0 || values.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  return values.map(value => value === null ? "" : String(value)).join("") as ConcatResult<T>;
 }`,
   join: `function join(...values: unknown[]): string | symbol | undefined {
   if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
