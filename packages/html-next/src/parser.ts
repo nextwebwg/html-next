@@ -184,8 +184,7 @@ function compileScopedExpression(
 }
 
 // Scan browser-parsed text, not source HTML. Mixed segments share one native Text node.
-// Brackets accept literal keys/indexes in shorthand; braces contain any checked expression.
-const TEXT_PATH = new RegExp(String.raw`\$${IDENTIFIER}(?:\.(?:${IDENTIFIER}|[0-9]+)|\[(?:[0-9]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')\])*`, "uy");
+// Braces delimit every insertion and contain any checked expression.
 
 function parseText(value: string, scope: ParseScope, source: string): TemplateNode[] {
   const nodes: TextNode[] = [];
@@ -195,7 +194,7 @@ function parseText(value: string, scope: ParseScope, source: string): TemplateNo
     literal = "";
   };
   for (let offset = 0; offset < value.length;) {
-    if (value[offset] === "\\" && ["$", "{", "\\"].includes(value[offset + 1] ?? "")) {
+    if (value[offset] === "\\" && ["{", "\\"].includes(value[offset + 1] ?? "")) {
       literal += value[offset + 1];
       offset += 2;
       continue;
@@ -219,16 +218,6 @@ function parseText(value: string, scope: ParseScope, source: string): TemplateNo
       nodes.push({ kind: "text", value: expression, expressionPlan: compileScopedExpression(expression, scope, source) });
       offset = end + 1;
       continue;
-    }
-    if (value[offset] === "$") {
-      TEXT_PATH.lastIndex = offset;
-      const match = TEXT_PATH.exec(value);
-      if (match !== null) {
-        flush();
-        nodes.push({ kind: "text", value: match[0], expressionPlan: compileScopedExpression(match[0], scope, source) });
-        offset = TEXT_PATH.lastIndex;
-        continue;
-      }
     }
     literal += value[offset++];
   }

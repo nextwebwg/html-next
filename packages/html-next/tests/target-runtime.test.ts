@@ -641,7 +641,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "html-next-vanilla-aot-"));
-    const definition = parseComponent((await readFile(reactiveFixtureUrl, "utf8")).replace('<output $value="count"></output>', '<output>$count</output>'), reactiveFixtureUrl.href);
+    const definition = parseComponent((await readFile(reactiveFixtureUrl, "utf8")).replace('<output $value="count"></output>', '<output>{$count}</output>'), reactiveFixtureUrl.href);
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/ReactiveCounter.js")?.content;
     assert.ok(module);
@@ -2709,7 +2709,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         <prop name="label" type="string" default="Ready">Label.</prop>
         <prop name="tone" type="keyword" values="quiet, loud" default="quiet">Tone.</prop>
       </props>
-      <section from:data-count="count" from:data-tone="tone"><output $value="count"></output><span from:aria-label="label">$label / $count</span><slot></slot></section>
+      <section from:data-count="count" from:data-tone="tone"><output $value="count"></output><span from:aria-label="label">{$label} / {$count}</span><slot></slot></section>
     </template>`);
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/DemoProps.js")?.content;

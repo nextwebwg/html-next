@@ -50,14 +50,14 @@ const cases: readonly ParityCase[] = [
     action: `root.querySelector("button").click(); root.querySelectorAll("button")[1].click()`,
   },
   {
-    name: "inline paths preserve mixed content and keyed table rows",
+    name: "braced inline expressions preserve mixed content and keyed table rows",
     features: ["inline text", "keyed lists", "case-sensitive names"],
     definitions: { "x-inline": String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }, { id: 2, name: 'Bea' }]"></state>
       <state name="Name" type="string" value="Upper"></state><state name="name" type="string" value="lower"></state>
       <handler name="change"><set name="rows" expr:value="[{ id: 2, name: 'Bea' }, { id: 1, name: '&lt;i&gt;Lin&lt;/i&gt;' }]"></set></handler>
-      </defs><section><button type="button" on:click="change">Next</button><p>$Name/$name. \$literal costs $1.15.</p>
-      <table><tbody><tr $each="r of $rows" $key="$r.id"><td>Hello $r.name!</td></tr></tbody></table></section></template>` },
+      </defs><section><button type="button" on:click="change">Next</button><p>{$Name}/{$name}. $literal costs $1.15.</p>
+      <table><tbody><tr $each="r of $rows" $key="$r.id"><td>Hello {$r.name}!</td></tr></tbody></table></section></template>` },
     invocation: `<x-inline id="case"></x-inline>`, vueRender: `h(XInline, { id: "case" })`, root: "#case",
     probe: `({ text: root.querySelector('p')?.textContent, rows: Array.from(root.querySelectorAll('td'), (td) => td.textContent), markup: root.querySelector('i') !== null })`,
     action: `root.querySelector('button').click()`,

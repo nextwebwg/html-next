@@ -17,7 +17,7 @@ const definitions = [
   `<template component="ssr-inline"><defs>
     <state name="count" type="number" value="0"></state>
     <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-    </defs><section><button type="button" on:click="increment">Next</button><p>Total: $count due today <b>Kept</b>!</p></section></template>`,
+    </defs><section><button type="button" on:click="increment">Next</button><p>Total: {$count} due today <b>Kept</b>!</p></section></template>`,
   `<template component="ssr-counter"><defs>
     <prop name="label" type="string" default="Visits">Label.</prop>
     <state name="count" type="number" value="0"></state>
@@ -64,7 +64,7 @@ const definitions = [
 
 const cases = [
   { name: "Intl text expressions and inferred declared types", html: '<x-formatting id="subject"></x-formatting>', state: {} },
-  { name: "inline paths with adjacent text and elements", html: '<ssr-inline id="subject"></ssr-inline>', state: { count: 7 } },
+  { name: "braced inline expressions with adjacent text and elements", html: '<ssr-inline id="subject"></ssr-inline>', state: { count: 7 } },
   { name: "changed state, implicit props, adjacent text and unrendered slots", html: '<ssr-counter id="subject"><b slot="title">T</b>world<i slot="extra">Hidden</i></ssr-counter>', state: { count: 7 } },
   { name: "keyed lists and retained row identity", html: '<ssr-list id="subject"></ssr-list>', state: { rows: ["Ada", "Bea"] } },
   { name: "nested components and shared state", html: '<ssr-provider id="subject"><strong>Projected</strong></ssr-provider>', state: { current: 5 } },

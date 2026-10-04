@@ -12,11 +12,11 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
-  it("renders inline paths as escaped text in mixed content and native table rows", async () => {
+  it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: '&lt;b&gt;Ada&lt;/b&gt;' }]"></state>
-      </defs><section><p>Total: $rows.0.name due today. \$literal costs $1.15.</p>
-      <table><tbody><tr $each="r of $rows" $key="$r.id"><td>$r.name</td></tr></tbody></table></section></template>`);
+      </defs><section><p>Total: {$rows.0.name} due today. $literal costs $1.15.</p>
+      <table><tbody><tr $each="r of $rows" $key="$r.id"><td>{$r.name}</td></tr></tbody></table></section></template>`);
     const rendered = await renderComponents('<x-inline></x-inline>', { definitions: [definition] });
     assert.match(rendered.html, /Total: &lt;b&gt;Ada&lt;\/b&gt; due today\. \$literal costs \$1\.15\./);
     assert.match(rendered.html, /<td>&lt;b&gt;Ada&lt;\/b&gt;<\/td>/);

@@ -62,15 +62,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
-    it(`${engine} updates inline paths without replacing siblings or retained keyed rows`, async () => {
+    it(`${engine} updates braced inline expressions without replacing siblings or retained keyed rows`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
         await page.setContent(String.raw`<template component="x-inline"><defs>
           <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }, { id: 2, name: 'Bea' }]"></state>
           <state name="Name" type="string" value="Upper"></state><state name="name" type="string" value="lower"></state>
-          </defs><section><p>Hello $rows.0.name! <b>Kept</b> \$literal costs $1.15; $Name/$name.</p>
-          <table><tbody><tr $each="r of $rows" $key="$r.id"><td>$r.name</td></tr></tbody></table></section></template>
+          </defs><section><p>Hello {$rows.0.name}! <b>Kept</b> $literal costs $1.15; {$Name}/{$name}.</p>
+          <table><tbody><tr $each="r of $rows" $key="$r.id"><td>{$r.name}</td></tr></tbody></table></section></template>
           <x-inline id="case"></x-inline>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {

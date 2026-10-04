@@ -19,9 +19,9 @@ the installed Chromium, Firefox, and WebKit builds.
 
 The native HTML parser already creates inert text nodes in context-valid elements, including table
 cells. `Document.createTextNode()` and `Text.data` provide escaped text output and preserve sibling
-markup and node identity. The remaining gap is recognizing authored `$path` reads and `{expression}` segments and subscribing
+markup and node identity. The remaining gap is recognizing authored `{expression}` segments and subscribing
 them to the existing `$value` effects. The shared parser records literal segments
-and compiled path reads within each authored text node; the live runtime and Node renderer update native text nodes, while
+and compiled expressions within each authored text node; the live runtime and Node renderer update native text nodes, while
 framework targets lower the same reads to their own escaped-text rendering. Generated scalar
 components use their existing specialized dependency updates. No HTML source replacement or
 runtime scanning of returned values is involved. Identifier validation reuses CSS Syntax's

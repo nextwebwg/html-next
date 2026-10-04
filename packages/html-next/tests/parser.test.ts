@@ -30,13 +30,19 @@ function componentSource(
 
 describe("full text expressions", () => {
   it("matches nested objects and quoted braces, preserves escapes, and checks expression scope", () => {
-    const definition = parseComponent(String.raw`<template component="x-text-expr"><defs><state name="amount" type="number" value="12"></state></defs><p>Total: {format($amount, 'currency', { currency: 'USD' }, 'en')} / {concat('}', '{')} / \{literal} / \$amount</p></template>`);
+    const definition = parseComponent(String.raw`<template component="x-text-expr"><defs><state name="amount" type="number" value="12"></state></defs><p>Total: {format($amount, 'currency', { currency: 'USD' }, 'en')} / {concat('}', '{')} / \{literal} / $amount / \$amount / \\</p></template>`);
     const text = definition.template.children[0]!;
     assert.equal(text.kind, "text");
     if (text.kind !== "text") return;
     assert.deepEqual(text.segments?.filter((segment) => segment.expressionPlan !== undefined).map((segment) => segment.expressionPlan?.dependencies), [["amount"], []]);
-    assert.equal(text.segments?.at(-1)?.value, " / {literal} / $amount");
-    for (const value of ["{", "{}", "{$missing}"]) assert.throws(() => parseComponent(`<template component="x-bad-text"><p>${value}</p></template>`));
+    assert.equal(text.segments?.at(-1)?.value, " / {literal} / $amount / \\$amount / \\");
+    for (const value of ["{", "{}", "{ }", "{$missing}", "{1 +}", "{format(}"]) {
+      assert.throws(() => parseComponent(`<template component="x-bad-text"><p>${value}</p></template>`), HtmlDiagnosticError);
+    }
+  });
+  it("leaves dollar paths and punctuation literal outside braces, without scope checks", () => {
+    const definition = parseComponent(String.raw`<template component="x-text"><p>$unknown.name.txt $HOME $1.15 \$ident</p></template>`);
+    assert.deepEqual(definition.template.children, [{ kind: "text", value: String.raw`$unknown.name.txt $HOME $1.15 \$ident` }]);
   });
 });
 
@@ -47,7 +53,7 @@ describe("parseComponent", () => {
       <state name="Name" type="string" value="Bea"></state>
       <state name="name" type="string" value="Lin"></state>
       <state name="café" type="number" value="1"></state>
-      </defs><p>$_name / $Name / $name / $café</p></template>`));
+      </defs><p>{$_name} / {$Name} / {$name} / {$café}</p></template>`));
     for (const name of ["$name", "name$tail", "first-name", "-name", "--name", "1name"]) {
       expectDiagnostic("HC013", `<template component="x-names"><defs><state name="${name}" value="1"></state></defs><p></p></template>`);
       expectDiagnostic("HT016", `<template component="x-names"><p $each="${name} of [1]">Hi</p></template>`);
@@ -59,10 +65,10 @@ describe("parseComponent", () => {
     expectDiagnostic("HT016", `<template component="x-names"><p $each="😀of [1]">Hi</p></template>`);
   });
 
-  it("parses inline paths with literals, punctuation, escaped dollars, and loop scope", () => {
+  it("parses braced inline paths with literals, punctuation, and loop scope", () => {
     const definition = parseComponent(String.raw`<template component="x-text"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }]"></state>
-      </defs><table><tbody><tr $each="r of $rows" $key="$r.id"><td>Hello $r.name. Cost $1.15; \$ident; $rows[0].name!</td></tr></tbody></table></template>`);
+      </defs><table><tbody><tr $each="r of $rows" $key="$r.id"><td>Hello {$r.name}. Cost $1.15; $ident; {$rows[0].name}!</td></tr></tbody></table></template>`);
     const cell = definition.template.children[0];
     assert.equal(cell?.kind, "element");
     if (cell?.kind !== "element") return;
@@ -74,7 +80,7 @@ describe("parseComponent", () => {
     if (td?.kind !== "element") return;
     assert.deepEqual(td.children.flatMap((child) => child.kind === "text" ? (child.segments ?? [child]).map((segment) => segment.expressionPlan?.dependencies ?? segment.value) : [null]),
       ["Hello ", ["r.name"], ". Cost $1.15; $ident; ", ["rows.0.name"], "!"]);
-    expectDiagnostic("HT003", `<template component="x-text"><p>$unknown</p></template>`);
+    expectDiagnostic("HT003", `<template component="x-text"><p>{$unknown}</p></template>`);
   });
   it("reads from: bindings and rejects the former bare-colon spelling", () => {
     const definition = parseComponent(`<template component="x-from"><defs>

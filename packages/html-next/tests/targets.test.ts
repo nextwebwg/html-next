@@ -138,8 +138,8 @@ describe("official target compilers", () => {
   it("compiles mixed inline text and CSS-derived local names in all targets", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
       <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }]"></state>
-      </defs><section><p>Total: $rows.0.name due today. \$literal costs $1.15.</p>
-      <table><tbody><tr $each="😀 of $rows" $key="$😀.id"><td>Hello $😀.name!</td></tr></tbody></table></section></template>`);
+      </defs><section><p>Total: {$rows.0.name} due today. $literal costs $1.15.</p>
+      <table><tbody><tr $each="😀 of $rows" $key="$😀.id"><td>Hello {$😀.name}!</td></tr></tbody></table></section></template>`);
     const outputs = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
     compileVue(outputs.get("vue/XInline.vue")!, "XInline.vue");
     await transform(generateReactComponent(definition), { loader: "tsx", format: "esm" });

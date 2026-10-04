@@ -14,8 +14,12 @@ export const formattingSource = `<template component="x-formatting"><defs>
 <handler name="invalid"><set name="optionalAmount" value="0"></set><set name="currency" value="INVALID"></set><set name="names" expr:value="['Zed']"></set></handler>
 </defs><section from:aria-label="$label"><button type="button" on:click="change">Change</button><button type="button" on:click="invalid">Invalid currency</button>
   <p data-format="currency">Total: {format($amount, 'currency', { currency: $currency }, $locale)} due.</p>
+  <output data-format="valueBinding" $value="format($amount, 'currency', { currency: $currency }, $locale)"></output>
+  <p data-format="initialInvalid">Before {format(1, 'currency', {}, $locale)} after</p>
+  <output data-format="initialInvalidBinding" $value="format(1, 'currency', {}, $locale)"></output>
   <p data-format="mixed">Total: {format($amount, 'currency', { currency: $currency }, $locale)} for {format($names, 'list', {}, $locale)}.</p>
-  <p data-format="inferred">$label</p>
+  <p data-format="literal">$amount $HOME $file.name.txt $1.15 \\{name}</p>
+  <p data-format="inferred">{$label}</p>
   <p data-format="time">{format($clock, { timeStyle: 'long', hour12: false }, $locale)}</p>
   <p data-format="date">{format($day, { dateStyle: 'long' }, $locale)}</p>
   <p data-format="dateTime">{format($instant, 'dateTime', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' }, $locale)}</p>
@@ -27,7 +31,7 @@ export const formattingSource = `<template component="x-formatting"><defs>
   <p data-format="plural">{format($names.length, 'plural', { forms: { one: '# name', other: '# names' } }, $locale)}</p>
   <p data-format="displayName">{format('CA', 'displayName', { type: 'region' }, $locale)}</p>
   <p data-format="range">{formatRange(1, $amount, 'number', {}, $locale)}</p>
-  <p data-format="parts"><span $each="part of formatParts($amount, 'currency', { currency: $currency }, $locale)">$part.value</span></p>
+  <p data-format="parts"><span $each="part of formatParts($amount, 'currency', { currency: $currency }, $locale)">{$part.value}</span></p>
 <p data-format="shadow"><span $each="formatValue of names">{format(12, 'number', {}, $locale)}</span></p>
 <p data-format="withShadow" $with="$amount as formatValue">{format($formatValue, 'number', {}, $locale)}</p>
 <p data-format="matchShadow"><template $match="$amount as formatValue"><span $when="$formatValue &gt; 0">{format($formatValue, 'number', {}, $locale)}</span></template></p>
