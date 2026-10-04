@@ -551,6 +551,13 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
     return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
+  const selectedBindingInput = (prop: string, attribute: Extract<ElementNode["attributes"][number], { kind: "attribute" }>): void => {
+    const candidate = context.freshIdentifier("htmlNextBindingInput");
+    const guard = declaredReadGuard(attribute.expressionPlan!, scope, context);
+    const source = lowering.value(attribute.expressionPlan!.ast, scope);
+    const serialized = lowering.attribute({ kind: "id", name: candidate }, unknownValueScope(candidate), attribute.name);
+    selectedBindings.push(`[${quote(prop)}]: () => { if (!(${guard ?? "true"})) return Symbol.for('html-next.invalid-result'); const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${candidate} : { value: ${candidate}, attribute: ${serialized} }; }`);
+  };
   const boundLiteralInput = (prop: string, contract: PropContract, raw: string, guard: string | undefined, literal: string): string => {
     context.usesComponentBindings = true;
     const candidate = context.freshIdentifier("htmlNextBindingValue");
@@ -575,7 +582,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${value})}`);
         continue;
       }
-      if (controlledNames.has(attribute.name) || (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
+      if (controlledNames.has(attribute.name) && childProp(attribute.name)?.[1].select === undefined || (ownsClasses && attribute.name === "class" || !component && ownsStyles && attribute.name === "style")) continue;
       if (root && (attribute.name === "class" || attribute.name === "style" || reflectedNames.has(attribute.name))) continue;
       if (node.name === "option" && context.boundSelect && attribute.name === "selected") {
         bindings.push(`{...(typeof document === 'undefined' && (${context.boundSelect}) ? {} : { selected: true })}`);
@@ -617,7 +624,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const guard = declaredReadGuard(attribute.expressionPlan, scope, context);
           const source = lowering.value(attribute.expressionPlan.ast, scope);
           if (declared[1].select !== undefined) {
-            selectedBindings.push(`${quote(declared[0])}: () => ${guard === undefined ? source : `(${guard}) ? ${source} : Symbol.for('html-next.invalid-result')`}`);
+            selectedBindingInput(declared[0], attribute);
             bindings.push(`{@attach (element: Element) => attachGenericBinding(element, ${bindingWriter(attribute)})}`);
             continue;
           }
@@ -648,6 +655,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       else if (attribute.target === "class" || attribute.target === "style") continue;
       else {
         const declared = childProp(attribute.name);
+        if (declared?.[1].select !== undefined) { selectedBindingInput(declared[0], attribute); continue; }
         const read = conformingRead(attribute.expressionPlan, scope, context, declared === undefined
           ? lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name) : lowering.value(attribute.expressionPlan.ast, scope));
         const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === attribute.name);
@@ -780,7 +788,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     // The callback keeps SSR-only reads out of per-option client memoization.
     selectedOption = `{...Reflect.apply(() => typeof document === 'undefined' && (${context.boundSelect}) ? (${context.selectSelection}?.(${value}) ? ${yes} : ${no}) : {}, undefined, [])}`;
   }
-  if (selectedBindings.length > 0) bindings.push(`{...{ ${quote(BINDING_INPUTS_PROP)}: { ${selectedBindings.join(", ")} } }}`);
+  if (selectedBindings.length > 0) bindings.push(`${BINDING_INPUTS_PROP}={{ ${selectedBindings.join(", ")} }}`);
   // Svelte preserves NUL-named component props; a spread adds a proxy to every invocation.
   if (literalInputs.length > 0) bindings.push(`${LITERAL_INPUTS_PROP}={{ ${literalInputs.join(", ")} }}`);
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
@@ -919,7 +927,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   for (const prop of target.props) reserved.add(`input${prop.name}`);
   const declarationName = (name: string): string => reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextRow\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
@@ -1017,7 +1025,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       : { kind: "union" as const, members: prop.select.options.map((option) => option.type) } }])) };
   const inputSource = (name: string): string => {
     const prop = definition.contract.props[name]!;
-    return "default" in prop ? `(input${name} === undefined ? ${JSON.stringify(prop.default)} : input${name})` : `input${name}`;
+    const input = selectedInputs.has(name) ? `input${name}.value` : `input${name}`;
+    return "default" in prop ? `(${input} === undefined ? ${JSON.stringify(prop.default)} : ${input})` : input;
   };
   const selectorSource = (name: string): string | undefined => {
     const selector = definition.contract.props[name];
@@ -1038,8 +1047,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const input = selectedInputs.get(prop.name);
     if (input === undefined) return [];
     return [
-      `const ${input.retain} = retainedBindingInput();`,
-      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => unknown> | undefined)?.[${quote(prop.name)}], ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), ${propTypeSource(prop, true)}));`,
+      `const ${input.retain} = retainedBindingInput((value: unknown) => { acceptedProps[${quote(prop.name)}] = value; }, ${"default" in prop.contract ? JSON.stringify(prop.contract.default) : "null"});`,
+      `let input${prop.name} = $derived.by(() => ${input.retain}((rest[${quote(BINDING_INPUTS_PROP)}] as Record<string, () => { value: unknown; attribute: string | undefined } | symbol> | undefined)?.[${quote(prop.name)}], () => ({ value: ${literalInputName}(${quote(prop.name)}, ${input.raw}, ${selectorSource(prop.contract.select!.from)}, true), raw: (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined)?.[${quote(prop.name)}]?.raw ?? ${input.raw} ?? null, html: Object.hasOwn((rest[${quote(LITERAL_INPUTS_PROP)}] as object | undefined) ?? {}, ${quote(prop.name)}) }), ${propTypeSource(prop, true)}));`,
     ];
   });
   const checkedPropSources = target.props.map((prop) =>
@@ -1136,7 +1145,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
-    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     ...(nestedDepthLimit === undefined ? [] : [
@@ -1293,7 +1302,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...(selectedInputs.size === 0 ? [] : [
         `const ${literalInitialsName} = new Map<string, unknown>();`,
         `function ${literalInputName}(name: string, initial: unknown, selector: unknown, once = false): unknown {`,
-        `  const literal = (rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { options?: readonly (readonly [unknown, unknown])[] }> | undefined)?.[name];`,
+        `  const literals = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { options?: readonly (readonly [unknown, unknown])[] }> | undefined;`,
+        "  const literal = literals !== undefined && Object.hasOwn(literals, name) ? literals[name] : undefined;",
         "  if (literal === undefined) return initial;",
         `  if (once && ${literalInitialsName}.has(name)) return ${literalInitialsName}.get(name);`,
         "  const option = literal.options?.find(([value]) => value === selector);",
@@ -1307,7 +1317,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       ...checkedPropSources,
       "}));",
       `const propValidityContract = ${JSON.stringify(validityContract)} as const;`,
-      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${quote(name)}: ${code.get(name)}`).join("")} }));`,
+      `let propInputValues = $derived.by(() => ({ ...checkedProps, ${target.props.map((prop) => `${quote(prop.name)}: ${selectors.includes(prop.name) ? `checkedProps[${quote(prop.name)}]` : prop.contract.select === undefined ? inputSource(prop.name) : `(input${prop.name}.html && rest[${quote(BINDING_INPUTS_PROP)}] !== undefined && Object.hasOwn(rest[${quote(BINDING_INPUTS_PROP)}] as object, ${quote(prop.name)}) ? htmlPropValue(input${prop.name}.raw, ${propTypeSource(prop, true)}) : input${prop.name}.html ? ${literalInputName}(${quote(prop.name)}, ${inputSource(prop.name)}, ${selectorSource(prop.contract.select.from)}) : ${inputSource(prop.name)})`}`).join(", ")}${selectors.filter((name) => definition.contract.props[name] === undefined).map((name) => `, ${quote(name)}: ${code.get(name)}`).join("")} }));`,
       "$effect(() => {",
       "  const element = rootElement;",
       "  if (element === undefined) return;",
@@ -1382,7 +1392,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
       `  props: () => ${hasProps ? "checkedProps" : "({})"}, propNames: ${JSON.stringify(target.props.map((prop) => prop.name))},`,
       ...(hasProps ? [
-        `  propInputs: (name: string) => { const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
+        `  propInputs: (name: string) => { ${target.props.filter((prop) => selectedInputs.has(prop.name)).map((prop) => `if (name === ${quote(prop.name)}) return input${prop.name}.raw;`).join(" ")} const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.filter((prop) => !selectedInputs.has(prop.name)).map((prop) => `${quote(prop.name)}: input${prop.name} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
       `  state: { ${states.map((state) => `${quote(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,

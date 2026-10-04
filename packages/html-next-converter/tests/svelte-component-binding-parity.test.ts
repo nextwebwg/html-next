@@ -17,11 +17,17 @@ const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-fr
   <x-literal-number id="mixed-invalid-from" value="14" from:value="literalInput.value"></x-literal-number>
   <x-literal-number id="mixed-invalid-bind" value="14" bind:value="literalInput.value"></x-literal-number>
   <x-literal-number $each="row, index of [1, 2]" from:id="concat('mixed-row-', index)" value="14" from:value="literalInput.value"></x-literal-number>
+  <x-state-field id="mixed-selected-from" value="14" from:value="literalInput.value"></x-state-field>
+  <x-state-field id="mixed-selected-bind" value="14" bind:value="literalInput.value"></x-state-field>
+  <x-prop-field id="mixed-selected-prop-from" value="14" from:mode="mode" from:value="literalInput.value"></x-prop-field>
+  <x-prop-field id="mixed-selected-prop-bind" value="14" from:mode="mode" bind:value="literalInput.value"></x-prop-field>
+  <x-state-field id="mixed-selected-string-from" value="99" from:value="stringInput.value"></x-state-field>
+  <x-state-field id="mixed-selected-string-bind" value="99" bind:value="stringInput.value"></x-state-field>
   <x-literal-number id="literal-number" value="14"></x-literal-number>
   <x-literal-boolean id="literal-boolean" value></x-literal-boolean>
   <x-literal-list id="literal-list" value="One Two"></x-literal-list>
   <x-prop-field id="literal-selected" value="14" from:mode="mode"></x-prop-field>
-</form>`).replace('<state name="selected"', '<state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
+</form>`).replace('<state name="selected"', '<state name="stringInput" type="object({ value: unknown })" value="{ value: \'14\' }"></state><state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="value"></output></template>
 <template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="value"></output></template>
 `;
@@ -162,7 +168,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await svelte.addScriptTag({ path: output.bundle });
             await Promise.all(pages.map((page) => page.waitForFunction(() =>
-              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 12 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
+              (window as unknown as { ownedHost?: unknown }).ownedHost !== undefined && (window as unknown as { fieldsHost?: unknown }).fieldsHost !== undefined && Object.keys((window as unknown as { selectedHosts?: object }).selectedHosts ?? {}).length === 18 && Object.keys((window as unknown as { optionHosts?: object }).optionHosts ?? {}).length === 3)));
             const compare = async () => {
               const [native, converted] = await Promise.all([snapshot(live), snapshot(svelte)]);
               assert.deepEqual(converted.behavior, native.behavior);
@@ -240,6 +246,8 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             const initialMixed = (await snapshot(live)).selected;
             for (const id of ["mixed-from", "mixed-bind"]) assert.deepEqual(initialMixed[id], { value: 12, input: 12, valid: true });
             for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1"]) assert.deepEqual(initialMixed[id], { value: 14, input: "14", valid: true });
+            for (const id of ["mixed-selected-from", "mixed-selected-bind", "mixed-selected-prop-from", "mixed-selected-prop-bind"]) assert.deepEqual(initialMixed[id], { value: null, input: "invalid", valid: false });
+            for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) assert.deepEqual(initialMixed[id], { value: 14, input: "14", valid: true });
             await setMode("state", "text");
             await compareSelected([12, 12, false], [12, 12, true]);
             await setSelected("Hello");
@@ -271,8 +279,23 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await compare();
               const mixed = (await snapshot(live)).selected;
               const value = next === 14 || next === "invalid" ? 14 : 6;
-              for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1"]) assert.deepEqual(mixed[id], { value, input: value, valid: true });
+              for (const id of ["mixed-invalid-from", "mixed-invalid-bind", "mixed-row-0", "mixed-row-1", "mixed-selected-from", "mixed-selected-bind", "mixed-selected-prop-from", "mixed-selected-prop-bind"]) assert.deepEqual(mixed[id], { value, input: value, valid: true });
             }
+            for (const mode of ["text", "number"]) {
+              await Promise.all(pages.map((page) => page.evaluate((next) => {
+                const hosts = (window as unknown as { selectedHosts: Record<string, { state: { mode: string } }> }).selectedHosts;
+                for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) hosts[id]!.state.mode = next;
+              }, mode)));
+              await compare();
+              const selected = (await snapshot(live)).selected;
+              for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) assert.deepEqual(selected[id], { value: "14", input: "14", valid: mode === "text" });
+            }
+            await Promise.all(pages.map((page) => page.evaluate(() => {
+              (window as unknown as { fieldsHost: { state: { stringInput: { value: unknown } } } }).fieldsHost.state.stringInput.value = 18;
+            })));
+            await compare();
+            const recovered = (await snapshot(live)).selected;
+            for (const id of ["mixed-selected-string-from", "mixed-selected-string-bind"]) assert.deepEqual(recovered[id], { value: 18, input: 18, valid: true });
             await Promise.all(pages.map((page) => page.locator("#untyped-number").fill("23")));
             await Promise.all(pages.map((page) => page.waitForFunction(() => document.querySelector("#amount")?.textContent === "23")));
             await compare();
