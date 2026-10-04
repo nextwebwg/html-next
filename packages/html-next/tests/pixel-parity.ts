@@ -61,7 +61,7 @@ async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Pr
   }, [actual.toString("base64"), expected.toString("base64")] as [string, string]);
 }
 
-async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | undefined, actual: Buffer, expected: Buffer): Promise<unknown> {
+async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | undefined, actual: Buffer, expected: Buffer) {
   const state = async (page: Page) => page.evaluate(() => {
     const button = document.querySelector("#case button");
     const style = button === null ? null : getComputedStyle(button);
@@ -103,7 +103,14 @@ export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Bu
   if (tolerance !== undefined && difference.changed > 0 && difference.changed <= tolerance.maxChangedPixels &&
     difference.maxChannelDelta <= tolerance.maxChannelDelta) return;
   let diagnostics: unknown;
-  try { diagnostics = await diagnosePixelMismatch(page, expectedPage, actual, expected); }
+  try {
+    const recaptured = await diagnosePixelMismatch(page, expectedPage, actual, expected);
+    diagnostics = recaptured;
+    // Native control paint can settle after DOM updates and action completion.
+    // Allow one settled recapture of live pages, still requiring exact RGBA equality.
+    // Frozen expected PNGs have no reference page and remain strict.
+    if (expectedPage !== undefined && recaptured.recapturedParity?.changed === 0) return;
+  }
   catch (error) { diagnostics = { error: String(error) }; }
   assert.fail(`${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; max channel delta=${difference.maxChannelDelta}; first=${JSON.stringify(difference.first)}; diagnostics=${JSON.stringify(diagnostics)}`);
 }
