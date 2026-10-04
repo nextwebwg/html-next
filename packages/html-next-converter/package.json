@@ -31,6 +31,7 @@
     "@nextwebwg/html-next": "workspace:*"
   },
   "devDependencies": {
+    "@formatjs/intl-durationformat": "0.11.1",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

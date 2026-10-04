@@ -600,14 +600,14 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       .map((artifact) => join(outDirectory, artifact.path)));
   });
 
-  it("typechecks a React context exported under a hyphenated state name", async () => {
+  it("typechecks a React context exported under a Unicode state name", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<link rel="component" href="./x-reader.html">
       <template component="x-card" status="early" summary="Card."><defs>
-        <state name="selection-mode" value="ready"></state>
+        <state name="selection😀" value="ready"></state>
       </defs><section><x-reader></x-reader></section></template>`);
     await writeFile(join(root, "x-reader.html"), `<template component="x-reader" status="early" summary="Reader."><defs>
-      <context name="selection-mode" from="x-card" as="mode"></context>
+      <context name="selection😀" from="x-card" as="mode"></context>
     </defs><output $value="mode"></output></template>`);
     const outDirectory = join(root, "out-react-context-name");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.24
+
+### Added
+
+- Reactive inline text expressions with single braces, including `{$user.name}`, across native, Vue, React, and server rendering.
+- Intl formatting expressions with explicit formatters or declared-type inference, native options, and an optional locale; Node 22 server rendering includes duration formatting.
+- Reproducible reactive benchmarks, pinned development-only comparison libraries, and a required performance regression check against main.
+
+### Improved
+
+- Repeated Intl formatting reuses bounded native formatter instances across updates and generated component instances.
+- Identifier names exclude dollars, dashes, and escapes; references stay case-sensitive, and public prop names cannot differ only by ASCII casing.
+
+## 1.0.0-alpha.23
+
 ### Added
 
 - Publish HTML source folders directly, including nested components, and consume the same package with native, Vue, or React Vite plugins without a library build script.

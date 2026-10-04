@@ -91,11 +91,14 @@
     "test:browser": "vitest run --config ../../vitest.browser.config.ts",
     "test:consumer": "vitest run --config ../../vitest.consumer.config.ts",
     "test:targets": "vitest run --config ../../vitest.targets.config.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "verify:performance": "tsx scripts/check-reactivity-performance.ts",
+    "report:reactivity:suite": "tsx scripts/report-reactive-suite.ts"
   },
   "dependencies": {
     "@dprint/formatter": "^0.5.1",
     "@dprint/typescript": "^0.96.1",
+    "@formatjs/intl-durationformat": "0.11.1",
     "dprint-plugin-malva": "^0.16.0",
     "dprint-plugin-markup": "^0.27.5",
     "jsdom": "27.4.0",
