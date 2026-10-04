@@ -81,6 +81,24 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "bound selects preserve authored value attributes and native option text selection",
+    source: `<template component="x-select-ssr" status="early" summary="Select defaults."><defs>
+      <state name="choice" type="number" value="2"></state><state name="choices" type="list(number)" value="[2]"></state><state name="items" type="list(number)" value="[1, 2]"></state><state name="many" type="boolean" value="true"></state>
+      <handler name="toggle"><set name="many" expr:value="many = false"></set></handler><handler name="both"><set name="choices" expr:value="[1, 2]"></set></handler>
+      </defs><section><select class="authored" value="Authored" bind:value="choice"><option value="1" selected>One</option><option value="2">Two</option></select>
+      <select class="dynamic" from:multiple="many" bind:value="choices"><option $each="item of items" from:value="item" $value="item"></option></select>
+      <select class="implicit" bind:value="choice"><option> One </option><option> 2 </option></select>
+      <select class="implicit-many" multiple bind:value="choices"><option> 1 </option><option> 2 </option></select>
+      <select class="nullable-options" bind:value="choice"><option $each="item of items" from:value="item = 2 ? null : item" $value="item"></option></select>
+      <button class="toggle" on:click="toggle">Toggle</button><button class="both" on:click="both">Both</button></section></template><x-select-ssr></x-select-ssr>`,
+    expect: { probe: `return qa('select').map(e => [e.getAttribute('value'), e.multiple, e.value, Array.from(e.selectedOptions, o => o.value)]);`,
+      result: [["Authored", false, "2", ["2"]], [null, true, "2", ["2"]], [null, false, "2", ["2"]], [null, true, "2", ["2"]], [null, false, "2", ["2"]]], after: [
+        { action: `document.querySelector('button.toggle').click();`, result: [["Authored", false, "2", ["2"]], [null, false, "2", ["2"]], [null, false, "2", ["2"]], [null, true, "2", ["2"]], [null, false, "2", ["2"]]] },
+        { action: `document.querySelector('button.both').click();`, result: [["Authored", false, "2", ["2"]], [null, false, "", []], [null, false, "2", ["2"]], [null, true, "1", ["1", "2"]], [null, false, "2", ["2"]]] },
+        { action: `document.querySelector('button.toggle').click();`, result: [["Authored", false, "2", ["2"]], [null, true, "", []], [null, false, "2", ["2"]], [null, true, "1", ["1", "2"]], [null, false, "2", ["2"]]] },
+      ] },
+  },
+  {
     name: "remaining strict declared formats reject malformed fields and recover",
     source: `<template component="x-format-fields" status="early" summary="Format fields."><defs>
       <state name="box" type="object({ ${formatCases.map(([type], index) => `f${index}: ${type}`).join(", ")} })" value="${formatObject(1)}"></state>

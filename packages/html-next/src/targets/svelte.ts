@@ -170,6 +170,24 @@ function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderC
   };
 }
 
+/** Attribute presence and Web IDL Boolean conversion differ for dynamic multiple values. */
+function selectMultiple(node: ElementNode, root: boolean, scope: Scope, lowering: Lowering, context: RenderContext): string {
+  const literal = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
+  const incoming = root ? lowering.attribute({ kind: "id", name: "htmlNextMultiple" }, unknownValueScope("htmlNextMultiple"), "multiple") : undefined;
+  const fallback = root ? `(() => { const htmlNextMultiple: unknown = rest.multiple; return Object.hasOwn(rest, "multiple") ? (${incoming}) !== undefined : ${literal}; })()` : String(literal);
+  const binding = node.attributes.find((entry) => entry.name === "multiple" && (entry.kind === "attribute" || entry.kind === "property"));
+  if (binding === undefined || binding.kind !== "attribute" && binding.kind !== "property") return fallback;
+  const source = binding.kind === "property" ? lowering.value(binding.expressionPlan!.ast, scope) : lowering.attribute(binding.expressionPlan!.ast, scope, "multiple");
+  const read = conformingRead(binding.expressionPlan!, scope, context, source);
+  const candidate = context.freshIdentifier("htmlNextMultiple");
+  return `(() => { const ${candidate}: unknown = ${read.source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? ${fallback} : ${binding.kind === "property" ? `Boolean(${candidate})` : `${candidate} != null && ${candidate} !== false`}; })()`;
+}
+
+function optionAttribute(value: string, context: RenderContext): string {
+  const candidate = context.freshIdentifier("htmlNextOptionValue");
+  return `(() => { const ${candidate}: unknown = ${value}; return ${candidate} == null ? {} : { value: String(${candidate}) }; })()`;
+}
+
 function conformingCondition(plan: CompiledExpression, scope: Scope, lowering: Lowering, context: RenderContext): { source: string; invalid: boolean } {
   const read = conformingRead(plan, scope, context, lowering.value(plan.ast, scope));
   if (!read.invalid) return { source: lowering.condition(plan.ast, scope), invalid: false };
@@ -350,9 +368,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const source = lowering.text(plan.ast, scope);
     const value = guard === undefined && !mayProduceInvalidResult(plan.ast, scope) ? source
       : retained(context, `(${guard === undefined ? "true" : guard}) ? ${source} : Symbol.for('html-next.invalid-result')`, "undefined as any");
+    const optionText = node.name === "option" ? context.freshIdentifier("htmlNextOptionText") : undefined;
     content = contentDirective.name === "html"
       ? `{@html htmlSite${context.htmlSites++}(${value})}`
-      : `{${value}}`;
+      : node.name === "option" ? `{(() => { const ${optionText}: unknown = ${value}; return ${optionText} == null ? "" : String(${optionText}); })()}` : `{${value}}`;
   }
   if (node.name === "template") return content ?? node.children.map((child) => renderNode(child, false, scope, lowering, context)).join("");
   const component = node.name.includes("-");
@@ -444,11 +463,21 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const read = conformingRead(attribute.expressionPlan!, scope, context, lowering.value(attribute.expressionPlan!.ast, scope));
     const value = read.source;
     const nativeProperty = attribute.kind === "property";
-    const multiple = node.attributes.some((entry) => entry.name === "multiple" && entry.kind === "literal");
+    const multiple = node.name === "select" ? selectMultiple(node, root, scope, lowering, context) : "false";
     const serialize = (source: string): string => attribute.name === "checked" ? nativeProperty ? `Boolean(${source})` : lowering.truthiness(source)
-      : node.name === "select" && multiple && !nativeProperty ? `(Array.isArray(${source}) ? ${source}.map(String) : [])`
+      : node.name === "select" && !nativeProperty ? `((${multiple}) ? (Array.isArray(${source}) ? ${source}.map(String) : []) : (${source} == null ? "" : String(${source})))`
       : nativeProperty && node.name === "select" ? `String(${source})` : `(${source} == null ? "" : String(${source}))`;
     const literalValue = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "value");
+    if (node.name === "select" && literalValue?.kind === "literal") {
+      context.usesAttributeBinding = true;
+      const candidate = context.freshIdentifier("htmlNextSelectValueAttribute");
+      const raw = `(Object.hasOwn(rest, "value") ? rest.value : ${quote(literalValue.value)})`;
+      const literal = root ? `(() => { const ${candidate}: unknown = ${raw}; return ${lowering.attribute({ kind: "id", name: candidate }, unknownValueScope(candidate), "value")}; })()` : quote(literalValue.value);
+      // HTML attribute names are case-insensitive. The public spread keeps an ordinary value
+      // attribute alongside Svelte's separate select-selection value during server rendering.
+      bindings.push(`{...(typeof document === 'undefined' ? { VALUE: ${literal} } : {})}`);
+      bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${literal})}`);
+    }
     const inheritsBinding = root && context.rootBindings?.includes(attribute.name);
     const defaultValue = quote(literalValue?.kind === "literal" ? literalValue.value : node.name === "textarea" ? node.children.filter((child) => child.kind === "text").map((child) => child.value).join("") : "");
     const defaultChecked = node.attributes.some((entry) => entry.kind === "literal" && entry.name === "checked");
@@ -546,8 +575,8 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           const value = read.invalid ? retained(context, read.source, literal?.kind === "literal" ? quote(literal.value) : "undefined as any") : read.source;
           // Svelte optimizes value= into a property write even on <output>. Keep the
           // server attribute declarative, and use only setAttribute/removeAttribute on the client.
-          bindings.push(`{...(typeof document === 'undefined' ? { ${quote(name)}: ${value} } : {})}`);
-          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${read.source}, ${bindingWriter(attribute)})}`);
+          bindings.push(`{...(typeof document === 'undefined' ? ${node.name === "option" && name === "value" ? optionAttribute(value, context) : `{ ${quote(name)}: ${value} }`} : {})}`);
+          bindings.push(`{@attach ${context.bindingHelperName}(${quote(name)}, () => ${read.source}, ${bindingWriter(attribute)}${node.name === "option" && name === "value" ? ", true" : ""})}`);
           if (root) context.rootAttributeBindings.add(attribute.name);
         }
       }
@@ -564,6 +593,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
           bindings.push(`{...(typeof document === 'undefined' ? { value: ${value} } : {})}`);
           bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source})}`);
           if (root) context.rootAttributeBindings.add("value");
+        } else if (node.name === "option" && attribute.name === "value") {
+          // An option's DOM value is always a string. Omitted value attributes use option text.
+          context.usesAttributeBinding = true;
+          bindings.push(`{...(typeof document === 'undefined' ? ${optionAttribute(value, context)} : {})}`);
+          bindings.push(`{@attach ${context.bindingHelperName}("value", () => ${read.source}, undefined, true)}`);
         } else bindings.push(`${declared?.[0] ?? (component ? attribute.name : svgAttributeName(attribute.name))}={${value}}`);
       }
     }
@@ -618,9 +652,9 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         const unboundSource = `(() => { const ${unbound}: unknown = Object.keys(rest).includes(${quote(name)}) ? rest[${quote(name)}] : ${literal?.kind === "literal" ? quote(literal.value) : "undefined"}; return ${lowering.attribute({ kind: "id", name: unbound }, unboundScope, name)}; })()`;
         const unboundDefault = name === "checked" ? `(${unboundSource}) !== undefined` : `String((${unboundSource}) ?? "")`;
         const candidate = context.freshIdentifier("htmlNextNativeValue");
-        const multiple = node.name === "select" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "multiple");
+        const multiple = node.name === "select" ? selectMultiple(node, root, scope, lowering, context) : "false";
         const candidateScope = unknownValueScope(candidate);
-        const serialized = name === "checked" ? lowering.condition({ kind: "id", name: candidate }, candidateScope) : multiple ? `(Array.isArray(${candidate}) ? ${candidate}.map(String) : [])` : `(${candidate} == null ? "" : String(${candidate}))`;
+        const serialized = name === "checked" ? lowering.condition({ kind: "id", name: candidate }, candidateScope) : node.name === "select" ? `((${multiple}) ? (Array.isArray(${candidate}) ? ${candidate}.map(String) : []) : (${candidate} == null ? "" : String(${candidate})))` : `(${candidate} == null ? "" : String(${candidate}))`;
         if (node.name === "textarea") content = `{typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? (${defaults}).value : ${serialized}; })() : (${defaults}).value}`;
         else bindings.push(`{...(typeof document === 'undefined' ? (() => { const ${candidate}: unknown = ${source}; return ${candidate} === Symbol.for('html-next.invalid-result') ? {} : { ${quote(name)}: ${serialized} }; })() : {})}`);
         if (node.name !== "input") {
@@ -958,7 +992,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     `<script lang="ts"${generics.length === 0 ? "" : ` generics=${quote(generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", "))}`}>`,
     'import type { Snippet } from "svelte";',
     ...(nestedDepthLimit !== undefined || states.length > 0 || contexts.length > 0 ? ['import { getContext, setContext } from "svelte";'] : []),
-    ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
+    ...(hasProps || (options.rootBindings?.length ?? 0) > 0 || context.usesControls || context.usesAttributeBinding || context.usesSampledSlots || context.usesInvocationClasses || scope.preservesRootFocus ? ['import { untrack } from "svelte";'] : []),
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host.svelte")};`] : []),
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
@@ -1075,14 +1109,16 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(context.usesAttributeBinding ? [
-      `function ${context.bindingHelperName}(name: string, read: () => unknown, update?: (value: any) => void) {`,
+      `function ${context.bindingHelperName}(name: string, read: () => unknown, update?: (value: any) => void, initialize = false) {`,
       "  return (element: Element) => {",
-      "    $effect(() => {",
-      "      const value = read();",
+      "    const apply = (value: unknown) => {",
       "      if (value === Symbol.for('html-next.invalid-result')) return;",
       "      if (value == null) element.removeAttribute(name);",
       "      else element.setAttribute(name, String(value));",
-      "    });",
+      "    };",
+      "    // Options must expose their initial DOM value before the parent select binding runs.",
+      "    if (initialize) apply(untrack(read));",
+      "    $effect(() => apply(read()));",
       ...(context.usesControls ? ["    return update === undefined ? undefined : attachGenericBinding(element, update);"] : []),
       "  };",
       "}",
