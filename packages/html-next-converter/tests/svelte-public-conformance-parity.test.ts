@@ -81,6 +81,14 @@ const formatCases = [
 const formatObject = (column: 1 | 2 | 3): string => `{ ${formatCases.map((entry, index) => `f${index}: '${entry[column]}'`).join(", ")} }`;
 const regressions: readonly ConverterCase[] = [
   {
+    name: "authored text preserves literal braces decoded entities and exact whitespace",
+    source: `<template component="x-literal-text" status="early" summary="Literal text."><defs><state name="count" type="number" value="1"></state><handler name="next"><set name="count" value="2"></set></handler></defs><section><p class="literal" title="{count}" data-entity="&amp;amp;">  {count} &amp; &#123;count&#125; {#if count} &lt;b&gt;  </p><pre> first
+  second </pre><span class="dynamic" $value="count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
+    expect: { probe: `return [q('p.literal').textContent, q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "1"], after: [
+      { action: `document.querySelector('button').click();`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "2"] },
+    ] },
+  },
+  {
     name: "bound selects preserve authored value attributes and native option text selection",
     source: `<template component="x-select-ssr" status="early" summary="Select defaults."><defs>
       <state name="choice" type="number" value="2"></state><state name="choices" type="list(number)" value="[2]"></state><state name="items" type="list(number)" value="[1, 2]"></state><state name="many" type="boolean" value="true"></state>

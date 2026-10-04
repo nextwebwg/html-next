@@ -9,7 +9,7 @@ import { parseDuration } from "../duration.js";
 import type { ComponentDefinition, ContextDeclaration, DataDeclaration, ElementNode, HandlerDeclaration, ReactiveDeclaration, SlotNode, SlotContract, TemplateNode } from "../template.js";
 import type { PropContract } from "../types.js";
 import { targetComponent } from "./backend.js";
-import { escapeHtml, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
+import { escapeHtml, literalAttribute, isVoidElement, isNativeBooleanAttribute, quote, svgAttributeName, selectorGenerics, dependentPropTypeSource, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
 import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { declaredReferenceGuard, handlerDestinationCheck } from "./type-guards.js";
 import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
@@ -264,7 +264,10 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
 
 function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: Lowering,
   context: RenderContext): string {
-  if (node.kind === "text") return escapeHtml(node.value);
+  if (node.kind === "text") {
+    // Svelte's server select matching relies on its static option-text normalization.
+    return context.boundSelect ? escapeHtml(node.value) : `{${quote(node.value)}}`;
+  }
   if (node.kind === "slot") {
     if (node.flow !== undefined) return renderEach(node, scope, lowering, context);
     const fallback = (node.fallback ?? []).map((child) => renderNode(child, false, scope, lowering, context)).join("");
@@ -529,7 +532,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         continue;
       }
       const declared = childProp(attribute.name);
-      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${quote(attribute.value)}`);
+      if (declared === undefined) literals.push(!component && isNativeBooleanAttribute(attribute.name) ? attribute.name : `${attribute.name}=${literalAttribute(attribute.value)}`);
       else {
         const [prop, contract] = declared;
         literals.push(`${prop}={${literalPropValue(attribute.value, contract)}}`);
