@@ -91,7 +91,7 @@ describe("framework converter", () => {
     await writeFile(join(root, "components", "nested", "card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="label" type="string">Label.</prop></props>
       <article class="card" style="border-radius: 2px" class:ready="true" style:color="'red'" from:aria-label="label"><slot></slot></article>
-      <style>:host { color: red; } :host-state([label="Hello"]) { font-weight: bold; }</style>
+      <style>:host { color: red; } :host([label="Hello"]) { font-weight: bold; }</style>
     </template>`);
     await writeFile(join(root, "components", "nested", "orphan.html"),
       '<template component="x-orphan" status="early" summary="Orphan."><aside>Orphan</aside></template>');

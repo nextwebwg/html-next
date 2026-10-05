@@ -3,6 +3,7 @@ import { selectedPropType } from "./contract.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
 import {
@@ -789,6 +790,16 @@ function conformsAtDestination(value: Value, type: PropType | TypeNode | null | 
  * they last had: a binding does not write, and a computed does not recompute, so nothing downstream
  * of a broken contract moves.
  */
+const reportedAuthoredWarnings = new WeakMap<ComponentDefinition, Set<string>>();
+
+function warnAuthored(definition: ComponentDefinition, location: string, message: string): void {
+  let reported = reportedAuthoredWarnings.get(definition);
+  if (reported === undefined) reportedAuthoredWarnings.set(definition, reported = new Set());
+  if (reported.has(location)) return;
+  reported.add(location);
+  console.warn(`${definition.source.file}: HR007: ${message}`);
+}
+
 function evalConforming(
   expression: string | CompiledExpression,
   scope: ReactiveScope,
@@ -802,6 +813,7 @@ function evalConforming(
     const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
       ? type : declaredTypeAt(definition, path, scope);
     if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
+    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` does not satisfy its declared type.`);
     return NONCONFORMING;
   }
   try {
@@ -989,12 +1001,23 @@ function applyBoundControlValue(element: Element, name: string, value: Value): b
   return false;
 }
 
+const eventDependentHandlers = new WeakMap<HandlerDeclaration, boolean>();
+
 function runHandler(
   declaration: HandlerDeclaration,
   element: Element,
   scope: ReactiveScope,
   context: RuntimeRenderContext,
+  event: Event,
 ): void {
+  // Per-invocation lexical scope preserves the outer event during synchronous nested dispatch.
+  let readsEvent = eventDependentHandlers.get(declaration);
+  if (readsEvent === undefined) {
+    readsEvent = declaration.steps.some((step) => [step.guard, ...("value" in step ? [step.value] : [])]
+      .some((expression) => expression?.dependencies.some((name) => name.split(".", 1)[0] === "$$event")));
+    eventDependentHandlers.set(declaration, readsEvent);
+  }
+  if (readsEvent) scope = scope.fork([["$$event", event]]);
   for (const step of declaration.steps) {
     if (step.guard !== undefined) {
       const guard = evalConforming(step.guard, scope, context.definition);
@@ -1004,7 +1027,11 @@ function runHandler(
       const next = evalConforming(step.value, scope, context.definition);
       if (next === NONCONFORMING) continue;
       const path = resolveWritablePath(scope, step.writablePath);
-      if (path === undefined || !conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) continue;
+      if (path === undefined) continue;
+      if (!conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) {
+        warnAuthored(context.definition, `handler:${declaration.name}:${step.path}`, `State \`${step.path}\` does not satisfy its declared type.`);
+        continue;
+      }
       setWritablePath(scope, path, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
@@ -1093,7 +1120,7 @@ function bindEvents(
       if (!eventPasses(event, target, binding.modifiers)) return;
       if (binding.modifiers.includes("prevent")) event.preventDefault();
       if (binding.modifiers.includes("stop")) event.stopPropagation();
-      runHandler(declaration, target, scope, context);
+      runHandler(declaration, target, scope, context, event);
     };
     const capture = binding.modifiers.includes("capture");
     let attached = false;
@@ -3335,8 +3362,12 @@ export interface ComponentHost {
   readonly root: Element;
   /** Alias for the rendered root used by generated component controllers. */
   readonly element: Element;
-  /** Component-owned state, computed values, and data resources; never declared props. */
+  /** Mutable state, readonly computed state and inherited context; never props or resources. */
   readonly state: Record<string, unknown>;
+  /** Declared resource handles; response and status fields are readonly. */
+  readonly data: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Subscribe to a connection lifecycle or DOM event, with lifecycle-owned cleanup. */
+  on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   /** Per-prop handles for accepted values, latest input, and validity. */
   readonly props: Readonly<Record<string, ComponentProp>>;
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
@@ -3419,22 +3450,48 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       .filter((declaration) => declaration.kind === "state")
       .map((declaration) => declaration.name),
   );
-  const propNames = new Set(Object.keys(instance.definition.contract.props));
+  const declarations = instance.definition.declarations ?? [];
+  const stateNames = new Set(declarations.flatMap((declaration) =>
+    declaration.kind === "state" || declaration.kind === "computed" ? [declaration.name]
+      : declaration.kind === "context" ? [declaration.as ?? declaration.name] : []));
+  const dataNames = new Set(declarations.filter((declaration) => declaration.kind === "data").map((declaration) => declaration.name));
+  const nested = new WeakMap<object, Map<string, object>>();
+  const write = (path: string, value: unknown, readonly: boolean, apply: () => void): boolean => {
+    if (readonly) {
+      warnAuthored(instance.definition, `controller:${path}`, `Destination \`${path}\` is read-only.`);
+    } else if (!conformsAtDestination(value as Value, declaredTypeAt(instance.definition, path, instance.scope))) {
+      warnAuthored(instance.definition, `controller:${path}`, `State \`${path}\` does not satisfy its declared type.`);
+    } else apply();
+    return true;
+  };
+  const wrap = (value: unknown, path: string, readonly: boolean): unknown => {
+    if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+    let paths = nested.get(value);
+    if (paths === undefined) nested.set(value, paths = new Map());
+    const known = paths.get(path);
+    if (known !== undefined) return known;
+    const proxy = new Proxy(value, {
+      get: (target, key, receiver) => wrap(Reflect.get(target, key, receiver), `${path}.${String(key)}`, readonly),
+      set: (target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => { Reflect.set(target, key, next); }),
+    });
+    paths.set(path, proxy);
+    return proxy;
+  };
   const state = new Proxy({}, {
     get: (_target, key) => {
-      if (typeof key !== "string" || propNames.has(key)) return undefined;
+      if (typeof key !== "string" || !stateNames.has(key)) return undefined;
       const value = instance.scope.get(key);
-      return value === ABSENT ? undefined : value;
+      return value === ABSENT ? undefined : wrap(value, key, !writable.has(key));
     },
-    set: (_target, key, value) => {
-      if (typeof key !== "string" || !writable.has(key)) {
-        throw new TypeError(`Only declared state roots are writable; \`${String(key)}\` is read-only.`);
-      }
-      instance.scope.set(key, value as Value);
-      return true;
-    },
-    has: (_target, key) => typeof key === "string" && !propNames.has(key) && instance.scope.has(key),
+    set: (_target, key, value) => write(String(key), value, typeof key !== "string" || !writable.has(key),
+      () => instance.scope.set(key as string, value as Value)),
+    has: (_target, key) => typeof key === "string" && stateNames.has(key),
   });
+  const data = new Proxy({}, {
+    get: (_target, key) => typeof key === "string" && dataNames.has(key) ? wrap(instance.scope.get(key), key, true) : undefined,
+    set: (_target, key, value) => write(`data.${String(key)}`, value, true, () => {}),
+    has: (_target, key) => typeof key === "string" && dataNames.has(key),
+  }) as ComponentHost["data"];
   const props = Object.create(null) as Record<string, ComponentProp>;
   for (const name of Object.keys(instance.definition.contract.props)) {
     const validity = (): GeneralizedValidityState => {
@@ -3482,6 +3539,19 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
+    data,
+    on(type, callback) {
+      let stopped = false;
+      const stop = host.effect(() => {
+        if (type === "connect") return untracked(() => callback(new Event(type)));
+        if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
+        const root = host.root;
+        const listener = (event: Event): void => { callback(event); };
+        root.addEventListener(type, listener);
+        return () => root.removeEventListener(type, listener);
+      });
+      return () => { stopped = true; stop(); };
+    },
     props: Object.freeze(props),
     refs,
     slots,

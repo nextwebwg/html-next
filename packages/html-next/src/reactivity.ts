@@ -1,3 +1,4 @@
+import { isNativeEvent } from "./freeze.js";
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
@@ -597,6 +598,7 @@ export class ReactiveScope implements Scope {
     if (value === null || typeof value !== "object") return value;
     const cached = proxyCache.get(value);
     if (cached !== undefined) return cached as Value;
+    if (isNativeEvent(value)) return value;
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => {
         if (activeEffect !== undefined) {

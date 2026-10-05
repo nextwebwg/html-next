@@ -234,7 +234,7 @@ function validateCompiledExpression(
 ): void {
   for (const dependency of expression.dependencies) {
     const root = dependency.split(".", 1)[0]!;
-    if (!scope.roots.has(root) && scope.allowUndeclared !== true) {
+    if (!scope.roots.has(root) && (root === "$$event" || scope.allowUndeclared !== true)) {
       fail("HT003", `Expression root \`${root}\` is not declared in this scope.`, source);
     }
   }
@@ -879,7 +879,7 @@ function readDeclarations(
     declarations.push({
       kind: "handler",
       name,
-      steps: readHandlerSteps(element, scope, source, stateTypes, eventTypes),
+      steps: readHandlerSteps(element, { ...scope, roots: new Set([...roots, "$$event"]) }, source, stateTypes, eventTypes),
     });
   }
   for (const declaration of declarations) {

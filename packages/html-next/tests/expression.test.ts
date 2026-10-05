@@ -177,6 +177,45 @@ describe("expression: Intl formatting", () => {
   });
 });
 
+describe("expression: native handler event", () => {
+  it("reserves $$event without changing ordinary reference names", () => {
+    assert.deepEqual(compileExpression("$$event").ast, { kind: "id", name: "$$event" });
+    assert.deepEqual(compileExpression("$$event.detail").dependencies, ["$$event.detail"]);
+    for (const expression of ["$$name", "$$eventual", "$$value", "$$event.type()", "$$event.preventDefault()"] ) {
+      assert.throws(() => compileExpression(expression), SyntaxError, expression);
+    }
+    assert.equal(getWritablePath("$$event", new Set(["$$event"])), undefined);
+    assert.equal(getWritablePath("$$event.detail", new Set(["$$event"])), undefined);
+    assert.throws(() => evaluate("$$event", scope({})), UndeclaredName);
+  });
+
+  it("reads native getters and passes the original event through structured values", () => {
+    const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
+    const target = new EventTarget();
+    let listenerError: unknown;
+    target.addEventListener("select", () => {
+      try {
+        const values = scope({ "$$event": event });
+        assert.equal(evaluate("$$event", values), event);
+        assert.equal(evaluate("$$event.type", values), "select");
+        assert.equal(evaluate("$$event.target", values), target);
+        assert.equal(evaluate("$$event.currentTarget", values), target);
+        assert.equal(evaluate("$$event['detail'].item", values), "Ada");
+        assert.deepEqual(evaluate("{ source: $$event, item: $$event.detail.item }", values), { source: event, item: "Ada" });
+        assert.equal(evaluate("$$event.cancelable", values), true);
+      } catch (error) { listenerError = error; }
+    });
+    target.dispatchEvent(event);
+    assert.ifError(listenerError);
+    assert.equal(evaluate("$$event.currentTarget", scope({ "$$event": event })), null);
+  });
+
+  it("treats native events with no own enumerable fields as present", () => {
+    assert.equal(truthy(new Event("activate")), true);
+    assert.equal(truthy(new CustomEvent("select", { detail: null })), true);
+  });
+});
+
 describe("expression: reads and absent value", () => {
   it("reads declared identifiers and dotted paths", () => {
     const s = scope({ user: { name: "Ada" }, n: 3 });

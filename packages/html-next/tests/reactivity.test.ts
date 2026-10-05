@@ -10,6 +10,28 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("stores native events without proxying them, including inside reactive structures", () => {
+    const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
+    const scope = new ReactiveScope([["event", event], ["selection", { source: event, item: "Ada" }]]);
+    assert.equal(scope.get("event"), event);
+    assert.equal((scope.get("selection") as { source: Value }).source, event);
+    assert.equal(evaluate("$event.detail.item", scope), "Ada");
+    assert.equal(evaluate("$selection.source.type", scope), "select");
+    const seen: Value[] = [];
+    createEffect(scope.scheduler, () => { seen.push(scope.get("event")!); });
+    event.preventDefault();
+    scope.scheduler.flush();
+    assert.equal(evaluate("$event.defaultPrevented", scope), true);
+    assert.deepEqual(seen, [event]);
+    scope.set("event", event);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event]);
+    const next = new Event("next");
+    scope.set("event", next);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event, next]);
+  });
+
   it("keeps a computed null until its first valid result, then retains its last valid result", () => {
     const scope = new ReactiveScope([["source", "oops"]]);
     const seen: unknown[] = [];

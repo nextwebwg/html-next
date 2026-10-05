@@ -4,7 +4,7 @@ import type { ExpressionNode } from "./expression.js";
 
 type TokenKind = 0 | 1 | 2 | 3 | 4 | 5;
 
-const TOKEN = new RegExp(String.raw`\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d+|\.(?!${IDENTIFIER_START}|[\d$]))?|\.\d+)(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%(?!${IDENTIFIER_START}|[\d$.]|\s*(?:\d|\.\d|\$)))?|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|(\$?${IDENTIFIER})|([=<>+*/%(),.?:{}[\]\-])|$)`, "uy");
+const TOKEN = new RegExp(String.raw`\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d+|\.(?!${IDENTIFIER_START}|[\d$]))?|\.\d+)(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%(?!${IDENTIFIER_START}|[\d$.]|\s*(?:\d|\.\d|\$)))?|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|(\$\$event(?!${IDENTIFIER_START}|[\d$])|\$?${IDENTIFIER})|([=<>+*/%(),.?:{}[\]\-])|$)`, "uy");
 const ESCAPE = /\\([\s\S])/g;
 
 const PRECEDENCE: Readonly<Record<string, number>> = {
@@ -232,7 +232,7 @@ export function parseExpression(source: string): ExpressionNode {
         }
         return { kind: "call", fn: name, args };
       }
-      return { kind: "id", name: name.startsWith("$") ? name.slice(1) : name };
+      return { kind: "id", name: name === "$$event" ? name : name.startsWith("$") ? name.slice(1) : name };
     }
     throw new SyntaxError("Unexpected end of expression.");
   }

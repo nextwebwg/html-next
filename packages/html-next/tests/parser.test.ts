@@ -912,3 +912,21 @@ describe("parseComponent", () => {
   });
 
 });
+
+
+describe("handler event references", () => {
+  it("reserves $$event for handler expressions and guards", () => {
+    const definition = parseComponent(`<template component="x-event"><defs>
+      <event name="activate" type="unknown"></event>
+      <handler name="activate"><dispatch event="activate" expr:value="$$event" $if="$$event.type = 'click'"></dispatch></handler>
+      </defs><button on:click="activate"></button></template>`);
+    const handler = definition.declarations?.find((entry) => entry.kind === "handler");
+    assert.equal(handler?.kind, "handler");
+    if (handler?.kind !== "handler") return;
+    assert.deepEqual(handler.steps[0]?.guard?.dependencies, ["$$event.type"]);
+    for (const markup of [
+      '<p $value="$$event.type"></p>',
+      '<defs><computed name="source" from="$$event"></computed></defs><p></p>',
+    ]) assert.throws(() => parseComponent(`<template component="x-invalid-event">${markup}</template>`), HtmlDiagnosticError);
+  });
+});

@@ -97,7 +97,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
   <style>
     :host { display: block; }
     :host-state([open]) .panel { outline: 1px solid; }
-    :host-state([size="sm"]) h2 { font-size: small; }
+    :host([size="sm"]) h2 { font-size: small; }
     :slotted(p) { margin: 0; }
     x-badge { margin-inline: auto; }
   </style>

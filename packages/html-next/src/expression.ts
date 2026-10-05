@@ -1,3 +1,4 @@
+import { isNativeEvent } from "./freeze.js";
 import { parseExpression } from "./expression-parser.js";
 import { formatValue, formattingType } from "./format.js";
 import type { TypeNode } from "./type-system.js";
@@ -18,6 +19,7 @@ export type Value =
   | boolean
   | null
   | Absent
+  | Event
   | typeof NONCONFORMING
   | readonly Value[]
   | { readonly [key: string]: Value };
@@ -73,9 +75,9 @@ export function truthy(value: Value): boolean {
   if (typeof value === "string") return value.length > 0;
   if (typeof value === "number") return value !== 0 && value === value;
   if (Array.isArray(value)) return value.length > 0;
-  // A native Error is a present failure even when its message is non-enumerable. The empty-record
-  // rule applies to declarative object values, not to platform error objects in <data>.error.
-  if (value instanceof Error) return true;
+  // Native events and errors are present even without enumerable fields. The empty-record rule
+  // applies to declarative object values, not these platform objects.
+  if (value instanceof Error || isNativeEvent(value)) return true;
   for (const key in value) if (Object.hasOwn(value, key)) return true;
   return false;
 }
@@ -488,7 +490,7 @@ export function getWritablePath(
 ): WritablePath | undefined {
   const result: WritablePathSegment[] = [];
   if (!appendWritable(compileExpression(source).ast, result)
-    || !writableRoots.has(result[0] as string)) return undefined;
+    || result[0] === "$$event" || !writableRoots.has(result[0] as string)) return undefined;
   return result;
 }
 

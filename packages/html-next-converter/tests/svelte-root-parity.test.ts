@@ -18,7 +18,7 @@ const source = `<template component="x-action" status="early" summary="Button or
 </defs><template $match><a $when="as = 'a'" class="action" from:href="href">Go</a>
 <button $else class="action" type="button">Go</button></template>
 <style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }
-  :host-state([as="a"]) { background: rgb(240, 240, 240); }</style></template>`;
+  :host([as="a"]) { background: rgb(240, 240, 240); }</style></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, string | null>; readonly pixels: Buffer }> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));

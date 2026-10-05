@@ -62,6 +62,48 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} exposes handler events and separates validated state from readonly data`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-event-contract"><defs>
+          <state name="count" type="number" value="1"></state>
+          <computed name="doubled" from="$count * 2"></computed>
+          <data name="search" src="/search"></data>
+          <event name="activate" type="event"></event>
+          <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+          </defs><button on:click="activate">{$doubled}</button></template><x-event-contract></x-event-contract>`);
+        await page.route('**/search', route => route.fulfill({ json: { title: 'Result' } }));
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('button')!;
+          const host = runtime.getComponentHost(root);
+          const warnings: string[] = [];
+          console.warn = (message: unknown) => warnings.push(String(message));
+          host.state.count = 2;
+          host.state.count = 'bad';
+          host.state.count = 'bad';
+          host.state.doubled = 9;
+          await Promise.resolve();
+          let source: Event | undefined;
+          const stop = host.on('activate', (event: CustomEvent) => { source = event.detail; });
+          const event = new MouseEvent('click', { bubbles: true });
+          root.dispatchEvent(event);
+          stop();
+          const firstSource = source;
+          source = undefined;
+          root.dispatchEvent(new MouseEvent('click'));
+          return { count: host.state.count, doubled: host.state.doubled,
+            separateData: host.state.search === undefined && host.data.search !== undefined,
+            sameEvent: firstSource === event, unsubscribed: source === undefined,
+            warnings: warnings.length, text: root.textContent };
+        });
+        assert.deepEqual(actual, { count: 2, doubled: 4, separateData: true, sameEvent: true, unsubscribed: true, warnings: 2, text: '4' });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} updates braced inline expressions without replacing siblings or retained keyed rows`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

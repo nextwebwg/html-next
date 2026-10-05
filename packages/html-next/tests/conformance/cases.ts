@@ -196,7 +196,7 @@ const successes: ConformanceCase[] = [
       tag: "x-camel-state",
       defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state type="string" name="toneName" value="warm"></state>`,
       root: `<div></div>`,
-      style: `:host-state([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
+      style: `:host([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
       use: `<x-camel-state id="c"></x-camel-state>`,
     }),
     expect: {
@@ -210,7 +210,7 @@ const successes: ConformanceCase[] = [
       tag: "x-rail",
       defs: `<prop name="wide" type="boolean" default="false">Wide.</prop>`,
       root: `<div><slot></slot></div>`,
-      style: `:host > :slotted(*) { margin-left: 7px; } :host-state([wide]) > :slotted(p) { width: 55px; }`,
+      style: `:host > :slotted(*) { margin-left: 7px; } :host([wide]) > :slotted(p) { width: 55px; }`,
       use: `<x-rail wide><p id="child"><span id="grandchild">A</span></p></x-rail>`,
     }),
     expect: {
