@@ -17,7 +17,7 @@ catalog:
   '@reactively/core': 0.0.8
   '@reatom/core': 1001.3.0
   '@solidjs/signals': 0.13.13
-  '@types/node': 25.9.8
+  '@types/node': 25.9.9
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
   '@vue/compiler-sfc': 3.5.43
@@ -28,12 +28,12 @@ catalog:
   css-tree: 3.2.1
   cssstyle: 6.2.0
   esbuild: 0.28.2
-  mobx: 7.0.5
+  mobx: 7.0.6
   oxlint: 1.86.0
   parse5: 8.0.1
   postcss: 8.5.28
   playwright: 1.63.0
-  pota: 0.7.82
+  pota: 0.22.235
   reactive-framework-test-suite: 0.1.0
   react: 19.3.0
   react-dom: 19.3.0
@@ -47,7 +47,7 @@ catalog:
   vite: 8.3.2
   vitest: 5.0.3
   vue: 3.5.43
-  vue-tsc: 3.3.11
+  vue-tsc: 3.3.12
 
 allowBuilds:
   esbuild: true
