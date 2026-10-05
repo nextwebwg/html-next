@@ -1,7 +1,6 @@
 import type {
   ComponentDefinition,
   EventDeclaration,
-  MethodDeclaration,
   SlotContract,
 } from "../template.js";
 import type { PropContract } from "../types.js";
@@ -18,15 +17,10 @@ export interface TargetEvent extends EventDeclaration {
   readonly callbackName: string;
 }
 
-export interface TargetMethod extends MethodDeclaration {
-  readonly returnType: string;
-}
-
 export interface TargetComponent {
   readonly definition: ComponentDefinition;
   readonly props: readonly TargetProp[];
   readonly events: readonly TargetEvent[];
-  readonly methods: readonly TargetMethod[];
   readonly slots: readonly SlotContract[];
   readonly controller?: string;
 }
@@ -63,9 +57,6 @@ export function targetComponent(definition: ComponentDefinition): TargetComponen
       detailType: typeScriptType(declarationTypeNode(event.type, event.shape)!),
       callbackName: `on${pascalCase(event.name)}`,
     }))),
-    methods: Object.freeze(declarations.filter((declaration): declaration is MethodDeclaration =>
-      declaration.kind === "method"
-    ).map((method) => Object.freeze({ ...method, returnType: declarationTypeSource(method.returns) }))),
     slots: Object.freeze([...(definition.slots ?? [])]),
     ...(definition.controller === undefined ? {} : { controller: definition.controller }),
   });

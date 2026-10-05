@@ -8,7 +8,6 @@ import {
   installComponentGraph,
   installInlineDefinitionParser,
   observeDocument,
-  setControllerModule,
 } from "./runtime.js";
 
 export interface BrowserLoaderOptions {
@@ -91,6 +90,7 @@ export async function startBrowserComponents(
   installComponentGraph(loaded.graph, root);
   const report = options.onError ?? ((error: unknown) => console.error(error));
   let stopped = false;
+  const initialized = new WeakSet<object>();
   // A later root may share dependencies with the installed graph; only its new definitions are
   // added. Installing them renders the instances already waiting in the document.
   const addRoot = (href: string | null): void => {
@@ -118,14 +118,19 @@ export async function startBrowserComponents(
       const node = loaded.registry.get(definition.contract.tag)?.node;
       if (node?.controller === undefined) return;
       const module = loadControllerModule(node, options.importer);
-      setControllerModule(element, module);
       let disconnected = false;
       let cleanup: void | (() => void);
       void module
         // A module import may outlive the connection that requested it. Reconnection starts a
         // fresh lifecycle attempt; invoking this stale one would duplicate controller work and
         // let asynchronous setup attach owners to an already disconnected instance.
-        .then((loaded) => disconnected ? undefined : loaded.default(getComponentHost(element)!))
+        .then((loaded) => {
+          if (disconnected) return;
+          const host = getComponentHost(element)!;
+          if (initialized.has(host)) return;
+          initialized.add(host);
+          return loaded.default(host);
+        })
         .then((result) => {
           if (typeof result !== "function") return;
           if (disconnected) result();

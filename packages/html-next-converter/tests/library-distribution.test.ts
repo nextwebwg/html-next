@@ -5,6 +5,8 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
+import { sveltePlugin } from "./helpers/svelte.js";
 import { describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
@@ -20,8 +22,8 @@ const run = promisify(execFile);
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 
-describe.skipIf(!enabled)("distributable three-target component library", () => {
-  it("packs nested HTML Next, Vue, and React outputs for an independent consumer", async () => {
+describe.skipIf(!enabled)("distributable component library", () => {
+  it("packs nested HTML Next, Vue, React, and Svelte outputs for an independent consumer", async () => {
     const directory = await mkdtemp(join(tmpdir(), "html-next-three-target-package-"));
     try {
       const source = join(directory, "source");
@@ -40,7 +42,7 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
 </defs><article class="card" from:aria-label="title"><x-badge></x-badge><div $html="body"></div><slot></slot></article>
 <style>:host { display: block; padding: 4px; }</style></template>`);
       await writeFile(badge, `<template component="x-badge" status="early" summary="A badge.">
-<span class="badge">New</span><style>:host { color: red; }</style></template>`);
+<defs><prop name="label" type="string" default="New">Label.</prop></defs><span class="badge" $value="label"></span><style>:host { color: red; }</style></template>`);
       await writeFile(unused, `<template component="x-unused" status="early" summary="Unused.">
 <aside>UNUSED_COMPONENT_MARKER</aside><style>:host { --unused-component-style: keep-out; }</style></template>`);
 
@@ -53,6 +55,9 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
         entries: ["components/**"], outDirectory: join(convertedRoot, "vue-target") });
       const react = await convertComponents({ mode: "library", target: "react", root: source,
         entries: ["components/**"], outDirectory: join(convertedRoot, "react-target") });
+      const svelte = await convertComponents({ mode: "library", target: "svelte", root: source,
+        entries: ["components/**"], outDirectory: join(convertedRoot, "svelte-target") });
+      assert.deepEqual(svelte.components.map((component) => component.tag), ["x-card", "x-badge", "x-unused"]);
       assert.deepEqual(vue.components.map((component) => component.tag), ["x-card", "x-badge", "x-unused"]);
       assert.deepEqual(react.components.map((component) => component.tag), ["x-card", "x-badge", "x-unused"]);
       const packageJsonPath = join(packageRoot, "package.json");
@@ -64,12 +69,16 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
       };
       manifest.exports["./vue-converted"] = "./converted/vue-target/vue/index.ts";
       manifest.exports["./react"] = "./converted/react-target/react/index.ts";
+      manifest.exports["./svelte"] = "./converted/svelte-target/svelte/index.ts";
+      for (const component of svelte.components) {
+        manifest.exports[`./svelte/${component.name}`] = `./converted/svelte-target/${component.artifact}`;
+      }
       for (const component of react.components) {
         manifest.exports[`./react/${component.name}`] = `./converted/react-target/${component.artifact}`;
       }
-      manifest.dependencies = { ...manifest.dependencies, ...vue.package.dependencies, ...react.package.dependencies };
-      Object.assign(manifest.peerDependencies, vue.package.peerDependencies, react.package.peerDependencies);
-      manifest.peerDependenciesMeta = { vue: { optional: true }, react: { optional: true } };
+      manifest.dependencies = { ...manifest.dependencies, ...vue.package.dependencies, ...react.package.dependencies, ...svelte.package.dependencies };
+      Object.assign(manifest.peerDependencies, vue.package.peerDependencies, react.package.peerDependencies, svelte.package.peerDependencies);
+      manifest.peerDependenciesMeta = { vue: { optional: true }, react: { optional: true }, svelte: { optional: true } };
       assert.equal(manifest.dependencies.parse5, "^8.0.1");
       await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -80,13 +89,15 @@ describe.skipIf(!enabled)("distributable three-target component library", () => 
       const installed = join(consumer, "node_modules", "@example", "html-next-triad");
       await access(join(consumer, "node_modules", "parse5", "package.json"));
       await mkdir(join(consumer, "node_modules", "@types"), { recursive: true });
-      for (const name of ["react", "react-dom", "@types/react", "@types/react-dom"]) {
+      for (const name of ["react", "react-dom", "@types/react", "@types/react-dom", "svelte"]) {
         await symlink(resolve(nodeModulesPath, name), join(consumer, "node_modules", name), "dir");
       }
       for (const path of ["dist/index.js", "components/card.html", "components/nested/badge.html",
         "converted/vue-target/vue/index.ts", "converted/react-target/react/index.ts", "converted/react-target/react/components/XCard.tsx",
         "converted/react-target/react/components/nested/XBadge.tsx", "converted/react-target/react/components/XCard.css",
-        "converted/vue-target/html-next.conversion.json", "converted/react-target/html-next.conversion.json"]) {
+        "converted/vue-target/html-next.conversion.json", "converted/react-target/html-next.conversion.json",
+        "converted/svelte-target/html-next.conversion.json", "converted/svelte-target/svelte/index.ts",
+        "converted/svelte-target/svelte/components/XCard.svelte", "converted/svelte-target/svelte/components/nested/XBadge.svelte"]) {
         await access(join(installed, path));
       }
 
@@ -154,6 +165,38 @@ createRoot(document.querySelector("main")!).render(<XCard title="Hello"><XBadge 
       const mountedCSS = mountedBundle.outputFiles.find((file) => file.path.endsWith(".css"))?.text;
       assert.ok(mountedJS);
       assert.ok(mountedCSS);
+      await writeFile(join(consumer, "App.svelte"), `<script>import { XCard, XBadge } from "@example/html-next-triad/svelte";</script><XCard title="Hello"><XBadge /></XCard>`);
+      const svelteServer = join(consumer, "svelte-server.mjs");
+      const svelteServerEntry = join(consumer, "svelte-server.ts");
+      await writeFile(svelteServerEntry, 'import { render } from "svelte/server"; import App from "./App.svelte"; export const html = render(App).body;');
+      await build({ entryPoints: [svelteServerEntry], outfile: svelteServer, bundle: true,
+        platform: "node", format: "esm", external: ["svelte", "svelte/*", "parse5"], loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
+      const svelteMarkup = (await import(pathToFileURL(svelteServer).href) as { html: string }).html;
+      assert.match(svelteMarkup, /aria-label="Hello"/);
+      assert.match(svelteMarkup, /New/);
+      assert.match(svelteMarkup, /<b\b[^>]*>Safe<\/b>/);
+      const svelteEntry = join(consumer, "svelte-browser.ts");
+      await writeFile(svelteEntry, 'import { mount, hydrate } from "svelte"; import App from "./App.svelte"; const target = document.querySelector("main")!; if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target });');
+      const svelteMounted = await build({ entryPoints: [svelteEntry], bundle: true, write: false, metafile: true,
+        platform: "browser", format: "iife", outdir: join(consumer, "svelte-mounted"), plugins: [sveltePlugin("client")] });
+      const svelteJS = svelteMounted.outputFiles.find((file) => file.path.endsWith(".js"))?.text;
+      const svelteCSS = svelteMounted.outputFiles.find((file) => file.path.endsWith(".css"))?.text;
+      assert.ok(svelteJS); assert.ok(svelteCSS);
+      const svelteInputs = Object.keys(svelteMounted.metafile!.inputs);
+      assert.equal(svelteInputs.filter((path) => path.endsWith("/svelte/props.ts")).length, 1, "multiple installed entries share one prop helper");
+      assert.equal(svelteInputs.some((path) => path.includes("/@nextwebwg/html-next/") || path.includes("/packages/html-next/src/")), false, "installed converted Svelte has no HTML Next runtime");
+      for (const components of [["XCard"], ["XCard", "XBadge"]]) {
+        const app = join(consumer, "Shaken.svelte");
+        await writeFile(app, `<script>${components.map((name) => `import ${name} from "@example/html-next-triad/svelte/${name}";`).join("\n")}</script><XCard title="Hello">${components.includes("XBadge") ? "<XBadge />" : ""}</XCard>`);
+        const entry = join(consumer, "svelte-shaken.ts");
+        await writeFile(entry, 'import { mount } from "svelte"; import App from "./Shaken.svelte"; mount(App, { target: document.body });');
+        const result = await build({ entryPoints: [entry], bundle: true, write: false, minify: true, metafile: true,
+          platform: "browser", format: "esm", outdir: join(consumer, "svelte-shaken"), plugins: [sveltePlugin("client")] });
+        const content = result.outputFiles.map((file) => file.text).join("\n");
+        assert.equal(content.includes("UNUSED_COMPONENT_MARKER"), false);
+        assert.equal(content.includes("--unused-component-style"), false);
+        assert.equal(Object.keys(result.metafile!.inputs).filter((path) => path.endsWith("/svelte/props.ts")).length, 1);
+      }
       const liveBundle = await build({ entryPoints: [new URL("../../html-next/src/live.ts", import.meta.url).pathname],
         bundle: true, write: false, format: "iife", globalName: "HtmlRuntime", platform: "browser", target: ["es2022"] });
       const cardDefinition = (await readFile(card, "utf8")).replace(/<link rel="component"[^>]*>/, "");
@@ -176,6 +219,20 @@ createRoot(document.querySelector("main")!).render(<XCard title="Hello"><XBadge 
           assert.equal(convertedSnapshot.text, native.text, `${engine} installed React library text differs`);
           await assertPixelsEqual(convertedPage, convertedSnapshot.pixels, native.pixels,
             `${engine} installed React library pixels differ`, live);
+          for (const hydration of [false, true]) {
+            const sveltePage = await browser.newPage();
+            try {
+              const errors: string[] = [];
+              sveltePage.on("pageerror", (error) => errors.push(error.message));
+              await sveltePage.setContent(`<style>${svelteCSS}</style><main>${hydration ? svelteMarkup : ""}</main>`);
+              if (hydration) assert.equal(await sveltePage.locator("main").innerText(), native.text, "installed Svelte SSR text differs");
+              await sveltePage.addScriptTag({ content: svelteJS });
+              const actual = await snapshot(sveltePage);
+              assert.equal(actual.text, native.text, `${engine} installed Svelte text differs`);
+              await assertPixelsEqual(sveltePage, actual.pixels, native.pixels, `${engine} installed Svelte pixels differ`, live);
+              assert.deepEqual(errors, []);
+            } finally { await sveltePage.close(); }
+          }
         } finally {
           await Promise.all([live.close(), convertedPage.close()]);
           await browser.close();

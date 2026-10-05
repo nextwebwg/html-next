@@ -1,6 +1,6 @@
 /**
  * `data-<tag>-state` exists for the names a definition's own stylesheet tests with
- * `:host-state()`, and for nothing else: a definition that styles no state carries no state
+ * `:host([prop])` or `:host-state()`, and for nothing else: a definition that styles neither carries no state
  * attribute at all, in any target. See nextwebwg.org/html-next/styling.
  */
 import assert from "node:assert/strict";

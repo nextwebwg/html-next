@@ -1,7 +1,8 @@
 /** The complete HTML Next value-type grammar and its canonical runtime representation. */
 
-import { deepFreeze } from "./freeze.js";
-import { compileExpression, type ExpressionNode } from "./expression.js";
+import { deepFreeze, isNativeEvent } from "./freeze.js";
+import { compileExpression } from "./expression.js";
+import { parseHtmlLiteral } from "./structured-input.js";
 import { CSS_COLOR_KEYWORDS } from "./css-color-keywords.js";
 import { boundFailures, type ValueBounds } from "./value-constraints.js";
 
@@ -29,7 +30,8 @@ export type TerminalTypeName =
   | "trusted-html"
   | "trusted-script"
   | "function"
-  | "unknown";
+  | "unknown"
+  | "event";
 
 export interface TerminalType {
   readonly kind: "terminal";
@@ -129,13 +131,13 @@ const TERMINALS = new Set<TerminalTypeName>([
   "string", "keyword", "boolean", "number", "integer", "url", "email", "date", "month",
   "week", "time", "datetime-local", "datetime", "color", "color-hex", "length",
   "percentage", "duration", "null", "absent",
-  "trusted-html", "trusted-script", "function", "unknown",
+  "trusted-html", "trusted-script", "function", "unknown", "event",
 ]);
 
 const PUBLIC_TERMINALS = new Set([
   "string", "keyword", "boolean", "integer", "number", "url", "email", "date",
   "month", "week", "time", "datetime-local", "datetime", "color", "color-hex",
-  "length", "percentage", "duration", "unknown",
+  "length", "percentage", "duration", "unknown", "event",
 ]);
 const CSS_NAMED_COLOR_SET = new Set<string>(CSS_COLOR_KEYWORDS);
 // HTML's valid-email-address production permits a single-label domain such as a@b.
@@ -371,7 +373,7 @@ export function typeScriptType(type: TypeInput): string {
         "color-hex": "string", length: "string", percentage: "string", duration: "string",
         null: "null", absent: "undefined", "trusted-html": "TrustedHTML",
         "trusted-script": "TrustedScript", "function": "(...args: readonly unknown[]) => unknown",
-        unknown: "unknown",
+        unknown: "unknown", event: "Event",
       };
       return values[node.name];
     }
@@ -413,23 +415,9 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+const readStructuredExpression = (source: string) => compileExpression(source).ast;
 function structuredInput(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const literal = (node: ExpressionNode): unknown => {
-    switch (node.kind) {
-      case "literal": return node.value;
-      case "unary": {
-        const operand = literal(node.operand);
-        if (node.op === "-" && typeof operand === "number") return -operand;
-        throw new SyntaxError("Structured attributes must contain literal values.");
-      }
-      case "array": return node.items.map(literal);
-      case "object": return Object.fromEntries(node.pairs.map(({ key, value: item }) => [key, literal(item)]));
-      default: throw new SyntaxError("Structured attributes must contain literal values.");
-    }
-  };
-  try { return literal(compileExpression(value).ast); }
-  catch { return Symbol.for("html-next.bad-literal"); }
+  return parseHtmlLiteral(value, readStructuredExpression);
 }
 
 function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
@@ -553,6 +541,9 @@ function parseTerminal(value: unknown, name: TerminalTypeName, path: string, sou
     case "function": return typeof value === "function"
       ? { ok: true, value }
       : issue("typeMismatch", "Must be a function supplied through a property.", path);
+    case "event": return isNativeEvent(value)
+      ? { ok: true, value }
+      : issue("typeMismatch", "Must be a native Event value.", path);
     case "unknown": return { ok: true, value };
   }
 }
@@ -652,12 +643,16 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   const parsed = parseTypedValue(value, type);
   if (!parsed.ok) throw new TypeError(parsed.issues.map((item) => `${item.path}: ${item.message}`).join("; "));
   const node = normalizeType(type);
+  if (isNativeEvent(parsed.value)) throw new TypeError("Native event values cannot be serialized.");
   if (node.kind === "terminal" && (node.name === "function" || node.name === "unknown")) {
     throw new TypeError(`The ${node.name} type is property-only and cannot be serialized.`);
   }
   if (node.kind === "list" || node.kind === "record" || node.kind === "object" ||
       (node.kind === "union" && typeof parsed.value === "object" && parsed.value !== null)) {
-    return JSON.stringify(parsed.value);
+    return JSON.stringify(parsed.value, (_key, item: unknown) => {
+      if (isNativeEvent(item)) throw new TypeError("Native event values cannot be serialized.");
+      return item;
+    });
   }
   if (node.kind === "separated-list") return (parsed.value as string[]).join(node.separator === "space" ? " " : ", ");
   if (parsed.value === null) return "null";
@@ -669,12 +664,12 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
  * Whether a prop type can be written as an HTML attribute. Props are attributes on the component
  * invocation, so every declared type with a text form qualifies: scalar types and enums as
  * their text, and collection and structured shapes as literal text parsed against the declared shape.
- * `function`, `unknown`, and trusted content have no text form and cannot be props.
+ * `event`, `function`, `unknown`, and trusted content have no text form and cannot be props.
  */
 export function isAttributeType(type: TypeInput): boolean {
   const node = normalizeType(type);
   if (node.kind === "terminal") {
-    return !["function", "unknown", "trusted-html", "trusted-script"].includes(node.name);
+    return !["event", "function", "unknown", "trusted-html", "trusted-script"].includes(node.name);
   }
   if (node.kind === "keyword") return true;
   if (node.kind === "separated-list") return true;

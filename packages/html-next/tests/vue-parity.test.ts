@@ -39,6 +39,20 @@ interface ParityCase {
 import { formattingSource, formattingProbe } from "./formatting-fixture.js";
 
 const cases: readonly ParityCase[] = [
+  ...[false, true].map((selected): ParityCase => ({
+    name: `absent component values preserve native select ${selected ? "authored selection" : "first-option selection"}`,
+    features: ["optional value prop", "native selection", "projected options", "change event"],
+    definitions: {
+      "x-native-select": `<template component="x-native-select"><defs><prop name="value" type="string">Optional selection.</prop></defs><select from:value="value"><slot></slot></select></template>`,
+    },
+    invocation: `<x-native-select id="case"><option value="a">A</option><option value="b"${selected ? " selected" : ""}>B</option></x-native-select>`,
+    vueRender: `h(XNativeSelect, { id: "case" }, { default: () => [h("option", { value: "a" }, "A"), h("option", { value: "b"${selected ? ", selected: true" : ""} }, "B")] })`,
+    root: "#case",
+    probe: `({ value: root.value, defaults: Array.from(root.options, option => option.defaultSelected) })`,
+    beforeReady: `document.querySelector('#case')?.value === '${selected ? "b" : "a"}'`,
+    action: `root.value = '${selected ? "a" : "b"}'; root.dispatchEvent(new Event('change', { bubbles: true }));`,
+    expectedAfter: { value: selected ? "a" : "b", defaults: [false, selected] },
+  })),
   {
     name: "Intl expressions infer declared types and preserve locale overrides",
     features: ["format", "inference", "locale", "text expressions"],

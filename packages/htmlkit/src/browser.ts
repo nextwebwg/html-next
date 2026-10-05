@@ -40,7 +40,7 @@ export function browserSource(components: readonly BrowserDefinition[], base: st
       return declaration;
     });
   }
-  return `import { registerComponentDefinitions, observeDocument, getComponentHost, setControllerModule } from ${JSON.stringify(runtime)};
+  return `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
 ${[...stylesheetSources(components).keys()].map(id => `import ${JSON.stringify(id)};`).join("\n")}
 ${reads.map((read, i) => `import read${i} from ${JSON.stringify(read.asset + "?url&no-inline")};`).join("\n")}
 ${controlled.map((component, index) => `import * as controller${index} from ${JSON.stringify(component.controller)};`).join("\n")}
@@ -49,12 +49,15 @@ const styleStates = ${JSON.stringify(Object.fromEntries(components.map(component
 const definitions = ${JSON.stringify(definitions)};
 ${reads.map((read, i) => `definitions[${read.definition}].declarations[${read.declaration}].source = read${i} + ${JSON.stringify(read.suffix)};`).join("\n")}
 registerComponentDefinitions(definitions, document, (_css, definition) => ({ css: '', stateNames: styleStates[definition.contract.tag] ?? [] }));
+const initialized = new WeakSet();
 export const stop = observeDocument(document, { onConnect(element, definition) {
   const controller = controllers[definition.contract.tag];
   if (!controller) return;
-  setControllerModule(element, Promise.resolve(controller));
   if (typeof controller.default !== 'function') throw new Error('Controller for ' + definition.contract.tag + ' must export a default function');
-  return controller.default(getComponentHost(element));
+  const host = getComponentHost(element);
+  if (initialized.has(host)) return;
+  initialized.add(host);
+  return controller.default(host);
 } });
 document.dispatchEvent(new Event('htmlkit:ready'));
 `;

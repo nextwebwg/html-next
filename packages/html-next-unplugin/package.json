@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-unplugin",
-  "version": "1.0.0-alpha.28",
+  "version": "1.0.0-alpha.29",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -31,12 +31,16 @@
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",
     "@nextwebwg/html-next-converter": "workspace:*",
+    "css-tree": "catalog:",
+    "cssstyle": "catalog:",
     "parse5": "catalog:",
+    "svelte2tsx": "0.7.61",
     "typescript": "5.9.3",
     "unplugin": "catalog:",
     "vue-tsc": "catalog:"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -45,6 +49,8 @@
     "playwright": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "4.7.6",
     "vite": "catalog:",
     "vitest": "catalog:",
     "vue": "catalog:"

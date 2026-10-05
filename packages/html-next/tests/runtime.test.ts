@@ -62,6 +62,118 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} targets local refs across repeated instances and collection changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-ref-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="check" type="number" bubbles="false" cancelable="true"></event>
+          <handler name="send"><dispatch event="check" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $key="row" $ref="fields" from:data-row="row"></button></section></template>
+          <x-ref-dispatch id="first"></x-ref-dispatch><x-ref-dispatch id="second"></x-ref-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const first = document.querySelector('#first')!;
+          const second = document.querySelector('#second')!;
+          const observed: Array<[string, string | null, unknown, boolean]> = [];
+          const events: Event[] = [];
+          const listen = (root: Element) => { for (const field of root.querySelectorAll('button')) field.addEventListener('check', event => {
+            events.push(event); event.preventDefault();
+            observed.push([root.id, field.getAttribute('data-row'), (event as CustomEvent).detail, event.defaultPrevented]);
+          }); };
+          listen(first); listen(second);
+          first.dispatchEvent(new CustomEvent('send', { detail: 3 }));
+          runtime.getComponentHost(first).state.rows = [2,1];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 4 }));
+          runtime.getComponentHost(first).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 5 }));
+          second.dispatchEvent(new CustomEvent('send', { detail: 6 }));
+          return { observed, distinct: new Set(events).size === events.length };
+        });
+        assert.deepEqual(actual, { observed: [['first','1',3,true],['first','2',3,true],['first','2',4,true],['first','1',4,true],['second','1',6,true],['second','2',6,true]], distinct: true });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} validates a broadcast payload once, including empty collections`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-shared-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="share" type="object({ n: number })"></event>
+          <handler name="send"><dispatch event="share" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $ref="fields"></button></section></template>
+          <x-shared-dispatch></x-shared-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('section')!;
+          const [first, second] = [...root.querySelectorAll('button')];
+          const values: unknown[] = [];
+          const errors: string[] = [];
+          window.addEventListener('error', event => { errors.push(String(event.error?.message ?? event.message)); event.preventDefault(); });
+          first!.addEventListener('share', event => {
+            const detail = (event as CustomEvent).detail; values.push(detail.n); detail.n = 'changed';
+          });
+          second!.addEventListener('share', event => values.push((event as CustomEvent).detail.n));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 1 } }));
+          runtime.getComponentHost(root).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 'invalid' } }));
+          return { values, errors: errors.length };
+        });
+        assert.deepEqual(actual, { values: [1, 'changed'], errors: 1 });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} exposes handler events and separates validated state from readonly data`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-event-contract"><defs>
+          <state name="count" type="number" value="1"></state>
+          <computed name="doubled" from="$count * 2"></computed>
+          <data name="search" src="/search"></data>
+          <event name="activate" type="event"></event>
+          <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+          </defs><button on:click="activate">{$doubled}</button></template><x-event-contract></x-event-contract>`);
+        await page.route('**/search', route => route.fulfill({ json: { title: 'Result' } }));
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('button')!;
+          const host = runtime.getComponentHost(root);
+          const warnings: string[] = [];
+          console.warn = (message: unknown) => warnings.push(String(message));
+          host.state.count = 2;
+          host.state.count = 'bad';
+          host.state.count = 'bad';
+          host.state.doubled = 9;
+          await Promise.resolve();
+          let source: Event | undefined;
+          const stop = host.on('activate', (event: CustomEvent) => { source = event.detail; });
+          const event = new MouseEvent('click', { bubbles: true });
+          root.dispatchEvent(event);
+          stop();
+          const firstSource = source;
+          source = undefined;
+          root.dispatchEvent(new MouseEvent('click'));
+          return { count: host.state.count, doubled: host.state.doubled,
+            separateData: host.state.search === undefined && host.data.search !== undefined,
+            sameEvent: firstSource === event, unsubscribed: source === undefined,
+            warnings: warnings.length, text: root.textContent };
+        });
+        assert.deepEqual(actual, { count: 2, doubled: 4, separateData: true, sameEvent: true, unsubscribed: true, warnings: 2, text: '4' });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} updates braced inline expressions without replacing siblings or retained keyed rows`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -221,7 +333,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           recovered: { input: "grace@example.org", nativeMismatch: false,
             source: "grace@example.org", downstream: "grace@example.org" },
         });
-        assert.deepEqual(warnings, []);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0]!, /HR007.*Reference `address` must satisfy email/);
       } finally { await browser.close(); }
     });
 
@@ -449,32 +562,82 @@ describe.skipIf(!enabled)("browser runtime", () => {
         </defs><input from:type="type" from:value="value"></template>
         <template component="x-parent-source"><defs>
           <state name="mode" type="keyword" values="text, number" value="text"></state>
-          <state name="entry" type="number"></state>
+          <state name="entry" type="number"></state><state name="draft" type="number" value="2.5"></state>
           <handler name="switch"><set name="mode" value="number"></set><set name="entry" value="2.5"></set></handler>
-        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child></div></template>
+        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child><x-selected-child id="unchanged-from" from:type="mode" from:value="draft"></x-selected-child><x-selected-child id="unchanged-bind" from:type="mode" bind:value="draft"></x-selected-child></div></template>
         <x-parent-source id="parent"></x-parent-source>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
             lowerDocument(): void;
-            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
           } }).HtmlRuntime;
           runtime.lowerDocument();
           const parent = document.querySelector("#parent")!;
           const child = document.querySelector("#child")!;
-          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value });
+          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value,
+            unchanged: ["unchanged-from", "unchanged-bind"].map((id) => {
+              const host = runtime.getComponentHost(document.querySelector(`#${id}`)!)!;
+              return { type: host.props.type!.value, value: host.props.value!.value, input: host.props.value!.inputValue };
+            }),
+          });
           const initial = read();
           parent.querySelector("button")!.click();
           await Promise.resolve();
           return { initial, changed: read() };
         });
         assert.deepEqual(actual, {
-          initial: { type: "text", value: null },
-          changed: { type: "number", value: 2.5 },
+          initial: { type: "text", value: null, unchanged: [{ type: "text", value: "2.5", input: "2.5" }, { type: "text", value: "2.5", input: "2.5" }] },
+          changed: { type: "number", value: 2.5, unchanged: [{ type: "number", value: 2.5, input: 2.5 }, { type: "number", value: 2.5, input: 2.5 }] },
         });
       } finally {
         await browser.close();
       }
+    });
+
+    it(`${engine} writes structured child props without subscribing to its own output`, async () => {
+      const browser = await browserType.launch();
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      try {
+        await page.setContent(`<template component="x-structured-child"><defs>
+          <state name="mode" type="keyword" values="list, object" value="list"></state>
+          <prop name="value">Value.<type from="mode"><option value="list" type="list(number)"></option><option value="object" type="object({ count: number })"></option></type></prop>
+        </defs><output $value="value"></output></template>
+        <template component="x-list-child"><defs><prop name="value" type="list(number)">Value.</prop></defs><output $value="value"></output></template>
+        <template component="x-structured-parent"><defs><state name="box" type="object({ value: unknown })" value="{ value: [1, 2] }"></state></defs>
+          <section><x-structured-child id="from" from:value="box.value"></x-structured-child><x-structured-child id="bind" bind:value="box.value"></x-structured-child><x-list-child id="fixed-from" from:value="box.value"></x-list-child><x-list-child id="fixed-bind" bind:value="box.value"></x-list-child></section></template><x-structured-parent></x-structured-parent>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> };
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const host = (id: string) => runtime.getComponentHost(document.getElementById(id)!);
+          const read = () => ["from", "bind", "fixed-from", "fixed-bind"].map((id) => host(id).props.value!.value);
+          const initial = read();
+          const parent = runtime.getComponentHost(document.querySelector("section")!);
+          parent.state.box = { value: [3, 4] };
+          await Promise.resolve();
+          const changed = read();
+          (parent.state.box as { value: number[] }).value[1] = 6;
+          await Promise.resolve();
+          const inPlace = read();
+          host("from").state.mode = "object";
+          host("bind").state.mode = "object";
+          await Promise.resolve();
+          parent.state.box = { value: { count: 3 } };
+          await Promise.resolve();
+          const object = read();
+          (parent.state.box as { value: { count: number } }).value.count = 5;
+          await Promise.resolve();
+          return { initial, changed, inPlace, object, objectInPlace: read() };
+        });
+        assert.deepEqual(actual, { initial: [[1, 2], [1, 2], [1, 2], [1, 2]], changed: [[3, 4], [3, 4], [3, 4], [3, 4]], inPlace: [[3, 6], [3, 6], [3, 6], [3, 6]], object: [{ count: 3 }, { count: 3 }, [3, 6], [3, 6]], objectInPlace: [{ count: 5 }, { count: 5 }, [3, 6], [3, 6]] });
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
     });
 
     for (const form of ["inline", "named"] as const) {
@@ -1590,7 +1753,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = window.HtmlRuntime.getComponentHost(first);
           const privateState = first[Symbol.for("@nextwebwg/html-next.runtime.v1")] === undefined;
           const frozenHost = Object.isFrozen(host);
-          const nativeOnlyEvents = !("on" in host);
+          let received = 0;
+          const stopProbe = host.on("probe", event => { if (event.target === first) received += 1; });
+          first.dispatchEvent(new Event("probe"));
+          stopProbe();
+          first.dispatchEvent(new Event("probe"));
+          const nativeSubscriptions = received === 1;
           first.addEventListener("connect", () => events.push("connect"));
           first.addEventListener("disconnect", () => events.push("disconnect"));
           first.remove();
@@ -1600,7 +1768,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           stopDocument();
           stopFirst();
           stopSecond();
-          return { documentObservers, connected, events, privateState, frozenHost, nativeOnlyEvents };
+          return { documentObservers, connected, events, privateState, frozenHost, nativeSubscriptions };
         })()`);
         assert.deepEqual(result, {
           documentObservers: 1,
@@ -1608,7 +1776,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           events: [],
           privateState: true,
           frozenHost: true,
-          nativeOnlyEvents: true,
+          nativeSubscriptions: true,
         });
       } finally {
         await browser.close();

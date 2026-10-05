@@ -70,3 +70,41 @@ function sanitizeServer(parent: DefaultTreeAdapterTypes.ParentNode): void {
     return true;
   });
 }`;
+
+/** Declared event details share the typed-prop module's strict value parser. */
+export const DECLARED_EVENT_TYPE_SOURCE = `/** Declared event details use the same nested type and constraint check as typed values. */
+export function acceptsDeclaredEvent(value: unknown, type: Parameters<typeof parse>[1]): boolean {
+  return parse(value, type, "$").ok;
+}
+`;
+
+/** Immediate declared-read checks retain raw containers; their fields are checked when read. */
+export const DECLARED_REFERENCE_TYPE_SOURCE = `export function acceptsDeclaredReference(value: unknown, type: TypeNode): boolean {
+  if (value == null) return true;
+  switch (type.kind) {
+    case "list": return Array.isArray(value);
+    case "record":
+    case "object": return typeof value === "object" && !Array.isArray(value);
+    case "union": return type.members.some((member) => acceptsDeclaredReference(value, member));
+    case "constrained": return acceptsDeclaredReference(value, type.base);
+    default: return parse(value, type, "$").ok;
+  }
+}
+
+/** Missing input cannot erase a child's accepted prop unless its type explicitly accepts null. */
+export function acceptsBindingDestination(value: unknown, type: TypeNode | null): boolean {
+  return value === undefined || type !== null && (value === null ? parse(value, type, "$").ok : acceptsDeclaredReference(value, type));
+}
+`;
+
+
+/** Snapshot local refs before invoking listeners; Vue refs can hold public component instances. */
+export const DISPATCH_TARGETS_SOURCE = `export function dispatchToTargets(recorded: unknown, send: (target: Element) => void): void {
+  const refs = recorded instanceof Set ? [...recorded] : Array.isArray(recorded) ? [...recorded] : [recorded];
+  const targets = refs.map((ref: any) => ref?.nodeType === 1 ? ref : ref?.$el)
+    .filter((element): element is Element => element?.nodeType === 1 && element.isConnected)
+    .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+  for (const target of targets) {
+    if (target.isConnected) send(target);
+  }
+}`;

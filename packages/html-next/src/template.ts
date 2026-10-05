@@ -28,7 +28,6 @@ export type ComponentDeclaration =
   | ReactiveDeclaration
   | ContextDeclaration
   | EventDeclaration
-  | MethodDeclaration
   | HandlerDeclaration
   | DataDeclaration;
 
@@ -80,13 +79,6 @@ export interface EventDeclaration {
   readonly cancelable: boolean;
 }
 
-export interface MethodDeclaration {
-  readonly kind: "method";
-  readonly name: string;
-  readonly exportName: string;
-  readonly returns: string;
-}
-
 export interface HandlerDeclaration {
   readonly kind: "handler";
   readonly name: string;
@@ -103,6 +95,8 @@ export type HandlerStep =
     }
   | {
       readonly kind: "dispatch";
+      /** Component-local $ref; collection refs receive one event per rendered element. */
+      readonly target?: string;
       readonly event: string;
       readonly value?: CompiledExpression;
       readonly guard?: CompiledExpression;
@@ -256,4 +250,30 @@ export function elementMatchRoot(node: ElementNode): ElementNode {
     ...wrapper,
     children: [{ kind: "element", name: "template", attributes: [], children, flow }],
   };
+}
+
+/**
+ * The ref names a definition places inside an iteration. Multiplicity is a property of where the
+ * directive sits, not of how much data arrives: a name under `$each` is the list that iteration
+ * produced even when it produced one row or none, so a controller never branches on shape.
+ */
+const iteratedRefs = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
+
+export function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<string> {
+  const cached = iteratedRefs.get(definition);
+  if (cached !== undefined) return cached;
+  const names = new Set<string>();
+  const walk = (node: TemplateNode, iterating: boolean): void => {
+    if (node.kind === "slot") {
+      for (const child of node.fallback ?? []) walk(child, iterating);
+      return;
+    }
+    if (node.kind !== "element") return;
+    const inside = iterating || node.flow?.kind === "each";
+    if (node.ref !== undefined && inside) names.add(node.ref);
+    for (const child of node.children) walk(child, inside);
+  };
+  walk(definition.template, false);
+  iteratedRefs.set(definition, names);
+  return names;
 }

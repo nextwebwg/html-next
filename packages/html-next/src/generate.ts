@@ -2,6 +2,7 @@ import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
+import { generateSvelteOutput, type SvelteConversionOptions, type SvelteConversionOutput } from "./targets/svelte.js";
 import { reactEventsArtifact as makeReactEventsArtifact } from "./targets/react-events.js";
 import { reactControlArtifact as makeReactControlArtifact } from "./targets/react-control.js";
 import { reactDataArtifact as makeReactDataArtifact } from "./targets/react-data.js";
@@ -10,6 +11,15 @@ import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host
 import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
+import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
+import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
+import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
+import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
+import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
+import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
+import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
+import { svelteEventsArtifact as makeSvelteEventsArtifact } from "./targets/svelte-events.js";
+import { svelteHtmlArtifact as makeSvelteHtmlArtifact } from "./targets/svelte-html.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
@@ -18,7 +28,7 @@ import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.28";
+export const GENERATOR_VERSION = "1.0.0-alpha.29";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -74,6 +84,46 @@ export function vuePropsArtifact(): GeneratedArtifact {
 /** Target-independent typed invocation rules, copied into React output only when props are used. */
 export function reactPropsArtifact(): GeneratedArtifact {
   return makeReactPropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteDecorationsArtifact(): GeneratedArtifact {
+  return makeSvelteDecorationsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteStyleArtifacts(): readonly GeneratedArtifact[] {
+  return makeSvelteStyleArtifacts(GENERATOR_VERSION);
+}
+
+export function svelteConnectionArtifact(): GeneratedArtifact {
+  return makeSvelteConnectionArtifact(GENERATOR_VERSION);
+}
+
+export function svelteHostArtifact(): GeneratedArtifact {
+  return makeSvelteHostArtifact(GENERATOR_VERSION);
+}
+
+export function svelteReactivityArtifact(): GeneratedArtifact {
+  return makeSvelteReactivityArtifact(GENERATOR_VERSION);
+}
+
+export function svelteDataArtifact(): GeneratedArtifact {
+  return makeSvelteDataArtifact(GENERATOR_VERSION);
+}
+
+export function sveltePropsArtifact(): GeneratedArtifact {
+  return makeSveltePropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteHtmlArtifact(): GeneratedArtifact {
+  return makeSvelteHtmlArtifact(GENERATOR_VERSION);
+}
+
+export function svelteControlArtifact(): GeneratedArtifact {
+  return makeSvelteControlArtifact(GENERATOR_VERSION);
+}
+
+export function svelteEventsArtifact(declared = false): GeneratedArtifact {
+  return makeSvelteEventsArtifact(GENERATOR_VERSION, declared);
 }
 
 export function reactEventsArtifact(declared = false): GeneratedArtifact {
@@ -137,4 +187,8 @@ export function generateReactComponent(definition: ComponentDefinition, options?
 /** Converts one definition with CSS and helper usage for package-level output. */
 export function generateReactConversion(definition: ComponentDefinition, options?: ReactConversionOptions): ReactConversionOutput {
   return generateReactOutput(definition, GENERATOR_VERSION, options);
+}
+
+export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
+  return generateSvelteOutput(definition, options);
 }

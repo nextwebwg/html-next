@@ -13,9 +13,7 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 import { convertComponents } from "../src/index.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const source = `<template component="x-depth" status="early" summary="Bounded recursive component."><defs>
-  <prop name="level" type="number" default="0">Current depth.</prop>
-</defs><section><span $value="level"></span><x-depth $if="level < 33" from:level="level + 1"></x-depth></section></template>`;
+import { recursiveDepthSource as source } from "./fixtures/recursive-depth.js";
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };
 const expected: Diagnostic = { name: "HtmlDiagnosticError", code: "HR008", message: "HR008: Component invocations nested deeper than the lowering limit." };
 

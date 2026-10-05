@@ -3,6 +3,7 @@ import { selectedPropType } from "./contract.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
 import {
@@ -43,6 +44,7 @@ import {
 } from "./component-styles.js";
 import {
   declarationTypeNode,
+  formatType,
   normalizeType,
   parseTypeExpression,
   parseTypedValue,
@@ -64,7 +66,7 @@ import type {
   SlotNode,
   TemplateNode,
 } from "./template.js";
-import { definitionMayInvokeComponents, elementMatchRoot, rootArms } from "./template.js";
+import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropContract, PropType, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
@@ -102,6 +104,7 @@ interface PropInput {
 }
 
 interface RuntimeInstance {
+  controllerInitialized?: boolean;
   element?: Element;
   /** Stable component ownership, captured when invoked rather than inferred from later DOM position. */
   readonly parent?: RuntimeInstance;
@@ -112,7 +115,6 @@ interface RuntimeInstance {
   readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
   connected: boolean;
-  controllerModule?: Promise<ControllerModule>;
   host?: ComponentHost;
   /** Props the author supplied. Only these are reflected; defaults never are. */
   readonly explicit: Set<string>;
@@ -789,6 +791,16 @@ function conformsAtDestination(value: Value, type: PropType | TypeNode | null | 
  * they last had: a binding does not write, and a computed does not recompute, so nothing downstream
  * of a broken contract moves.
  */
+const reportedAuthoredWarnings = new WeakMap<ComponentDefinition, Set<string>>();
+
+function warnAuthored(definition: ComponentDefinition, location: string, message: string): void {
+  let reported = reportedAuthoredWarnings.get(definition);
+  if (reported === undefined) reportedAuthoredWarnings.set(definition, reported = new Set());
+  if (reported.has(location)) return;
+  reported.add(location);
+  console.warn(`${definition.source.file}: HR007: ${message}`);
+}
+
 function evalConforming(
   expression: string | CompiledExpression,
   scope: ReactiveScope,
@@ -802,6 +814,7 @@ function evalConforming(
     const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
       ? type : declaredTypeAt(definition, path, scope);
     if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
+    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` must satisfy ${formatType(selectedType)}.`);
     return NONCONFORMING;
   }
   try {
@@ -812,31 +825,6 @@ function evalConforming(
   }
 }
 
-/**
- * The ref names a definition places inside an iteration. Multiplicity is a property of where the
- * directive sits, not of how much data arrives: a name under `$each` is the list that iteration
- * produced even when it produced one row or none, so a controller never branches on shape.
- */
-const iteratedRefs = new WeakMap<ComponentDefinition, ReadonlySet<string>>();
-
-function iteratedRefNames(definition: ComponentDefinition): ReadonlySet<string> {
-  const cached = iteratedRefs.get(definition);
-  if (cached !== undefined) return cached;
-  const names = new Set<string>();
-  const walk = (node: TemplateNode, iterating: boolean): void => {
-    if (node.kind === "slot") {
-      for (const child of node.fallback ?? []) walk(child, iterating);
-      return;
-    }
-    if (node.kind !== "element") return;
-    const inside = iterating || node.flow?.kind === "each";
-    if (node.ref !== undefined && inside) names.add(node.ref);
-    for (const child of node.children) walk(child, inside);
-  };
-  walk(definition.template, false);
-  iteratedRefs.set(definition, names);
-  return names;
-}
 
 interface HydrationRange {
   readonly slot: string;
@@ -927,8 +915,10 @@ function ownEffect(
   scope: ReactiveScope,
   run: () => void | (() => void),
   priority = 1,
-): void {
-  context.owned.effects.push(createEffect(scope.scheduler, run, priority));
+): ReturnType<typeof createEffect> {
+  const effect = createEffect(scope.scheduler, run, priority);
+  context.owned.effects.push(effect);
+  return effect;
 }
 
 function resolveWritablePath(scope: ReactiveScope, path: WritablePath): (string | number)[] | undefined {
@@ -1012,12 +1002,23 @@ function applyBoundControlValue(element: Element, name: string, value: Value): b
   return false;
 }
 
+const eventDependentHandlers = new WeakMap<HandlerDeclaration, boolean>();
+
 function runHandler(
   declaration: HandlerDeclaration,
   element: Element,
   scope: ReactiveScope,
   context: RuntimeRenderContext,
+  event: Event,
 ): void {
+  // Per-invocation lexical scope preserves the outer event during synchronous nested dispatch.
+  let readsEvent = eventDependentHandlers.get(declaration);
+  if (readsEvent === undefined) {
+    readsEvent = declaration.steps.some((step) => [step.guard, ...("value" in step ? [step.value] : [])]
+      .some((expression) => expression?.dependencies.some((name) => name.split(".", 1)[0] === "$$event")));
+    eventDependentHandlers.set(declaration, readsEvent);
+  }
+  if (readsEvent) scope = scope.fork([["$$event", event]]);
   for (const step of declaration.steps) {
     if (step.guard !== undefined) {
       const guard = evalConforming(step.guard, scope, context.definition);
@@ -1027,13 +1028,24 @@ function runHandler(
       const next = evalConforming(step.value, scope, context.definition);
       if (next === NONCONFORMING) continue;
       const path = resolveWritablePath(scope, step.writablePath);
-      if (path === undefined || !conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) continue;
+      if (path === undefined) continue;
+      if (!conformsAtDestination(next, declaredTypeAt(context.definition, path, scope))) {
+        warnAuthored(context.definition, `handler:${declaration.name}:${step.path}`, `State \`${step.path}\` does not satisfy its declared type.`);
+        continue;
+      }
       setWritablePath(scope, path, next);
     } else if (step.kind === "dispatch") {
       const declaration = eventDeclaration(context.definition, step.event);
       const detail = step.value === undefined ? undefined : evalConforming(step.value, scope, context.definition);
       if (detail === NONCONFORMING) continue;
-      dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
+      if (step.target === undefined) dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
+      else {
+        const recorded = context.refs[step.target];
+        const targets = (Array.isArray(recorded) ? [...recorded] : recorded === undefined ? [] : [recorded])
+          .filter((target) => target.isConnected)
+          .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+        dispatchComponentEvent(targets, step.event, detail, declaration);
+      }
     } else {
       const recorded = context.refs[step.target];
       const target = Array.isArray(recorded) ? recorded[0] : recorded;
@@ -1051,7 +1063,7 @@ function eventDeclaration(definition: ComponentDefinition, name: string): EventD
 
 /** Undeclared events keep the permissive default: bubbling, composed, and not cancelable. */
 function dispatchComponentEvent(
-  target: Element,
+  target: Element | readonly Element[],
   event: string,
   detail: unknown,
   declaration: EventDeclaration | undefined,
@@ -1062,12 +1074,20 @@ function dispatchComponentEvent(
     const parsed = parseTypedValue(detail, declarationTypeNode(declaration.type, declaration.shape)!, "$", "value");
     if (!parsed.ok) fail("HR002", `Event \`${event}\` detail does not satisfy its declared type.`);
   }
-  return target.dispatchEvent(new CustomEvent(event, {
+  const init = {
     detail,
     bubbles: declaration?.bubbles ?? true,
     composed: declaration?.composed ?? true,
     cancelable: declaration?.cancelable ?? false,
-  }));
+  };
+  if (Array.isArray(target)) {
+    let accepted = true;
+    for (const element of target) {
+      if (element.isConnected && !element.dispatchEvent(new CustomEvent(event, init))) accepted = false;
+    }
+    return accepted;
+  }
+  return (target as Element).dispatchEvent(new CustomEvent(event, init));
 }
 
 function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
@@ -1116,7 +1136,7 @@ function bindEvents(
       if (!eventPasses(event, target, binding.modifiers)) return;
       if (binding.modifiers.includes("prevent")) event.preventDefault();
       if (binding.modifiers.includes("stop")) event.stopPropagation();
-      runHandler(declaration, target, scope, context);
+      runHandler(declaration, target, scope, context, event);
     };
     const capture = binding.modifiers.includes("capture");
     let attached = false;
@@ -1692,7 +1712,10 @@ function renderInstance(
   }
   const adopted = candidate instanceof Element && candidate.localName === elementName;
   const element = adopted ? candidate : createTemplateElement(document, elementName, context);
-  if (node === context.rootNode) context.root = element;
+  if (node === context.rootNode) {
+    context.root = element;
+    if (node.name.includes("-")) whenLowered(element, (root) => { context.root = root; });
+  }
   const existingChildren = adopted ? Array.from(element.childNodes) : [];
   const controlState = adopted && (
     element instanceof HTMLInputElement ||
@@ -1786,10 +1809,10 @@ function renderInstance(
           setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
         }
       };
-      ownEffect(context, scope, applyBinding);
+      const bindingEffect = ownEffect(context, scope, applyBinding);
       if (node.name.includes("-")) whenLowered(element, (root) => {
         bindingTarget = root;
-        applyBinding();
+        bindingEffect.execute();
       });
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         let target = element;
@@ -2412,30 +2435,6 @@ function installPropReflection(instance: RuntimeInstance): void {
 
 }
 
-function installPublicMethods(root: Element, instance: RuntimeInstance): void {
-  for (const declaration of instance.definition.declarations ?? []) {
-    if (declaration.kind !== "method") continue;
-    Object.defineProperty(root, declaration.name, {
-      configurable: true,
-      enumerable: false,
-      value: (...args: unknown[]) => {
-        if (instance.controllerModule === undefined) {
-          return Promise.reject(new TypeError(
-            `Controller method \`${declaration.name}\` is not ready for <${instance.definition.contract.tag}>.`,
-          ));
-        }
-        return instance.controllerModule.then((module) => {
-          const method = module[declaration.exportName];
-          if (typeof method !== "function") {
-            fail("HJ003", `Controller does not export method \`${declaration.exportName}\`.`);
-          }
-          return Reflect.apply(method, undefined, [getComponentHost(root), ...args]);
-        });
-      },
-    });
-  }
-}
-
 function prepareRuntimeInvocation(
   invocation: Element,
   definition: ComponentDefinition,
@@ -2607,10 +2606,12 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
     delegate.rootElement.set(element);
   }
   runtimeInstances.set(element, instance);
-  installPublicMethods(element, instance);
   instance.rootElement.set(element);
-  if (previous !== undefined && previous !== element) {
-    for (const owner of [instance, ...instance.delegates]) {
+  // A delegated root may already have followers before its first native root is installed.
+  if (previous !== element) {
+    // Inner bindings apply before the outer invocation's bindings on a shared root.
+    for (let index = instance.delegates.length; index >= 0; index -= 1) {
+      const owner = index === 0 ? instance : instance.delegates[index - 1]!;
       for (const follow of owner.followers) follow(element);
     }
   }
@@ -2755,11 +2756,15 @@ function commitRuntimeInvocations(
     if (invocation.replace && host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
       // This component delegates its root to a component that has not lowered yet. Claim the
       // element so discovery does not lower this component onto it a second time, but install
-      // nothing: reflection, public methods, and the host belong on the root that survives.
-      runtimeInstances.set(host, invocation.instance);
+      // nothing: reflection and the host belong on the root that survives.
+      // An earlier rebind may already have carried an outer owner onto this intermediate root.
+      const owner = runtimeInstances.get(host) ?? invocation.instance;
+      runtimeInstances.set(host, owner);
       whenLowered(host, (finalRoot) => {
-        if (runtimeInstances.get(host) === invocation.instance) runtimeInstances.delete(host);
+        if (runtimeInstances.get(host) === owner) runtimeInstances.delete(host);
+        if (owner !== invocation.instance) runtimeInstances.set(finalRoot, owner);
         adoptComponentRoot(invocation.instance, finalRoot);
+        if (owner !== invocation.instance) attachRoot(owner, finalRoot);
       });
     } else {
       adoptComponentRoot(invocation.instance, host);
@@ -2770,7 +2775,7 @@ function commitRuntimeInvocations(
 
 /**
  * Binds an instance to the root it ends up sharing. The component the author invoked claims the
- * root, so page code reaches its host, public methods, and reflected props; a component it
+ * root, so page code reaches its host and reflected props; a component it
  * delegates to shares the element and rides the owner's connection lifecycle.
  */
 /**
@@ -3252,9 +3257,8 @@ export function attachComponent(
 
   let controllerCleanup: void | (() => void);
   let disposed = false;
-  if (options.controller !== undefined) {
-    const module = Promise.resolve(options.controller);
-    setControllerModule(element, module);
+  if (options.controller !== undefined && !attached.controllerInitialized) {
+    attached.controllerInitialized = true;
     void Promise.resolve(options.controller.default(getComponentHost(element)!)).then((cleanup) => {
       if (typeof cleanup !== "function") return;
       if (disposed) cleanup();
@@ -3291,12 +3295,16 @@ function applyComponentProps(
   // The current root: a root `$match` may have replaced the element a caller last saw.
   const element = instance.element!;
   const contract = instance.definition.contract;
-  const next = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
-  for (const prop of Object.values(contract.props)) {
-    if (prop.select !== undefined && contract.props[prop.select.from] === undefined) {
-      next[prop.select.from] = instance.scope.get(prop.select.from);
+  // Source validation stays tracked; reading the child's current model is write bookkeeping.
+  const next = untracked(() => {
+    const values = Object.fromEntries(Object.keys(contract.props).map((name) => [name, instance.scope.get(name)]));
+    for (const prop of Object.values(contract.props)) {
+      if (prop.select !== undefined && contract.props[prop.select.from] === undefined) {
+        values[prop.select.from] = instance.scope.get(prop.select.from);
+      }
     }
-  }
+    return values;
+  });
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) {
@@ -3331,7 +3339,7 @@ function applyComponentProps(
       const selected = selectedPropType(contract, prop, next);
       if (!bound) element.setAttribute(attributeName, reflectedPropValue(input, selected));
     }
-    if (!Object.is(instance.scope.get(name), value)) instance.scope.set(name, value);
+    if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
   }
 }
 
@@ -3344,8 +3352,12 @@ export interface ComponentHost {
   readonly root: Element;
   /** Alias for the rendered root used by generated component controllers. */
   readonly element: Element;
-  /** Component-owned state, computed values, and data resources; never declared props. */
+  /** Mutable state, readonly computed state and inherited context; never props or resources. */
   readonly state: Record<string, unknown>;
+  /** Declared resource handles; response and status fields are readonly. */
+  readonly data: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Subscribe to a connection lifecycle or DOM event, with lifecycle-owned cleanup. */
+  on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   /** Per-prop handles for accepted values, latest input, and validity. */
   readonly props: Readonly<Record<string, ComponentProp>>;
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
@@ -3428,22 +3440,69 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
       .filter((declaration) => declaration.kind === "state")
       .map((declaration) => declaration.name),
   );
-  const propNames = new Set(Object.keys(instance.definition.contract.props));
+  const declarations = instance.definition.declarations ?? [];
+  const stateNames = new Set(declarations.flatMap((declaration) =>
+    declaration.kind === "state" || declaration.kind === "computed" ? [declaration.name]
+      : declaration.kind === "context" ? [declaration.as ?? declaration.name] : []));
+  const dataNames = new Set(declarations.filter((declaration) => declaration.kind === "data").map((declaration) => declaration.name));
+  const nested = new WeakMap<object, Map<string, object>>();
+  const write = (path: string, value: unknown, readonly: boolean, apply: () => void): boolean => {
+    if (readonly) {
+      warnAuthored(instance.definition, `controller:${path}`, `Destination \`${path}\` is read-only.`);
+    } else if (!conformsAtDestination(value as Value, declaredTypeAt(instance.definition, path, instance.scope))) {
+      warnAuthored(instance.definition, `controller:${path}`, `State \`${path}\` does not satisfy its declared type.`);
+    } else apply();
+    return true;
+  };
+  const wrap = (value: unknown, path: string, readonly: boolean): unknown => {
+    if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+    let paths = nested.get(value);
+    if (paths === undefined) nested.set(value, paths = new Map());
+    const known = paths.get(path);
+    if (known !== undefined) return known;
+    const surface = readonly ? (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))) : value;
+    if (readonly && Array.isArray(value)) surface.length = value.length;
+    const proxy = new Proxy(surface, {
+      get: (_target, key) => wrap(Reflect.get(value, key), `${path}.${String(key)}`, readonly),
+      set: (_target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => { Reflect.set(value, key, next); }),
+      has: (_target, key) => Reflect.has(value, key),
+      ownKeys: () => Reflect.ownKeys(value),
+      getOwnPropertyDescriptor: (_target, key) => {
+        if (readonly && Array.isArray(value) && key === "length") { surface.length = value.length; return Reflect.getOwnPropertyDescriptor(surface, key); }
+        const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+        return descriptor === undefined ? undefined : readonly ? { ...descriptor, configurable: true } : descriptor;
+      },
+      deleteProperty: (_target, key) => write(`${path}.${String(key)}`, undefined, readonly, () => { Reflect.deleteProperty(value, key); }),
+      defineProperty: (_target, key, descriptor) => {
+        const destination = `${path}.${String(key)}`;
+        if (readonly || !("value" in descriptor) || !conformsAtDestination(descriptor.value as Value, declaredTypeAt(instance.definition, destination, instance.scope))) {
+          write(destination, descriptor.value, readonly, () => {}); return false;
+        }
+        return Reflect.defineProperty(value, key, descriptor);
+      },
+    });
+    paths.set(path, proxy);
+    return proxy;
+  };
   const state = new Proxy({}, {
     get: (_target, key) => {
-      if (typeof key !== "string" || propNames.has(key)) return undefined;
+      if (typeof key !== "string" || !stateNames.has(key)) return undefined;
       const value = instance.scope.get(key);
-      return value === ABSENT ? undefined : value;
+      return value === ABSENT ? undefined : wrap(value, key, !writable.has(key));
     },
-    set: (_target, key, value) => {
-      if (typeof key !== "string" || !writable.has(key)) {
-        throw new TypeError(`Only declared state roots are writable; \`${String(key)}\` is read-only.`);
-      }
-      instance.scope.set(key, value as Value);
-      return true;
-    },
-    has: (_target, key) => typeof key === "string" && !propNames.has(key) && instance.scope.has(key),
+    set: (_target, key, value) => write(String(key), value, typeof key !== "string" || !writable.has(key),
+      () => instance.scope.set(key as string, value as Value)),
+    deleteProperty: (_target, key) => write(String(key), undefined, true, () => {}),
+    defineProperty: (_target, key) => { write(String(key), undefined, true, () => {}); return false; },
+    has: (_target, key) => typeof key === "string" && stateNames.has(key),
   });
+  const data = new Proxy({}, {
+    get: (_target, key) => typeof key === "string" && dataNames.has(key) ? wrap(instance.scope.get(key), key, true) : undefined,
+    set: (_target, key, value) => write(`data.${String(key)}`, value, true, () => {}),
+    deleteProperty: (_target, key) => write(`data.${String(key)}`, undefined, true, () => {}),
+    defineProperty: (_target, key) => { write(`data.${String(key)}`, undefined, true, () => {}); return false; },
+    has: (_target, key) => typeof key === "string" && dataNames.has(key),
+  }) as ComponentHost["data"];
   const props = Object.create(null) as Record<string, ComponentProp>;
   for (const name of Object.keys(instance.definition.contract.props)) {
     const validity = (): GeneralizedValidityState => {
@@ -3491,6 +3550,19 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     get root() { return instance.rootElement.get()!; },
     get element() { return instance.rootElement.get()!; },
     state,
+    data,
+    on(type, callback) {
+      let stopped = false;
+      const stop = host.effect(() => {
+        if (type === "connect") return untracked(() => callback(new Event(type)));
+        if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
+        const root = host.root;
+        const listener = (event: Event): void => { callback(event); };
+        root.addEventListener(type, listener);
+        return () => root.removeEventListener(type, listener);
+      });
+      return () => { stopped = true; stop(); };
+    },
     props: Object.freeze(props),
     refs,
     slots,
@@ -3517,16 +3589,6 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
   };
   instance.host = Object.freeze(host);
   return instance.host;
-}
-
-/** Supplies the already application-approved controller module to a lowered instance. */
-export function setControllerModule(
-  element: Element,
-  module: Promise<ControllerModule>,
-): void {
-  const instance = runtimeInstance(element);
-  if (instance === undefined) fail("HJ003", "A controller can attach only to a lowered component root.");
-  instance.controllerModule = module;
 }
 
 export interface DocumentObservationOptions {

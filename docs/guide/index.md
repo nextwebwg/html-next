@@ -9,17 +9,17 @@ pager: false
 
 # Universal components. Built with HTML.
 
-Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, or in React. Svelte support is coming soon.
+Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, in React, or in Svelte.
 
 ## What is HTML Next?
 
-HTML Next is a component format and JavaScript tools for building reactive interfaces with HTML. A definition brings markup, state, events, slots, and scoped styles together in one file. Use it natively in an HTML page or with Vite, or import it into Vue and React through their adapters.
+HTML Next is a component format and JavaScript tools for building reactive interfaces with HTML. A definition brings markup, state, events, slots, and scoped styles together in one file. Use it natively in an HTML page or with Vite, or import it into Vue, React, and Svelte through their adapters.
 
 The tools implement a public proposal today. Browsers do not support this component syntax on their own; HTML Next runs or builds the definitions for your project.
 
 ## Why build components this way?
 
-A reusable component should not need a rewrite every time an application changes frameworks. HTML Next keeps the source in HTML and lets the consuming project choose how to use it. That is useful for component libraries shared by HTML pages, Vue apps, and React apps.
+A reusable component should not need a rewrite every time an application changes frameworks. HTML Next keeps the source in HTML and lets the consuming project choose how to use it. That is useful for component libraries shared by HTML pages, Vue apps, React apps, and Svelte apps.
 
 | Approach | How you build | Where it fits |
 | --- | --- | --- |
@@ -44,6 +44,8 @@ Use HTML Next when you want one component library to serve several application s
 : Import HTML components alongside your React components with the Vite adapter.
 :::
 
+For Svelte source imports, see the [Vite adapter documentation](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-unplugin#framework-source-imports). The [Converter](/html-next/convert) also emits Svelte components for application and library builds.
+
 ## Find your path
 
 | You want to… | Start here |
@@ -60,6 +62,6 @@ HTML Forms has its own [installation and usage guide](/html-next/forms).
 HTML Next is JavaScript tooling for the [Declarative HTML Components](/declarative-components/) and [HTML Forms](/html-forms/) proposals. The component language has one reference: the public proposal. These guides cover installing and using its implementation.
 
 > [!note] Early, and usable today
-> The tools are in early development and the proposals are at Stage 0. Syntax and generated output may change. Vue and React adapters and converters are available; Svelte adapters and conversion are planned and do not ship yet.
+> The tools are in early development and the proposals are at Stage 0. Syntax and generated output may change. Vue, React, and Svelte adapters and converters are available. The [converter documentation](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-converter) tracks implementation coverage.
 
 [Looma](https://threadlabs.studio/looma/) is a UI library authored with this component language. Explore the [tools source](https://github.com/nextwebwg/html-next), try a component, and [report what you find](https://github.com/nextwebwg/html-next/issues).

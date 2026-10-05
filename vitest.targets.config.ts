@@ -21,6 +21,7 @@ config.test!.include = [
   "packages/html-next/tests/vue-parity.test.ts",
   "packages/html-next-converter/tests/vue-*-parity.test.ts",
   "packages/html-next-converter/tests/react-*-parity.test.ts",
+  "packages/html-next-converter/tests/svelte-*-parity.test.ts",
   "packages/html-next-converter/tests/library-distribution.test.ts",
   "packages/html-next-unplugin/tests/framework.test.ts",
 ];

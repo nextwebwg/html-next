@@ -17,50 +17,8 @@ import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const source = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
-  <prop name="amount" type="number" default="5">Controller prop.</prop>
-  <state type="number" name="count" value="0"></state>
-  <state type="object({ value: number })" name="nested" value="{ value: 1 }"></state>
-  <handler name="sameNested"><set name="nested.value" value="1"></set></handler>
-  <event name="saved" type="object" bubbles="false" composed="false" cancelable="true"><prop name="reason" type="keyword" values="action, programmatic" required></prop></event>
-  <event name="contact" type="email"></event>
-  <event name="quantity" type="number"></event>
-  <event name="labels" type="keyword+"></event>
-  <method name="increment" export="increment" returns="promise(number)"></method>
-  <method name="missing" export="missingExport" returns="promise(undefined)"></method>
-</defs><section><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><output $value="count"></output></section>
-<style>:host { display: block; width: 180px; padding: 4px; background: rgb(240 245 250); font: 16px/24px Arial, sans-serif; }</style></template>`;
-const controller = `export default function connect(host) {
-  window.trace.connects++;
-  window.controllerHost = host;
-  const local = host.signal(1);
-  const doubled = host.computed(() => local.get() * 2);
-  const stopDisplay = host.effect(() => {
-    window.trace.effects++;
-    host.root.setAttribute("data-local", String(doubled.get()));
-    return () => { window.trace.effectCleanups++; };
-  });
-  const stopProp = host.effect(() => {
-    host.root.setAttribute("data-amount-value", String(host.props.amount.value));
-    host.root.setAttribute("data-amount-input", String(host.props.amount.inputValue));
-    host.root.setAttribute("data-amount-valid", String(host.props.amount.validate().valid));
-    host.root.setAttribute("data-state-has-amount", String("amount" in host.state));
-  });
-  const stopNested = host.effect(() => {
-    window.trace.nestedEffects++;
-    host.root.setAttribute("data-nested", String(host.state.nested.value));
-  });
-  const stopClick = host.effect(() => {
-    const button = host.refs.button;
-    const click = () => { local.update((value) => value + 1); host.state.count += 1; };
-    button.addEventListener("click", click);
-    return () => button.removeEventListener("click", click);
-  });
-  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopClick(); window.trace.disconnects++; };
-  if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
-  return cleanup;
-}
-export async function increment(host) { host.state.count += 1; return host.state.count; }`;
+import { assertTargetedDispatch } from "./fixtures/targeted-dispatch.js";
+import { controllerParitySource as source, controllerParityModule as controller } from "./fixtures/controller-parity.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -102,7 +60,7 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       try {
         await promisify(execFile)(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), [
           "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
-          "--target", "ES2022", "--allowJs", "--skipLibCheck", "--strict",
+          "--target", "ES2022", "--allowJs", "--allowImportingTsExtensions", "--skipLibCheck", "--strict",
           join(outDirectory, manifest.components[0]!.artifact),
         ], { cwd: directory });
       } catch (error) {
@@ -142,7 +100,7 @@ if (!hydrating) root.render(element);
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
       for (const hydrate of [false, true]) {
-        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} matches controller effects, methods, and cleanup`, async () => {
+        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} matches controller effects, events, and cleanup`, async () => {
           const browser = await launchParityBrowser(browserType);
           const pages: Page[] = [];
           const errors: string[] = [];
@@ -177,6 +135,7 @@ if (!hydrating) root.render(element);
               assert.deepEqual(converted.behavior, native.behavior);
               await assertPixelsEqual(react, converted.pixels, native.pixels, "React controller pixels differ", live);
             };
+            for (const page of [live, react]) await assertTargetedDispatch(page);
             await compare();
             await Promise.all([live, react].map((page) => page.locator("#case button.same-nested").click()));
             assert.equal((await snapshot(live)).behavior.trace.nestedEffects, 1, "a no-op nested write must not rerun its controller effect");
@@ -263,18 +222,14 @@ if (!hydrating) root.render(element);
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
             await compare();
             const results = await Promise.all([live, react].map((page) => page.evaluate(() =>
-              (document.querySelector("#case") as Element & { increment(): Promise<number> }).increment())));
+              new Promise<number>((resolve) => {
+                const root = document.querySelector("#case")!;
+                root.addEventListener("incremented", (event) => resolve((event as CustomEvent<number>).detail), { once: true });
+                root.dispatchEvent(new Event("request-increment"));
+              }))));
             assert.deepEqual(results, [2, 2]);
             await Promise.all([live, react].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2")));
             await compare();
-            const failures = await Promise.all([live, react].map((page) => page.evaluate(async () => {
-              try { await (document.querySelector("#case") as Element & { missing(): Promise<void> }).missing(); return null; }
-              catch (error) { const failure = error as Error & { diagnostic?: { code: string } }; return { code: failure.diagnostic?.code, message: failure.message }; }
-            })));
-            assert.deepEqual(failures, [
-              { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
-              { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
-            ]);
             await Promise.all([live, react].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               (window as unknown as { detachedRoot: Element }).detachedRoot = root;

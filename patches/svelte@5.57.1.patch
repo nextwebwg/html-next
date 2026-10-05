@@ -1,0 +1,15 @@
+diff --git a/src/internal/client/dom/blocks/each.js b/src/internal/client/dom/blocks/each.js
+index 9a2504f8875ab2101e5c1cbd28d6565dc8dc9833..eb79b6d57f100e1f54ab57f8d1c2e722ee2075ff 100644
+--- a/src/internal/client/dom/blocks/each.js
++++ b/src/internal/client/dom/blocks/each.js
+@@ -719,7 +719,9 @@ function move(effect, next, anchor) {
+ 
+ 	while (node !== null) {
+ 		var next_node = /** @type {TemplateNode} */ (get_next_sibling(node));
+-		dest.before(node);
++		var parent = dest.parentNode;
++		if (parent?.moveBefore && node.parentNode === parent) parent.moveBefore(node, dest);
++		else dest.before(node);
+ 
+ 		if (node === end) {
+ 			return;

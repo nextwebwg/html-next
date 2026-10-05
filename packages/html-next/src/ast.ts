@@ -19,7 +19,6 @@ export type {
   HandlerDeclaration,
   HandlerStep,
   LiteralAttribute,
-  MethodDeclaration,
   PropertyBinding,
   ReactiveDeclaration,
   SlotContract,

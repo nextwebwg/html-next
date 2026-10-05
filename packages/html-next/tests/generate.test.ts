@@ -105,7 +105,7 @@ describe("generateComponent", () => {
     assert.match(docs.slice(0, 200), /Status: EARLY/);
     assert.doesNotMatch(docs, /Coming soon/);
     assert.match(docs, /## Runtime support/);
-    assert.match(docs, /State, computed values, handlers, structural rendering, data, validation/);
+    assert.match(docs, /Mutable and computed state, handlers, structural rendering, data, validation/);
   });
 
   it("preserves native validity pseudo-classes in generated CSS", () => {

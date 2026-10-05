@@ -12,10 +12,7 @@ import { convertComponents, type ConversionGraph } from "../src/index.js";
 import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const definitions = {
-  self: '<template component="x-self-cycle" status="early" summary="Self cycle."><defs><computed name="loop" from="loop + 1"></computed></defs><div from:data-value="loop"></div></template>',
-  mutual: '<template component="x-mutual-cycle" status="early" summary="Mutual cycle."><defs><computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><div from:data-value="left"></div></template>',
-} as const;
+import { computedCycles as definitions } from "./fixtures/computed-cycles.js";
 
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };
 

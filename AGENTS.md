@@ -30,6 +30,7 @@
 ## Safe work
 
 - Preserve unrelated changes and never rewrite shared Git history without explicit approval.
+- Do not add DCO checks or require commit signoffs unless the owner explicitly requests that policy.
 - Preview Foundation plans before applying them.
 - Check threadlabs.config.json for each path's ownership mode before editing. For managed paths, use .threadlabs.lock.json to confirm the last-applied content and change the owning Foundation template; preserve local paths and stop on ambiguous ownership.
 - Use Oxlint for JavaScript and TypeScript linting. Do not add Prettier or another repository-wide formatter.

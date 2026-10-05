@@ -10,7 +10,7 @@ const SOURCE = `
 import { cloneVNode, createVNode, defineComponent, Fragment, onMounted, onUpdated, type VNode } from "vue";
 
 type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-type BoundControl = { readonly tag: "input" | "textarea" | "select"; readonly name: "value" | "checked"; readonly value: unknown; readonly nativeProperty?: boolean; readonly defaultValue?: string; readonly defaultChecked?: boolean };
+type BoundControl = { readonly tag: "input" | "textarea" | "select"; readonly name: "value" | "checked"; readonly value: unknown; readonly nativeProperty?: boolean; readonly optionalValue?: boolean; readonly defaultValue?: string; readonly defaultChecked?: boolean };
 const connectedControls = new WeakSet<Control>();
 const boundValues = new WeakMap<Control, unknown>();
 const selectOptions = new WeakMap<HTMLSelectElement, readonly (readonly [HTMLOptionElement, string])[]>();
@@ -43,6 +43,8 @@ function snapshotValue(value: unknown): unknown {
 
 function writeBoundControl(element: Control, binding: BoundControl): void {
   const value = binding.value;
+  // An absent component value leaves the browser's selection/default behavior in charge.
+  if (binding.optionalValue && value === undefined) return;
   if (binding.name === "checked" && element instanceof HTMLInputElement) {
     const next = Boolean(value);
     if (element.checked !== next) element.checked = next;
@@ -108,7 +110,7 @@ function selectChildren(nodes: unknown, selected: ReadonlySet<string>, defaults:
 /** Render options through Vue VNodes so slotted options receive SSR selection too. */
 export const SelectedOptions = defineComponent({
   name: "SelectedOptions",
-  props: { value: { type: null }, multiple: Boolean, nativeProperty: Boolean },
+  props: { value: { type: null }, multiple: Boolean, nativeProperty: Boolean, optionalValue: Boolean },
   setup(props, { slots }) {
     let defaults: Array<readonly [VNode, boolean]> = [];
     const restoreDefaults = () => {
@@ -123,6 +125,10 @@ export const SelectedOptions = defineComponent({
     onMounted(restoreDefaults);
     onUpdated(restoreDefaults);
     return () => {
+      if (props.optionalValue && props.value === undefined) {
+        defaults = [];
+        return createVNode(Fragment, null, slots.default?.() ?? []);
+      }
       const values = props.nativeProperty ? [String(props.value)] : props.multiple
         ? Array.isArray(props.value) ? props.value.map(String) : []
         : [props.value == null ? "" : String(props.value)];
@@ -136,7 +142,8 @@ export const SelectedOptions = defineComponent({
 export const vBindControl = {
   deep: true,
   getSSRProps(binding: { value: BoundControl }): Record<string, unknown> | undefined {
-    const { tag, name, value, nativeProperty } = binding.value;
+    const { tag, name, value, nativeProperty, optionalValue } = binding.value;
+    if (optionalValue && value === undefined) return undefined;
     if (name === "checked") return { checked: Boolean(value) };
     if (tag === "input" || tag === "textarea") {
       return { value: nativeProperty ? String(value) : value == null ? "" : String(value) };

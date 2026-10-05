@@ -72,14 +72,6 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
         ),
       ]),
     "",
-    "## Methods",
-    "",
-    ...(target.methods.length === 0
-      ? ["This component exposes no controller methods."]
-      : target.methods.map((method) =>
-        `- \`${method.name}()\` delegates to controller export \`${method.exportName}\` and returns \`${method.returns}\`.`
-      )),
-    "",
     "## Usage",
     "",
     "```html",
@@ -94,7 +86,7 @@ export function generateDocs(definition: ComponentDefinition, version: string): 
     "",
     "## Runtime support",
     "",
-    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} State, computed values, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
+    `The generated targets use the same HTML Next definition as the live runtime${definition.controller === undefined ? "." : ` and load its declared controller module \`${definition.controller}\`.`} Mutable and computed state, handlers, structural rendering, data, validation, lifecycle, SSR adoption, and projected content therefore follow the shared conformance rules rather than target-specific interpretations.`,
     "",
   ].join("\n");
 }

@@ -7,7 +7,7 @@ eyebrow: HTML Next · Conversion
 
 # Convert once. Build with your framework.
 
-Turn your HTML component definitions into Vue or React source files that you can inspect, build, and distribute with ordinary framework tooling.
+Turn your HTML component definitions into Vue, React, or Svelte source files that you can inspect, build, and distribute with ordinary framework tooling.
 
 ## Install the converter
 
@@ -15,15 +15,16 @@ Turn your HTML component definitions into Vue or React source files that you can
 npm install --save-dev @nextwebwg/html-next-converter
 ```
 
-The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Vue and React are supported; Svelte conversion is coming soon and is not a CLI target yet.
+The CLI is `html-next-convert`. The examples below use `npx` to run the installed command. Targets are Vue 3.5, React 19.3, and Svelte 5.57.1.
 
 ## Convert a library
 
-Run either command from your project root. Quote the glob so the converter expands it, and use separate output directories to preserve both inventories.
+Run the command for your target from your project root. Quote the glob so the converter expands it, and use separate output directories to preserve each inventory.
 
 ```bash
 npx html-next-convert vue 'components/**' --mode library --out-dir generated/vue-target
 npx html-next-convert react 'components/**' --mode library --out-dir generated/react-target
+npx html-next-convert svelte 'components/**' --mode library --out-dir generated/svelte-target
 ```
 
 A directory such as `components/` is also accepted, as are explicit `.html` files. Definitions keep their source-directory layout beneath the target folder. Export names use PascalCase derived from component tags; each definition in a multi-component HTML file gets its own export.
@@ -32,9 +33,9 @@ A directory such as `components/` is also accepted, as are explicit `.html` file
 | --- | --- | --- |
 | Vue 3.5 | `.vue` single-file components | `<style scoped>` |
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
-| Svelte | Coming soon | Planned; not emitted today |
+| Svelte 5.57.1 | `.svelte` single-file components | Adjacent imported `.css` files |
 
-The generated files use Vue or React directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
+The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
 
 If a component uses `$html` to render an HTML string, its generated code needs the `parse5` package. Install the dependencies listed under `package.dependencies` in `html-next.conversion.json`; components without `$html` do not need `parse5`.
 
@@ -45,11 +46,13 @@ If a component uses `$html` to render an HTML string, its generated code needs t
 | `--mode application` | `<target>/application.ts`, exporting the application entry components |
 | `--mode library` | `<target>/index.ts`, with independently consumable named exports |
 
-Both modes write `html-next.conversion.json` with the inputs, artifacts, target version, and required package dependencies and peers. If a `<data src>` URL is component-relative, pass `--public-root-url /app/` when the conversion root is served at `/app/`.
+Both modes write `html-next.conversion.json` with the inputs, entry, artifacts, target version, and required package dependencies and peers. Merge its `package` fields into your published manifest. Entries export components for the consumer to mount or hydrate with its framework. If a `<data src>` URL is component-relative, pass `--public-root-url /app/` when the conversion root is served at `/app/`.
 
 ## Package the results
 
 [Ship for Vue and React](/html-next/ship-frameworks) shows a complete library build: convert both targets automatically, compile their JavaScript and types, publish their CSS, and expose Vue and React entries from one package.
+
+Svelte libraries can publish the generated components, CSS, controllers, and helpers as source, or compile them with `@sveltejs/vite-plugin-svelte`, `svelte-check`, and `svelte2tsx`. Give each target its own package subpath; framework peers can be optional when those entries are independently consumable.
 
 ## Prefer conversion during the app build?
 
@@ -57,7 +60,7 @@ Use the [Usage guide](/html-next/usage). It converts local imports and installed
 
 ## Publish HTML instead {#source-libraries}
 
-For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, or React. You do not need a library build script.
+For most component libraries, [publish your HTML files](/html-next/ship) and give consumers the Vite-plugin instructions. Each app builds the same package for native HTML Next, Vue, React, or Svelte. You do not need a library build script.
 
 ## Diagnostics
 

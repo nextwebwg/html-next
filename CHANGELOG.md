@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.29
+
+### Added
+
+- Svelte conversion for application and library output, including source-folder Vite imports, hydration, slots, and controller lifecycle behavior.
+- Handler `$$event` references and the `event` payload type preserve native events, including when passed through another event's detail.
+- `<dispatch target="ref">` sends native events to component-local refs. Collection refs receive one event per rendered element, with a shared payload evaluated once.
+
+### Changed
+
+- Controllers initialize once per component instance and use `host.on("connect", ...)` for setup and cleanup on each connection.
+- Resource data lives under `host.data`; mutable and computed state live under `host.state`. Invalid and readonly writes warn and retain the accepted value.
+- Prop styling uses `:host([prop])`; `:host-state()` selects mutable or computed state.
+- Removed the unsupported `<method>` API and its generated element-method and checker bridges. Use reactive props and native events with controller listeners.
+
 ## 1.0.0-alpha.28
 
 ### Changed

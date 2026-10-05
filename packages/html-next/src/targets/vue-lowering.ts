@@ -254,7 +254,12 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   truthy: `function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (value instanceof Error) return true;
-  if (value !== null && typeof value === "object") return Object.keys(value).length > 0;
+  if (value !== null && typeof value === "object") {
+    if (typeof Event !== "undefined" && "type" in value) {
+      try { Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!.call(value); return true; } catch { /* ordinary objects use their fields */ }
+    }
+    return Object.keys(value).length > 0;
+  }
   return Boolean(value);
 }`,
   text: `function text(value: unknown): string {
@@ -417,6 +422,26 @@ const IDENTIFIER_PATH = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*$/;
 export class Lowering {
   readonly #used = new Set<string>();
 
+  constructor(readonly warningName = "htmlNextAuthoredCheck") {}
+
+  /** Warn once for an authored location while retaining the existing acceptance predicate. */
+  authoredCheck(check: string, location: string, message: string): string {
+    this.#used.add("authoredWarning");
+    return `${this.warningName}(${check}, ${quote(location)}, ${quote(message)})`;
+  }
+
+  authoredFallbacks(): string[] {
+    if (!this.#used.has("authoredWarning")) return [];
+    return [`const ${this.warningName}Reported = new Set<string>();
+function ${this.warningName}(accepted: boolean, location: string, message: string): boolean {
+  if (!accepted && !${this.warningName}Reported.has(location)) {
+    ${this.warningName}Reported.add(location);
+    console.warn(message);
+  }
+  return accepted;
+}`];
+  }
+
   #use(name: string): string {
     this.#used.add(name);
     for (const dependency of FALLBACK_DEPENDENCIES[name] ?? []) this.#used.add(dependency);
@@ -445,7 +470,7 @@ export class Lowering {
         const objectType = typeOf(node.object, scope);
         const access = objectType.nullable ? "?." : ".";
         const retains = mayProduceInvalidResult(node.object, scope);
-        const candidate = retains ? "candidate" : object;
+        const candidate = retains ? "candidate" : objectType.type.kind === "terminal" && objectType.type.name === "event" ? `(${object} as any)` : object;
         // A closed shape still permits an absent read; the result is undefined at runtime.
         const read = objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)
           ? `(${candidate} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`
@@ -459,6 +484,8 @@ export class Lowering {
         if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
           return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typeOf(node.object, scope).nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
         }
+        const objectType = typeOf(node.object, scope).type;
+        if (objectType.kind === "terminal" && objectType.name === "event") return `(${object} as any)[${index}]`;
         // A computed key may not be one of an object literal's declared names. JavaScript then
         // reads an absent property, while TypeScript rejects the indexing expression.
         if (typeOf(node.object, scope).type.kind === "object") {
@@ -503,6 +530,11 @@ export class Lowering {
     }
   }
 
+  /** Apply native expression truthiness to an already evaluated value. */
+  truthiness(source: string): string {
+    return `${this.#use("truthy")}(${source})`;
+  }
+
   /** The expression as a condition, where JavaScript truthiness is enough. */
   condition(node: ExpressionNode, scope: Scope): string {
     if (node.kind === "binary" && (node.op === "and" || node.op === "or")) {
@@ -527,7 +559,7 @@ export class Lowering {
     const type = typeOf(node, scope);
     // A closed object with a required field always has keys, so only its absence makes it false.
     const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
-    if (filled) return code;
+    if (filled || type.type.kind === "terminal" && type.type.name === "event") return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
       case "list": return mayProduceInvalidResult(node, scope)
@@ -576,10 +608,11 @@ export class Lowering {
     scope: Scope,
     item: string,
     options: { where?: ExpressionNode; itemScope: Scope; sort: readonly string[]; limit?: ExpressionNode },
+    source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
     // Vue iterates null and undefined as nothing; anything but a list must also iterate as nothing.
-    let code = type.type.kind === "list" ? this.value(node, scope) : `${this.#use("list")}(${this.value(node, scope)})`;
+    let code = type.type.kind === "list" ? source : `${this.#use("list")}(${source})`;
     if (options.where === undefined && options.sort.length === 0 && options.limit === undefined) return code;
     if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
     if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;

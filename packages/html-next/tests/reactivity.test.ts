@@ -10,6 +10,33 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("reads frozen nested values without violating native proxy invariants", () => {
+    const source = Object.freeze({ nested: Object.freeze({ value: 7 }) });
+    const scope = new ReactiveScope([["source", source]]);
+    assert.equal(evaluate("source.nested.value", scope), 7);
+  });
+  it("stores native events without proxying them, including inside reactive structures", () => {
+    const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
+    const scope = new ReactiveScope([["event", event], ["selection", { source: event, item: "Ada" }]]);
+    assert.equal(scope.get("event"), event);
+    assert.equal((scope.get("selection") as { source: Value }).source, event);
+    assert.equal(evaluate("$event.detail.item", scope), "Ada");
+    assert.equal(evaluate("$selection.source.type", scope), "select");
+    const seen: Value[] = [];
+    createEffect(scope.scheduler, () => { seen.push(scope.get("event")!); });
+    event.preventDefault();
+    scope.scheduler.flush();
+    assert.equal(evaluate("$event.defaultPrevented", scope), true);
+    assert.deepEqual(seen, [event]);
+    scope.set("event", event);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event]);
+    const next = new Event("next");
+    scope.set("event", next);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event, next]);
+  });
+
   it("keeps a computed null until its first valid result, then retains its last valid result", () => {
     const scope = new ReactiveScope([["source", "oops"]]);
     const seen: unknown[] = [];
@@ -32,6 +59,52 @@ describe("reactive scope", () => {
     scope.set("source", 7);
     scope.scheduler.flush();
     assert.deepEqual(seen, [null, 4, 14]);
+  });
+
+  it("updates serialized arrays when index writes extend their length", () => {
+    const scope = new ReactiveScope([["items", ["a"]]]);
+    const items = scope.get("items") as string[];
+    const seen: string[] = [];
+    createEffect(scope.scheduler, () => { seen.push(String(scope.get("items"))); });
+    assert.deepEqual(seen, ["a"]);
+
+    items.push("b");
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b"]);
+
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b", "a,b,,d"]);
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.equal(seen.length, 3);
+  });
+
+  it("notifies deleted array indices when length shrinks without notifying retained indices", () => {
+    const scope = new ReactiveScope([["items", ["a", "b", "c"]]]);
+    const items = scope.get("items") as string[];
+    const deleted: unknown[] = [];
+    const retained: unknown[] = [];
+    const lengths: unknown[] = [];
+    createEffect(scope.scheduler, () => { deleted.push((scope.get("items") as string[])[2]); });
+    createEffect(scope.scheduler, () => { retained.push((scope.get("items") as string[])[0]); });
+    createEffect(scope.scheduler, () => { lengths.push((scope.get("items") as string[]).length); });
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined]);
+    assert.deepEqual(retained, ["a"]);
+    assert.deepEqual(lengths, [3, 1]);
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.equal(deleted.length, 2);
+    assert.equal(lengths.length, 2);
+
+    items[2] = "next";
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined, "next"]);
+    assert.deepEqual(lengths, [3, 1, 3]);
   });
 
   it("does not notify consumers for Object.is-equal signal writes", () => {
