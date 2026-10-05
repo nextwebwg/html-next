@@ -2,5 +2,3 @@
 packages/*/dist/** linguist-generated=true
 packages/*/examples/generated/** linguist-generated=true
 *.lock linguist-generated=true
-# Unified patch context lines preserve the upstream indentation and blank-line prefix.
-patches/*.patch whitespace=-blank-at-eol,-space-before-tab

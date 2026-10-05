@@ -58,7 +58,7 @@ The React adapter turns this HTML definition into a React component when your ap
 
 ::: framework-svelte
 
-You can author this HTML definition now. The Svelte adapter is coming soon.
+The Svelte adapter turns this HTML definition into a Svelte component when your app builds.
 
 :::
 
@@ -84,7 +84,7 @@ You can author this HTML definition now. The Svelte adapter is coming soon.
 
 ::: framework-svelte
 
-Svelte support is coming soon. [Use HTML Next today](/html-next/usage) or choose Vue or React above.
+[Set up Svelte](/html-next/usage/svelte). Import `XCounter` from `counter.html` and use it like another Svelte component.
 
 :::
 
