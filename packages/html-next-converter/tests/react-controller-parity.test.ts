@@ -17,6 +17,7 @@ import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
+import { assertTargetedDispatch } from "./fixtures/targeted-dispatch.js";
 import { controllerParitySource as source, controllerParityModule as controller } from "./fixtures/controller-parity.js";
 
 async function snapshot(page: Page) {
@@ -59,7 +60,7 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       try {
         await promisify(execFile)(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), [
           "--noEmit", "--jsx", "react-jsx", "--module", "preserve", "--moduleResolution", "bundler",
-          "--target", "ES2022", "--allowJs", "--skipLibCheck", "--strict",
+          "--target", "ES2022", "--allowJs", "--allowImportingTsExtensions", "--skipLibCheck", "--strict",
           join(outDirectory, manifest.components[0]!.artifact),
         ], { cwd: directory });
       } catch (error) {
@@ -99,7 +100,7 @@ if (!hydrating) root.render(element);
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
       for (const hydrate of [false, true]) {
-        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} matches controller effects, methods, and cleanup`, async () => {
+        it(`${engine} ${mode} ${hydrate ? "hydration" : "mount"} matches controller effects, events, and cleanup`, async () => {
           const browser = await launchParityBrowser(browserType);
           const pages: Page[] = [];
           const errors: string[] = [];
@@ -134,6 +135,7 @@ if (!hydrating) root.render(element);
               assert.deepEqual(converted.behavior, native.behavior);
               await assertPixelsEqual(react, converted.pixels, native.pixels, "React controller pixels differ", live);
             };
+            for (const page of [live, react]) await assertTargetedDispatch(page);
             await compare();
             await Promise.all([live, react].map((page) => page.locator("#case button.same-nested").click()));
             assert.equal((await snapshot(live)).behavior.trace.nestedEffects, 1, "a no-op nested write must not rerun its controller effect");
@@ -220,18 +222,14 @@ if (!hydrating) root.render(element);
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
             await compare();
             const results = await Promise.all([live, react].map((page) => page.evaluate(() =>
-              (document.querySelector("#case") as Element & { increment(): Promise<number> }).increment())));
+              new Promise<number>((resolve) => {
+                const root = document.querySelector("#case")!;
+                root.addEventListener("incremented", (event) => resolve((event as CustomEvent<number>).detail), { once: true });
+                root.dispatchEvent(new Event("request-increment"));
+              }))));
             assert.deepEqual(results, [2, 2]);
             await Promise.all([live, react].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2")));
             await compare();
-            const failures = await Promise.all([live, react].map((page) => page.evaluate(async () => {
-              try { await (document.querySelector("#case") as Element & { missing(): Promise<void> }).missing(); return null; }
-              catch (error) { const failure = error as Error & { diagnostic?: { code: string } }; return { code: failure.diagnostic?.code, message: failure.message }; }
-            })));
-            assert.deepEqual(failures, [
-              { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
-              { code: "HJ003", message: "HJ003: Controller does not export method `missingExport`." },
-            ]);
             await Promise.all([live, react].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               (window as unknown as { detachedRoot: Element }).detachedRoot = root;

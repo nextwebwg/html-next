@@ -14,8 +14,7 @@ import { componentDecorationsController } from "./fixtures/component-decorations
 import { delegatedDecorationsSource as source } from "./fixtures/delegated-decorations.js";
 
 const controller = (owner: string): string => `window.styleModules ??= []; window.styleModules.push(${JSON.stringify(owner)});\n`
-  + componentDecorationsController(owner)
-  + "\nexport function outer(host) { return host.root.localName; }";
+  + componentDecorationsController(owner);
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -124,11 +123,6 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               await assertPixelsEqual(svelte, converted.pixels, native.pixels, "Svelte decoration pixels differ", live);
             };
             await compare("button");
-            const methods = await Promise.all(pages.map((page) => page.locator("#case button").evaluate(async (element) => {
-              const root = element as unknown as Element & { outer(): Promise<string>; inner?: unknown; innerNoController?: unknown; };
-              return { outer: await root.outer(), inner: typeof root.inner, innerNoController: typeof root.innerNoController };
-            })));
-            assert.deepEqual(methods, Array.from({ length: 2 }, () => ({ outer: "button", inner: "undefined", innerNoController: "undefined" })));
             await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").click()));
             await compare("a");
             for (const [owner, name, value] of [
@@ -144,9 +138,6 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
             }
             await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").click()));
             await compare("button");
-            const replacedMethods = await Promise.all(pages.map((page) => page.locator("#case [data-leaf]").evaluate(async (element) =>
-              (element as unknown as { outer(): Promise<string> }).outer())));
-            assert.deepEqual(replacedMethods, ["button", "button"]);
             assert.deepEqual(errors, []);
             assert.deepEqual(warnings.filter((message) => /hydration|mismatch/i.test(message)), []);
           } catch (error) {

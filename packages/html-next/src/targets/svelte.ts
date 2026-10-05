@@ -134,6 +134,7 @@ function checkSupported(definition: ComponentDefinition): { importedNames: Reado
 }
 
 interface RenderContext {
+  readonly lowering: Lowering;
   readonly definition: ComponentDefinition;
   readonly imports: Set<string>;
   readonly handlerNames: ReadonlyMap<string, string>;
@@ -192,7 +193,7 @@ function strictTypeCheck(type: TypeNode, value: string, context: RenderContext):
 }
 
 function declaredReadGuard(plan: CompiledExpression, scope: Scope, context: RenderContext): string | undefined {
-  return declaredReferenceGuard(plan, scope, context.definition, (type, value) => strictTypeCheck(type, value, context));
+  return declaredReferenceGuard(plan, scope, context.definition, (type, value) => strictTypeCheck(type, value, context), context.lowering);
 }
 
 function conformingRead(plan: CompiledExpression, scope: Scope, context: RenderContext, source: string): { source: string; invalid: boolean } {
@@ -1008,7 +1009,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return name;
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
-    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
+    + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending specialElement hadConstructor hadProto event children slots rest rootAttrs checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
   for (const name of importedNames) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
@@ -1060,8 +1061,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     code,
     types,
   };
-  const lowering = new Lowering();
-  const context: RenderContext = { definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
+  const lowering = new Lowering(freshIdentifier("htmlNextAuthoredCheck"));
+  const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, checkedSlotName: freshIdentifier("htmlNextCheckedSlot"), propContractsByTag: options.propContractsByTag,
     ...(css !== "" && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
     nextLoop: 0, htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), decorationAttachmentName: freshIdentifier("htmlNextDecorations"), propertyAttachmentName: freshIdentifier("htmlNextProperty"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
@@ -1154,6 +1155,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   });
   const handlerScope: Scope = { code: new Map(scope.code).set("$$event", "event"),
     types: new Map(scope.types).set("$$event", { type: { kind: "terminal", name: "event" }, nullable: false }) };
+  const usesTargetDispatch = handlers.some((handler) => handler.steps.some((step) => step.kind === "dispatch" && step.target !== undefined));
   const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(event: Event): void {\n${handler.steps.map((step, index) => {
     const condition = step.guard === undefined ? undefined : conformingCondition(step.guard, handlerScope, lowering, context);
     const guardName = condition === undefined ? undefined : context.freshIdentifier("htmlNextGuard");
@@ -1163,6 +1165,10 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
       const detail = context.freshIdentifier(`htmlNextDetail${index}`);
       const source = step.value === undefined ? "undefined" : conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope)).source;
+      if (step.target !== undefined) {
+        context.refs.add(step.target);
+        return `  ${guard}{ const ${detail}: unknown = ${source}; if (${detail} !== Symbol.for('html-next.invalid-result')) dispatchDeclaredTargets(${context.refsName}.get(${quote(step.target)}), ${quote(step.event)}, ${detail}, ${JSON.stringify(declarationTypeNode(declaration.type, declaration.shape))}, ${JSON.stringify({ bubbles: declaration.bubbles, composed: declaration.composed, cancelable: declaration.cancelable })}); }`;
+      }
       return `  ${guard}{ const ${detail}: unknown = ${source}; if (${detail} !== Symbol.for('html-next.invalid-result')) dispatchDeclared(rootElement ?? null, ${quote(step.event)}, ${detail}, ${JSON.stringify(declarationTypeNode(declaration.type, declaration.shape))}, ${JSON.stringify({ bubbles: declaration.bubbles, composed: declaration.composed, cancelable: declaration.cancelable })}); }`;
     }
     if (step.kind === "focus" || step.kind === "validate") {
@@ -1174,13 +1180,16 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     const state = states.find((entry) => entry.name === step.writablePath[0]);
     if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
     const next = context.freshIdentifier(`htmlNextCandidate${index}`);
-    const check = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
+    const destinationCheck = handlerDestinationCheck(declarationTypeNode(state.type, state.shape), step.writablePath, 1, next, handlerScope, lowering, (type, value) => strictTypeCheck(type, value, context));
+    const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
+      `(${next} === undefined || ${destinationCheck})`, `handler:${handler.name}:${step.path}`,
+      `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
     const destination = scope.code.get(state.name)!;
     const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
         ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
-    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${next} === undefined || ${check})`}) { ${write} } }`;
+    return `  ${guard}{ const ${next}: unknown = ${read.source}; if (${next} !== Symbol.for('html-next.invalid-result')${check === undefined ? "" : ` && (${check})`}) { ${write} } }`;
   }).join("\n")}\n}`);
   const usesNestedWrites = context.usesNestedBindings || handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const focusReads: string[] = [];
@@ -1234,7 +1243,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(computed.length > 0 ? [`import { cycleCheckedComputed } from ${quote(options.reactivitySpecifier ?? "./reactivity.svelte")};`] : []),
     ...(data.some((declaration) => declaration.source !== undefined) ? [`import { useDataRead } from ${quote(options.dataSpecifier ?? "./data.svelte")};`] : []),
     ...(context.usesControls ? [`import { attachGenericBinding, attachBoundControl, syncBoundControl, controlDefaults, prepareHydrationControls, observeBoundOptions, type BoundDefaults } from ${quote(options.controlSpecifier ?? "./control")};`] : []),
-    ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared"} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
+    ...(context.usesEvents ? [`import { attachNativeEvents${target.events.length === 0 ? "" : ", dispatchDeclared" + (usesTargetDispatch ? ", dispatchDeclaredTargets" : "")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(context.htmlSites === 0 ? [] : [`import { retainedSanitizedHtml } from ${quote(options.htmlSpecifier ?? "./html")};`]),
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
@@ -1488,7 +1497,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(usesController ? [
-      ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, unknown> = ${JSON.stringify(controllerStateTypes)};`] : []),
+      ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, Parameters<typeof acceptsControllerWrite>[1]> = ${JSON.stringify(controllerStateTypes)};`] : []),
       `useComponentHost(() => import(${quote(definition.controller!)}), {`,
       "  root: () => rootElement ?? null,",
       `  ownsRoot: () => rest[${quote(ROOT_OWNER_PROP)}] !== true,`,
@@ -1509,7 +1518,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...handlerSources,
     ...lowering.fallbacks(),
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
-  return { component: `${moduleFallbacks.length === 0 ? "" : `<script module lang="ts">\n${moduleFallbacks.join("\n").replace(/<\/script/gi, "<\\/script")}\n</script>\n`}${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
+  const moduleSources = [...moduleFallbacks, ...lowering.authoredFallbacks()];
+  return { component: `${moduleSources.length === 0 ? "" : `<script module lang="ts">\n${moduleSources.join("\n").replace(/<\/script/gi, "<\\/script")}\n</script>\n`}${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
     helpers: [
       ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),

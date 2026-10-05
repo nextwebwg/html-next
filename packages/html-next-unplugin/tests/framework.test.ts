@@ -353,7 +353,22 @@ describe("svelte source adapter", () => {
   it.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("mounts on-demand local imports in Vite and updates native output", async () => {
     const { root, library } = await fixture();
     await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
-    await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+    const controlled = (await readFile(join(library, "controls.html"), "utf8"))
+      .replace('component="ui-button"', 'component="ui-button" controller="./controlled.js"')
+      .replace('<handler name="increment">', '<event name="increment-request" type="event">Native input event.</event><handler name="increment">')
+      .replace('<set name="count" expr:value="$count + 1"></set>', () => '<dispatch event="increment-request" expr:value="$$event"></dispatch>');
+    await writeFile(join(root, "src", "controls.html"), controlled);
+    await writeFile(join(root, "src", "controlled.js"), `export default function initialize(host) {
+      host.on("connect", () => {
+        host.root.setAttribute("data-connected", "yes");
+        return () => host.root.removeAttribute("data-connected");
+      });
+      host.on("increment-request", event => {
+        host.state.count += 1;
+        host.root.setAttribute("data-native-event", String(event.detail instanceof MouseEvent));
+        host.root.setAttribute("data-source-event", event.detail.type);
+      });
+    }`);
     await writeFile(join(root, "src", "App.svelte"), `<script lang="ts">import { UiButton } from "./controls.html";</script><UiButton label="Save" />`);
     await writeFile(join(root, "src", "mount.ts"), `import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.getElementById("app")! });`);
     await writeFile(join(root, "index.html"), `<div id="app"></div><script type="module" src="/src/mount.ts"></script>`);
@@ -364,10 +379,19 @@ describe("svelte source adapter", () => {
       const page = await browser.newPage();
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      page.on("response", response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
       await page.goto(server.resolvedUrls!.local[0]!);
-      await page.waitForFunction(() => document.querySelector("output")?.textContent === "0");
+      try { await page.waitForFunction(() => document.querySelector("output")?.textContent === "0", undefined, { timeout: 5000 }); }
+      catch (error) { assert.fail(`${String(error)}; browser errors: ${JSON.stringify(errors)}`); }
+      await page.locator('button[data-connected="yes"]').waitFor();
       await page.locator("button").click();
       await page.waitForFunction(() => document.querySelector("output")?.textContent === "1");
+      assert.equal(await page.locator("button").getAttribute("data-connected"), "yes");
+      assert.equal(await page.locator("button").getAttribute("data-native-event"), "true");
+      assert.equal(await page.locator("button").getAttribute("data-source-event"), "click");
+      await page.locator("button").click();
+      await page.waitForFunction(() => document.querySelector("output")?.textContent === "2");
       assert.equal(await page.locator("ui-button, ui-badge").count(), 0);
       assert.equal(await page.locator("button").evaluate((element) => getComputedStyle(element).color), "rgb(1, 2, 3)");
       assert.deepEqual(errors, []);
@@ -397,10 +421,10 @@ describe("svelte source adapter", () => {
           <prop name="value">Value.<type from="kind"><option value="list" type="list(number)"></option><option value="object" type="object({ label: string })"></option><option value="text" type="string"></option></type></prop>
           </defs><output $value="value"></output></template>
         <template component="ui-structured-owner" status="early" summary="Structured input binding."><defs><state name="box" type="object({ value: unknown })" value="{ value: '[1, 2]' }"></state></defs><section><ui-structured from:value="box.value"></ui-structured><ui-structured bind:value="box.value"></ui-structured></section></template>
-        <template component="ui-no-controller" status="early" summary="Method readiness."><defs><method name="ping" returns="promise(undefined)"></method><method name="·ping" returns="promise(number)"></method><method name="my-method" returns="promise(string)"></method></defs><button class="">Ping</button></template>
+        <template component="ui-no-controller" status="early" summary="Controller-free native output."><button class="">Ping</button></template>
         <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
         <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" $ref="link" href="#next">Link</a><button $else $ref="button">Button</button></template></template>
-        <template component="ui-controlled" status="early" summary="Controller methods." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><method name="increment" export="increment" returns="promise(number)"></method></defs><section><button $ref="button" $value="count"></button><span $each="row of [count]" $ref="rows" $value="row"></span></section></template>
+        <template component="ui-controlled" status="early" summary="Controller events." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><event name="increment-request" type="event">Native input event.</event><handler name="increment"><dispatch event="increment-request" expr:value="$$event"></dispatch></handler></defs><section><button on:click="increment" $ref="button" $value="count"></button><span $each="row of [count]" $ref="rows" $value="row"></span></section></template>
         <template component="ui-reserved" status="early" summary="Public slot names."><defs><prop name="children" type="string">Public children.</prop><prop name="slots" type="string">Public slots.</prop></defs><section><output $value="concat(children, '/', slots)"></output><slot name="title"></slot><slot></slot></section></template>
         <template component="ui-names" status="early" summary="Import collisions."><defs><state name="UiReserved" value="Ready"></state><state name="Map" value="1"></state><state name="String" value="Ready"></state><state name="Symbol" value="Kept"></state><state name="absent" type="number"></state><handler name="UiControlled"><set name="absent" expr:value="1"></set></handler></defs><section><ui-reserved from:children="UiReserved" slots="Public"><b slot="title">Title</b><span $value="UiReserved"></span></ui-reserved><ui-controlled $ref="controlled" on:click="UiControlled"></ui-controlled><output .title="absent" $value="concat(String, '/', Map, '/', Symbol)"></output></section></template>
         <template component="ui-bound" status="early" summary="Component binding."><defs><state name="form" type="object({ amount: number })" value="{ amount: 2 }"></state></defs><section><ui-controlled bind:amount="form.amount"></ui-controlled><ui-native-delegate bind:value="form.amount"></ui-native-delegate><ui-owned-input bind:value="form.amount"></ui-owned-input><ui-untyped-number bind:value="form.amount"></ui-untyped-number><ui-untyped-output bind:value="form.amount"></ui-untyped-output><ui-untyped-output bind:__proto__="form.amount" bind:constructor="form.amount"></ui-untyped-output><ui-untyped-output from:value="form.amount"></ui-untyped-output><ui-untyped-flag bind:checked="form.amount"></ui-untyped-flag><ui-untyped-radio bind:checked="form.amount"></ui-untyped-radio><ui-untyped-file bind:value="form.amount"></ui-untyped-file><ui-untyped-area bind:value="form.amount"></ui-untyped-area><ui-untyped-select bind:value="form.amount"></ui-untyped-select><ui-untyped-select from:value="form.amount"></ui-untyped-select><ui-plain-select from:value="form.amount"></ui-plain-select><select from:value="form.amount"><option value="1" selected>One</option><option value="2">Two</option></select><ui-untyped-multiple bind:value="form.amount"></ui-untyped-multiple><ui-selected kind="number" bind:value="form.amount"></ui-selected><ui-state-selected bind:value="form.amount"></ui-state-selected></section></template>
@@ -433,7 +457,13 @@ describe("svelte source adapter", () => {
         </defs><ui-button $ref="root" from:label="label" class="primary" class:active="active" on:click="toggle"><slot></slot></ui-button></template>`;
     await writeFile(join(library, "controls.html"), authored);
     await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
-    const controllerSource = "export default function connect(host) {} export async function increment(host) { return ++host.state.count; }";
+    const controllerSource = `export default function initialize(host) {
+      host.on("connect", () => {
+        host.root.setAttribute("data-connected", "yes");
+        return () => host.root.removeAttribute("data-connected");
+      });
+      host.on("increment-request", () => { host.state.count += 1; });
+    }`;
     await writeFile(join(library, "controlled.js"), controllerSource);
     await writeFile(join(root, "src", "controlled.js"), controllerSource);
     const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });
@@ -475,8 +505,8 @@ describe("svelte source adapter", () => {
     const entry = join(root, "src", "entry.ts");
     await writeFile(entry, `import { render } from "svelte/server";
       import { Button } from "@example/controls";
-      import { UiBadge, UiDecorated } from "./controls.html";
-      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body + render(UiDecorated).body;`);
+      import { UiBadge, UiDecorated, UiNoController } from "./controls.html";
+      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body + render(UiDecorated).body + render(UiNoController).body;`);
     await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
       build: { ssr: entry, outDir: "dist", minify: false } });
     const output = await import(pathToFileURL(join(root, "dist", "entry.js")).href) as { markup(): string };
@@ -484,6 +514,7 @@ describe("svelte source adapter", () => {
     assert.match(output.markup(), /Badge/);
     assert.match(output.markup(), /class="decorated"/);
     assert.match(output.markup(), /style="color: red;"/);
+    assert.match(output.markup(), /<button\b[^>]*>Ping<\/button>/);
     const bundle = await readFile(join(root, "dist", "entry.js"), "utf8");
     assert.equal(/<ui-button|<ui-badge|UNUSED_COMPONENT_MARKER|parse(?:BrowserComponent|Component(?:Nodes|Resource)?)\b|html-next\/live/.test(bundle), false, "unused components and HTML Next runtime must be absent");
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
@@ -491,9 +522,8 @@ describe("svelte source adapter", () => {
     }, include: ["src"] }));
     await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
       import { Button } from "@example/controls"; import { UiButton, UiControlled, UiReserved, UiNoController } from "./controls.html";
-      export const method: Promise<number> = (null! as ReturnType<typeof UiControlled>).increment();
-      export const unusual: Promise<number> = (null! as ReturnType<typeof UiNoController>)['·ping']();
-      export const hyphenated: Promise<string> = (null! as ReturnType<typeof UiNoController>)['my-method']();
+      export const controlled: ComponentProps<typeof UiControlled> = { amount: 2 };
+      export const controllerFree: ComponentProps<typeof UiNoController> = {};
       export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
       export const local: ComponentProps<typeof UiButton> = { label: "Save" };
       export const reserved: ComponentProps<typeof UiReserved> = { children: "Child", slots: "Slots" };`);
@@ -505,12 +535,6 @@ describe("svelte source adapter", () => {
       const result = error as { stdout: string };
       assert.match(result.stdout, /number.*string/);
       assert.match(result.stdout, /huge/);
-      return true;
-    });
-    await writeFile(join(root, "src", "invalid.ts"), `import { UiControlled } from "./controls.html";
-      export const bad: Promise<string> = (null! as ReturnType<typeof UiControlled>).increment();`);
-    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
-      assert.match((error as { stdout: string }).stdout, /Promise<number>.*Promise<string>/);
       return true;
     });
     await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { UiReserved } from "./controls.html";

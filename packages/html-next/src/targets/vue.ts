@@ -1,7 +1,7 @@
 /**
  * Converts a definition to a Vue 3.5 single-file component that depends only on Vue and the
  * component's own modules. Props, state, computed values, bindings, structural directives, slots,
- * events, and methods map to Vue's own facilities; the controller receives a host generated here from
+ * events map to Vue's own facilities; the controller receives a host generated here from
  * Vue refs, effects, and lifecycle; styles become `<style scoped>`.
  */
 import { isScriptIdentifier } from "./shared.js";
@@ -41,9 +41,9 @@ const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentI
 
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
-  "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
+  "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "createDispatch", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
+  "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
   "SanitizedHtml", "RetainedInlineText", "inlineTextSegment", "moduleFormatValue",
@@ -161,7 +161,7 @@ function referenceCheck(type: TypeNode, value: string): string {
 }
 
 /** The same declared path checks as the live evaluator, before a generated expression can update. */
-function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>): string | undefined {
+function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>, lowering?: Lowering): string | undefined {
   const checks: string[] = [];
   for (const dependency of typeCheckedDependencies(plan)) {
     const [root, ...steps] = dependency.split(".");
@@ -192,7 +192,9 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
     const base = scope.code.get(root!);
     if (base === undefined) continue;
     const read = `${readAbsentField ? `(${base} as any)` : base}${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
-    checks.push(`(${read} == null || ${referenceCheck(type, read)})`);
+    const accepted = `(${read} == null || ${referenceCheck(type, read)})`;
+    checks.push(lowering?.authoredCheck(accepted, `${plan.source}:${dependency}`,
+      `${definition.source.file}: HR007: Reference ${dependency} does not satisfy its declared type.`) ?? accepted);
   }
   return checks.length === 0 ? undefined : checks.join(" && ");
 }
@@ -202,7 +204,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
     const root = dependency.split(".")[0]!;
     return !context.globals.has(root) || names.locals?.has(root);
   })) return undefined;
-  const guard = expressionGuard(plan, names.script, context.definition);
+  const guard = expressionGuard(plan, names.script, context.definition, names.locals, context.lowering);
   const retains = mayProduceInvalidResult(plan.ast, names.script);
   if (guard === undefined && !retains) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
@@ -381,7 +383,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
         if (plan === undefined) return `{ value: ${quote(segment.value)}, text: ${quote(segment.value)}, accepted: true }`;
         const candidate = context.identifiers.take("candidate", "Text");
         const local = withLocal(names, [[candidate, typeOf(plan.ast, names.template)]]);
-        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
+        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals, lowering) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
       });
       return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
     }
@@ -612,7 +614,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   if (node.ref !== undefined) {
     if (!context.refs.has(node.ref)) context.refs.set(node.ref, context.identifiers.take(`${node.ref}Element`, ""));
-    attributes.push(`ref=${quote(node.ref)}`);
+    // Keep Vue's template-ref namespace separate from authored state and props.
+    attributes.push(`ref=${quote(context.refs.get(node.ref)!)}`);
   }
   if (isRoot) {
     // The consumer's attributes win over the template's literals and lose to its bindings, as in
@@ -693,26 +696,31 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
-      const check = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
+      const destinationCheck = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, `next${index}`, local.script, lowering);
+      const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
+        `(next${index} === undefined || ${destinationCheck})`,
+        `handler:${handler.name}:${step.path}`,
+        `${context.definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
       if (check === undefined && !mayBeInvalid) {
         lines.push(`  ${guard}${target} = ${value};`);
       } else {
         const next = `next${index}`;
         lines.push(`  ${guard}{`);
         lines.push(`    const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`);
-        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${next} === null || ${next} === undefined || ${check})`}) ${target} = ${next} as never;`);
+        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${check})`}) ${target} = ${next} as never;`);
         lines.push("  }");
       }
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
+      const destination = step.target === undefined ? "" : `, ${element(step.target)}.value ?? []`;
       if (step.value !== undefined && mayProduceInvalidResult(step.value.ast, local.script)) {
         const detail = `detail${index}`;
-        lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}); }`);
+        lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}${destination}); }`);
       } else {
-        const detail = step.value === undefined ? "" : `, ${lowering.value(step.value.ast, local.script)}`;
-        lines.push(`  ${guard}dispatch(${quote(step.event)}${detail});`);
+        const detail = step.value === undefined ? (step.target === undefined ? "" : ", undefined") : `, ${lowering.value(step.value.ast, local.script)}`;
+        lines.push(`  ${guard}dispatch(${quote(step.event)}${detail}${destination});`);
       }
     } else if (step.kind === "focus") {
       lines.push(`  ${guard}${element(step.target)}.value?.focus();`);
@@ -794,7 +802,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ? target.props.find((prop) => prop.name === "value")
     : undefined;
   const identifiers = new Identifiers(target.props.map((prop) => prop.name));
-  const lowering = new Lowering();
+  const lowering = new Lowering(identifiers.take("htmlNextAuthoredCheck", ""));
   const templateScope = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const script = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const names: Names = { template: templateScope, script };
@@ -1003,7 +1011,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const name = stateNames.get(declaration)!;
     const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
     if (declaration.kind === "computed") {
-      const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition);
+      const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition, undefined, lowering);
       const retains = declaration.expression !== undefined && mayProduceInvalidResult(declaration.expression.ast, script);
       if (retains) return `let ${name}Previous: any = null;\nconst ${name} = cycleCheckedComputed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}const next: any = ${initial}; if (next === Symbol.for("html-next.invalid-result")) return ${name}Previous; return ${name}Previous = next; });`;
       if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
@@ -1112,7 +1120,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     "",
     ...(arms === undefined && needsRoot && template.ref === undefined ? ["const root = ref<HTMLElement | null>(null);"] : []),
     ...(unnamedRootRef === undefined ? [] : [`const ${unnamedRootRef} = useTemplateRef<HTMLElement>(${quote(context.rootArmRef!)});`]),
-    ...[...context.refs].map(([ref, name]) => `const ${name} = useTemplateRef<HTMLElement>(${quote(ref)});`),
+    ...[...context.refs.values()].map((name) => `const ${name} = useTemplateRef<HTMLElement>(${quote(name)});`),
     ...(arms === undefined && needsRoot && template.ref !== undefined ? [`const root = ${context.refs.get(template.ref)!};`] : []),
     ...(arms === undefined ? [] : [`const root = ${rootValues.length === 1 ? rootValues[0] : `computed(() => ${rootValues.map((name) => `${name}.value`).join(" ?? ")} ?? null)`};`]),
     ...(arms === undefined ? [] : ["preserveRootFocus(root);"]),
@@ -1207,9 +1215,10 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(target.props.length === 0 && !context.usesRetainedInlineText ? [] : ["PropType"]),
     ...(context.usesKeyedBoundary ? ["VNode"] : []),
   ];
+  const moduleSources = [...moduleFallbacks, ...lowering.authoredFallbacks()];
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
-    ...(moduleFallbacks.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleFallbacks, "</script>", ""]),
+    ...(moduleSources.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleSources, "</script>", ""]),
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),

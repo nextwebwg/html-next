@@ -96,3 +96,15 @@ export function acceptsBindingDestination(value: unknown, type: TypeNode | null)
   return value === undefined || type !== null && (value === null ? parse(value, type, "$").ok : acceptsDeclaredReference(value, type));
 }
 `;
+
+
+/** Snapshot local refs before invoking listeners; Vue refs can hold public component instances. */
+export const DISPATCH_TARGETS_SOURCE = `export function dispatchToTargets(recorded: unknown, send: (target: Element) => void): void {
+  const refs = recorded instanceof Set ? [...recorded] : Array.isArray(recorded) ? [...recorded] : [recorded];
+  const targets = refs.map((ref: any) => ref?.nodeType === 1 ? ref : ref?.$el)
+    .filter((element): element is Element => element?.nodeType === 1 && element.isConnected)
+    .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+  for (const target of targets) {
+    if (target.isConnected) send(target);
+  }
+}`;

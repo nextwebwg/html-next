@@ -38,7 +38,6 @@
     <computed name="loading" from="stock.pending"></computed>
     <computed name="failed" from="not stock.pending and not stock.ok"></computed>
 
-    <method name="restockAll" export="restockAll" returns="undefined">Refill every low item.</method>
   </defs>
 
   <!-- The shell is a child here, so this component keeps its own <main> root. It could equally

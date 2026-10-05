@@ -422,6 +422,26 @@ const IDENTIFIER_PATH = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*$/;
 export class Lowering {
   readonly #used = new Set<string>();
 
+  constructor(readonly warningName = "htmlNextAuthoredCheck") {}
+
+  /** Warn once for an authored location while retaining the existing acceptance predicate. */
+  authoredCheck(check: string, location: string, message: string): string {
+    this.#used.add("authoredWarning");
+    return `${this.warningName}(${check}, ${quote(location)}, ${quote(message)})`;
+  }
+
+  authoredFallbacks(): string[] {
+    if (!this.#used.has("authoredWarning")) return [];
+    return [`const ${this.warningName}Reported = new Set<string>();
+function ${this.warningName}(accepted: boolean, location: string, message: string): boolean {
+  if (!accepted && !${this.warningName}Reported.has(location)) {
+    ${this.warningName}Reported.add(location);
+    console.warn(message);
+  }
+  return accepted;
+}`];
+  }
+
   #use(name: string): string {
     this.#used.add(name);
     for (const dependency of FALLBACK_DEPENDENCIES[name] ?? []) this.#used.add(dependency);

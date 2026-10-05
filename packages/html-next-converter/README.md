@@ -9,7 +9,7 @@ deterministic SSR. It parses inert fragments and applies one pinned safe-default
 browser and on the server. It deliberately does not call native `setHTML()`, even where available:
 Firefox currently parses malformed table content differently from Chromium, WebKit, and `parse5`,
 which would make hydration browser-dependent. Props, state, computed values, bindings, structural
-directives, slots, and methods map to Vue's own facilities; declared events remain native
+directives and slots map to Vue's own facilities; declared events remain native
 `CustomEvent`s on the lowered root (Vue emits are reserved for `v-model` updates), and styles become
 `<style scoped>`.
 
@@ -62,8 +62,7 @@ hydration, and exact pixels with the live runtime in Chromium, Firefox, and WebK
 that cannot be represented fail conversion explicitly rather than silently changing behavior.
 Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle APIs, with `.svelte`
 components and adjacent imported CSS under `generated/svelte/`. It supports props (including generic
-and state-selected types), state/computed/handlers, named and scoped slots, native events and
-methods, context, data reads, controllers and refs, native form controls, safe HTML, structural
+and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, controllers and refs, native form controls, safe HTML, structural
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
 Svelte's normal compiler owns rendering, SSR, and hydration.
 
@@ -74,13 +73,12 @@ html-next-convert svelte 'components/**' --mode library --out-dir generated
 The current supported Svelte baseline is 5.57.1. Compile generated files with the standard Svelte
 compiler or `@sveltejs/vite-plugin-svelte`. Source consumers can use `svelte-check`; publishers
 emitting declaration files can use `svelte2tsx`. The generated public types cover props, native and
-declared event callbacks, scoped slot fields, and exposed methods. Both graph modes export components; application and library consumers use public `mount`/`hydrate`
+declared event callbacks and scoped slot fields. Both graph modes export components; application and library consumers use public `mount`/`hydrate`
 or their framework's usual mounting and hydration flow.
 Svelte 5.57.1 loses focus when it moves a focused keyed row in Chromium and Firefox. The
 [compatibility patch](../../patches/README.md#keyed-focus) preserves focus and native focus events.
 Install it in the consuming application when that behavior is required; this repository's pnpm
-patches do not propagate through generated output or published dependencies. The same document
-covers checker patches needed for CSS-valid method names that require quoted JavaScript exports.
+patches do not propagate through generated output or published dependencies.
 
 Feature helpers are emitted once per converted graph and imported only by components that need
 them. Style bindings record `cssstyle` and `css-tree` in server dependencies; the generated helper's
@@ -120,3 +118,17 @@ component subpaths from the conversion inventory, such as `./react/XCard` pointi
 bundlers retain CSS side-effect imports from unused named re-exports in a shared `./react` barrel,
 even when they remove the unused JavaScript. The on-demand Vite adapter handles pruning for its
 generated named exports.
+
+Controllers initialize once per component instance. Use `host.on("connect", setup)` for setup
+that must run on every connection; return its disconnect cleanup from `setup`. Register other
+native events with `host.on(type, listener)`, which detaches listeners while disconnected and
+reattaches them on reconnect. A handler can dispatch its native `$$event` or selected event fields
+to that listener. `<method>` and automatic named-export element methods are unsupported.
+
+`host.state` contains mutable state, readonly computed state, and inherited context. Resources
+are read through `host.data.name`, including their readonly response and status fields. Invalid
+authored state assignments retain the prior value and warn; native control edits retain their
+ordinary validity behavior. Props use `:host([prop])` styling, and state uses `:host-state([state])`.
+The [public proposal](https://nextwebwg.org/declarative-components/javascript/) defines these contracts.
+
+Handler `<dispatch target="name">` resolves the current component instance's `$ref="name"`, never a DOM ID. Collection refs receive separate native events in rendered order; payload expressions are sampled once. React, Vue, and Svelte outputs preserve the authored event type and flags, and a targeted request does not become a framework emit from its sender. See [dispatch targets](https://nextwebwg.org/declarative-components/bindings/#dispatch-target).

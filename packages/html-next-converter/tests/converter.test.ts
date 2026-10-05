@@ -621,9 +621,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card." controller="./controller.js"><defs>
       <state type="number" name="count" value="0"></state>
       <event name="changed" type="number"></event>
-      <method name="increment" export="increment" returns="promise(number)"></method>
     </defs><article><button type="button" $ref="button">Increase</button><output $value="count"></output><slot></slot></article></template>`);
-    await writeFile(join(root, "controller.js"), `export default function connect(host) {
+    await writeFile(join(root, "controller.js"), `function connect(host) {
   const stop = host.effect(() => {
     const button = host.refs.button;
     const onClick = () => { host.state.count += 1; host.dispatch("changed", host.state.count); };
@@ -632,7 +631,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
   });
   return stop;
 }
-export async function increment(host) { host.state.count += 1; return host.state.count; }
+
+export default function initialize(host) { host.on("connect", () => connect(host)); }
 `);
     const outDirectory = join(root, "out-react-controller");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -651,21 +651,6 @@ export async function increment(host) { host.state.count += 1; return host.state
     new Function("require", "module", "exports", bundle.outputFiles[0]!.text)(createRequire(import.meta.url), module, module.exports);
     assert.equal(renderToStaticMarkup(createElement(module.exports.XCard!, { children: "Projected" })),
       '<article data-component="x-card"><button type="button">Increase</button><output>0</output>Projected</article>');
-  });
-
-  it("keeps a declared React method present but not ready without a controller", async () => {
-    const root = await fixture();
-    await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card."><defs>
-      <method name="load" export="load" returns="promise(number)"></method>
-    </defs><article>Card</article></template>`);
-    const outDirectory = join(root, "out-react-method");
-    const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
-    const component = await readFile(join(outDirectory, "react/XCard.tsx"), "utf8");
-    assert.match(component, /export type XCardRoot = \(HTMLElement\) & \{ load: \(\.\.\.args: unknown\[\]\) => Promise<Awaited<Promise<number>>>;/);
-    assert.match(component, /Controller method `load` is not ready for <x-card>/);
-    await typecheckReact(root, manifest.output.artifacts
-      .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
-      .map((artifact) => join(outDirectory, artifact.path)));
   });
 
   it("server-renders an important inline style in React without an HTML Next runtime import", async () => {
@@ -720,14 +705,13 @@ export async function increment(host) { host.state.count += 1; return host.state
     await writeFile(join(root, "x-switch.html"), `<template component="x-switch" status="early" summary="Polymorphic root."><defs>
       <state type="boolean" name="linked" value="false"></state>
       <handler name="switch"><set name="linked" expr:value="linked = false"></set></handler>
-      <method name="reload" export="reload" returns="promise(undefined)"></method>
     </defs><template $match><a $when="linked" href="#next" on:click="switch">Link</a>
       <button $else type="button" on:click="switch">Button</button></template>
     <style>:host { color: blue; }</style></template>`);
     const outDirectory = join(root, "out-react-polymorphic");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-switch.html"] });
     assert.match(await readFile(join(outDirectory, "react/XSwitch.tsx"), "utf8"),
-      /export type XSwitchRoot = \(HTMLAnchorElement \| HTMLButtonElement\) & \{ reload:/);
+      /ref\?: React\.Ref<HTMLAnchorElement \| HTMLButtonElement>/);
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
       .map((artifact) => join(outDirectory, artifact.path)));
@@ -1099,7 +1083,7 @@ export async function increment(host) { host.state.count += 1; return host.state
     assert.match(source, /const next0 = count\.value \+ 1/);
     assert.match(source, /count\.value = next0 as never/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
-    assert.match(source, /const isCountChangeDetail = \(detail: unknown\): boolean =>\n  typeof detail === 'number' && Number\.isFinite\(detail\)/);
+    assert.match(source, /const isCountChangeDetail = \(\s*detail: unknown,?\s*\): boolean => \(?typeof detail === 'number' && Number\.isFinite\(detail\)/);
     assert.match(source, /:data-count="guarded"/);
   });
 
@@ -1149,7 +1133,7 @@ export async function increment(host) { host.state.count += 1; return host.state
       <defs><state type="boolean" name="on" value="false"></state></defs>
       <button type="button"><slot></slot></button>
     </template>`);
-    await writeFile(join(root, "components", "x-toggle", "x-toggle.js"), 'import { flip } from "../shared/flip.js";\nexport default function controller(host) { const root = host.root; const onClick = () => { host.state.on = flip(host.state.on); }; root.addEventListener("click", onClick); return () => root.removeEventListener("click", onClick); }\n');
+    await writeFile(join(root, "components", "x-toggle", "x-toggle.js"), "import { flip } from \"../shared/flip.js\";\nfunction controller(host) { const root = host.root; const onClick = () => { host.state.on = flip(host.state.on); }; root.addEventListener(\"click\", onClick); return () => root.removeEventListener(\"click\", onClick); }\n\nexport default function initialize(host) { host.on(\"connect\", () => controller(host)); }\n");
     await writeFile(join(root, "components", "shared", "flip.js"), "export const flip = (value) => !value;\n");
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "library", entries: ["components/x-toggle/x-toggle.html"], target: "vue", root, outDirectory });

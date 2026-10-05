@@ -204,7 +204,7 @@ function localScope(scope: RenderScope, names: readonly (readonly [string, Stati
 }
 
 function localIdentifier(name: string, scope: RenderScope, state: RenderState): string {
-  if (isScriptIdentifier(name) && !["formatValue", "Symbol", "Object", "String", "Number", "Array", "Math", "text", "truthy", "attribute", "number", "list", "concat", "join", "math", "arithmetic"].includes(name)) return name;
+  if (isScriptIdentifier(name) && !["dispatchDeclaredTargets", "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "formatValue", "Symbol", "Object", "String", "Number", "Array", "Math", "text", "truthy", "attribute", "number", "list", "concat", "join", "math", "arithmetic"].includes(name)) return name;
   let alias: string;
   do alias = `__htmlNextLocal${state.nextRetainedAlias++}`;
   while ([...scope.code.values()].includes(alias) || scope.code.has(alias));
@@ -219,7 +219,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       for (const segment of node.segments) {
         const plan = segment.expressionPlan;
         if (plan === undefined) { parts.push(quote(segment.value)); continue; }
-        const guard = declaredReferenceGuard(plan, scope, state.definition);
+        const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
         if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
           state.usesRetainedValue = true;
           const alias = `__retained${state.nextRetainedAlias++}`;
@@ -234,7 +234,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return jsxText(node.value);
-    const guard = declaredReferenceGuard(plan, scope, state.definition);
+    const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
     const text = nullableText(lowering.text(plan.ast, scope));
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
       state.usesRetainedText = true;
@@ -369,7 +369,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     const html = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "html");
     if (html?.kind === "directive" && html.expressionPlan !== undefined) {
       state.usesHtml = true;
-      const guard = declaredReferenceGuard(html.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(html.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard !== undefined) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
@@ -379,7 +379,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     }
     const value = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "value");
     if (value?.kind === "directive" && value.expressionPlan !== undefined) {
-      const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition, undefined, lowering);
       if (mayProduceInvalidResult(value.expressionPlan.ast, scope) || guard !== undefined) {
         state.usesRetainedText = true;
         return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope))}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
@@ -444,7 +444,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         : `${reactAttribute(attribute.name, svg)}=${quote(attribute.value)}`);
     } else if (attribute.kind === "attribute" && attribute.target === "class") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
-      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) classes.push(`${lowering.condition(attribute.expressionPlan.ast, scope)} ? ${quote(attribute.name)} : ""`);
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
@@ -454,7 +454,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       }
     } else if (attribute.kind === "attribute" && attribute.target === "style") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled binding ${attribute.expression}.`);
-      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard === undefined && !mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) reactiveStyles.push(`${quote(reactStyleProperty(attribute.name))}: String(${lowering.text(attribute.expressionPlan.ast, scope)})`);
       else {
         const alias = `__retained${state.nextRetainedAlias++}`;
@@ -501,7 +501,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         ? lowering.value(attribute.expressionPlan.ast, scope)
         : lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name);
       const nativeValue = !component && typeOf(attribute.expressionPlan.ast, scope).nullable ? `(${value}) ?? undefined` : value;
-      const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+      const sourceGuard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (node.name === "input" && attribute.name === "value") bindings.push(`defaultValue={${nativeValue}}`);
       else if (node.name === "input" && attribute.name === "checked") bindings.push(`defaultChecked={Boolean(${lowering.value(attribute.expressionPlan.ast, scope)})}`);
       else if (componentPropContract !== undefined) {
@@ -544,7 +544,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const name = attribute.name as "value" | "checked";
         const defaults = authoredControlDefaults(node, name);
         control = { name, value, defaults, nativeProperty: true };
-        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         const alias = guard === undefined ? value : `__retained${state.nextRetainedAlias++}`;
         if (guard !== undefined) {
           state.usesRetainedValue = true;
@@ -561,14 +561,14 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           : node.name === "select" ? "undefined" : `(${defaults}).value`;
         bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else if (attribute.name === "textContent") {
-        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         if (guard !== undefined) {
           state.usesRetainedText = true;
           content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope))}} accepts={() => ${guard}} />`;
         } else content = `{${nullableText(value)}}`;
       }
       else {
-        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+        const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         const accepts = `(((${value}) as unknown) !== Symbol.for("html-next.invalid-result")${guard === undefined ? "" : ` && (${guard})`})`;
         properties.push({ name: attribute.name, value, accepts });
         const retained = (SSR_BOOLEAN_PROPERTIES.has(attribute.name) || SSR_STRING_PROPERTIES.has(attribute.name)) &&
@@ -583,7 +583,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       }
     } else if (attribute.kind === "directive" && attribute.name === "value") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled value ${attribute.expression}.`);
-      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       const retained = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) || guard !== undefined;
       const raw = lowering.value(attribute.expressionPlan.ast, scope);
       const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope));
@@ -602,7 +602,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     } else if (attribute.kind === "directive" && attribute.name === "html") {
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled HTML ${attribute.expression}.`);
       state.usesHtml = true;
-      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition);
+      const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       if (guard !== undefined) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
@@ -702,6 +702,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const data = declarations.filter((declaration): declaration is DataDeclaration => declaration.kind === "data");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
   const handlers = declarations.filter((declaration): declaration is HandlerDeclaration => declaration.kind === "handler");
+  const usesTargetDispatch = handlers.some((handler) => handler.steps.some((step) => step.kind === "dispatch" && step.target !== undefined));
   const contexts = declarations.filter((declaration): declaration is ContextDeclaration => declaration.kind === "context");
   const providedContexts = new Set(states.map((state) => state.name));
   const usesContext = providedContexts.size > 0 || contexts.length > 0;
@@ -735,7 +736,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   }
   const template = definition.template;
   if (template.name === "template" && template.flow?.kind !== "match") fail("HT030", "React conversion requires one element root.");
-  const lowering = new ReactLowering();
+  const lowering = new ReactLowering(allocate("htmlNextAuthoredCheck"));
   const code = new Map<string, string>();
   const types = new Map<string, Static>();
   for (const prop of target.props) {
@@ -810,7 +811,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const usesKeyedLists = renderState.usesKeyedLists;
   const capturesRoot = attachments.some((attachment) => attachment.forward);
   const usesRefActions = handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate"));
-  const usesRefs = usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
+  const usesRefs = usesTargetDispatch || usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
   const usesNestedHandlerWrites = handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const name = definition.contract.name;
   const rootType = rootArms(template) === undefined ? getDomInterface(template.name) ?? "HTMLElement"
@@ -857,7 +858,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(target.props.length === 0 ? [] : ["checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
-    ...(usesEvents ? [`import { ${[...(attachments.some((attachment) => attachment.bindings.length > 0) ? ["attachNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared"] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
+    ...(usesEvents ? [`import { ${[...(attachments.some((attachment) => attachment.bindings.length > 0) ? ["attachNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
       ...(usesGenericBindings ? ["attachGenericBinding"] : []),
@@ -1058,6 +1059,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
           const detail = step.value === undefined ? "undefined" : lowering.value(step.value.ast, handlerScope);
           const schema = eventSchemas.get(declaration.name)!;
+          if (step.target !== undefined) return `    ${guard}dispatchDeclaredTargets(refElements.current.get(${quote(step.target)}), ${quote(step.event)}, ${detail}, ${schema}.type, ${schema}.init);`;
           return `    ${guard}dispatchDeclared(rootRef.current, ${quote(step.event)}, ${detail}, ${schema}.type, ${schema}.init);`;
         }
         if (step.kind === "focus") return `    ${guard}(refTarget(${quote(step.target)}) as HTMLElement | undefined)?.focus();`;
@@ -1070,14 +1072,18 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const setter = stateSetters.get(state.name)!;
         const value = lowering.value(step.value.ast, handlerScope);
         const candidate = `__htmlNextCandidate${index}`;
-        const check = handlerDestinationCheck(handlerScope.types.get(state.name)?.type,
+        const destinationCheck = handlerDestinationCheck(handlerScope.types.get(state.name)?.type,
           step.writablePath, 1, candidate, handlerScope, lowering);
+        const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
+          `(${candidate} === undefined || ${destinationCheck})`,
+          `handler:${handler.name}:${step.path}`,
+          `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
         const write = step.writablePath.length === 1
           ? `${setter}(() => ${candidate} as typeof ${valueNames.get(state.name)!});`
           : `${setter}((previous) => writeStatePath(previous, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
             ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${candidate}));`;
         if (check === undefined) return `    ${guard}{ const ${candidate} = ${value}; ${write} }`;
-        return `    ${guard}{ const ${candidate} = ${value}; if (${candidate} === null || ${candidate} === undefined || ${check}) { ${write} } }`;
+        return `    ${guard}{ const ${candidate} = ${value}; if (${check}) { ${write} } }`;
       });
       return [
         `  function ${handlerNames.get(handler.name)!}(event: Event): void {`,
@@ -1375,6 +1381,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     "",
     ...lowering.moduleFallbacks(),
+    ...lowering.authoredFallbacks(),
   ].join("\n");
   return {
     component,

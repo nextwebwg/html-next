@@ -95,6 +95,8 @@ export type HandlerStep =
     }
   | {
       readonly kind: "dispatch";
+      /** Component-local $ref; collection refs receive one event per rendered element. */
+      readonly target?: string;
       readonly event: string;
       readonly value?: CompiledExpression;
       readonly guard?: CompiledExpression;

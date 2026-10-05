@@ -2,12 +2,10 @@ export const delegatedDecorationsSource = `<template component="x-styled-leaf" s
   <state name="linked" type="boolean" value="false"></state>
   <state name="active" type="boolean" value="true"></state>
   <state name="color" type="string" value="green"></state>
-  <method name="inner" returns="promise(undefined)"></method>
   <handler name="change"><set name="color" value="brown"></set><set name="active" value="false"></set><set name="linked" expr:value="linked = false"></set></handler>
 </defs><template $match><button $when="linked = false" data-leaf class="base active" style="color: blue !important" class:active="active" style:color="color" on:click.prevent="change" type="button">Decorated</button><a $else data-leaf class="base active" style="color: blue !important" class:active="active" style:color="color" on:click.prevent="change" href="#next">Decorated</a></template></template>
-<template component="x-styled-adapter" status="early" summary="Native method owner."><defs><method name="innerNoController" returns="promise(undefined)"></method></defs><x-styled-leaf></x-styled-leaf></template>
+<template component="x-styled-adapter" status="early" summary="Native delegated adapter."><defs></defs><x-styled-leaf></x-styled-leaf></template>
 <template component="x-styled-middle" status="early" summary="Delegated decorations." controller="./middle.js"><defs>
-  <method name="outer" returns="promise(string)"></method>
   <state name="active" type="boolean" value="true"></state>
   <state name="color" type="string" value="purple"></state>
 </defs><x-styled-adapter class="middle active" style="background-color: white" class:active="active" style:color="color"></x-styled-adapter></template>

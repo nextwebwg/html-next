@@ -15,9 +15,15 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
   const reported = new Set<string>();
   const nested = new WeakMap<object, Map<string, object>>();
   const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+  const eventBrands = new WeakMap<object, boolean>();
   const nativeEvent = (value: object): boolean => {
     if (!("type" in value) || eventType === undefined) return false;
-    try { eventType.call(value); return true; } catch { return false; }
+    const known = eventBrands.get(value);
+    if (known !== undefined) return known;
+    let accepted = false;
+    try { eventType.call(value); accepted = true; } catch {}
+    eventBrands.set(value, accepted);
+    return accepted;
   };
   const warn = (path: string, readonly: boolean): void => {
     if (reported.has(path)) return;
@@ -36,13 +42,33 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     if (paths === undefined) nested.set(value, paths = new Map());
     const known = paths.get(path);
     if (known !== undefined) return known;
-    const proxy = new Proxy(value, {
-      get: (target, key, receiver) => wrap(Reflect.get(target, key, receiver), name, [...keys, String(key)], readonly),
-      set: (target, key, next) => write(name, [...keys, String(key)], next, readonly, () => {
-        const previous = Reflect.get(target, key);
-        Reflect.set(target, key, next);
-        if (!Object.is(previous, next)) options.changed?.(name);
+    // A readonly facade avoids Proxy invariants on frozen source properties.
+    const surface = readonly ? (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))) : value;
+    if (readonly && Array.isArray(value)) surface.length = value.length;
+    const proxy = new Proxy(surface, {
+      get: (_target, key) => wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly),
+      set: (_target, key, next) => write(name, [...keys, String(key)], next, readonly, () => {
+        const previous = Reflect.get(value, key);
+        if (Reflect.set(value, key, next) && !Object.is(previous, next)) options.changed?.(name);
       }),
+      has: (_target, key) => Reflect.has(value, key),
+      ownKeys: () => Reflect.ownKeys(value),
+      getOwnPropertyDescriptor: (_target, key) => {
+        if (readonly && Array.isArray(value) && key === "length") { surface.length = value.length; return Reflect.getOwnPropertyDescriptor(surface, key); }
+        const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+        return descriptor === undefined ? undefined : readonly ? { ...descriptor, configurable: true } : descriptor;
+      },
+      deleteProperty: (_target, key) => write(name, [...keys, String(key)], undefined, readonly, () => {
+        if (Reflect.has(value, key) && Reflect.deleteProperty(value, key)) options.changed?.(name);
+      }),
+      defineProperty: (_target, key, descriptor) => {
+        if (readonly || !("value" in descriptor) || options.acceptsState?.(name, [...keys, String(key)], descriptor.value) === false) {
+          warn([name, ...keys, String(key)].join("."), readonly); return false;
+        }
+        const changed = Reflect.defineProperty(value, key, descriptor);
+        if (changed) options.changed?.(name);
+        return changed;
+      },
     });
     paths.set(path, proxy);
     return proxy;
@@ -56,12 +82,16 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     },
     set: (_target, name, value) => write(String(name), [], value, typeof name !== "string" || !Object.hasOwn(options.state, name),
       () => options.state[String(name)]!.set(value)),
+    deleteProperty: (_target, name) => { warn(String(name), true); return true; },
+    defineProperty: (_target, name) => { warn(String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && (Object.hasOwn(options.state, name) || Object.hasOwn(options.computed, name)),
   });
   const data = new Proxy({} as Record<string, unknown>, {
     get: (_target, name) => typeof name === "string" && Object.hasOwn(options.data ?? {}, name)
       ? wrap(options.data![name]!(), "data." + name, [], true) : undefined,
     set: (_target, name, value) => write("data." + String(name), [], value, true, () => {}),
+    deleteProperty: (_target, name) => { warn("data." + String(name), true); return true; },
+    defineProperty: (_target, name) => { warn("data." + String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && Object.hasOwn(options.data ?? {}, name),
   });
   return { state, data };

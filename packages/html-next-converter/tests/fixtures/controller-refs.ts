@@ -13,10 +13,12 @@ export const controllerRefsSource = `<template component="x-refs" status="early"
   <ol><li $each="row of later" $key="row" $ref="later" $value="row"></li></ol>
 </section><style>:host { display: block; min-height: 24px; font: 16px/24px Arial, sans-serif; } ul, ol { margin: 0; } li:focus { outline: none; }</style></template>`;
 
-export const controllerRefsModule = `export default function connect(host) {
+export const controllerRefsModule = `function connect(host) {
   window.refsHost = host;
   window.refsEffects = 0;
   window.refsInvalid = 0;
   const stop = host.effect(() => { void host.refs.row; window.refsEffects++; });
   return stop;
-}`;
+}
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;

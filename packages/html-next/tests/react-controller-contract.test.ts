@@ -17,6 +17,7 @@ interface Host {
   data: Readonly<Record<string, { value: unknown }>>;
   on(type: string, callback: (event: Event) => void | (() => void)): () => void;
   dispatch(type: string, detail?: unknown): boolean;
+  computed<T>(run: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
 }
 
@@ -53,7 +54,7 @@ async function controllerHarness(controller: (host: Host) => void) {
       source: { get: () => event, set: (value: unknown) => { event = value; } },
       model: { get: () => model, set: (value: unknown) => { model = value as typeof model; }, touch: () => { nestedWrites++; } },
     },
-    computed: { doubled: () => Number(count) * 2 }, data: { result: () => resource },
+    computed: { doubled: () => Number(count) * 2, frozen: () => Object.freeze({ nested: Object.freeze({ value: 7 }) }) }, data: { result: () => resource },
     acceptsState: (name: string, keys: readonly string[], value: unknown) =>
       name === "count" || name === "model" && keys[0] === "amount" ? typeof value === "number" : true,
     dispatch: (target: EventTarget, type: string, detail?: unknown) => target.dispatchEvent(new CustomEvent(type, { detail })),
@@ -162,6 +163,35 @@ describe("React controller contract", () => {
     } finally { harness.stop(); vi.unstubAllGlobals(); }
   });
 
+  it("blocks readonly deletion and descriptors, and reads frozen computed objects", async () => {
+    let host!: Host;
+    const harness = await controllerHarness(value => { host = value; });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      assert.equal(Reflect.deleteProperty(host.data.result!, "value"), true);
+      assert.equal(host.data.result!.value, 7);
+      assert.equal(Reflect.defineProperty(host.data.result!, "value", { value: 8 }), false);
+      assert.equal(host.data.result!.value, 7);
+      const derived = host.state.frozen as { nested: { value: number } };
+      assert.equal(derived.nested.value, 7);
+      Reflect.deleteProperty(derived.nested, "value");
+      assert.equal(derived.nested.value, 7);
+      assert.match(String(warning.mock.calls[0]![0]), /HR007.*read-only/);
+    } finally { warning.mockRestore(); harness.stop(); vi.unstubAllGlobals(); }
+  });
+
+  it("invalidates controller-local computed values synchronously", async () => {
+    let host!: Host;
+    const harness = await controllerHarness(value => { host = value; });
+    try {
+      const cached = host.computed(() => Number(host.state.doubled) * 2);
+      assert.equal(cached.get(), 4);
+      host.state.count = 2;
+      assert.equal(host.state.doubled, 4);
+      assert.equal(cached.get(), 8);
+    } finally { harness.stop(); vi.unstubAllGlobals(); }
+  });
+
   it("emits typed controller writes and isolates resources from state", () => {
     const output = generateReactOutput(parseComponent(`<template component="x-probe" controller="./probe.js"><defs>
       <state name="count" type="number" value="1"></state>
@@ -197,12 +227,13 @@ describe("React controller contract", () => {
       <computed name="doubled" from="$count * 2"></computed>
       <event name="activate" type="event"></event>
       <event name="snapshot" type="number"></event>
+      <handler name="setCount"><set name="count" expr:value="$$event.detail"></set></handler>
       <handler name="activate">
         <dispatch event="activate" expr:value="$$event"></dispatch>
         <set name="count" expr:value="$count + 1"></set>
         <dispatch event="snapshot" expr:value="$count"></dispatch>
       </handler>
-    </defs><button on:click="activate"><output $value="$count"></output></button></template>`), "test").component;
+    </defs><button on:click="activate" on:set-count="setCount"><output $value="$count"></output></button></template>`), "test").component;
     let received: Event | undefined;
     let computed: unknown;
     let snapshot: unknown;
@@ -225,6 +256,18 @@ describe("React controller contract", () => {
       assert.equal(computed, 20);
       assert.equal(snapshot, 11);
       assert.equal(button.querySelector("output")!.textContent, "11");
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: "wrong" })); });
+        assert.equal(button.querySelector("output")!.textContent, "11");
+        await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: "still wrong" })); });
+        await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: null })); });
+        assert.equal(button.querySelector("output")!.textContent, "11");
+        assert.equal(warning.mock.calls.length, 1);
+        assert.match(String(warning.mock.calls[0]![0]), /HR007.*count/);
+        await act(async () => { button.dispatchEvent(new dom.window.CustomEvent("set-count", { detail: 12 })); });
+        assert.equal(button.querySelector("output")!.textContent, "12");
+      } finally { warning.mockRestore(); }
     } finally {
       await act(async () => { root.unmount(); });
       dom.window.close();

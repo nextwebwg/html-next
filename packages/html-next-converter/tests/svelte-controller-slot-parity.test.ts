@@ -21,7 +21,7 @@ const owner = `<link rel="component" href="./receiver.html"><template component=
     <x-detached-projection slot="nested"></x-detached-projection>
     <button slot="shown" $value="label"></button>
   </x-slot-host></main></template><template component="x-detached-projection"><aside>Nested projection</aside></template>`;
-const controller = `export default function connect(host) {
+const controller = `function connect(host) {
   window.slotHost = host;
   const trace = window.slotTrace ??= { connects: 0, disconnects: 0, clicks: 0 };
   trace.connects++;
@@ -32,7 +32,9 @@ const controller = `export default function connect(host) {
   for (const button of buttons) button.addEventListener('click', click);
   host.root.setAttribute('data-controller-ready', '');
   return () => { for (const button of buttons) button.removeEventListener('click', click); trace.disconnects++; };
-}`;
+}
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

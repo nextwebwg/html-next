@@ -12,9 +12,15 @@ const SOURCE = `
 const CSS_NAMED_COLOR_SET = new Set<string>(${JSON.stringify(CSS_COLOR_KEYWORDS)});
 const HTML_EMAIL_PATTERN = ${HTML_EMAIL_PATTERN.toString()};
 const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+const eventBrands = new WeakMap<object, boolean>();
 function nativeEvent(value: unknown): boolean {
   if (typeof value !== "object" || value === null || !("type" in value) || eventType === undefined) return false;
-  try { eventType.call(value); return true; } catch { return false; }
+  const known = eventBrands.get(value);
+  if (known !== undefined) return known;
+  let accepted = false;
+  try { eventType.call(value); accepted = true; } catch {}
+  eventBrands.set(value, accepted);
+  return accepted;
 }
 type TypeNode =
   | { readonly kind: "terminal"; readonly name: string }
@@ -503,8 +509,10 @@ export function acceptsControllerWrite(value: unknown, type: TypeNode | undefine
   }
   if (type.kind === "union") return type.members.some((member) => acceptsControllerWrite(value, member, keys));
   if (type.kind === "constrained") return acceptsControllerWrite(value, type.base, keys);
-  const child = type.kind === "object" ? type.fields.find((field) => field.name === keys[0])?.type
-    : type.kind === "list" ? type.item : type.kind === "record" ? type.value : undefined;
+  const key = keys[0]!;
+  if (type.kind === "object" && !type.open && !type.fields.some(field => field.name === key)) return value === undefined;
+  const child = type.kind === "object" ? type.fields.find((field) => field.name === key)?.type
+    : type.kind === "list" ? (/^\\d+$/.test(key) ? type.item : undefined) : type.kind === "record" ? type.value : undefined;
   return acceptsControllerWrite(value, child, keys.slice(1));
 }
 `;

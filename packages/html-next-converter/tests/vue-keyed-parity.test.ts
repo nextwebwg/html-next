@@ -18,11 +18,13 @@ const child = `<template component="x-keyed-item" status="early" summary="Keyed 
   <prop name="itemId" type="string">Item identity.</prop>
   <prop name="label" type="string">Item label.</prop>
 </defs><li from:data-id="itemId"><input><span $value="label"></span></li></template>`;
-const controller = `export default function connect(host) {
+const controller = `function connect(host) {
   const id = host.props.itemId.value;
   window.keyedLifecycle.push("connect:" + id);
   return () => window.keyedLifecycle.push("disconnect:" + id);
-}`;
+}
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;
 const parent = `<link rel="component" href="./item.html">
 <template component="x-keyed-list" status="early" summary="Keyed parent."><defs>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>

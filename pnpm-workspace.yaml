@@ -53,6 +53,4 @@ allowBuilds:
   esbuild: true
 
 patchedDependencies:
-  svelte-check@4.7.6: patches/svelte-check@4.7.6.patch
-  svelte2tsx@0.7.61: patches/svelte2tsx@0.7.61.patch
   svelte@5.57.1: patches/svelte@5.57.1.patch

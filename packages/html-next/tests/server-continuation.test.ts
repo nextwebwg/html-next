@@ -18,20 +18,23 @@ const source = `<template component="ssr-connected" controller="./controller.js"
   <state name="text" type="string" value="'initial'"></state>
   <state name="derived" type="number" value="0"></state>
   <data name="result" src="./data"><param name="query" from:value="query"></param></data>
-  <method name="advance" export="advance" returns="promise(undefined)"></method>
   </defs><section><h2><slot name="title">Untitled</slot></h2><button $ref="button" type="button">Next</button>
   <output $ref="count" $value="count"></output><b $value="derived"></b><input bind:value="text" value="authored">
   <p $if="result.pending">Loading</p><div $if="result.ok" $value="result.value.label"></div><slot></slot>
   </section></template>`;
 const authored = '<ssr-connected id="subject" step="2"><strong slot="title">Title</strong>Body</ssr-connected>';
 const controller = `export default function(host) {
+  host.on("advance-request", () => advance(host));
+  host.on("connect", () => connect(host));
+}
+function connect(host) {
   host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1);
   const next = () => advance(host);
   host.refs.button.addEventListener('click', next);
   const stop = host.effect(() => { host.state.derived = host.state.count * host.props.step.value; });
   return () => { stop(); host.refs.button.removeEventListener('click', next); };
 }
-export function advance(host) { host.state.count += host.props.step.value; host.state.query += 1; }
+function advance(host) { host.state.count += host.props.step.value; host.state.query += 1; }
 `;
 
 async function inspect(page: Page) {
@@ -99,13 +102,14 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== '1')('Node output continue
       live: `import { startBrowserComponents } from ${JSON.stringify(loader)};
         export { inspectInstance, updateComponentProps } from ${JSON.stringify(runtime)};
         export const ready = startBrowserComponents().then(value => { window.stopComponents = value.stop; });`,
-      static: `import { registerComponentDefinitions, observeDocument, getComponentHost, setControllerModule } from ${JSON.stringify(runtime)};
+      static: `import { registerComponentDefinitions, observeDocument, getComponentHost } from ${JSON.stringify(runtime)};
         import * as controller from ${JSON.stringify(controllerFile)};
         export { inspectInstance, updateComponentProps } from ${JSON.stringify(runtime)};
         registerComponentDefinitions(${JSON.stringify([definition])});
+        const initialized = new WeakSet();
         window.stopComponents = observeDocument(document, { onConnect(element) {
-          setControllerModule(element, Promise.resolve(controller));
-          return controller.default(getComponentHost(element));
+          const host = getComponentHost(element);
+          if (!initialized.has(host)) { initialized.add(host); controller.default(host); }
         } });
         export const ready = Promise.resolve();`,
     };
@@ -194,8 +198,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== '1')('Node output continue
           assert.equal(await hydrated.locator('b').textContent(), '10');
           for (const page of [hydrated, fresh]) {
             await page.evaluate(async () => {
-              const root = document.querySelector('#subject') as Element & { advance(): Promise<void> };
-              await root.advance();
+              const root = document.querySelector('#subject')!;
+              root.dispatchEvent(new Event("advance-request"));
             });
             await page.waitForFunction(() => document.querySelector('#subject div')?.textContent === 'Result 3');
             await page.evaluate(async () => {

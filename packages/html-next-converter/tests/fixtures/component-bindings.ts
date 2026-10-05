@@ -73,10 +73,18 @@ export const componentBindingsSource = `<template component="x-state-field" stat
   <output id="amount" $value="form.amount"></output><output id="label" $value="form.text"></output><output id="checked" $value="form.checked"></output>
 </form><style>:host { display: block; font: 16px/24px Arial, sans-serif; } input { width: 80px; }</style></template>`;
 
-export const componentBindingsModule = `export default function connect(host) { window.fieldsHost = host; }`;
+export const componentBindingsModule = `function connect(host) { window.fieldsHost = host; }
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;
 
-export const selectedBindingModule = `export default function connect(host) { window.selectedHosts ??= {}; window.selectedHosts[host.root.id] = host; }`;
+export const selectedBindingModule = `function connect(host) { window.selectedHosts ??= {}; window.selectedHosts[host.root.id] = host; }
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;
 
-export const componentOptionsModule = `export default function connect(host) { window.optionHosts ??= {}; window.optionHosts[host.root.id] = host; }`;
+export const componentOptionsModule = `function connect(host) { window.optionHosts ??= {}; window.optionHosts[host.root.id] = host; }
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;
 
-export const componentOwnedModule = `export default function connect(host) { window.ownedHost = host; }`;
+export const componentOwnedModule = `function connect(host) { window.ownedHost = host; }
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;

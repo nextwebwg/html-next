@@ -26,7 +26,6 @@ const parent = `<template component="x-graph-list" status="early" summary="Graph
   <state type="boolean" name="active" value="true"></state>
   <state type="number" name="saved" value="0"></state>
   <state type="number" name="ancestorSaved" value="0"></state>
-  <method name="ping" returns="promise(undefined)"></method>
   <handler name="increment"><set name="count" expr:value="count + 1"></set><set name="active" expr:value="not active"></set></handler>
   <handler name="recordSaved"><set name="saved" expr:value="saved + 1"></set></handler>
   <handler name="recordAncestorSaved"><set name="ancestorSaved" expr:value="ancestorSaved + 1"></set></handler>
@@ -137,16 +136,6 @@ else createRoot(mount).render(<XGraphList id="case" />);`);
             assert.equal(native.behavior.projectedColor, "rgb(90, 30, 60)");
             if (expected === "Child:Item0") await Promise.all(pages.map((page) => page.getByRole("button", { name: "Increment" }).click()));
           }
-          const notReady = await Promise.all(pages.map((page) => page.evaluate(async () => {
-            try { await (document.querySelector("#case") as Element & { ping(): Promise<void> }).ping(); return null; }
-            catch (error) {
-              const failure = error as Error & { diagnostic?: { code: string } };
-              return { name: failure.name, code: failure.diagnostic?.code ?? null, message: failure.message };
-            }
-          })));
-          assert.deepEqual(notReady, Array.from({ length: 3 }, () => ({
-            name: "TypeError", code: null, message: "Controller method `ping` is not ready for <x-graph-list>.",
-          })));
           await Promise.all(pages.map((page) => page.locator("#case li").click()));
           const [nativeEvent, mountedEvent, claimedEvent] = await Promise.all([snapshot(live), snapshot(react), snapshot(hydrated)]);
           assert.deepEqual(mountedEvent.behavior, nativeEvent.behavior);

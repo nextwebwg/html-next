@@ -19,10 +19,10 @@ it("checks an independently installed Svelte library with native consumers", asy
     const pkg = join(directory, "package");
     const consumer = join(directory, "consumer");
     await Promise.all([mkdir(source), mkdir(pkg), mkdir(consumer)]);
-    await writeFile(join(source, 'types.html'), `<template component="x-typed" status="early" summary="Typed consumer." controller="./types.js"><defs><prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop><event name="change" type="boolean">Change.</event><method name="ping" returns="promise(number)"></method></defs><button><slot name="row" from:item="'Ada'"></slot></button></template>
+    await writeFile(join(source, 'types.html'), `<template component="x-typed" status="early" summary="Typed consumer." controller="./types.js"><defs><prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop><prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop><event name="change" type="boolean">Change.</event></defs><button><slot name="row" from:item="'Ada'"></slot></button></template>
       <template component="x-plain" status="early" summary="Unscoped slots."><section><slot name="title"></slot><slot></slot></section></template>
       <template component="x-dynamic" status="early" summary="Dynamic scoped slots."><defs><prop name="outlet" type="string" default="row">Outlet.</prop></defs><section><slot name="fixed" from:index="2"></slot><slot from:name="outlet" from:item="'Ada'"></slot></section></template>`);
-    await writeFile(join(source, 'types.js'), 'export default function connect(host) {} export async function ping(host) { return 1; }');
+    await writeFile(join(source, 'types.js'), 'export default function initialize(host) {}');
     const manifest = await convertComponents({ target: 'svelte', mode: 'library', root: source, outDirectory: pkg, entries: ['types.html'] });
     await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@example/svelte-types-probe', version: '0.0.0', private: true, license: 'MIT', type: 'module', files: ['svelte'], exports: { '.': './svelte/index.ts', './XTyped': './svelte/XTyped.svelte' }, dependencies: manifest.package.dependencies, peerDependencies: manifest.package.peerDependencies }));
     const packed = await run('npm', ['pack', '--json', '--pack-destination', directory], { cwd: pkg, shell: useCommandShell });
@@ -37,8 +37,6 @@ it("checks an independently installed Svelte library with native consumers", asy
       ['native-event-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onclick={(event: KeyboardEvent) => {}} />'],
       ['declared-event-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onchange={(event) => { const detail: boolean = event.detail; }} />'],
       ['declared-event-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script><XTyped onchange={(event: CustomEvent<string>) => {}} />'],
-      ['method-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped"; let instance: ReturnType<typeof XTyped>; function ping() { const result: Promise<number> = instance.ping(); }</script><XTyped bind:this={instance} />'],
-      ['method-negative', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped"; let instance: ReturnType<typeof XTyped>; function ping() { const result: Promise<string> = instance.ping(); }</script><XTyped bind:this={instance} />'],
       ['slot-positive', '<script lang="ts">import XTyped from "@example/svelte-types-probe/XTyped";</script>{#snippet row(props: {item: unknown})}{props.item}{/snippet}<XTyped slots={{row}} />'],
       ['default-and-named-slot-positive', '<script lang="ts">import { XPlain } from "@example/svelte-types-probe";</script>{#snippet title()}Title{/snippet}<XPlain slots={{title}}>Default</XPlain>'],
       ['dynamic-slot-positive', '<script lang="ts">import { XDynamic } from "@example/svelte-types-probe";</script>{#snippet row(props: {item: unknown})}{props.item}{/snippet}{#snippet fixed(props: {index: unknown})}{props.index}{/snippet}<XDynamic slots={{row, fixed}} />'],
@@ -50,7 +48,6 @@ it("checks an independently installed Svelte library with native consumers", asy
       "generic-negative": /string.*number/,
       "native-event-negative": /KeyboardEvent|MouseEvent/,
       "declared-event-negative": /string.*boolean|CustomEvent<string>/,
-      "method-negative": /Promise<number>.*Promise<string>/,
       "slot-negative": /wrong|item/,
       "dynamic-slot-negative": /wrong|item|index/,
     };

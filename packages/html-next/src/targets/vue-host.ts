@@ -5,7 +5,7 @@
  * generated. It depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
-import { DATA_URL_SOURCE } from "./shared-generated.js";
+import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
@@ -21,6 +21,7 @@ const SOURCE = `
 import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
 
 ${CONTROLLER_STATE_SOURCE}
+${DISPATCH_TARGETS_SOURCE}
 
 interface DataReadOptions {
   readonly source: string;
@@ -454,16 +455,23 @@ export function createDispatch(
   root: Readable<HTMLElement | null>,
   emit?: (name: string, detail: unknown) => void,
   options: DispatchOptions = {},
-): (name: string, detail?: unknown) => boolean {
+): (name: string, detail?: unknown, targets?: unknown) => boolean {
   const { declared = {}, checks = {}, modeled = [] } = options;
   // One change can be reported by more than one event — a choice is both a select and a change —
   // and each carries the new value. The prop updates once per change: a value already reported in
   // this turn of the event loop is not reported again.
   const reported = new Map<string, unknown>();
-  return (name, detail) => {
+  return (name, detail, targets) => {
     const check = checks[name];
     if (detail !== undefined && check !== undefined && !check(detail)) {
       throw new HtmlDiagnosticError("HR002", \`Event \\\`\${name}\\\` detail does not satisfy its declared type.\`);
+    }
+    if (targets !== undefined) {
+      let accepted = true;
+      dispatchToTargets(targets, target => {
+        if (!target.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, ...declared[name], detail }))) accepted = false;
+      });
+      return accepted;
     }
     if (detail !== null && typeof detail === "object") {
       for (const prop of modeled) {

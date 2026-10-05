@@ -44,6 +44,7 @@ import {
 } from "./component-styles.js";
 import {
   declarationTypeNode,
+  formatType,
   normalizeType,
   parseTypeExpression,
   parseTypedValue,
@@ -813,7 +814,7 @@ function evalConforming(
     const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
       ? type : declaredTypeAt(definition, path, scope);
     if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
-    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` does not satisfy its declared type.`);
+    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` must satisfy ${formatType(selectedType)}.`);
     return NONCONFORMING;
   }
   try {
@@ -1037,7 +1038,14 @@ function runHandler(
       const declaration = eventDeclaration(context.definition, step.event);
       const detail = step.value === undefined ? undefined : evalConforming(step.value, scope, context.definition);
       if (detail === NONCONFORMING) continue;
-      dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
+      if (step.target === undefined) dispatchComponentEvent(context.root ?? element, step.event, detail, declaration);
+      else {
+        const recorded = context.refs[step.target];
+        const targets = (Array.isArray(recorded) ? [...recorded] : recorded === undefined ? [] : [recorded])
+          .filter((target) => target.isConnected)
+          .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+        dispatchComponentEvent(targets, step.event, detail, declaration);
+      }
     } else {
       const recorded = context.refs[step.target];
       const target = Array.isArray(recorded) ? recorded[0] : recorded;
@@ -1055,7 +1063,7 @@ function eventDeclaration(definition: ComponentDefinition, name: string): EventD
 
 /** Undeclared events keep the permissive default: bubbling, composed, and not cancelable. */
 function dispatchComponentEvent(
-  target: Element,
+  target: Element | readonly Element[],
   event: string,
   detail: unknown,
   declaration: EventDeclaration | undefined,
@@ -1066,12 +1074,20 @@ function dispatchComponentEvent(
     const parsed = parseTypedValue(detail, declarationTypeNode(declaration.type, declaration.shape)!, "$", "value");
     if (!parsed.ok) fail("HR002", `Event \`${event}\` detail does not satisfy its declared type.`);
   }
-  return target.dispatchEvent(new CustomEvent(event, {
+  const init = {
     detail,
     bubbles: declaration?.bubbles ?? true,
     composed: declaration?.composed ?? true,
     cancelable: declaration?.cancelable ?? false,
-  }));
+  };
+  if (Array.isArray(target)) {
+    let accepted = true;
+    for (const element of target) {
+      if (element.isConnected && !element.dispatchEvent(new CustomEvent(event, init))) accepted = false;
+    }
+    return accepted;
+  }
+  return (target as Element).dispatchEvent(new CustomEvent(event, init));
 }
 
 function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
@@ -2740,7 +2756,7 @@ function commitRuntimeInvocations(
     if (invocation.replace && host === invocation.nativeRoot && invocation.definition.root?.kind === "component") {
       // This component delegates its root to a component that has not lowered yet. Claim the
       // element so discovery does not lower this component onto it a second time, but install
-      // nothing: reflection, public methods, and the host belong on the root that survives.
+      // nothing: reflection and the host belong on the root that survives.
       // An earlier rebind may already have carried an outer owner onto this intermediate root.
       const owner = runtimeInstances.get(host) ?? invocation.instance;
       runtimeInstances.set(host, owner);
@@ -2759,7 +2775,7 @@ function commitRuntimeInvocations(
 
 /**
  * Binds an instance to the root it ends up sharing. The component the author invoked claims the
- * root, so page code reaches its host, public methods, and reflected props; a component it
+ * root, so page code reaches its host and reflected props; a component it
  * delegates to shares the element and rides the owner's connection lifecycle.
  */
 /**
@@ -3444,9 +3460,26 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     if (paths === undefined) nested.set(value, paths = new Map());
     const known = paths.get(path);
     if (known !== undefined) return known;
-    const proxy = new Proxy(value, {
-      get: (target, key, receiver) => wrap(Reflect.get(target, key, receiver), `${path}.${String(key)}`, readonly),
-      set: (target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => { Reflect.set(target, key, next); }),
+    const surface = readonly ? (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))) : value;
+    if (readonly && Array.isArray(value)) surface.length = value.length;
+    const proxy = new Proxy(surface, {
+      get: (_target, key) => wrap(Reflect.get(value, key), `${path}.${String(key)}`, readonly),
+      set: (_target, key, next) => write(`${path}.${String(key)}`, next, readonly, () => { Reflect.set(value, key, next); }),
+      has: (_target, key) => Reflect.has(value, key),
+      ownKeys: () => Reflect.ownKeys(value),
+      getOwnPropertyDescriptor: (_target, key) => {
+        if (readonly && Array.isArray(value) && key === "length") { surface.length = value.length; return Reflect.getOwnPropertyDescriptor(surface, key); }
+        const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+        return descriptor === undefined ? undefined : readonly ? { ...descriptor, configurable: true } : descriptor;
+      },
+      deleteProperty: (_target, key) => write(`${path}.${String(key)}`, undefined, readonly, () => { Reflect.deleteProperty(value, key); }),
+      defineProperty: (_target, key, descriptor) => {
+        const destination = `${path}.${String(key)}`;
+        if (readonly || !("value" in descriptor) || !conformsAtDestination(descriptor.value as Value, declaredTypeAt(instance.definition, destination, instance.scope))) {
+          write(destination, descriptor.value, readonly, () => {}); return false;
+        }
+        return Reflect.defineProperty(value, key, descriptor);
+      },
     });
     paths.set(path, proxy);
     return proxy;
@@ -3459,11 +3492,15 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     },
     set: (_target, key, value) => write(String(key), value, typeof key !== "string" || !writable.has(key),
       () => instance.scope.set(key as string, value as Value)),
+    deleteProperty: (_target, key) => write(String(key), undefined, true, () => {}),
+    defineProperty: (_target, key) => { write(String(key), undefined, true, () => {}); return false; },
     has: (_target, key) => typeof key === "string" && stateNames.has(key),
   });
   const data = new Proxy({}, {
     get: (_target, key) => typeof key === "string" && dataNames.has(key) ? wrap(instance.scope.get(key), key, true) : undefined,
     set: (_target, key, value) => write(`data.${String(key)}`, value, true, () => {}),
+    deleteProperty: (_target, key) => write(`data.${String(key)}`, undefined, true, () => {}),
+    defineProperty: (_target, key) => { write(`data.${String(key)}`, undefined, true, () => {}); return false; },
     has: (_target, key) => typeof key === "string" && dataNames.has(key),
   }) as ComponentHost["data"];
   const props = Object.create(null) as Record<string, ComponentProp>;

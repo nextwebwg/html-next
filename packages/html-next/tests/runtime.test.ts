@@ -62,6 +62,76 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} targets local refs across repeated instances and collection changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-ref-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="check" type="number" bubbles="false" cancelable="true"></event>
+          <handler name="send"><dispatch event="check" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $key="row" $ref="fields" from:data-row="row"></button></section></template>
+          <x-ref-dispatch id="first"></x-ref-dispatch><x-ref-dispatch id="second"></x-ref-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const first = document.querySelector('#first')!;
+          const second = document.querySelector('#second')!;
+          const observed: Array<[string, string | null, unknown, boolean]> = [];
+          const events: Event[] = [];
+          const listen = (root: Element) => { for (const field of root.querySelectorAll('button')) field.addEventListener('check', event => {
+            events.push(event); event.preventDefault();
+            observed.push([root.id, field.getAttribute('data-row'), (event as CustomEvent).detail, event.defaultPrevented]);
+          }); };
+          listen(first); listen(second);
+          first.dispatchEvent(new CustomEvent('send', { detail: 3 }));
+          runtime.getComponentHost(first).state.rows = [2,1];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 4 }));
+          runtime.getComponentHost(first).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 5 }));
+          second.dispatchEvent(new CustomEvent('send', { detail: 6 }));
+          return { observed, distinct: new Set(events).size === events.length };
+        });
+        assert.deepEqual(actual, { observed: [['first','1',3,true],['first','2',3,true],['first','2',4,true],['first','1',4,true],['second','1',6,true],['second','2',6,true]], distinct: true });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} validates a broadcast payload once, including empty collections`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-shared-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="share" type="object({ n: number })"></event>
+          <handler name="send"><dispatch event="share" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $ref="fields"></button></section></template>
+          <x-shared-dispatch></x-shared-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('section')!;
+          const [first, second] = [...root.querySelectorAll('button')];
+          const values: unknown[] = [];
+          const errors: string[] = [];
+          window.addEventListener('error', event => { errors.push(String(event.error?.message ?? event.message)); event.preventDefault(); });
+          first!.addEventListener('share', event => {
+            const detail = (event as CustomEvent).detail; values.push(detail.n); detail.n = 'changed';
+          });
+          second!.addEventListener('share', event => values.push((event as CustomEvent).detail.n));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 1 } }));
+          runtime.getComponentHost(root).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 'invalid' } }));
+          return { values, errors: errors.length };
+        });
+        assert.deepEqual(actual, { values: [1, 'changed'], errors: 1 });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} exposes handler events and separates validated state from readonly data`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

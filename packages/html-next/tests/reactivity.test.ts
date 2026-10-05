@@ -10,6 +10,11 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("reads frozen nested values without violating native proxy invariants", () => {
+    const source = Object.freeze({ nested: Object.freeze({ value: 7 }) });
+    const scope = new ReactiveScope([["source", source]]);
+    assert.equal(evaluate("source.nested.value", scope), 7);
+  });
   it("stores native events without proxying them, including inside reactive structures", () => {
     const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
     const scope = new ReactiveScope([["event", event], ["selection", { source: event, item: "Ada" }]]);

@@ -4,7 +4,7 @@ export const polymorphicControllerSource = `<template component="x-switch" statu
 </defs><template $match><a $when="linked" $ref="link" href="#next" on:click.prevent="switch">Link</a>
   <button $else $ref="button" type="button" on:click="switch">Button</button></template>
 <style>:host { display: inline-block; padding: 4px; color: rgb(20 70 130); font: 16px/24px Arial, sans-serif; }</style></template>`;
-export const polymorphicControllerModule = `export default function connect(host) {
+export const polymorphicControllerModule = `function connect(host) {
   const root = host.root;
   window.switchHost = host;
   window.switchTrace.push(["connect", root.localName]);
@@ -14,4 +14,6 @@ export const polymorphicControllerModule = `export default function connect(host
     window.switchEffects.push(current.localName);
   });
   return () => { stop(); window.switchTrace.push(["disconnect", root.localName]); };
-}`;
+}
+export default function initialize(host) { host.on("connect", () => connect(host)); }
+`;

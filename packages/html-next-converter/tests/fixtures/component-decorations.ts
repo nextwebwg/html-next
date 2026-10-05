@@ -18,5 +18,5 @@ export const componentDecorationsSource = `<template component="x-empty-class" s
 <style>:host { display: block; width: 220px; padding: 4px; font: 16px/24px Arial, sans-serif; } button { font: inherit; } i[class], i[style] { font-style: normal; background: pink; }</style></template>`;
 
 export function componentDecorationsController(owner: string): string {
-  return `export default function connect(host) { window.styleHosts ??= {}; window.styleHosts[${JSON.stringify(owner)}] = host; }`;
+  return `export default function initialize(host) { host.on("connect", () => { window.styleHosts ??= {}; window.styleHosts[${JSON.stringify(owner)}] = host; }); }`;
 }

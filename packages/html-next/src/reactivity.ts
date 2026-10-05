@@ -598,7 +598,7 @@ export class ReactiveScope implements Scope {
     if (value === null || typeof value !== "object") return value;
     const cached = proxyCache.get(value);
     if (cached !== undefined) return cached as Value;
-    if (isNativeEvent(value)) return value;
+    if (isNativeEvent(value) || Object.isFrozen(value)) return value;
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => {
         if (activeEffect !== undefined) {

@@ -108,20 +108,6 @@ it("shares computed-only Intl formatters across SSR instances without authored h
   }
 });
 
-it("compiles CSS-valid public method names through quoted Svelte exports", async () => {
-  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-method-exports-"));
-  temporary.push(root);
-  await writeFile(join(root, "method.html"), `<template component="x-method-name"><defs>
-    <method name="·ping" returns="promise(number)"></method></defs><button>Ready</button></template>`);
-  for (const mode of ["application", "library"] as const) {
-    const outDirectory = join(root, mode);
-    const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["method.html"] });
-    const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-    compile(source, { filename: "XMethodName.svelte", generate: "client" });
-    assert.match(await serverHtml(outDirectory, "XMethodName", source), /Ready/);
-  }
-});
-
 it("preserves a declared __proto__ prop as an own value in public SSR output", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-proto-prop-"));
   temporary.push(root);

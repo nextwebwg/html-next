@@ -278,7 +278,7 @@ The package assembler emits:
 
 - side-effect registration and concrete component HTML;
 - Vanilla and Vue components with native roots;
-- typed props (as HTML attributes), events, slots, and exposed methods;
+- typed props (as HTML attributes), events, slots, and controller subscriptions;
 - scoped component CSS;
 - controller and dependency graphs preserved as static modules; and
 - explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.

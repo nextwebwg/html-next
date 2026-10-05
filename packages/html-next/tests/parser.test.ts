@@ -358,6 +358,10 @@ describe("parseComponent", () => {
     assert.equal(parseTypedValue({ amount: 101, label: "okay" }, event.shape, "$", "value").ok, false);
     assert.equal(parseTypedValue({ amount: 20, label: "x" }, event.shape, "$", "value").ok, false);
   });
+  it("rejects unsupported method declarations", () => {
+    expectDiagnostic("HC021", `<template component="x-method"><defs><method name="validate"></method></defs><div></div></template>`);
+  });
+
   it("normalizes the full component interface and named slot shapes", () => {
     const definition = parseComponent(
       `<template component="ui-combobox" status="early" summary="A composed field." controller="./combobox.js">` +
@@ -366,7 +370,6 @@ describe("parseComponent", () => {
         `<state type="string" name="query" value=""></state>` +
         `<computed name="empty" from="not query"></computed>` +
         `<event name="value-change" type="string"></event>` +
-        `<method name="validate" returns="string" export="validate"></method>` +
         `</defs>` +
         `<div><slot name="start"><span>Start</span></slot><slot from:name="query"></slot></div>` +
         `</template>`,
@@ -378,7 +381,6 @@ describe("parseComponent", () => {
       ["state", "query"],
       ["computed", "empty"],
       ["event", "value-change"],
-      ["method", "validate"],
     ]);
     const state = definition.declarations![0];
     const computed = definition.declarations![1];
@@ -677,7 +679,6 @@ describe("parseComponent", () => {
         `<data name="results" src="/api/search" type="object" debounce="150ms" poll="30s">` +
         `<param name="q" from:value="query"></param></data>` +
         `<event name="selection-change" type="number" bubbles="false" composed="false" cancelable="true"></event>` +
-        `<method name="refresh" export="refresh" returns="promise(undefined)"></method>` +
         `<handler name="select">` +
         `<set name="form.selected" expr:value="form.selected + 1" $if="hasQuery"></set>` +
         `<validate target="search"></validate><focus ref="search"></focus>` +
@@ -928,5 +929,26 @@ describe("handler event references", () => {
       '<p $value="$$event.type"></p>',
       '<defs><computed name="source" from="$$event"></computed></defs><p></p>',
     ]) assert.throws(() => parseComponent(`<template component="x-invalid-event">${markup}</template>`), HtmlDiagnosticError);
+  });
+});
+
+
+describe("ref-targeted dispatch", () => {
+  const source = (target: string, body = '<button $ref="customer"></button>') =>
+    `<template component="x-dispatch"><defs><event name="validate" type="number"></event><handler name="check"><dispatch event="validate" target="${target}" value="3"></dispatch></handler></defs><section>${body}</section></template>`;
+
+  it("retains the component-local target and typed constant payload", () => {
+    const definition = parseComponent(source("customer"));
+    const handler = definition.declarations?.find((entry) => entry.kind === "handler");
+    assert.equal(handler?.kind, "handler");
+    if (handler?.kind !== "handler") return;
+    assert.equal(handler.steps[0]?.kind, "dispatch");
+    assert.equal((handler.steps[0] as unknown as { target: string }).target, "customer");
+    assert.equal(handler.steps[0]?.kind === "dispatch" && handler.steps[0].value?.source, "3");
+  });
+
+  it("rejects invalid and unknown targets", () => {
+    for (const target of ["", "#customer", "missing"]) expectDiagnostic("HC023", source(target));
+    assert.doesNotThrow(() => parseComponent(source("customer", '<ul $each="item of [1, 2]"><li $ref="customer"></li></ul>')));
   });
 });

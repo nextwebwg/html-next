@@ -75,11 +75,10 @@ export function truthy(value: Value): boolean {
   if (typeof value === "string") return value.length > 0;
   if (typeof value === "number") return value !== 0 && value === value;
   if (Array.isArray(value)) return value.length > 0;
-  // Native events and errors are present even without enumerable fields. The empty-record rule
-  // applies to declarative object values, not these platform objects.
-  if (value instanceof Error || isNativeEvent(value)) return true;
   for (const key in value) if (Object.hasOwn(value, key)) return true;
-  return false;
+  // Only empty objects need a platform brand check. Ordinary records (including records with
+  // a `type` field) stay on the inexpensive enumerable-property path.
+  return value instanceof Error || isNativeEvent(value);
 }
 
 function asNumber(value: Value): number | Absent {

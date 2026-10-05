@@ -78,7 +78,6 @@ const featureSource = `<template component="x-feature" status="experimental" sum
     <computed name="count" from="items.length"></computed>
     <event name="toggle" type="object({ open: boolean })"></event>
     <handler name="flip"><set name="open" expr:value="not open"></set><dispatch event="toggle" expr:value="{ open: open }"></dispatch></handler>
-    <method name="focusSearch" export="focusSearch" returns="promise(undefined)"></method>
   </defs>
   <section class="panel" class:compact="size = 'sm'" style:--gap="size">
     <h2 $value="label"></h2>
@@ -300,7 +299,7 @@ describe("official target compilers", () => {
     </template>`).get("vue/XRootRef.vue")!;
     compileVue(vue, "XRootRef.vue");
     assert.match(vue, /const root = controlElement\b/);
-    assert.match(vue, /<button[^>]*ref="control"/);
+    assert.match(vue, /<button[^>]*ref="controlElement"/);
     assert.doesNotMatch(vue, /ref="root"/);
   });
 
@@ -467,7 +466,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("converts to a Vue SFC that imports only Vue and the component's own modules", () => {
     const vue = generated(featureSource).get("vue/XFeature.vue")!;
     compileVue(vue, "XFeature.vue");
-    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./control", "./host", "./props", "vue", "vue"]);
+    assert.deepEqual(importsOf(vue).sort(), ["./XBadge.vue", "./control", "./host", "./props", "./props", "vue", "vue"]);
     assert.match(vue, /\(\) => import\('\.\/x-feature\.js'\)/);
     assert.doesNotMatch(vue, /@nextwebwg|attachComponent|manageGeneratedProps/);
   });
@@ -478,7 +477,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /const open = ref\(false\)\n/);
     assert.match(vue, /const query = ref\(''\)\n/);
     assert.match(vue, /const count = cycleCheckedComputed\(\(\) => checkedProps\.value\.items\?\.length\)\n/);
-    assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('search'\)\n/);
+    assert.match(vue, /const searchElement = useTemplateRef<HTMLElement>\('searchElement'\)\n/);
     assert.match(vue, /const hostState = computed\(\(\) =>/);
     assert.match(vue, /checkedProps\.value\.size && 'size'/);
     assert.match(vue, /`size=\$\{encodeURIComponent\(checkedProps\.value\.size\)\}`/);
@@ -498,8 +497,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /:style="\{ '--gap': checkedProps\.size \?\? undefined \}"/);
     assert.match(vue, /<XBadge :tone="checkedProps\.size"><slot name="badge">none<\/slot><\/XBadge>/);
     assert.match(vue, /<small v-if="checkedProps\.size === 'sm'">small<\/small>\n\s+<span v-else>regular<\/span>/);
-    assert.match(vue, /defineExpose\(\{\n  focusSearch: async/);
-    assert.match(vue, /const \{ host, ready \} = useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,\n  controllerSource:/);
+    assert.doesNotMatch(vue, /defineExpose|installMethods/);
+    assert.match(vue, /useComponentHost\(\(\) => import\('\.\/x-feature\.js'\), \{\n  root,\n  dispatch,/);
     assert.match(vue, /props: checkedProps,/);
   });
 
@@ -523,7 +522,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
-    assert.match(vue, /if \(!\(hovered\.value\?\.\['label'\] == null \|\| typeof hovered\.value\?\.\['label'\] === 'string'\)\)/);
+    assert.match(vue, /hovered\.value\?\.\['label'\] == null \|\| typeof hovered\.value\?\.\['label'\] === 'string'/);
     assert.match(vue, /<span v-if="hovered" :title="guarded"/);
     assert.match(vue, /<p v-if="!issues\.length">Valid<\/p>/);
     assert.doesNotMatch(vue, /function truthy\(/);

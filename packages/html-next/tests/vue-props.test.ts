@@ -139,3 +139,15 @@ describe("generated Vue prop boundary", () => {
     assert.equal(accepted.count, 7);
   });
 });
+
+
+describe("controller destination paths", () => {
+  it("permits list length bookkeeping and rejects undeclared closed fields", async () => {
+    const { acceptsControllerWrite: accepts } = await generatedModule();
+    assert.equal(accepts(0, parseTypeExpression("list(string)"), ["length"]), true);
+    assert.equal(accepts("hello", parseTypeExpression("list(string)"), ["0"]), true);
+    assert.equal(accepts(7, parseTypeExpression("list(string)"), ["0"]), false);
+    assert.equal(accepts(7, parseTypeExpression("object({ amount: number })"), ["extra"]), false);
+    assert.equal(accepts(7, parseTypeExpression("object({ amount: number })"), ["amount"]), true);
+  });
+});

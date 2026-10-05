@@ -1,12 +1,4 @@
-# Svelte compatibility patches
-
-The pinned `svelte2tsx@0.7.61` and `svelte-check@4.7.6` patches quote generated object and type property keys. Otherwise a legal quoted export such as `export { method as "·ping" }` produces an invalid unquoted key and loses its public method type. The checker bundles its own transformer, so both packages need the same fix.
-
-The patches affect build and checking tools. They add no generated component runtime code or runtime dependency. pnpm applies them from the checked-in workspace configuration and verifies their content hashes in the lockfile. Declaration caching includes the actual transformer entry so a patch cannot reuse stale types under the same package version.
-
-The source fix belongs in [language-tools' ExportedNames](https://github.com/sveltejs/language-tools/blob/master/packages/svelte2tsx/src/svelte2tsx/nodes/ExportedNames.ts), in `createReturnElements` and `createReturnElementsType`. An upstream contribution has not been submitted. Remove both patches when maintained releases preserve string-literal export names, and rerun the public method-name consumer and source-adapter declaration tests.
-
-Workspace patches do not propagate to downstream installations. Until the upstream fix is released, consumers using these method names need equivalent patches for their declaration generator and checker; editor language-server bundles can contain the same defect. Passing this workspace's checks does not establish that an unpatched external editor handles these names.
+# Svelte compatibility patch
 
 ## Keyed focus
 

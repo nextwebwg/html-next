@@ -138,6 +138,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       }
     };
     const dependencies = new Map<string, Dependency>();
+    const computedDependencies = new Set<Dependency>();
     const previousValues = new Map<string, unknown>();
     const dependency = (name: string): Dependency => {
       let result = dependencies.get(name);
@@ -155,6 +156,12 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         validate: validity,
       });
     }
+    const changedState = (name: string): void => {
+      notify(dependency("state:" + name));
+      // Fresh generated getters bypass this host's dependency tracker. Invalidate only the
+      // computed sources controllers have actually read; idle declarations add no write cost.
+      for (const source of computedDependencies) notify(source);
+    };
     const namespaces = controllerNamespaces({
       state: Object.fromEntries(Object.keys(options.state).map((name) => [name, {
         get: () => { track(dependency("state:" + name)); return latest.current.state[name]!.get(); },
@@ -162,17 +169,22 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           const entry = latest.current.state[name]!;
           const previous = entry.get();
           entry.set(value);
-          if (!Object.is(previous, value)) notify(dependency("state:" + name));
+          if (!Object.is(previous, value)) changedState(name);
         },
       }])),
       computed: Object.fromEntries(Object.keys(options.computed).map((name) => [name,
-        () => { track(dependency("state:" + name)); return latest.current.computed[name]!(); }])),
+        () => {
+          const source = dependency("state:" + name);
+          computedDependencies.add(source);
+          track(source);
+          return latest.current.computed[name]!();
+        }])),
       data: Object.fromEntries(Object.keys(options.data).map((name) => [name,
         () => { track(dependency("data:" + name)); return latest.current.data[name]!(); }])),
       acceptsState: (name, keys, value) => latest.current.acceptsState?.(name, keys, value) ?? true,
       changed: (name) => {
         latest.current.state[name]!.touch();
-        notify(dependency("state:" + name));
+        changedState(name);
       },
     }, options.definition);
     const host: ControllerHost = {

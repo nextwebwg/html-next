@@ -1,5 +1,5 @@
 import { typeCheckedDependencies, type CompiledExpression, type WritablePathSegment } from "../expression.js";
-import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
 import type { ComponentDefinition } from "../template.js";
 import { quote } from "./shared.js";
 import type { Lowering, Scope } from "./vue-lowering.js";
@@ -107,7 +107,7 @@ export function handlerDestinationCheck(
 }
 
 /** Declared types constrain expressions at the point each reference is read. */
-export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, strict?: StrictTypePredicate): string | undefined {
+export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, strict?: StrictTypePredicate, lowering?: Lowering): string | undefined {
   const checks = typeCheckedDependencies(plan).flatMap((path) => {
     const [root, ...steps] = path.split(".");
     const source = scope.code.get(root!);
@@ -121,7 +121,9 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
         type = typeAtKey(type, step);
         if (type === undefined) return [];
       }
-      return [`(${read} == null || ${destinationTypeCheck(type, read, strict)})`];
+      const accepted = `(${read} == null || ${destinationTypeCheck(type, read, strict)})`;
+      return [lowering?.authoredCheck(accepted, `${plan.source}:${path}`,
+        `${definition.source.file}: HR007: Reference ${path} must satisfy ${formatType(type)}.`) ?? accepted];
     };
     const prop = definition.contract.props[root!];
     if (prop === undefined) {
