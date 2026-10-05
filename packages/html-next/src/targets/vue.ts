@@ -638,7 +638,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const event = node.name === "select" || node.name === "input" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "type" && ["checkbox", "radio", "file"].includes(entry.value))
           ? "change" : "input";
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
-        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: 'value', value: model, ${authoredDefault("value")} }`)}`);
+        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: 'value', value: model, optionalValue: true, ${authoredDefault("value")} }`)}`);
         attributes.push(`@${event}=${bound(`model = readBoundControl(${control}) as any`)}`);
     }
     if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
@@ -674,7 +674,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   // v-model the owner of the live control value.
   const children = node.name === "select" && (selectProperty !== undefined ||
     twoWayControl || isRoot && context.model)
-    ? `<SelectedOptions :value=${bound(selectedValue)} :multiple=${bound(selectedMultiple)} :native-property=${bound(selectProperty !== undefined && !twoWayControl ? "true" : "false")}>${renderedChildren}</SelectedOptions>`
+    ? `<SelectedOptions :value=${bound(selectedValue)} :multiple=${bound(selectedMultiple)} :native-property=${bound(selectProperty !== undefined && !twoWayControl ? "true" : "false")}${isRoot && context.model && !twoWayControl && selectProperty === undefined ? " :optional-value=\"true\"" : ""}>${renderedChildren}</SelectedOptions>`
     : renderedChildren;
   // An empty component closes itself, as Vue's style guide has it.
   if (component && children === "") return `${open.slice(0, -1)} />`;

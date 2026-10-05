@@ -384,13 +384,13 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /modelValue: \{ type: null as unknown as PropType<string \| null \| undefined> \}/);
     assert.match(vue, /'update:modelValue': \[value: string\]\n/);
     assert.match(vue, /<input\s+data-component="x-field"/);
-    assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, defaultValue: '' \}"/);
+    assert.match(vue, /v-bind-control="\{ tag: 'input', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
     const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
     assert.match(select, /<select\s+data-component="x-choice"/);
-    assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, defaultValue: '' \}"/);
+    assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
     assert.match(select, /<SelectedOptions\s+:value="model"\s+:multiple="false"\s+:native-property="false"/);
     assert.doesNotMatch(select, /v-model=/);
