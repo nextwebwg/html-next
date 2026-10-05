@@ -1257,7 +1257,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.ok(manifest.output.artifacts.some(({ path, kind }) => path === "vue/html.ts" && kind === "helper"));
     assert.deepEqual(manifest.package, {
       dependencies: { parse5: "^8.0.1" },
-      peerDependencies: { vue: "^3.5.0" },
+      peerDependencies: { vue: "^3.5.43" },
     });
   });
 

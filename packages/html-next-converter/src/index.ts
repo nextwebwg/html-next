@@ -626,7 +626,8 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     graph: options.mode,
     package: Object.freeze({
       dependencies: Object.freeze({ ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
-      peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
+      // Vue 3.5.43 restores generic inference through runtime PropType declarations.
+      peerDependencies: Object.freeze({ [options.target]: options.target === "vue" ? "^3.5.43" : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),
