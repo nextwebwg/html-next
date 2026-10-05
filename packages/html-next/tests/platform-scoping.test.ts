@@ -82,7 +82,7 @@ describe.skipIf(!enabled)("platform assumptions for style scoping", () => {
         const source = `
           :host { outline: 1px solid }
           .label { color: rgb(1, 1, 1); }
-          :host([size="sm"]) .label { font-size: 8px }
+          :host-state([size="sm"]) .label { font-size: 8px }
           :slotted(h2) { color: rgb(2, 2, 2); & + ul { margin-top: 7px } }
           :slotted(ul li) { color: rgb(3, 3, 3) }
           @media (width > 1px) { :slotted(h2) { letter-spacing: 2px } }

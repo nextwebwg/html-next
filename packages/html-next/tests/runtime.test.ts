@@ -333,7 +333,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           recovered: { input: "grace@example.org", nativeMismatch: false,
             source: "grace@example.org", downstream: "grace@example.org" },
         });
-        assert.deepEqual(warnings, []);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0]!, /HR007.*Reference `address` must satisfy email/);
       } finally { await browser.close(); }
     });
 
@@ -1752,7 +1753,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = window.HtmlRuntime.getComponentHost(first);
           const privateState = first[Symbol.for("@nextwebwg/html-next.runtime.v1")] === undefined;
           const frozenHost = Object.isFrozen(host);
-          const nativeOnlyEvents = !("on" in host);
+          let received = 0;
+          const stopProbe = host.on("probe", event => { if (event.target === first) received += 1; });
+          first.dispatchEvent(new Event("probe"));
+          stopProbe();
+          first.dispatchEvent(new Event("probe"));
+          const nativeSubscriptions = received === 1;
           first.addEventListener("connect", () => events.push("connect"));
           first.addEventListener("disconnect", () => events.push("disconnect"));
           first.remove();
@@ -1762,7 +1768,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           stopDocument();
           stopFirst();
           stopSecond();
-          return { documentObservers, connected, events, privateState, frozenHost, nativeOnlyEvents };
+          return { documentObservers, connected, events, privateState, frozenHost, nativeSubscriptions };
         })()`);
         assert.deepEqual(result, {
           documentObservers: 1,
@@ -1770,7 +1776,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           events: [],
           privateState: true,
           frozenHost: true,
-          nativeOnlyEvents: true,
+          nativeSubscriptions: true,
         });
       } finally {
         await browser.close();

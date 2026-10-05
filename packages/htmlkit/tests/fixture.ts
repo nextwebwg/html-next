@@ -34,10 +34,12 @@ export async function fixture(): Promise<string> {
   await write(root, "app/pages/home.ts", `import './controller.css'; if (typeof document === 'undefined') throw new Error('Controller ran on server');
     export default function(host) {
       host.root.dataset.production = String(import.meta.env.PROD);
-      host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1);
-      const click = () => { host.state.count += 1; };
-      host.refs.button.addEventListener('click', click);
-      return () => host.refs.button.removeEventListener('click', click);
+      host.on('connect', () => {
+        host.root.dataset.connections = String(Number(host.root.dataset.connections || 0) + 1);
+        const click = () => { host.state.count += 1; };
+        host.refs.button.addEventListener('click', click);
+        return () => host.refs.button.removeEventListener('click', click);
+      });
     }`);
   await write(root, "app/pages/index.server.ts", `export function load({ base }) {
     return { props: { asset: base + 'mark.svg' }, state: { count: 4 }, head: { title: 'Home & kit' } };
