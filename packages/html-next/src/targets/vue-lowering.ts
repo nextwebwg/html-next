@@ -254,7 +254,12 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   truthy: `function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (value instanceof Error) return true;
-  if (value !== null && typeof value === "object") return Object.keys(value).length > 0;
+  if (value !== null && typeof value === "object") {
+    if (typeof Event !== "undefined" && "type" in value) {
+      try { Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!.call(value); return true; } catch { /* ordinary objects use their fields */ }
+    }
+    return Object.keys(value).length > 0;
+  }
   return Boolean(value);
 }`,
   text: `function text(value: unknown): string {
@@ -532,7 +537,7 @@ export class Lowering {
     const type = typeOf(node, scope);
     // A closed object with a required field always has keys, so only its absence makes it false.
     const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
-    if (filled) return code;
+    if (filled || type.type.kind === "terminal" && type.type.name === "event") return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
       case "list": return mayProduceInvalidResult(node, scope)

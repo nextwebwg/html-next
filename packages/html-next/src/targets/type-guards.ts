@@ -15,6 +15,7 @@ export function typeCheck(type: TypeNode, value: string): string {
         case "integer": return `Number.isInteger(${value})`;
         case "null": return `${value} === null`;
         case "absent": return `${value} === undefined`;
+        case "event": return `(() => { try { Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!.call(${value}); return true; } catch { return false; } })()`;
         case "function": return `typeof ${value} === "function"`;
         default: return "true";
       }
