@@ -75,10 +75,15 @@ compiler or `@sveltejs/vite-plugin-svelte`. Source consumers can use `svelte-che
 emitting declaration files can use `svelte2tsx`. The generated public types cover props, native and
 declared event callbacks and scoped slot fields. Both graph modes export components; application and library consumers use public `mount`/`hydrate`
 or their framework's usual mounting and hydration flow.
-Svelte 5.57.1 loses focus when it moves a focused keyed row in Chromium and Firefox. The
-[compatibility patch](../../patches/README.md#keyed-focus) preserves focus and native focus events.
-Install it in the consuming application when that behavior is required; this repository's pnpm
-patches do not propagate through generated output or published dependencies.
+Svelte support uses the unmodified framework; consumers do not install a runtime patch.
+One known upstream gap remains: reordering a keyed row can blur its focused input. Svelte uses
+ordinary DOM insertion to move the row, which can clear browser focus. In Svelte 5.57.1, our
+Chromium, Firefox, and WebKit checks retain edited values and selection but lose focus;
+Chromium also fires `blur` and `focusout`. The native HTML Next runtime retains focus in engines
+with state-preserving `moveBefore`; its WebKit insertion fallback has the same focus loss.
+This affects both mounting and hydration. See [Svelte issue #3973 and the editable Playground
+reproduction](https://github.com/sveltejs/svelte/issues/3973#issuecomment-6003429271). Converter tests keep
+this difference explicit while continuing to check rendering, edits, events, lifecycle and hydration.
 
 Feature helpers are emitted once per converted graph and imported only by components that need
 them. Style bindings record `cssstyle` and `css-tree` in server dependencies; the generated helper's

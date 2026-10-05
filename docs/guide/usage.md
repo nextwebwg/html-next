@@ -2,7 +2,7 @@
 title: Usage
 order: 1
 navGroup: guide
-blurb: HTML Next · Vue · React
+blurb: HTML Next · Vue · React · Svelte
 eyebrow: HTML Next · Usage
 ---
 
@@ -38,7 +38,7 @@ Keep your project's usual React plugin. The current target is React 19.3.
 
 ::: framework-svelte
 
-The Svelte adapter is coming soon. You can write the HTML definition now; use HTML Next, Vue, or React to run it today.
+Keep your project's usual Svelte plugin. The current target is Svelte 5.57.1. The adapter uses the standard, unpatched framework; see the [known keyed-focus limitation](/html-next/convert).
 
 :::
 
@@ -87,13 +87,21 @@ export default defineConfig({
 
 ::: framework-svelte
 
-Svelte Vite configuration will be available when the adapter ships. Choose another target for a working setup.
+```ts title="vite.config.ts"
+import { defineConfig } from "vite";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({ target: "svelte" }), svelte()],
+});
+```
 
 :::
 
 ## Use your component
 
-Build a small workshop check-in app: count guests as they arrive, then reset for the next session. Each example uses the same counter inside an `App` component and shows how to attach that app to the page. In an existing Vue or React project, keep its mounting code and add the counter to its `App` component.
+Build a small workshop check-in app: count guests as they arrive, then reset for the next session. Each example uses the same counter inside an `App` component and shows how to attach that app to the page. In an existing Vue, React, or Svelte project, keep its mounting code and add the counter to its `App` component.
 
 ::: framework-html-next
 
@@ -224,7 +232,43 @@ The result uses React and native DOM roots. Generated components import the help
 
 ::: framework-svelte
 
-The Svelte adapter is coming soon. The HTML definition stays the same; Svelte import and rendering instructions will follow with the adapter.
+Save the [counter you built](/html-next/quick-start) as `src/counter.html`. Use it inside the app:
+
+```svelte title="src/App.svelte"
+<script lang="ts">
+  import { XCounter } from "./counter.html";
+</script>
+
+<main>
+  <h1>Workshop check-in</h1>
+  <p>Count guests as they arrive. Reset for the next session.</p>
+  <XCounter />
+</main>
+```
+
+Attach `App` to the page:
+
+```ts title="src/main.ts"
+import { mount } from "svelte";
+import App from "./App.svelte";
+
+mount(App, { target: document.getElementById("app")! });
+```
+
+```html title="index.html"
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Workshop check-in</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+```
+
+Run your project's usual `npm run dev` command. Click the counter and Reset.
+
+The result uses Svelte and native DOM roots. Generated components import the helpers their features need and have no HTML Next runtime dependency. Editing the HTML definition updates the component in your app.
 
 :::
 
@@ -270,7 +314,17 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 ::: framework-svelte
 
-Svelte typechecking instructions will come with the adapter.
+Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Generate them before a standalone typecheck:
+
+```json title="package.json"
+{
+  "scripts": {
+    "typecheck": "html-next-sync && svelte-check"
+  }
+}
+```
+
+If a component needs declarations before its first import, add `entries: ["src/counter.html"]` to `htmlNext({ target: "svelte" })`.
 
 :::
 
@@ -320,7 +374,11 @@ Use those exports like other React components. The names come from the library's
 
 ::: framework-svelte
 
-Publishers can already package their HTML source. Consuming it in Svelte will be available when the adapter ships.
+```js
+import { UiButton } from "your-library";
+```
+
+Use those exports like other Svelte components. The names come from the library's README. Include the generated `src/html-next.d.ts` in your TypeScript project to get its component types.
 
 :::
 
@@ -369,7 +427,7 @@ For React, use the Vite adapter above. Choose HTML Next in this section for the 
 
 ::: framework-svelte
 
-The Svelte adapter is coming soon. Choose HTML Next in this section to run the definition directly in a browser today.
+For Svelte, use the Vite adapter above. Choose HTML Next in this section for the direct browser-runtime setup.
 
 :::
 

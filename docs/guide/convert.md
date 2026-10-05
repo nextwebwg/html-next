@@ -37,6 +37,12 @@ A directory such as `components/` is also accepted, as are explicit `.html` file
 
 The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
 
+Svelte conversion is available and uses the standard, unpatched framework. A known upstream
+limitation affects focused inputs when keyed rows reorder: the edited value and selection remain,
+but focus can be lost and Chromium fires `blur` and `focusout`. Svelte moves rows with ordinary
+DOM insertion, which can clear focus. This affects mount and hydration; see [Svelte issue #3973
+and its editable Playground reproduction](https://github.com/sveltejs/svelte/issues/3973#issuecomment-6003429271).
+
 If a component uses `$html` to render an HTML string, its generated code needs the `parse5` package. Install the dependencies listed under `package.dependencies` in `html-next.conversion.json`; components without `$html` do not need `parse5`.
 
 ## Choose the output shape

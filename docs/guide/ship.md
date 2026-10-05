@@ -7,7 +7,7 @@ eyebrow: HTML Next · Libraries
 
 # Publish your HTML Next library
 
-**Publish your `.html` files. Let the consuming app's Vite plugin build them.** This is the recommended way to share HTML Next components: one package works natively, in Vue, and in React. Svelte support is coming soon.
+**Publish your `.html` files. Let the consuming app's Vite plugin build them.** This is the recommended way to share HTML Next components: one package works natively, in Vue, in React, and in Svelte.
 
 You already have your components. Publishing them takes a package manifest, a README, and the usual npm commands.
 

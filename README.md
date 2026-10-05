@@ -1,8 +1,7 @@
 # HTML Next implementations
 
 Build universal components using the next generation of HTML. Author once, then run them in a
-browser, compile to native DOM, or use them in Vue and React. Svelte Vite adapters and converters
-are coming soon.
+browser, compile to native DOM, or use them in Vue, React, and Svelte.
 
 [Get started](https://nextwebwg.org/html-next/quick-start) ·
 [Usage](https://nextwebwg.org/html-next/usage) ·
