@@ -105,7 +105,7 @@ function checkSupported(definition: ComponentDefinition): { importedNames: Reado
   const importedNames = new Set<string>();
   const refs = new Set<string>();
   for (const declaration of definition.declarations ?? []) {
-    if (!["state", "computed", "handler", "data", "event", "method", "context"].includes(declaration.kind)) {
+    if (!["state", "computed", "handler", "data", "event", "context"].includes(declaration.kind)) {
       fail("HT030", `Svelte conversion does not yet support ${declaration.kind} declarations.`);
     }
   }
@@ -1070,9 +1070,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     resetRootRefs: usesController || refs.size > 0 || handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate")),
     refAttachmentName: freshIdentifier("htmlNextRef"), refTargetName: freshIdentifier("htmlNextRefTarget"),
     writePathName: freshIdentifier("htmlNextWritePath"), freshIdentifier };
-  const controllerHostName = freshIdentifier("htmlNextHost");
   const iteratedRefs = iteratedRefNames(definition);
-  const methodNames = new Map(target.methods.map((method) => [method.name, freshIdentifier("htmlNextMethod")]));
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
   const nestedDepthName = freshIdentifier("htmlNextDepth");
   const markup = renderNode(definition.template, true, scope, lowering, context);
@@ -1102,6 +1100,12 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   const structuredReader = (name: string): string => structuredInputs.has(name) ? ", parseHtmlLiteral" : "";
   const destructured = target.props.map((prop) => `${quote(prop.name)}: ${selectedInputs.get(prop.name)?.raw ?? inputNames.get(prop.name)}`).join(", ");
   const hasProps = target.props.length > 0;
+  const controllerStateTypes = Object.fromEntries(states.flatMap((state) => {
+    const type = declarationTypeNode(state.type, state.shape);
+    return type === undefined ? [] : [[state.name, type]];
+  }));
+  const usesControllerTypeChecks = usesController && Object.keys(controllerStateTypes).length > 0;
+  const controllerTypesName = freshIdentifier("htmlNextControllerStateTypes");
   const publicChildren = definition.contract.props.children !== undefined;
   const publicSlots = definition.contract.props.slots !== undefined;
   const internalProps = [!publicChildren ? "children" : undefined, !publicSlots ? "slots" : undefined].filter((name) => name !== undefined);
@@ -1148,8 +1152,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     return `const ${computedNames.get(value)!}: { get(): ${type} } = cycleCheckedComputed<${type}>(() => (${read.invalid
       ? retained(context, read.source, "null as any") : read.source}) as ${type});`;
   });
-  const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(): void {\n${handler.steps.map((step, index) => {
-    const handlerScope = scope;
+  const handlerScope: Scope = { code: new Map(scope.code).set("$$event", "event"),
+    types: new Map(scope.types).set("$$event", { type: { kind: "terminal", name: "event" }, nullable: false }) };
+  const handlerSources = handlers.map((handler) => `function ${handlerNames.get(handler.name)!}(event: Event): void {\n${handler.steps.map((step, index) => {
     const condition = step.guard === undefined ? undefined : conformingCondition(step.guard, handlerScope, lowering, context);
     const guardName = condition === undefined ? undefined : context.freshIdentifier("htmlNextGuard");
     const guard = condition === undefined ? "" : `const ${guardName} = ${condition.source}; if (${condition.invalid ? `(${guardName} as unknown) !== Symbol.for('html-next.invalid-result') && ` : ""}${guardName}) `;
@@ -1234,6 +1239,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesDecorations ? [`import { classText, type Decoration } from ${quote(options.decorationsSpecifier ?? "./decorations")};`] : []),
     ...(context.usesStyleDecorations ? [`import { styleText } from ${quote(options.styleSpecifier ?? "./style/style.js")};`] : []),
     ...((context.usesComponentBindings || context.usesDeclaredFormats) ? [`import { acceptsBindingDestination } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
+    ...(usesControllerTypeChecks ? [`import { acceptsControllerWrite } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
     ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
@@ -1482,7 +1488,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "}",
     ] : []),
     ...(usesController ? [
-      `const ${controllerHostName} = useComponentHost(() => import(${quote(definition.controller!)}), {`,
+      ...(usesControllerTypeChecks ? [`const ${controllerTypesName}: Record<string, unknown> = ${JSON.stringify(controllerStateTypes)};`] : []),
+      `useComponentHost(() => import(${quote(definition.controller!)}), {`,
       "  root: () => rootElement ?? null,",
       `  ownsRoot: () => rest[${quote(ROOT_OWNER_PROP)}] !== true,`,
       `  definition: ${quote(definition.source.file)}, tag: ${quote(definition.contract.tag)}, controller: ${quote(options.controllerSpecifier ?? definition.controller!)},`,
@@ -1492,22 +1499,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
       `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
-      `  computed: { ${[...computed, ...data, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
+      `  computed: { ${[...computed, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
+      `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
+      ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),
       `  refs: ${context.refsName},`,
       `  dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${JSON.stringify(declarationTypeNode(event.type, event.shape))}, ${JSON.stringify({ bubbles: event.bubbles, composed: event.composed, cancelable: event.cancelable })});`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
-      `  methods: ${JSON.stringify(target.methods.map((method) => ({ name: method.name, exportName: method.exportName })))},`,
-      "});",
-    ] : []),
-    ...target.methods.map((method) => {
-      const alias = methodNames.get(method.name)!;
-      const result = usesController ? `${controllerHostName}.invoke(${quote(method.name)}, ...args)`
-        : `Promise.reject(new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}))`;
-      return `const ${alias} = (...args: unknown[]): Promise<Awaited<${method.returnType}>> => ${result} as Promise<Awaited<${method.returnType}>>;\nexport { ${alias} as ${isScriptIdentifier(method.name) ? method.name : quote(method.name)} };`;
-    }),
-    ...(!usesController && target.methods.length > 0 ? [
-      "$effect(() => {",
-      `  const element = rootElement; if (element === undefined || rest[${quote(ROOT_OWNER_PROP)}] === true) return;`,
-      ...target.methods.map((method) => `  Object.defineProperty(element, ${quote(method.name)}, { configurable: true, enumerable: false, value: ${methodNames.get(method.name)} });`),
       "});",
     ] : []),
     ...handlerSources,
@@ -1515,7 +1511,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
   ].join("\n").replace(/<\/script/gi, "<\\/script") + "\n</script>";
   return { component: `${moduleFallbacks.length === 0 ? "" : `<script module lang="ts">\n${moduleFallbacks.join("\n").replace(/<\/script/gi, "<\\/script")}\n</script>\n`}${script}\n${markup}\n`, css, usesHtml: context.htmlSites > 0,
     helpers: [
-      ...(hasProps || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
+      ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),
       ...(context.usesEvents ? ["events" as const] : []),
       ...(context.usesControls ? ["control" as const] : []),

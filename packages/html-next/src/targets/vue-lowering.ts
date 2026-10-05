@@ -450,7 +450,7 @@ export class Lowering {
         const objectType = typeOf(node.object, scope);
         const access = objectType.nullable ? "?." : ".";
         const retains = mayProduceInvalidResult(node.object, scope);
-        const candidate = retains ? "candidate" : object;
+        const candidate = retains ? "candidate" : objectType.type.kind === "terminal" && objectType.type.name === "event" ? `(${object} as any)` : object;
         // A closed shape still permits an absent read; the result is undefined at runtime.
         const read = objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)
           ? `(${candidate} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`
@@ -464,6 +464,8 @@ export class Lowering {
         if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
           return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typeOf(node.object, scope).nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
         }
+        const objectType = typeOf(node.object, scope).type;
+        if (objectType.kind === "terminal" && objectType.name === "event") return `(${object} as any)[${index}]`;
         // A computed key may not be one of an object literal's declared names. JavaScript then
         // reads an absent property, while TypeScript rejects the indexing expression.
         if (typeOf(node.object, scope).type.kind === "object") {

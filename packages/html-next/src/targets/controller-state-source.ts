@@ -6,6 +6,7 @@ interface ControllerNamespaces {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
+  readonly changed?: (name: string) => void;
 }
 
 function controllerNamespaces(options: ControllerNamespaces, source: string): {
@@ -37,7 +38,11 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     if (known !== undefined) return known;
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => wrap(Reflect.get(target, key, receiver), name, [...keys, String(key)], readonly),
-      set: (target, key, next) => write(name, [...keys, String(key)], next, readonly, () => { Reflect.set(target, key, next); }),
+      set: (target, key, next) => write(name, [...keys, String(key)], next, readonly, () => {
+        const previous = Reflect.get(target, key);
+        Reflect.set(target, key, next);
+        if (!Object.is(previous, next)) options.changed?.(name);
+      }),
     });
     paths.set(path, proxy);
     return proxy;

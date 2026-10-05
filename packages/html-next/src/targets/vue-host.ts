@@ -6,6 +6,7 @@
  */
 import { formatVue } from "./vue-format.js";
 import { DATA_URL_SOURCE } from "./shared-generated.js";
+import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
 export const VUE_HOST_PATH = "vue/host.ts";
@@ -18,6 +19,8 @@ export function importsVueHost(source: string): boolean {
 
 const SOURCE = `
 import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
+
+${CONTROLLER_STATE_SOURCE}
 
 interface DataReadOptions {
   readonly source: string;
@@ -178,6 +181,7 @@ export interface ComponentHostOptions {
   readonly data?: Readonly<Record<string, Readable<unknown>>>;
   /** Values inherited through declared context, which a controller reads. */
   readonly context?: Readonly<Record<string, Readable<unknown>>>;
+  readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
 }
 
 /** Vue does not promise a \`v-for\` ref array in source order, and the host does. */
@@ -239,16 +243,23 @@ export function useComponentHost(
       throw controllerDiagnostic("HJ001", error);
     });
   const stops: Array<() => void> = [];
-  const readState = (name: string): unknown =>
-    Object.hasOwn(state, name)
-      ? state[name]!.value
-      : Object.hasOwn(computedValues, name)
-      ? computedValues[name]!.value
-      : Object.hasOwn(data, name)
-      ? data[name]!.value
-      : Object.hasOwn(context, name)
-      ? context[name]!.value
-      : undefined;
+  const connected = shallowRef(false);
+  const pauses = new Map<() => void, () => void>();
+  const subscriptions = new Set<{ type: string; callback: (event: Event) => void | (() => void); target?: Element; cleanup?: void | (() => void) }>();
+  type Subscription = typeof subscriptions extends Set<infer S> ? S : never;
+  const activate = (entry: Subscription): void => {
+    if (entry.type === "connect") entry.cleanup = entry.callback(new Event("connect"));
+    else if (entry.type !== "disconnect") {
+      entry.target = root.value ?? undefined;
+      entry.target?.addEventListener(entry.type, entry.callback as EventListener);
+    }
+  };
+  const deactivate = (entry: Subscription, disconnecting: boolean): void => {
+    entry.target?.removeEventListener(entry.type, entry.callback as EventListener);
+    entry.target = undefined;
+    const cleanup = entry.cleanup; entry.cleanup = undefined; cleanup?.();
+    if (disconnecting && entry.type === "disconnect") entry.callback(new Event("disconnect"));
+  };
   const propHandles = Object.create(null) as Record<string, unknown>;
   for (const name of propNames) {
     const validity = () => options.propValidity?.(name);
@@ -266,18 +277,18 @@ export function useComponentHost(
     get root(): Element {
       return root.value as Element;
     },
-    state: new Proxy({} as Record<string, unknown>, {
-      get: (_target, name) => typeof name === "string" ? readState(name) : undefined,
-      set: (_target, name, value) => {
-        if (typeof name !== "string" || !Object.hasOwn(state, name)) {
-          throw new TypeError(\`Only declared state is writable; \\\`\${String(name)}\\\` is not.\`);
-        }
-        state[name]!.value = value;
-        return true;
-      },
-      has: (_target, name) => typeof name === "string" &&
-        (Object.hasOwn(state, name) || Object.hasOwn(computedValues, name) || Object.hasOwn(data, name) || Object.hasOwn(context, name)),
-    }),
+    ...controllerNamespaces({
+      state: Object.fromEntries(Object.entries(state).map(([name, value]) => [name, { get: () => value.value, set: (next: unknown) => { value.value = next; } }])),
+      computed: Object.fromEntries([...Object.entries(computedValues), ...Object.entries(context)].map(([name, value]) => [name, () => value.value])),
+      data: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, () => value.value])),
+      acceptsState: options.acceptsState,
+    }, options.controllerSource?.definition ?? "<component>"),
+    on(type: string, callback: (event: Event) => void | (() => void)): () => void {
+      const entry: Subscription = { type, callback };
+      subscriptions.add(entry);
+      if (connected.value) activate(entry);
+      return () => { if (subscriptions.delete(entry)) deactivate(entry, false); };
+    },
     props: Object.freeze(propHandles),
     refs: Object.defineProperties(
       {},
@@ -314,12 +325,16 @@ export function useComponentHost(
       return { get: (): T => value.value };
     },
     effect(run: () => void | (() => void)): () => void {
-      const stop = watchEffect((onCleanup) => {
-        const cleanup = run();
-        if (typeof cleanup === "function") onCleanup(cleanup);
+      let cleanup: void | (() => void);
+      const pause = (): void => { const previous = cleanup; cleanup = undefined; previous?.(); };
+      const stop = watchEffect(() => {
+        pause();
+        if (connected.value) cleanup = run();
       }, { flush: "post" });
-      stops.push(stop);
-      return stop;
+      const dispose = (): void => { stop(); pause(); pauses.delete(dispose); };
+      pauses.set(dispose, pause);
+      stops.push(dispose);
+      return dispose;
     },
     dispatch,
   };
@@ -328,13 +343,14 @@ export function useComponentHost(
   let started: Promise<ControllerModule> | undefined;
   let stopObserving: (() => void) | undefined;
   let connection = 0;
-  let connected = false;
+  let initialized = false;
   let unmounted = false;
   const disconnect = (): void => {
-    if (!connected) return;
-    connected = false;
+    if (!connected.value) return;
+    connected.value = false;
     connection += 1;
-    for (const stop of stops.splice(0)) stop();
+    for (const pause of pauses.values()) pause();
+    for (const entry of subscriptions) deactivate(entry, true);
     cleanup?.();
     cleanup = undefined;
   };
@@ -344,14 +360,24 @@ export function useComponentHost(
       disconnect();
       return;
     }
-    if (connected) return;
-    connected = true;
+    if (connected.value) {
+      for (const entry of subscriptions) {
+        if (entry.type !== "connect" && entry.type !== "disconnect" && entry.target !== root.value) {
+          deactivate(entry, false); activate(entry);
+        }
+      }
+      return;
+    }
+    connected.value = true;
+    for (const entry of subscriptions) activate(entry);
+    if (initialized) return;
     const current = ++connection;
     started = loadControllerModule().then(async (loaded) => {
-      if (!connected || current !== connection) return loaded;
+      if (!connected.value || current !== connection || initialized) return loaded;
+      initialized = true;
       const result = await loaded.default(host as never);
       if (typeof result === "function") {
-        if (!connected || current !== connection) result();
+        if (!connected.value || current !== connection) result();
         else cleanup = result as () => void;
       }
       return loaded;
@@ -370,9 +396,10 @@ export function useComponentHost(
     unmounted = true;
     stopObserving?.();
     disconnect();
+    for (const stop of stops.splice(0)) stop();
+    subscriptions.clear();
   });
-  /** \`ready\` settles once the controller has started; a method exposed by the component awaits it. */
-  return { host, ready: (): Promise<ControllerModule> | undefined => started };
+  return host;
 }
 
 export interface DispatchOptions {

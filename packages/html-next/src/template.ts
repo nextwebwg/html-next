@@ -28,7 +28,6 @@ export type ComponentDeclaration =
   | ReactiveDeclaration
   | ContextDeclaration
   | EventDeclaration
-  | MethodDeclaration
   | HandlerDeclaration
   | DataDeclaration;
 
@@ -78,13 +77,6 @@ export interface EventDeclaration {
   readonly bubbles: boolean;
   readonly composed: boolean;
   readonly cancelable: boolean;
-}
-
-export interface MethodDeclaration {
-  readonly kind: "method";
-  readonly name: string;
-  readonly exportName: string;
-  readonly returns: string;
 }
 
 export interface HandlerDeclaration {

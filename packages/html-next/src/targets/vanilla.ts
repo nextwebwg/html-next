@@ -1715,7 +1715,6 @@ export function generateVanilla(
     ...target.events.map((event) => `  ${tsKey(event.name)}: CustomEvent<${event.detailType}>;`),
     "}",
     `export interface ${elementType} extends ${domType} {`,
-    ...target.methods.map((method) => `  ${tsKey(method.name)}(): ${method.returnType};`),
     `  addEventListener<K extends keyof ${contract.name}EventMap>(type: K, listener: (this: ${elementType}, event: ${contract.name}EventMap[K]) => unknown, options?: boolean | AddEventListenerOptions): void;`,
     `  removeEventListener<K extends keyof ${contract.name}EventMap>(type: K, listener: (this: ${elementType}, event: ${contract.name}EventMap[K]) => unknown, options?: boolean | EventListenerOptions): void;`,
     "}",

@@ -681,7 +681,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
   const { lowering } = context;
   const lines: string[] = [];
-  const local = withLocal(names, [["event", UNKNOWN]]);
+  const local = withLocal(names, [["$$event", { type: { kind: "terminal", name: "event" }, nullable: false }, "event"]]);
   const element = (ref: string): string => {
     if (!context.refs.has(ref)) context.refs.set(ref, context.identifiers.take(`${ref}Element`, ""));
     return context.refs.get(ref)!;
@@ -720,7 +720,7 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       lines.push(`  ${guard}(${element(step.target)}.value as HTMLInputElement | null)?.reportValidity?.();`);
     }
   }
-  const parameter = lines.some((line) => /\bevent\b/.test(line)) ? "event?: Event" : "";
+  const parameter = lines.some((line) => /\bevent\b/.test(line)) ? "event: Event" : "";
   return [`function ${name}(${parameter}): void {`, ...lines, "}"].join("\n");
 }
 
@@ -976,7 +976,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const checkNames = new Map<EventDeclaration, string>();
   const checksBySource = new Map<string, string>();
   for (const event of events) {
-    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail").replace(/^\((.*)\)$/s, "$1");
+    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail");
     let name = checksBySource.get(source);
     if (name === undefined) {
       name = identifiers.take(`is${pascal(event.name)}Detail`, "Check");
@@ -1180,7 +1180,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),
     ...handlerSources.flatMap((source) => ["", source]),
     "",
-    ...hostSource(definition, target.methods, {
+    ...hostSource(definition, {
       props: target.props.length > 0,
       refs: context.refs,
       state: new Map(states.map((state) => [state.name, stateNames.get(state)!])),
@@ -1213,6 +1213,8 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
+    ...(definition.controller !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
+      ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
     ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
@@ -1242,10 +1244,9 @@ function defaultSource(value: unknown): string {
   return value !== null && typeof value === "object" ? `() => (${JSON.stringify(value)})` : JSON.stringify(value);
 }
 
-/** The controller host and the methods it exposes: the shared module holds everything repeated. */
+/** The controller host shares namespace and connection behavior across components. */
 function hostSource(
   definition: ComponentDefinition,
-  methods: ReturnType<typeof targetComponent>["methods"],
   values: {
     readonly props: boolean;
     readonly refs: ReadonlyMap<string, string>;
@@ -1257,17 +1258,17 @@ function hostSource(
   },
   controllerSpecifier?: string,
 ): string[] {
-  if (definition.controller === undefined) {
-    return methods.length === 0 ? [] : [
-      `defineExpose({ ${methods.map((method) => `${propKey(method.name)}: () => Promise.reject(new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}))`).join(", ")} });`,
-    ];
-  }
+  if (definition.controller === undefined) return [];
   const record = (entries: ReadonlyMap<string, string>): string =>
     `{ ${[...entries].map(([name, identifier]) => name === identifier ? name : `${propKey(name)}: ${identifier}`).join(", ")} }`;
+  const stateTypes = Object.fromEntries((definition.declarations ?? []).flatMap((declaration) =>
+    declaration.kind === "state" && declarationTypeNode(declaration.type, declaration.shape) !== undefined
+      ? [[declaration.name, declarationTypeNode(declaration.type, declaration.shape)]] : []));
   const call = [
     `useComponentHost(() => import(${quote(definition.controller)}), {`,
     "  root,",
     "  dispatch,",
+    ...(Object.keys(stateTypes).length === 0 ? [] : [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${JSON.stringify(stateTypes)} as Record<string, any>)[name], keys),`]),
     `  controllerSource: { specifier: ${quote(controllerSpecifier ?? definition.controller!)}, definition: ${quote(definition.source.file)} },`,
     ...(values.props ? [
       "  props: checkedProps,",
@@ -1291,17 +1292,7 @@ function hostSource(
     ...(values.context.size === 0 ? [] : [`  context: ${record(values.context)},`]),
     "})",
   ].join("\n");
-  if (methods.length === 0) return [`${call};`];
-  return [
-    `const { host, ready } = ${call};`,
-    "",
-    "defineExpose({",
-    ...methods.map((method) => {
-      const message = `Controller does not export method \`${method.exportName}\`.`;
-      return `  ${propKey(method.name)}: async (...args: unknown[]) => { const controllerModule = await ready(); if (controllerModule === undefined) throw new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}); const method = Reflect.get(controllerModule, ${quote(method.exportName)}); if (typeof method !== "function") throw Object.assign(new Error(${quote(`HJ003: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HJ003", message: ${quote(message)} }) }); return method(host, ...args); },`;
-    }),
-    "});",
-  ];
+  return [`${call};`];
 }
 
 /** `query-change` as `QueryChange`, for a name derived from a declared event. */

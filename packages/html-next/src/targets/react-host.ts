@@ -1,5 +1,6 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
+import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 
 const SOURCE = `import React from "react";
 
@@ -35,9 +36,11 @@ function cycleError(): Error {
 }
 
 ${NATIVE_CONNECTION_SOURCE}
+${CONTROLLER_STATE_SOURCE}
 export interface StateAccess {
   readonly get: () => unknown;
   readonly set: (value: unknown) => void;
+  readonly touch: () => void;
 }
 
 export interface ComponentHostOptions {
@@ -52,12 +55,14 @@ export interface ComponentHostOptions {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly refs: ReadonlyMap<string, ReadonlySet<Element>>;
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
-  readonly methods: readonly { readonly name: string; readonly exportName: string }[];
+  readonly data: Readonly<Record<string, () => unknown>>;
+  readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
 }
 
 interface ControllerHost {
   readonly root: Element;
   readonly state: Record<string, unknown>;
+  readonly data: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
     readonly value: unknown;
     readonly inputValue: unknown;
@@ -70,6 +75,7 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
+  on(type: string, callback: (event: Event) => void | (() => void)): () => void;
 }
 
 interface ControllerModule extends Record<string, unknown> {
@@ -106,13 +112,31 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
 
   if (runtime.current === null) {
     let controllerModule: Promise<ControllerModule> | undefined;
-    let started: Promise<ControllerModule> | undefined;
+    let initialized = false;
     let cleanup: void | (() => void);
     let connected = false;
     let root: Element | null = null;
     let lastRoot: Element | null = null;
     let generation = 0;
-    const effects = new Set<() => void>();
+    const effects = new Map<() => void, { pause(): void; execute(): void }>();
+    const listeners = new Set<{
+      type: string; callback: (event: Event) => void | (() => void); listener: EventListener;
+      disposer?: () => void;
+    }>();
+    const lifecycle = (type: "connect" | "disconnect"): void => {
+      for (const entry of [...listeners]) {
+        if (entry.type !== type) continue;
+        const result = entry.callback(new Event(type));
+        if (type === "connect" && typeof result === "function") entry.disposer = result;
+      }
+    };
+    const attachListeners = (element: Element, attach: boolean): void => {
+      for (const entry of listeners) {
+        if (entry.type === "connect" || entry.type === "disconnect") continue;
+        if (attach) element.addEventListener(entry.type, entry.listener);
+        else element.removeEventListener(entry.type, entry.listener);
+      }
+    };
     const dependencies = new Map<string, Dependency>();
     const previousValues = new Map<string, unknown>();
     const dependency = (name: string): Dependency => {
@@ -131,38 +155,33 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         validate: validity,
       });
     }
+    const namespaces = controllerNamespaces({
+      state: Object.fromEntries(Object.keys(options.state).map((name) => [name, {
+        get: () => { track(dependency("state:" + name)); return latest.current.state[name]!.get(); },
+        set: (value: unknown) => {
+          const entry = latest.current.state[name]!;
+          const previous = entry.get();
+          entry.set(value);
+          if (!Object.is(previous, value)) notify(dependency("state:" + name));
+        },
+      }])),
+      computed: Object.fromEntries(Object.keys(options.computed).map((name) => [name,
+        () => { track(dependency("state:" + name)); return latest.current.computed[name]!(); }])),
+      data: Object.fromEntries(Object.keys(options.data).map((name) => [name,
+        () => { track(dependency("data:" + name)); return latest.current.data[name]!(); }])),
+      acceptsState: (name, keys, value) => latest.current.acceptsState?.(name, keys, value) ?? true,
+      changed: (name) => {
+        latest.current.state[name]!.touch();
+        notify(dependency("state:" + name));
+      },
+    }, options.definition);
     const host: ControllerHost = {
       get root() {
         track(dependency("root"));
         return (latest.current.root.current ?? root ?? lastRoot)!;
       },
-      state: new Proxy({} as Record<string, unknown>, {
-        get: (_target, name) => {
-          if (typeof name !== "string") return undefined;
-          track(dependency("state:" + name));
-          const current = latest.current;
-          if (Object.hasOwn(current.state, name)) return current.state[name]!.get();
-          if (Object.hasOwn(current.computed, name)) return current.computed[name]!();
-          return undefined;
-        },
-        set: (_target, name, value) => {
-          const current = latest.current;
-          if (typeof name !== "string" || !Object.hasOwn(current.state, name)) {
-            const tick = String.fromCharCode(96);
-            throw new TypeError("Only declared state roots are writable; " + tick + String(name) + tick + " is read-only.");
-          }
-          const entry = current.state[name]!;
-          const previous = entry.get();
-          entry.set(value);
-          if (!Object.is(previous, value)) notify(dependency("state:" + name));
-          return true;
-        },
-        has: (_target, name) => {
-          const current = latest.current;
-          return typeof name === "string" && (Object.hasOwn(current.state, name) ||
-            Object.hasOwn(current.computed, name));
-        },
-      }),
+      state: namespaces.state,
+      data: namespaces.data,
       props: Object.freeze(propHandles),
       refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
         get: (_target, name) => {
@@ -236,18 +255,40 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
           activeReaction = reaction;
           try { cleanupEffect = run(); } finally { activeReaction = prior; }
         };
+        const pause = (): void => {
+          cleanupEffect?.();
+          cleanupEffect = undefined;
+          clear(reaction);
+        };
         const stop = (): void => {
           if (reaction.stopped) return;
           reaction.stopped = true;
-          cleanupEffect?.();
-          clear(reaction);
+          pause();
           effects.delete(stop);
         };
-        effects.add(stop);
+        effects.set(stop, { pause, execute });
         execute();
         return stop;
       },
       dispatch: (name, detail) => latest.current.dispatch(host.root, name, detail),
+      on(type, callback) {
+        const entry: { type: string; callback: typeof callback; listener: EventListener; disposer?: () => void } = {
+          type, callback, listener: (event) => { callback(event); },
+        };
+        listeners.add(entry);
+        if (connected) {
+          if (type === "connect") {
+            const disposer = callback(new Event("connect"));
+            if (typeof disposer === "function") entry.disposer = disposer;
+          } else if (type !== "disconnect") host.root.addEventListener(type, entry.listener);
+        }
+        return () => {
+          if (!listeners.delete(entry)) return;
+          if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, entry.listener);
+          entry.disposer?.();
+          entry.disposer = undefined;
+        };
+      },
     };
     const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
       if (typeof (candidate as { default?: unknown } | null)?.default !== "function") throw moduleDiagnostic("HJ002", latest.current);
@@ -260,32 +301,12 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       if (!connected) return;
       connected = false;
       generation += 1;
-      for (const stop of [...effects]) stop();
+      lifecycle("disconnect");
+      if (root !== null) attachListeners(root, false);
+      for (const entry of listeners) { entry.disposer?.(); entry.disposer = undefined; }
+      for (const effect of effects.values()) effect.pause();
       cleanup?.();
       cleanup = undefined;
-    };
-    const installMethods = (element: Element): void => {
-      for (const method of latest.current.methods) {
-        Object.defineProperty(element, method.name, {
-          configurable: true, enumerable: false,
-          value: (...args: unknown[]) => {
-            if (started === undefined) return Promise.reject(new TypeError(
-              "Controller method " + String.fromCharCode(96) + method.name + String.fromCharCode(96) +
-              " is not ready for <" + element.getAttribute("data-component") + ">.",
-            ));
-            return started.then((loaded) => {
-              const exported = loaded[method.exportName];
-              if (typeof exported !== "function") {
-                const message = "Controller does not export method " + String.fromCharCode(96) + method.exportName + String.fromCharCode(96) + ".";
-                throw Object.assign(new Error("HJ003: " + message), {
-                  name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HJ003", message }),
-                });
-              }
-              return Reflect.apply(exported, undefined, [host, ...args]);
-            });
-          },
-        });
-      }
     };
     const synchronize = (): void => {
       const next = latest.current.root.current;
@@ -294,28 +315,35 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         // interval without a connected root ends its controller lifetime.
         const transferred = connected && next?.isConnected === true;
         if (!transferred) disconnect();
+        if (transferred && root !== null) attachListeners(root, false);
         root = next;
-        if (next !== null) { lastRoot = next; installMethods(next); }
+        if (next !== null) { lastRoot = next; if (transferred) attachListeners(next, true); }
         if (transferred) notify(dependency("root"));
       }
       if (next?.isConnected !== true) { disconnect(); return; }
       if (connected) return;
       connected = true;
       const current = ++generation;
-      started = load().then(async (module) => {
-        if (!connected || current !== generation) return module;
+      attachListeners(next, true);
+      if (initialized) {
+        for (const effect of effects.values()) effect.execute();
+        lifecycle("connect");
+        return;
+      }
+      void load().then(async (module) => {
+        if (!connected || current !== generation || initialized) return;
+        initialized = true;
         const result = await module.default(host);
         if (typeof result === "function") {
           if (!connected || current !== generation) result();
           else cleanup = result;
         }
-        return module;
-      });
-      void started.catch(report);
+      }).catch(report);
     };
     const checkValues = (): void => {
       const current = latest.current;
       const values = Object.fromEntries(Object.entries(current.state).map(([name, entry]) => ["state:" + name, entry.get()]));
+      for (const [name, read] of Object.entries(current.data)) values["data:" + name] = read();
       for (const name of current.propNames ?? []) {
         values["prop:value:" + name] = current.props()[name];
         values["prop:input:" + name] = current.propInputs?.(name);

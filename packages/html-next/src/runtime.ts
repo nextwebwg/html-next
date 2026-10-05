@@ -103,6 +103,7 @@ interface PropInput {
 }
 
 interface RuntimeInstance {
+  controllerInitialized?: boolean;
   element?: Element;
   /** Stable component ownership, captured when invoked rather than inferred from later DOM position. */
   readonly parent?: RuntimeInstance;
@@ -113,7 +114,6 @@ interface RuntimeInstance {
   readonly refs: Record<string, Element | Element[]>;
   readonly effects: ReactiveOwner[];
   connected: boolean;
-  controllerModule?: Promise<ControllerModule>;
   host?: ComponentHost;
   /** Props the author supplied. Only these are reflected; defaults never are. */
   readonly explicit: Set<string>;
@@ -2419,30 +2419,6 @@ function installPropReflection(instance: RuntimeInstance): void {
 
 }
 
-function installPublicMethods(root: Element, instance: RuntimeInstance): void {
-  for (const declaration of instance.definition.declarations ?? []) {
-    if (declaration.kind !== "method") continue;
-    Object.defineProperty(root, declaration.name, {
-      configurable: true,
-      enumerable: false,
-      value: (...args: unknown[]) => {
-        if (instance.controllerModule === undefined) {
-          return Promise.reject(new TypeError(
-            `Controller method \`${declaration.name}\` is not ready for <${instance.definition.contract.tag}>.`,
-          ));
-        }
-        return instance.controllerModule.then((module) => {
-          const method = module[declaration.exportName];
-          if (typeof method !== "function") {
-            fail("HJ003", `Controller does not export method \`${declaration.exportName}\`.`);
-          }
-          return Reflect.apply(method, undefined, [getComponentHost(root), ...args]);
-        });
-      },
-    });
-  }
-}
-
 function prepareRuntimeInvocation(
   invocation: Element,
   definition: ComponentDefinition,
@@ -2614,7 +2590,6 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
     delegate.rootElement.set(element);
   }
   runtimeInstances.set(element, instance);
-  installPublicMethods(element, instance);
   instance.rootElement.set(element);
   // A delegated root may already have followers before its first native root is installed.
   if (previous !== element) {
@@ -3266,9 +3241,8 @@ export function attachComponent(
 
   let controllerCleanup: void | (() => void);
   let disposed = false;
-  if (options.controller !== undefined) {
-    const module = Promise.resolve(options.controller);
-    setControllerModule(element, module);
+  if (options.controller !== undefined && !attached.controllerInitialized) {
+    attached.controllerInitialized = true;
     void Promise.resolve(options.controller.default(getComponentHost(element)!)).then((cleanup) => {
       if (typeof cleanup !== "function") return;
       if (disposed) cleanup();
@@ -3578,16 +3552,6 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
   };
   instance.host = Object.freeze(host);
   return instance.host;
-}
-
-/** Supplies the already application-approved controller module to a lowered instance. */
-export function setControllerModule(
-  element: Element,
-  module: Promise<ControllerModule>,
-): void {
-  const instance = runtimeInstance(element);
-  if (instance === undefined) fail("HJ003", "A controller can attach only to a lowered component root.");
-  instance.controllerModule = module;
 }
 
 export interface DocumentObservationOptions {

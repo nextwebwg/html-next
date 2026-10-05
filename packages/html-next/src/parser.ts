@@ -687,7 +687,7 @@ function readDeclarations(
     const element = node;
     elements.push(element);
     const kind = sourceTag(element);
-    if (!/^(?:prop|type|state|computed|data|context|handler|event|method)$/.test(kind)) {
+    if (!/^(?:prop|type|state|computed|data|context|handler|event)$/.test(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
     if (kind === "type") continue;
@@ -707,7 +707,7 @@ function readDeclarations(
     if (kind === "context" && !isIdentifier(localName)) {
       fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
     }
-    if (kind !== "handler" && kind !== "method" && !isIdentifier(localName)) {
+    if (kind !== "handler" && !isIdentifier(localName)) {
       fail("HC013", `Declaration \`${localName}\` is not a valid expression identifier.`, source);
     }
     if (names.has(localName)) {
@@ -864,15 +864,6 @@ function readDeclarations(
         bubbles: attr(element, "bubbles") !== "false",
         composed: attr(element, "composed") !== "false",
         cancelable: attr(element, "cancelable") === "true",
-      });
-      continue;
-    }
-    if (kind === "method") {
-      declarations.push({
-        kind,
-        name,
-        exportName: attr(element, "export") ?? name,
-        returns: attr(element, "returns") ?? "undefined",
       });
       continue;
     }

@@ -1,4 +1,5 @@
 import type { GeneratedArtifact } from "../generate.js";
+import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 
 const SOURCE = `import { flushSync, untrack } from "svelte";
 import { cycleCheckedComputed } from "./reactivity.svelte";
@@ -24,13 +25,15 @@ export interface ComponentHostOptions {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly refs: Map<string, Element | Element[]>;
   readonly dispatch: (root: Element, name: string, detail?: unknown) => boolean;
-  readonly methods: readonly { readonly name: string; readonly exportName: string }[];
+  readonly data?: Readonly<Record<string, () => unknown>>;
+  readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
 }
 
 interface ControllerHost {
   readonly root: Element;
   readonly element: Element;
   readonly state: Record<string, unknown>;
+  readonly data: Readonly<Record<string, unknown>>;
   readonly props: Readonly<Record<string, {
     readonly value: unknown;
     readonly inputValue: unknown;
@@ -43,9 +46,10 @@ interface ControllerHost {
   computed<T>(compute: () => T): { get(): T };
   effect(run: () => void | (() => void)): () => void;
   dispatch(name: string, detail?: unknown): boolean;
+  on(type: string, callback: EventListener): () => void;
 }
 
-interface ControllerModule extends Record<string, unknown> {
+interface ControllerModule {
   readonly default: (host: ControllerHost) => void | (() => void) | Promise<void | (() => void)>;
 }
 
@@ -66,10 +70,10 @@ function documentOrder(elements: readonly Element[]): Element[] {
     .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1);
 }
 
+${CONTROLLER_STATE_SOURCE}
+
 /** Public Svelte runes own reactions; native DOM connectivity owns controller lifetimes. */
-export function useComponentHost(loader: () => Promise<unknown>, options: ComponentHostOptions): {
-  invoke(name: string, ...args: unknown[]): Promise<unknown>;
-} {
+export function useComponentHost(loader: () => Promise<unknown>, options: ComponentHostOptions): void {
   let controllerModule: Promise<ControllerModule> | undefined;
   let started: Promise<ControllerModule> | undefined;
   let cleanup: void | (() => void);
@@ -77,8 +81,14 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   let root = $state.raw<Element | null>(null);
   let lastRoot: Element | null = null;
   let generation = 0;
+  let initialized = false;
   let membership = $state(0);
   const effects = new Map<() => void, () => void>();
+  const subscriptions = new Set<{ type: string; callback: EventListener; cleanup?: () => void }>();
+  const connect = (subscription: { callback: EventListener; cleanup?: () => void }): void => {
+    const result = (subscription.callback as (event: Event) => unknown)(new Event("connect"));
+    if (typeof result === "function") subscription.cleanup = result as () => void;
+  };
   const report = (error: unknown): void => { queueMicrotask(() => { throw error; }); };
   const propHandles = Object.create(null) as Record<string, ControllerHost["props"][string]>;
   for (const name of options.propNames ?? []) {
@@ -93,24 +103,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   const host: ControllerHost = {
     get root() { return (root ?? lastRoot)!; },
     get element() { return host.root; },
-    state: new Proxy({} as Record<string, unknown>, {
-      get: (_target, name) => {
-        if (typeof name !== "string") return undefined;
-        if (Object.hasOwn(options.state, name)) return options.state[name]!.get();
-        if (Object.hasOwn(options.computed, name)) return options.computed[name]!();
-        return undefined;
-      },
-      set: (_target, name, value) => {
-        if (typeof name !== "string" || !Object.hasOwn(options.state, name)) {
-          const tick = String.fromCharCode(96);
-          throw new TypeError("Only declared state roots are writable; " + tick + String(name) + tick + " is read-only.");
-        }
-        options.state[name]!.set(value);
-        return true;
-      },
-      has: (_target, name) => typeof name === "string" &&
-        (Object.hasOwn(options.state, name) || Object.hasOwn(options.computed, name)),
-    }),
+    ...controllerNamespaces(options, options.definition),
     props: Object.freeze(propHandles),
     refs: new Proxy({} as Record<string, Element | readonly Element[]>, {
       get: (_target, name) => {
@@ -164,6 +157,18 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       return stop;
     },
     dispatch: (name, detail) => options.dispatch(host.root, name, detail),
+    on(type, callback) {
+      const subscription: { type: string; callback: EventListener; cleanup?: () => void } = { type, callback };
+      subscriptions.add(subscription);
+      if (type === "connect") { if (connected) connect(subscription); }
+      else if (type !== "disconnect" && connected) host.root.addEventListener(type, callback);
+      return () => {
+        if (!subscriptions.delete(subscription)) return;
+        if (type !== "connect" && type !== "disconnect") host.root.removeEventListener(type, callback);
+        subscription.cleanup?.();
+        subscription.cleanup = undefined;
+      };
+    },
   };
   Object.freeze(host);
   const load = (): Promise<ControllerModule> => controllerModule ??= Promise.resolve().then(loader).then((candidate) => {
@@ -177,46 +182,45 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
     if (!connected) return;
     connected = false;
     generation += 1;
+    for (const subscription of [...subscriptions]) {
+      if (subscription.type === "disconnect") subscription.callback(new Event("disconnect"));
+    }
+    for (const subscription of [...subscriptions]) {
+      if (subscription.type !== "connect" && subscription.type !== "disconnect") host.root.removeEventListener(subscription.type, subscription.callback);
+      const dispose = subscription.cleanup; subscription.cleanup = undefined; dispose?.();
+    }
     for (const pause of [...effects.values()]) pause();
     cleanup?.();
     cleanup = undefined;
-  };
-  const invoke = (name: string, ...args: unknown[]): Promise<unknown> => {
-    const method = options.methods.find((entry) => entry.name === name)!;
-    if (controllerModule === undefined) return Promise.reject(new TypeError(
-      "Controller method " + String.fromCharCode(96) + name + String.fromCharCode(96) +
-      " is not ready for <" + options.tag + ">.",
-    ));
-    return controllerModule.then((loaded) => {
-      const exported = loaded[method.exportName];
-      if (typeof exported !== "function") {
-        const message = "Controller does not export method " + String.fromCharCode(96) + method.exportName + String.fromCharCode(96) + ".";
-        throw Object.assign(new Error("HJ003: " + message), {
-          name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HJ003", message }),
-        });
-      }
-      return Reflect.apply(exported, undefined, [host, ...args]);
-    });
   };
   const synchronize = (): void => {
     const next = options.root();
     if (root !== next) {
       // Connected root-arm replacement transfers the same logical controller lifetime.
       if (!(connected && next?.isConnected === true)) disconnect();
-      root = next;
-      if (next !== null) {
-        lastRoot = next;
-        for (const method of options.methods) Object.defineProperty(next, method.name, {
-          configurable: true, enumerable: false, value: (...args: unknown[]) => invoke(method.name, ...args),
-        });
+      if (connected && root !== null) for (const subscription of subscriptions) {
+        if (subscription.type !== "connect" && subscription.type !== "disconnect") {
+          root.removeEventListener(subscription.type, subscription.callback);
+          next!.addEventListener(subscription.type, subscription.callback);
+        }
       }
+      root = next;
+      if (next !== null) lastRoot = next;
     }
     if (next?.isConnected !== true) { disconnect(); return; }
     if (connected) return;
     connected = true;
     const current = ++generation;
+    if (initialized) {
+      for (const subscription of [...subscriptions]) {
+        if (subscription.type === "connect") connect(subscription);
+        else if (subscription.type !== "disconnect") next.addEventListener(subscription.type, subscription.callback);
+      }
+      return;
+    }
     started = load().then(async (module) => {
       if (!connected || current !== generation) return module;
+      initialized = true;
       const result = await module.default(host);
       if (typeof result === "function") {
         if (!connected || current !== generation) result();
@@ -236,8 +240,8 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   $effect(() => () => untrack(() => {
     disconnect();
     for (const stop of [...effects.keys()]) stop();
+    subscriptions.clear();
   }));
-  return { invoke };
 }
 `;
 
