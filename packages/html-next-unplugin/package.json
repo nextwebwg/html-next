@@ -35,7 +35,7 @@
     "cssstyle": "catalog:",
     "parse5": "catalog:",
     "svelte2tsx": "0.7.61",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "unplugin": "catalog:",
     "vue-tsc": "catalog:"
   },
