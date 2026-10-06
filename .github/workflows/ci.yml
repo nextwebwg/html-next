@@ -91,7 +91,9 @@ jobs:
     needs: framework-changes
     if: needs.framework-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Up to three sweeps of two entries (about 9 minutes each on an M4 Pro) plus a cold setup, at up
+    # to 2.5x on hosted runners; tighten this from the first CI runs' per-sweep timing.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,12 +108,19 @@ jobs:
       - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium
       # The pinned Puppeteer runner keeps Chrome's sandbox, which needs unprivileged user namespaces.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: benchmark-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/html-next/.benchmark/js-framework-benchmark
           # The script holds the fork pin and the control lockfile hashes.
           key: js-framework-benchmark-${{ runner.os }}-${{ hashFiles('packages/html-next/scripts/framework-benchmark.ts') }}
       - run: pnpm setup:frameworks
+      # Saved before the gate: the combined action only saves after a successful job.
+      - if: steps.benchmark-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/html-next/.benchmark/js-framework-benchmark
+          key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
       - name: Compare the nine keyed rendering workloads
         env:
           PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
