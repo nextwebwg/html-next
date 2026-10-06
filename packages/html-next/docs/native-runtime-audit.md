@@ -118,6 +118,14 @@ layer stops each block's effects and preserves ownership boundaries. Retained bl
 foreign siblings split removal groups. A single removed block keeps the direct removal
 path, and outer anchors retain their identity for later updates and hydration.
 
+Fresh ordinary repeated regions cache a detached native DOM prototype and ordered binding-site
+paths. Native `cloneNode(true)` creates each new block; existing attribute, text, content and event
+helpers install its effects and listeners in authored order. Static construction and literal writes
+occur once per definition/node and document. The cache is resolved at region initialization, outside
+the row loop. Refs, properties, controls, resources, custom elements, namespaces, slots and descendant
+flows retain ordinary rendering; existing server DOM retains adoption. No freezing, HTML sink or
+additional observer is introduced. Per-instance values, guards and ownership remain dynamic.
+
 | Authored feature | Gzip bytes | Runtime shape |
 | --- | ---: | --- |
 | Static markup | 302 | Direct DOM creation |

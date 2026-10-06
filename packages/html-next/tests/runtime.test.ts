@@ -62,6 +62,163 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} clones keyed native rows and preserves bindings, events, identity and guards`, async () => {
+      const definition = parseComponent(`<template component="native-clone-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="selected" type="number" value="2"></state>
+        <computed name="snapshot" from="rows"></computed>
+        <event name="activate" type="number"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event.detail"></dispatch></handler>
+        </defs><section><ul><li class="clone-row literal" $each="row of rows" $key="row.id"
+        from:data-id="row.id" from:aria-selected="row.id = selected" class:chosen="row.id = selected"
+        style:opacity="row.id = selected ? '1' : '0.5'">
+        <a class="activate" on:click.prevent="activate"><span class="mixed">Label: {row.label} / {selected}</span></a>
+        <span class="leaf" $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const originalClone = Node.prototype.cloneNode;
+          let rowClones = 0;
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.matches("li.clone-row")) rowClones += 1;
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+            const host = runtime.getComponentHost(root);
+            const events: number[] = [];
+            host.on("activate", (event: CustomEvent<number>) => events.push(event.detail));
+            const originals = Array.from(root.querySelectorAll("li"));
+            const mixedText = originals[0]!.querySelector(".mixed")!.firstChild;
+            const initial = originals.map(row => [row.getAttribute("data-id"), row.classList.contains("chosen"),
+              row.getAttribute("aria-selected"), (row as HTMLElement).style.opacity, row.querySelector(".mixed")!.textContent,
+              row.querySelector(".leaf")!.textContent]);
+            const clonesAfterMount = rowClones;
+            host.state.rows[0].label = "A2";
+            host.state.selected = 1;
+            await Promise.resolve();
+            const updated = [originals[0]!.querySelector(".mixed")!.textContent, originals[0]!.querySelector(".leaf")!.textContent,
+              originals[0]!.classList.contains("chosen"), originals[1]!.classList.contains("chosen"),
+              originals[0]!.querySelector(".mixed")!.firstChild === mixedText];
+            host.state.rows[0].label = 99;
+            host.state.snapshot[0].label = "readonly";
+            await Promise.resolve();
+            const guarded = [host.state.rows[0].label, originals[0]!.querySelector(".leaf")!.textContent];
+            const firstLink = originals[0]!.querySelector("a")!;
+            const prevented = !firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+            host.state.rows = [host.state.rows[2], host.state.rows[0], host.state.rows[1]];
+            await Promise.resolve();
+            const reordered = Array.from(root.querySelectorAll("li"));
+            const retained = reordered[0] === originals[2] && reordered[1] === originals[0] && reordered[2] === originals[1];
+            const removedLink = reordered[2]!.querySelector("a")!;
+            host.state.rows = host.state.rows.filter((row: any) => row.id !== 2);
+            await Promise.resolve();
+            removedLink.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            host.state.rows = host.state.rows.concat([{ id: 4, label: "D" }]);
+            await Promise.resolve();
+            const clonesAfterAppend = rowClones;
+            root.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            host.state.selected = 4;
+            host.state.rows[0].label = "C2";
+            document.body.append(root);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            const finalRows = Array.from(root.querySelectorAll("li"));
+            return { initial, clonesAfterMount, updated, guarded, prevented, retained, clonesAfterAppend,
+              finalClones: rowClones, events, final: finalRows.map(row => [row.getAttribute("data-id"),
+                row.querySelector(".mixed")!.textContent, row.querySelector(".leaf")!.textContent, row.classList.contains("chosen")]),
+              identityAfterReconnect: finalRows[0] === originals[2] && finalRows[1] === originals[0] };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: [["1", false, "false", "0.5", "Label: A / 2", "A"], ["2", true, "true", "1", "Label: B / 2", "B"],
+            ["3", false, "false", "0.5", "Label: C / 2", "C"]],
+          clonesAfterMount: 3, updated: ["Label: A2 / 1", "A2", true, false, true], guarded: ["A2", "A2"],
+          prevented: true, retained: true, clonesAfterAppend: 4, finalClones: 4, events: [1, 1],
+          final: [["3", "Label: C2 / 4", "C2", false], ["1", "Label: A2 / 4", "A2", false], ["4", "Label: D / 4", "D", true]],
+          identityAfterReconnect: true,
+        });
+        assert.equal(warnings.filter(warning => warning.includes("does not satisfy")).length, 1);
+        assert.equal(warnings.filter(warning => warning.includes("read-only")).length, 1);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} preserves native-clone fallbacks for refs, properties, controls, flows, SVG, components and slots`, async () => {
+      const definition = parseComponent(`<template component="native-clone-fallbacks"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        <state name="text" type="string" value="start"></state><state name="shown" type="boolean" value="true"></state>
+        </defs><section>
+        <ul><li class="fallback-ref" $each="row of rows" $key="row.id" $ref="rowRefs" from:data-id="row.id"><span $value="row.label"></span></li></ul>
+        <ul><li class="fallback-property" $each="row of rows" $key="row.id" from:data-id="row.id"><span .title="row.label" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-control" $each="row of rows" $key="row.id" from:data-id="row.id"><input bind:value="text"></li></ul>
+        <ul><li class="fallback-flow" $each="row of rows" $key="row.id" from:data-id="row.id"><span $if="shown" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-svg" $each="row of rows" $key="row.id" from:data-id="row.id"><svg viewBox="0 0 10 10"><text $value="row.label"></text></svg></li></ul>
+        <ul><li class="fallback-component" $each="row of rows" $key="row.id" from:data-id="row.id"><clone-child from:label="row.label"></clone-child></li></ul>
+        <ul><li class="fallback-slot" $each="row of rows" $key="row.id" from:data-id="row.id"><slot name="sample"><span $value="row.label"></span></slot></li></ul>
+        </section></template>`);
+      const child = parseComponent(`<template component="clone-child"><defs><prop name="label" type="string">Label.</prop></defs><strong class="child" $value="label"></strong></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinitions => {
+          const runtime = (window as any).BareRuntime;
+          const [definition, child] = JSON.parse(serializedDefinitions);
+          const originalClone = Node.prototype.cloneNode;
+          const clonedFallbackRows: string[] = [];
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.localName === "li" && this.className.startsWith("fallback-")) clonedFallbackRows.push(this.className);
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.registerComponentDefinitions([child]);
+            runtime.manageComponentLifecycle(root, definition);
+            runtime.lowerDocument();
+            const host = runtime.getComponentHost(root);
+            const originals = Array.from(root.querySelectorAll("li"));
+            const input = root.querySelector("input")!;
+            input.value = "edited";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            await Promise.resolve();
+            const twoWay = host.state.text;
+            host.state.rows[0].label = "A2";
+            host.state.shown = false;
+            await Promise.resolve();
+            const hidden = root.querySelectorAll(".fallback-flow span").length;
+            host.state.shown = true;
+            host.state.rows = [host.state.rows[1], host.state.rows[0]];
+            await Promise.resolve();
+            runtime.lowerDocument();
+            const rows = Array.from(root.querySelectorAll("li"));
+            return { clonedFallbackRows, twoWay, hidden, retained: rows.every((row, index) => row === originals[index % 2 === 0 ? index + 1 : index - 1]),
+              ids: rows.map(row => row.getAttribute("data-id")), refCount: host.refs.rowRefs.length,
+              property: Array.from(root.querySelectorAll(".fallback-property span"), element => element.getAttribute("title")),
+              inputs: Array.from(root.querySelectorAll("input"), element => element.value),
+              flow: Array.from(root.querySelectorAll(".fallback-flow span"), element => element.textContent),
+              svg: Array.from(root.querySelectorAll(".fallback-svg text"), element => [element.namespaceURI, element.textContent]),
+              children: Array.from(root.querySelectorAll(".fallback-component .child"), element => element.textContent),
+              slots: Array.from(root.querySelectorAll(".fallback-slot span"), element => element.textContent) };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify([definition, child]));
+        assert.deepEqual(actual, { clonedFallbackRows: [], twoWay: "edited", hidden: 0, retained: true,
+          ids: ["2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1"], refCount: 2,
+          property: ["B", "A2"], inputs: ["edited", "edited"], flow: ["B", "A2"],
+          svg: [["http://www.w3.org/2000/svg", "B"], ["http://www.w3.org/2000/svg", "A2"]],
+          children: ["B", "A2"], slots: ["B", "A2"] });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} removes owned block groups while preserving foreign siblings and cleanup`, async () => {
       const definition = parseComponent(`<template component="owned-removal-list"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>

@@ -66,6 +66,7 @@ import type {
   PropertyBinding,
   SlotNode,
   TemplateNode,
+  TextNode,
 } from "./template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
@@ -1487,6 +1488,8 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
+  const { flow: _flow, ...body } = node;
+  const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
     if (value === NONCONFORMING) return;
@@ -1501,7 +1504,6 @@ function renderEachRegion(
       for (const key of blocks.keys()) oldPositions.set(key, position++);
     }
     const previous: number[] | undefined = keyed ? [] : undefined;
-    const { flow: _flow, ...body } = node;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
       const locals: Record<string, Value> = {
@@ -1523,7 +1525,9 @@ function renderEachRegion(
         const adopted = adopting[adoptionIndex++];
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, context)
-          : renderInstance(body as ElementNode, local, document, passThrough, context, adopted?.[0].nextSibling ?? undefined), document);
+          : nativePlan !== undefined && adopted === undefined
+            ? instantiateNativeTemplate(nativePlan, body as ElementNode, local, document, passThrough, context)
+            : renderInstance(body as ElementNode, local, document, passThrough, context, adopted?.[0].nextSibling ?? undefined), document);
         const blockStart = adopted?.[0] ?? document.createComment("html-next:item-start");
         const blockEnd = adopted?.[1] ?? document.createComment("html-next:item-end");
         end.before(blockStart, ...rendered, blockEnd);
@@ -1661,6 +1665,242 @@ function renderMatch(
   // Render the winning arm, ignoring its own $when/$else marker.
   const { flow: _armFlow, ...armNode } = match.chosen;
   return renderInstance(armNode, match.scope, document, [], context, candidate);
+}
+
+/** Install the existing attribute/property bindings on an already-created element. */
+function bindElementAttributes(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute") {
+      let bindingTarget = element;
+      const applyBinding = (): void => {
+        const value = evalConforming(attribute.expression, scope, context.definition);
+        // A reference that broke its declared type writes nothing, so this binding keeps whatever
+        // it last rendered rather than showing a value the declaration forbids.
+        if (value === NONCONFORMING) return;
+        // A lowered child owns its props: write them through the same channel framework adapters
+        // use, so the child re-parses the declared type and reflects the value itself.
+        const lowered = loweredInvocations.get(element);
+        const childDefinition = lowered?.instance.definition ?? (element.localName.includes("-")
+          ? registryFor(element.ownerDocument).definitions.get(element.localName)?.definition : undefined);
+        if (childDefinition !== undefined && attribute.target === undefined) {
+          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
+          if (propName !== undefined) {
+            const contract = childDefinition.contract;
+            const prop = contract.props[propName]!;
+            const selected = prop.select === undefined ? prop.type : lowered === undefined ? undefined
+              : selectedPropType(contract, prop, { [prop.select.from]: lowered.instance.scope.get(prop.select.from) });
+            if (!conformsAtDestination(value, selected)) return;
+            if (lowered !== undefined) {
+              applyComponentProps(lowered.instance, { [propName]: value });
+              return;
+            }
+          }
+        }
+        if (attribute.target === "class") {
+          bindingTarget.classList.toggle(attribute.name, truthy(value));
+        } else if (attribute.target === "style") {
+          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
+        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
+          // Native form-control properties carry the live value; no duplicate attribute write.
+        } else {
+          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
+        }
+      };
+      const bindingEffect = ownEffect(context, scope, applyBinding);
+      if (node.name.includes("-")) whenLowered(element, (root) => {
+        bindingTarget = root;
+        bindingEffect.execute();
+      });
+      if (attribute.twoWay === true && attribute.writablePath !== undefined) {
+        let target = element;
+        let attached = false;
+        let eventName = "input";
+        const listener = (): void => {
+          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
+          setWritablePath(scope, attribute.writablePath!, controlValue(target));
+        };
+        const attach = (): void => {
+          eventName = target instanceof HTMLSelectElement ||
+            (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
+            ? "change" : "input";
+          target.addEventListener(eventName, listener);
+          attached = true;
+        };
+        const detach = (): void => {
+          target.removeEventListener(eventName, listener);
+          attached = false;
+        };
+        ownEffect(context, scope, () => {
+          attach();
+          return detach;
+        }, 2);
+        whenLowered(element, (root) => {
+          const live = attached;
+          if (live) detach();
+          target = root;
+          if (live) attach();
+        });
+      }
+    } else if (attribute.kind === "property") {
+      ownEffect(context, scope, () => {
+        const property = evalConforming(attribute.expression, scope, context.definition);
+        if (property === NONCONFORMING) return;
+        (element as unknown as Record<string, unknown>)[attribute.name] = property;
+      });
+    }
+    // Content directives are handled below.
+  }
+}
+
+/** Bind one authored text node, retaining nonconforming segments exactly as before. */
+function bindTemplateText(
+  text: Text,
+  node: TextNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  if (node.expressionPlan === undefined && node.segments === undefined) text.data = node.value;
+  else {
+    const segments = node.segments ?? [node];
+    const accepted = segments.map((segment) => segment.expressionPlan === undefined ? segment.value : "");
+    ownEffect(context, scope, () => {
+      for (const [index, segment] of segments.entries()) {
+        if (segment.expressionPlan === undefined) continue;
+        const value = evalConforming(segment.expressionPlan.source, scope, context.definition);
+        if (value !== NONCONFORMING) accepted[index] = toText(value);
+      }
+      text.data = accepted.join("");
+    });
+  }
+}
+
+/** Ordinary, inert HTML elements whose prototypes have no form/resource/custom lifecycle. */
+const cloneableNativeElements = new Set([
+  "a", "abbr", "address", "article", "aside", "b", "bdi", "bdo", "blockquote", "br",
+  "caption", "cite", "code", "col", "colgroup", "dd", "del", "dfn", "div", "dl", "dt",
+  "em", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+  "header", "hgroup", "hr", "i", "ins", "kbd", "li", "main", "mark", "menu", "nav",
+  "ol", "p", "pre", "q", "rp", "rt", "ruby", "s", "samp", "section", "small",
+  "span", "strong", "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead",
+  "time", "tr", "u", "ul", "var", "wbr",
+]);
+
+type NativeTemplateAction =
+  | { readonly kind: "attributes" | "events"; readonly path: readonly number[]; readonly node: ElementNode }
+  | { readonly kind: "content"; readonly path: readonly number[]; readonly directive: DirectiveAttribute }
+  | { readonly kind: "text"; readonly path: readonly number[]; readonly node: TextNode };
+
+interface NativeTemplatePlan {
+  readonly prototype: Element;
+  readonly actions: readonly NativeTemplateAction[];
+}
+
+const nativeTemplatePlans = new WeakMap<ElementNode, WeakMap<Document, NativeTemplatePlan | null>>();
+
+/**
+ * Cache only structural preparation. Values, validation, effects, listeners and owners remain
+ * instance-local. Native construction avoids an HTML sink and preserves authored DOM shape.
+ */
+function nativeTemplatePlan(
+  node: ElementNode,
+  document: Document,
+  context: RuntimeRenderContext,
+): NativeTemplatePlan | undefined {
+  if (context.frameworkOwned || context.namespace !== undefined) return undefined;
+  let documents = nativeTemplatePlans.get(node);
+  if (documents === undefined) {
+    documents = new WeakMap();
+    nativeTemplatePlans.set(node, documents);
+  }
+  const cached = documents.get(document);
+  if (cached !== undefined) return cached ?? undefined;
+  const eligible = (candidate: TemplateNode): boolean => {
+    if (candidate.kind === "text") return true;
+    if (candidate.kind !== "element" || (candidate.flow !== undefined && candidate !== node) || candidate.ref !== undefined ||
+        !cloneableNativeElements.has(candidate.name)) return false;
+    if (candidate.attributes.some((attribute) =>
+      attribute.kind === "property" ||
+      attribute.kind === "attribute" && (attribute.twoWay === true || attribute.name.toLowerCase() === "is") ||
+      attribute.kind === "literal" && (attribute.name.toLowerCase() === "is" || /^on/i.test(attribute.name))
+    )) return false;
+    const directive = candidate.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
+    // Content directives ignore authored descendants in the ordinary renderer too.
+    return directive === undefined ? candidate.children.every(eligible) : directive.name === "value";
+  };
+  if (!eligible(node)) {
+    documents.set(document, null);
+    return undefined;
+  }
+  const actions: NativeTemplateAction[] = [];
+  const construct = (candidate: TemplateNode, path: readonly number[]): Node => {
+    if (candidate.kind === "text") {
+      if (candidate.expressionPlan === undefined && candidate.segments === undefined) {
+        return document.createTextNode(candidate.value);
+      }
+      actions.push({ kind: "text", path, node: candidate });
+      return document.createTextNode("");
+    }
+    // Eligibility has rejected all slots, namespace transitions and structural descendants.
+    const elementNode = candidate as ElementNode;
+    const element = createTemplateElement(document, elementNode.name, context);
+    for (const attribute of elementNode.attributes) {
+      if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+    }
+    if (elementNode.attributes.some((attribute) => attribute.kind === "attribute")) {
+      actions.push({ kind: "attributes", path, node: elementNode });
+    }
+    const directive = elementNode.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
+    if (directive !== undefined) actions.push({ kind: "content", path, directive });
+    else {
+      for (const [index, child] of elementNode.children.entries()) {
+        element.append(construct(child, [...path, index]));
+      }
+    }
+    // Event ownership follows the same depth-first order as ordinary rendering.
+    if ((elementNode.events?.length ?? 0) > 0) actions.push({ kind: "events", path, node: elementNode });
+    return element;
+  };
+  const prototype = construct(node, []) as Element;
+  const plan = { prototype, actions };
+  documents.set(document, plan);
+  return plan;
+}
+
+/** Clone fresh repeated native output, then install the normal per-instance binding semantics. */
+function instantiateNativeTemplate(
+  plan: NativeTemplatePlan,
+  node: ElementNode,
+  scope: ReactiveScope,
+  document: Document,
+  passThrough: readonly RootAttribute[],
+  context: RuntimeRenderContext,
+): Node[] {
+  const element = plan.prototype.cloneNode(true) as Element;
+  // Resolve every site before content bindings can change any child list.
+  const sites = plan.actions.map((action) => {
+    let target: Node = element;
+    for (const index of action.path) target = target.childNodes[index]!;
+    return target;
+  });
+  if (node === context.rootNode) context.root = element;
+  for (const attribute of passThrough) {
+    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
+    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
+  }
+  for (let index = 0; index < plan.actions.length; index += 1) {
+    const action = plan.actions[index]!;
+    const target = sites[index]!;
+    if (action.kind === "attributes") bindElementAttributes(target as Element, action.node, scope, context);
+    else if (action.kind === "events") bindEvents(target as Element, action.node, scope, context);
+    else if (action.kind === "text") bindTemplateText(target as Text, action.node, scope, context);
+    else if (action.kind === "content") ownEffect(context, scope, () => applyContent(target as Element, action.directive, scope, document, context.definition));
+  }
+  return [element];
 }
 
 /** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */
@@ -1819,87 +2059,7 @@ function renderInstance(
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
     element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
-  for (const attribute of node.attributes) {
-    if (attribute.kind === "attribute") {
-      let bindingTarget = element;
-      const applyBinding = (): void => {
-        const value = evalConforming(attribute.expression, scope, context.definition);
-        // A reference that broke its declared type writes nothing, so this binding keeps whatever
-        // it last rendered rather than showing a value the declaration forbids.
-        if (value === NONCONFORMING) return;
-        // A lowered child owns its props: write them through the same channel framework adapters
-        // use, so the child re-parses the declared type and reflects the value itself.
-        const lowered = loweredInvocations.get(element);
-        const childDefinition = lowered?.instance.definition ?? (element.localName.includes("-")
-          ? registryFor(element.ownerDocument).definitions.get(element.localName)?.definition : undefined);
-        if (childDefinition !== undefined && attribute.target === undefined) {
-          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
-          if (propName !== undefined) {
-            const contract = childDefinition.contract;
-            const prop = contract.props[propName]!;
-            const selected = prop.select === undefined ? prop.type : lowered === undefined ? undefined
-              : selectedPropType(contract, prop, { [prop.select.from]: lowered.instance.scope.get(prop.select.from) });
-            if (!conformsAtDestination(value, selected)) return;
-            if (lowered !== undefined) {
-              applyComponentProps(lowered.instance, { [propName]: value });
-              return;
-            }
-          }
-        }
-        if (attribute.target === "class") {
-          bindingTarget.classList.toggle(attribute.name, truthy(value));
-        } else if (attribute.target === "style") {
-          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
-        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
-          // Native form-control properties carry the live value; no duplicate attribute write.
-        } else {
-          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
-        }
-      };
-      const bindingEffect = ownEffect(context, scope, applyBinding);
-      if (node.name.includes("-")) whenLowered(element, (root) => {
-        bindingTarget = root;
-        bindingEffect.execute();
-      });
-      if (attribute.twoWay === true && attribute.writablePath !== undefined) {
-        let target = element;
-        let attached = false;
-        let eventName = "input";
-        const listener = (): void => {
-          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
-          setWritablePath(scope, attribute.writablePath!, controlValue(target));
-        };
-        const attach = (): void => {
-          eventName = target instanceof HTMLSelectElement ||
-            (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
-            ? "change" : "input";
-          target.addEventListener(eventName, listener);
-          attached = true;
-        };
-        const detach = (): void => {
-          target.removeEventListener(eventName, listener);
-          attached = false;
-        };
-        ownEffect(context, scope, () => {
-          attach();
-          return detach;
-        }, 2);
-        whenLowered(element, (root) => {
-          const live = attached;
-          if (live) detach();
-          target = root;
-          if (live) attach();
-        });
-      }
-    } else if (attribute.kind === "property") {
-      ownEffect(context, scope, () => {
-        const property = evalConforming(attribute.expression, scope, context.definition);
-        if (property === NONCONFORMING) return;
-        (element as unknown as Record<string, unknown>)[attribute.name] = property;
-      });
-    }
-    // Content directives are handled below.
-  }
+  bindElementAttributes(element, node, scope, context);
 
   if (contentDirective !== undefined) {
     ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document, context.definition));
@@ -2411,19 +2571,7 @@ function renderTemplateNode(
 ): Node[] {
   if (node.kind === "text") {
     const text = candidate instanceof Text ? candidate : document.createTextNode("");
-    if (node.expressionPlan === undefined && node.segments === undefined) text.data = node.value;
-    else {
-      const segments = node.segments ?? [node];
-      const accepted = segments.map((segment) => segment.expressionPlan === undefined ? segment.value : "");
-      ownEffect(context, scope, () => {
-        for (const [index, segment] of segments.entries()) {
-          if (segment.expressionPlan === undefined) continue;
-          const value = evalConforming(segment.expressionPlan.source, scope, context.definition);
-          if (value !== NONCONFORMING) accepted[index] = toText(value);
-        }
-        text.data = accepted.join("");
-      });
-    }
+    bindTemplateText(text, node, scope, context);
     return [text];
   }
   if (node.kind === "slot") return node.flow === undefined
