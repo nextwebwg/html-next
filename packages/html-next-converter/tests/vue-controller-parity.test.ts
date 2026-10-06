@@ -8,6 +8,7 @@ import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
+import { assertTargetedDispatch } from "./fixtures/targeted-dispatch.js";
 import { convertComponents } from "../src/index.js";
 
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
@@ -17,18 +18,20 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", import.meta.url).pathname;
 const component = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
   <prop name="amount" type="number" default="5">The amount.</prop>
+  <state name="receivers" type="list(number)" value="[1,2]"></state>
+  <handler name="sendOne"><dispatch target="button" event="saved" value="7"></dispatch></handler>
+  <handler name="sendAll"><dispatch target="receivers" event="saved" value="7"></dispatch></handler>
   <state type="number" name="count" value="0"></state>
   <computed name="double" from="count * 2"></computed>
   <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
-  <method name="focusButton" export="focusButton" returns="promise(undefined)"></method>
-  <method name="loadHelper" export="loadHelper" returns="promise(number)"></method>
-  <method name="missing" export="missingExport" returns="promise(undefined)"></method>
+  <event name="helper-loaded" type="number"></event>
 </defs><template $match>
-  <article $when="arm = 'article'" $ref="articleRoot"><button type="button" $ref="button">Increment</button><output $value="count"></output></article>
-  <section $else $ref="sectionRoot"><button type="button" $ref="button">Increment</button><output $value="count"></output></section>
-</template></template>`;
-const controller = `export default function connect(host) {
+  <article $when="arm = 'article'" $ref="articleRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="count"></output><x-dispatch-receiver $each="receiver of receivers" $key="receiver" $ref="receivers" from:receiver="receiver"></x-dispatch-receiver></article>
+  <section $else $ref="sectionRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="count"></output><x-dispatch-receiver $each="receiver of receivers" $key="receiver" $ref="receivers" from:receiver="receiver"></x-dispatch-receiver></section>
+</template></template>
+<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="receiver" from:data-hits="hits"></span></template>`;
+const controller = `function connect(host) {
   window.trace.connects++;
   window.controllerHost = host;
   const local = host.signal(1);
@@ -59,13 +62,14 @@ const controller = `export default function connect(host) {
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }
-export function focusButton(host) {
-  host.refs.button.focus();
-  window.trace.methods++;
-}
-export async function loadHelper() {
-  const module = await import("./helper.js");
-  return module.answer;
+export default function initialize(host) {
+  host.on("request-focus", () => { host.refs.button.focus(); window.trace.requests++; });
+  host.on("request-helper", async () => {
+    const module = await import("./helper.js");
+    host.dispatch("helper-loaded", module.answer);
+  });
+  if (window.delayController) return connect(host);
+  host.on("connect", () => connect(host));
 }`;
 const helper = "export const answer = 42;\n";
 
@@ -111,44 +115,46 @@ describe.skipIf(!enabled)("public Vue converter controller parity", () => {
       const manifest = await convertComponents({ mode, target: "vue", entries: ["components/controlled.html"], root: directory, outDirectory: output });
       assert.ok(manifest.components[0]?.controller?.endsWith("controlled.js"));
       assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "controller" && artifact.path.endsWith("/helper.js")));
-      const vuePath = join(output, manifest.components[0]!.artifact);
-      const parsed = parseVue(await readFile(vuePath, "utf8"), { filename: vuePath });
-      assert.deepEqual(parsed.errors, []);
-      await writeFile(vuePath.replace(/\.vue$/, ".ts"), compileScript(parsed.descriptor, { id: `controller-parity-${mode}`, inlineTemplate: true }).content);
-      const serverScript = compileScript(parsed.descriptor, { id: `controller-parity-${mode}` });
-      const serverTemplate = compileTemplate({
-        source: parsed.descriptor.template!.content,
-        filename: vuePath,
-        id: `controller-parity-${mode}`,
-        ssr: true,
-        ssrCssVars: [],
-        compilerOptions: { bindingMetadata: serverScript.bindings ?? {} },
-      });
-      assert.deepEqual(serverTemplate.errors, []);
-      await writeFile(vuePath.replace(/\.vue$/, ".ssr.ts"), `${serverScript.content.replace("export default", "const Component =")}
-${serverTemplate.code}
-export default Object.assign(Component, { ssrRender });
-`);
+      for (const converted of manifest.components) {
+        const vuePath = join(output, converted.artifact);
+        const parsed = parseVue(await readFile(vuePath, "utf8"), { filename: vuePath });
+        assert.deepEqual(parsed.errors, []);
+        await writeFile(vuePath.replace(/\.vue$/, ".ts"), compileScript(parsed.descriptor, { id: `controller-parity-${mode}`, inlineTemplate: true }).content);
+        const serverScript = compileScript(parsed.descriptor, { id: `controller-parity-${mode}` });
+        const serverTemplate = compileTemplate({
+          source: parsed.descriptor.template!.content,
+          filename: vuePath,
+          id: `controller-parity-${mode}`,
+          ssr: true,
+          ssrCssVars: [],
+          compilerOptions: { bindingMetadata: serverScript.bindings ?? {} },
+        });
+        assert.deepEqual(serverTemplate.errors, []);
+        await writeFile(vuePath.replace(/\.vue$/, ".ssr.ts"), `${serverScript.content.replace("export default", "const Component =")}
+  ${serverTemplate.code}
+  export default Object.assign(Component, { ssrRender });
+  `);
+      }
       if (mode === "application") {
         const entry = join(output, "entry.ts");
         vueBundle = join(output, "vue.js");
-        await writeFile(entry, `import { createApp, h, ref } from "vue";
+        await writeFile(entry, `import { createApp, h } from "vue";
 import XControlled from "./${manifest.components[0]!.artifact.replace(/\.vue$/, "")}";
-window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 };
+window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 };
 window.delayController = location.search.includes("delay");
-const controlled = ref(null);
-window.vueApp = createApp({ render: () => h(XControlled, { id: "case", ref: controlled }) });
-window.vueMethod = () => controlled.value.focusButton();
-window.vueLoadHelper = () => controlled.value.loadHelper();
-window.vueMissingMethod = () => controlled.value.missing();
+window.vueApp = createApp({ render: () => h(XControlled, { id: "case" }) });
 window.vueApp.mount(document.querySelector("main"));\n`);
-        await build({ entryPoints: [entry], outfile: vueBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath] });
+        await build({ entryPoints: [entry], outfile: vueBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath],
+          plugins: [{ name: "compiled-vue-sfc", setup(pluginBuild) {
+            pluginBuild.onResolve({ filter: /\.vue$/ }, (args) => ({ path: resolve(args.resolveDir, args.path.replace(/\.vue$/, ".ts")) }));
+          } }],
+        });
       }
       const hydrateEntry = join(output, "hydrate.ts");
       const hydrateBundle = join(output, "hydrate.js");
       await writeFile(hydrateEntry, `import { createSSRApp, h } from "vue";
 import { XControlled } from "./vue/${mode === "application" ? "application" : "index"}";
-window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 };
+window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 };
 window.delayController = false;
 window.vueApp = createSSRApp({ render: () => h(XControlled, { id: "case" }) });
 window.vueApp.mount(document.querySelector("main"));\n`);
@@ -200,11 +206,12 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         }
         hydrated.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
         await Promise.all([live.goto("https://app.example/live"), hydrated.goto("https://app.example/hydrated")]);
-        await live.evaluate(() => { window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 }; });
+        await live.evaluate(() => { window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 }; });
         await live.addScriptTag({ path: loaderBundle });
         await live.evaluate(() => window.HtmlNextLoader.startBrowserComponents());
         await hydrated.addScriptTag({ path: hydrationOutputs.get(mode)!.bundle });
         await Promise.all([live, hydrated].map((page) => page.waitForFunction(() => window.trace.effects === 1)));
+        for (const page of [live, hydrated]) await assertTargetedDispatch(page, 7);
         const [initialLive, initialHydrated] = await Promise.all([snapshot(live), snapshot(hydrated)]);
         assert.deepEqual(initialHydrated.behavior, initialLive.behavior, "hydrated controller behavior differs");
         await assertPixelsEqual(hydrated, initialHydrated.pixels, initialLive.pixels, "hydrated controller pixels differ");
@@ -234,7 +241,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
     });
     }
 
-    it(`${name} matches state, effects, methods, and disconnect cleanup`, async () => {
+    it(`${name} matches state, effects, controller events, and disconnect cleanup`, async () => {
       const browser = await launchParityBrowser(browserType);
       const [live, vue] = await Promise.all([browser.newPage(), browser.newPage()]);
       const errors: string[] = [];
@@ -252,7 +259,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
           });
         }
         await Promise.all([live.goto("https://app.example/live"), vue.goto("https://app.example/vue")]);
-        await live.evaluate(() => { window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 }; });
+        await live.evaluate(() => { window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 }; });
         await live.addScriptTag({ path: loaderBundle });
         await live.evaluate(() => window.HtmlNextLoader.startBrowserComponents());
         await vue.addScriptTag({ path: vueBundle });
@@ -272,32 +279,18 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         const [switchedLive, switchedVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.equal(switchedLive.behavior.focused, true, "live root switch lost focus");
         assert.equal(switchedVue.behavior.focused, true, "Vue root switch lost focus");
-        await Promise.all([live.evaluate(() => (document.querySelector("#case") as Element & { focusButton(): Promise<void> }).focusButton()), vue.evaluate(() => window.vueMethod())]);
+        await Promise.all([live, vue].map((page) => page.evaluate(() => document.querySelector("#case")!.dispatchEvent(new Event("request-focus")))));
         const [afterLive, afterVue] = await Promise.all([snapshot(live), snapshot(vue)]);
         assert.deepEqual(afterVue.behavior, afterLive.behavior, "updated controller behavior differs");
         await assertPixelsEqual(vue, afterVue.pixels, afterLive.pixels, "updated controller pixels differ");
         assert.equal(afterLive.behavior.tag, "article");
-        const [liveHelper, vueHelper] = await Promise.all([
-          live.evaluate(() => (document.querySelector("#case") as Element & { loadHelper(): Promise<number> }).loadHelper()),
-          vue.evaluate(() => window.vueLoadHelper()),
-        ]);
-        assert.equal(liveHelper, 42);
-        assert.equal(vueHelper, liveHelper, "relative dynamic controller import differs");
-        const missingMethod = async (page: Page, vueCall: boolean) => page.evaluate(async (converted) => {
-          try {
-            if (converted) await window.vueMissingMethod();
-            else await (document.querySelector("#case") as Element & { missing(): Promise<void> }).missing();
-            return null;
-          } catch (error) {
-            const failure = error as Error & { diagnostic?: { code: string } };
-            return { name: failure.name, code: failure.diagnostic?.code ?? null, message: failure.message };
-          }
-        }, vueCall);
-        const [liveMissing, vueMissing] = await Promise.all([missingMethod(live, false), missingMethod(vue, true)]);
-        assert.deepEqual(liveMissing, {
-          name: "HtmlDiagnosticError", code: "HJ003", message: "HJ003: Controller does not export method `missingExport`.",
-        });
-        assert.deepEqual(vueMissing, liveMissing, "missing controller export diagnostic differs");
+        const helperResults = await Promise.all([live, vue].map((page) => page.evaluate(() =>
+          new Promise<number>((resolve) => {
+            const root = document.querySelector("#case")!;
+            root.addEventListener("helper-loaded", (event) => resolve((event as CustomEvent<number>).detail), { once: true });
+            root.dispatchEvent(new Event("request-helper"));
+          }))));
+        assert.deepEqual(helperResults, [42, 42], "relative dynamic controller import differs");
 
         await Promise.all([live, vue].map((page) => page.locator("#case button").click()));
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2" && document.querySelector("#case")?.localName === "section")));
@@ -305,6 +298,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         assert.deepEqual(roundTripVue.behavior, roundTripLive.behavior, "root switch-back controller behavior differs");
         await assertPixelsEqual(vue, roundTripVue.pixels, roundTripLive.pixels, "root switch-back controller pixels differ");
 
+        for (const page of [live, vue]) await assertTargetedDispatch(page, 7);
         const dispatchProbe = async (page: Page) => page.evaluate(() => {
           const root = document.querySelector("#case")!;
           const received: unknown[] = [];
@@ -391,7 +385,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         }
         await Promise.all([live.goto("https://app.example/live?delay"), vue.goto("https://app.example/vue?delay")]);
         await live.evaluate(() => {
-          window.trace = { connects: 0, effects: 0, effectCleanups: 0, methods: 0, disconnects: 0 };
+          window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 };
           window.delayController = true;
         });
         await live.addScriptTag({ path: loaderBundle });
@@ -413,12 +407,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
 
 declare global {
   interface Window {
-    trace: { connects: number; effects: number; effectCleanups: number; methods: number; disconnects: number };
+    trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number };
     HtmlNextLoader: { startBrowserComponents(): Promise<unknown> };
     vueApp: { unmount(): void };
-    vueMethod: () => Promise<void>;
-    vueLoadHelper: () => Promise<number>;
-    vueMissingMethod: () => Promise<void>;
     delayController: boolean;
     releaseController: () => void;
     controllerHost: { dispatch(event: string, detail?: unknown): boolean };

@@ -1,8 +1,7 @@
 # HTML Next implementations
 
 Build universal components using the next generation of HTML. Author once, then run them in a
-browser, compile to native DOM, or use them in Vue and React. Svelte Vite adapters and converters
-are coming soon.
+browser, compile to native DOM, or use them in Vue, React, and Svelte.
 
 [Get started](https://nextwebwg.org/html-next/quick-start) ·
 [Usage](https://nextwebwg.org/html-next/usage) ·
@@ -18,7 +17,7 @@ repository root.
 | --- | --- | --- |
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue and React conversion |
+| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
 | [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 The tools package implements both proposals it needs:
@@ -46,7 +45,7 @@ modes:
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to Vue or React | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue single-file components or React TSX components, with no HTML Next runtime dependency |
+| **Framework conversion** — to Vue, React, or Svelte | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue or Svelte single-file components, or React TSX components, with no HTML Next runtime dependency |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
@@ -57,8 +56,9 @@ Components. Such migrations are consumer-specific and live outside this reposito
 An application build may serve as a complete alternative to a framework application.
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
-must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
-behavior.
+must preserve appearance, interactions, state, events, validation, lifecycle, and successful
+hydration. Frameworks may use their own DOM and SSR representations; acceptance is based on how
+the resulting component looks and acts, including controller connect/disconnect and cleanup.
 
 The detailed contracts and independent progress tracks are in the
 [proposal](https://nextwebwg.org/declarative-components/) and
@@ -277,7 +277,7 @@ The package assembler emits:
 
 - side-effect registration and concrete component HTML;
 - Vanilla and Vue components with native roots;
-- typed props (as HTML attributes), events, slots, and exposed methods;
+- typed props (as HTML attributes), events, slots, and controller subscriptions;
 - scoped component CSS;
 - controller and dependency graphs preserved as static modules; and
 - explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.

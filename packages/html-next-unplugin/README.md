@@ -1,9 +1,9 @@
 # `@nextwebwg/html-next-unplugin`
 
-Vite can convert imported Declarative Components sources into Vue or React components. Libraries
+Vite can convert imported Declarative Components sources into Vue, React, or Svelte components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
-## Vue and React source imports
+## Framework source imports
 
 ```ts
 // vite.config.ts — Vue
@@ -17,6 +17,19 @@ export default defineConfig({
 ```
 
 For React, use `target: "react"` with `@vitejs/plugin-react` in place of the Vue plugin.
+For Svelte 5, use its standard Vite compiler after the converter:
+
+```ts
+// vite.config.ts — Svelte
+import { defineConfig } from "vite";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({ target: "svelte" }), svelte()],
+});
+```
+
 The adapter discovers installed dependencies that declare the `html-next` export condition,
 converts their source entry points, and generates framework declarations. No `entries` list
 or component-name mapping is needed for those packages.
@@ -68,7 +81,7 @@ working; assembly is optional for source libraries.
 
 ### Generated types
 
-The adapter uses `vue-tsc` or TypeScript to emit declarations from the converted components.
+The adapter uses `vue-tsc`, TypeScript, or `svelte2tsx` to emit declarations from the converted components.
 These retain required props, allowed values, dependent prop types, and framework slot APIs.
 Runtime source and declarations live under `node_modules/.html-next/<target>/`.
 `src/html-next.d.ts` exposes the package's exports to the consumer's editor and typechecker.
@@ -86,7 +99,7 @@ Vite prepares these files automatically at startup and during builds. Before sta
 }
 ```
 
-For React, replace `vue-tsc` with `tsc`. `html-next-sync` loads your Vite config; you do not
+For React, replace `vue-tsc` with `tsc`; for Svelte, use `svelte-check`. `html-next-sync` loads your Vite config; you do not
 repeat the target or package list. An API is also available:
 
 ```ts

@@ -6,6 +6,7 @@ import {
   addControllerGraph,
   generateVueComponent,
   generateReactConversion,
+  generateSvelteConversion,
   HtmlDiagnosticError,
   loadNodeComponents,
   vueHostArtifact,
@@ -13,6 +14,16 @@ import {
   vueControlArtifact,
   vuePropsArtifact,
   reactPropsArtifact,
+  sveltePropsArtifact,
+  svelteHtmlArtifact,
+  svelteEventsArtifact,
+  svelteControlArtifact,
+  svelteDataArtifact,
+  svelteReactivityArtifact,
+  svelteHostArtifact,
+  svelteConnectionArtifact,
+  svelteDecorationsArtifact,
+  svelteStyleArtifacts,
   reactEventsArtifact,
   reactControlArtifact,
   reactDataArtifact,
@@ -25,12 +36,13 @@ import {
   type GeneratedArtifact,
 } from "@nextwebwg/html-next";
 
-export type FrameworkTarget = "vue" | "react";
+export type FrameworkTarget = "vue" | "react" | "svelte";
 export type ConversionGraph = "application" | "library";
 
 const targetVersions: Readonly<Record<FrameworkTarget, string>> = {
   vue: "3.5",
   react: "19.3",
+  svelte: "5.57.1",
 };
 
 interface BaseConvertOptions {
@@ -164,7 +176,7 @@ function frameworkEntry(
 ): GeneratedArtifact {
   const exports = [...entries].sort((left, right) => left.artifact.localeCompare(right.artifact)).map((entry) => {
     const artifact = entry.artifact.slice(entry.artifact.lastIndexOf("/") + 1);
-    const name = artifact.replace(/\.(?:vue|tsx)$/, "");
+    const name = artifact.replace(/\.(?:vue|tsx|svelte)$/, "");
     return `export { default as ${name} } from ${JSON.stringify(relativeImport(`${target}/index.ts`, entry.artifact))};`;
   });
   return {
@@ -216,7 +228,7 @@ function componentArtifact(projectRoot: string, url: string, tag: string, name: 
   const insideRoot = source !== ".." && !source.startsWith(`..${sep}`) && !isAbsolute(source);
   const directory = insideRoot ? dirname(source) : `_external/${tag}`;
   const segments = directory === "." ? [] : directory.split(sep);
-  return [target, ...segments, `${name}.${target === "vue" ? "vue" : "tsx"}`].join("/");
+  return [target, ...segments, `${name}.${target === "vue" ? "vue" : target === "svelte" ? "svelte" : "tsx"}`].join("/");
 }
 
 function componentRelativeDataSource(source: string): boolean {
@@ -276,6 +288,73 @@ function needsNestedDepthGuard(graph: ComponentGraph): boolean {
   return [...edges.keys()].some((tag) => visit(tag) > 33);
 }
 
+function decoratedRoots(graph: ComponentGraph): Map<string, { classes: boolean; styles: boolean }> {
+  const receivers = new Map<string, { classes: boolean; styles: boolean }>();
+  const pending: string[] = [];
+  const add = (tag: string, classes: boolean, styles: boolean): boolean => {
+    const previous = receivers.get(tag);
+    if ((!classes || previous?.classes) && (!styles || previous?.styles)) return false;
+    receivers.set(tag, { classes: classes || previous?.classes === true, styles: styles || previous?.styles === true });
+    pending.push(tag);
+    return true;
+  };
+  for (const node of graph.nodes.values()) {
+    const visit = (template: TemplateNode): void => {
+      if (template.kind === "slot") for (const child of template.fallback ?? []) visit(child);
+      else if (template.kind === "element") {
+        if (template.name.includes("-")) add(template.name,
+          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class"),
+          template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "style"));
+        for (const child of template.children) visit(child);
+      }
+    };
+    visit(node.definition.template);
+  }
+  while (pending.length > 0) {
+    const tag = pending.pop()!;
+    const id = graph.tags.get(tag);
+    const root = id === undefined ? undefined : graph.nodes.get(id)?.definition.root;
+    if (root?.kind === "component") {
+      const receiver = receivers.get(tag)!;
+      add(root.tag, receiver.classes, receiver.styles);
+    }
+  }
+  return receivers;
+}
+
+function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
+  const receivers = new Map<string, Set<string>>();
+  const pending: string[] = [];
+  const add = (tag: string, name: string): void => {
+    let names = receivers.get(tag);
+    if (names?.has(name)) return;
+    if (names === undefined) receivers.set(tag, names = new Set());
+    names.add(name);
+    pending.push(tag);
+  };
+  for (const node of graph.nodes.values()) {
+    const visit = (template: TemplateNode): void => {
+      if (template.kind === "slot") for (const child of template.fallback ?? []) visit(child);
+      else if (template.kind === "element") {
+        const id = graph.tags.get(template.name);
+        const props = id === undefined ? undefined : graph.nodes.get(id)?.definition.contract.props;
+        if (props !== undefined) for (const attribute of template.attributes) {
+          if (attribute.kind === "attribute" && attribute.twoWay === true && !Object.keys(props).some((name) => name.toLowerCase() === attribute.name || name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() === attribute.name)) add(template.name, attribute.name);
+        }
+        for (const child of template.children) visit(child);
+      }
+    };
+    visit(node.definition.template);
+  }
+  while (pending.length > 0) {
+    const tag = pending.pop()!;
+    const id = graph.tags.get(tag);
+    const root = id === undefined ? undefined : graph.nodes.get(id)?.definition.root;
+    if (root?.kind === "component") for (const name of receivers.get(tag)!) add(root.tag, name);
+  }
+  return receivers;
+}
+
 export async function convertComponents(options: ConvertOptions): Promise<ConversionManifest> {
   if (options.entries.length === 0) throw new Error("Framework conversion requires at least one component entry.");
   const targetVersion = targetVersions[options.target];
@@ -318,6 +397,8 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   const propContractsByTag = new Map([...graph.nodes.values()].map((node) => [node.definition.contract.tag,
     node.definition.contract.props] as const));
   const guardNestedDepth = needsNestedDepthGuard(graph);
+  const bindingReceivers = options.target === "svelte" ? nativeBindingRoots(graph) : undefined;
+  const decorationReceivers = options.target === "svelte" ? decoratedRoots(graph) : undefined;
   const manifestComponents: ConversionManifest["components"][number][] = [];
   const planned: Array<{ artifact: GeneratedArtifact; kind: ConversionOutput["kind"]; source?: string }> = [];
   const neededHelpers = new Set<string>();
@@ -355,6 +436,7 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     });
     let content: string;
     let reactConversion: ReturnType<typeof generateReactConversion> | undefined;
+    let svelteConversion: ReturnType<typeof generateSvelteConversion> | undefined;
     const helpers = new Set<string>();
     try {
       const importSpecifier = (importedTag: string): string => {
@@ -372,7 +454,25 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
           return relativeImport(componentPath, `${options.target}/${name}.ts`).replace(/\.ts$/, "");
         },
         ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
-      }) : (reactConversion = generateReactConversion(definition, {
+      }) : options.target === "svelte" ? (svelteConversion = generateSvelteConversion(definition, {
+        slotsByTag,
+        guardNestedDepth,
+        rootDecorations: decorationReceivers?.get(tag),
+        ...(bindingReceivers?.has(tag) === true ? { rootBindings: [...bindingReceivers.get(tag)!] } : {}),
+        decorationsSpecifier: relativeImport(componentPath, "svelte/decorations.ts").replace(/\.ts$/, ""),
+        styleSpecifier: relativeImport(componentPath, "svelte/style/style.js"),
+        hostSpecifier: relativeImport(componentPath, "svelte/host.svelte.ts").replace(/\.ts$/, ""),
+        ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
+        reactivitySpecifier: relativeImport(componentPath, "svelte/reactivity.svelte.ts").replace(/\.ts$/, ""),
+        importSpecifier,
+        propContractsByTag,
+        stylesheetSpecifier: `./${node.definition.contract.name}.css`,
+        propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
+        htmlSpecifier: relativeImport(componentPath, "svelte/html.ts").replace(/\.ts$/, ""),
+        eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
+        controlSpecifier: relativeImport(componentPath, "svelte/control.ts").replace(/\.ts$/, ""),
+        dataSpecifier: relativeImport(componentPath, "svelte/data.svelte.ts").replace(/\.ts$/, ""),
+      })).component : (reactConversion = generateReactConversion(definition, {
         slotsByTag,
         propsByTag,
         propContractsByTag,
@@ -408,6 +508,10 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
         claim({ path: componentPath.replace(/\.tsx$/, ".css"), content: `${css}\n` }, "style", source);
       }
     }
+    if (svelteConversion !== undefined && svelteConversion.css !== "") {
+      claim({ path: componentPath.replace(/\.svelte$/, ".css"), content: `${svelteConversion.css}\n` }, "style", source);
+    }
+    if (svelteConversion !== undefined) for (const helper of svelteConversion.helpers) neededHelpers.add(helper);
     for (const helper of helpers) neededHelpers.add(helper);
     for (const file of controllerFiles.values()) {
       claim(file, "controller", source);
@@ -439,6 +543,36 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
   }
   if (options.target === "react" && neededHelpers.has("props")) {
     claim(reactPropsArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("props")) {
+    claim(sveltePropsArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("html")) {
+    claim(svelteHtmlArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("control")) {
+    claim(svelteControlArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("decorations")) {
+    claim(svelteDecorationsArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("style")) {
+    for (const artifact of svelteStyleArtifacts()) claim(artifact, "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("connection")) {
+    claim(svelteConnectionArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("host")) {
+    claim(svelteHostArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("reactivity")) {
+    claim(svelteReactivityArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("data")) {
+    claim(svelteDataArtifact(), "helper");
+  }
+  if (options.target === "svelte" && neededHelpers.has("events")) {
+    claim(svelteEventsArtifact(hasDeclaredEvents), "helper");
   }
   if (options.target === "react" && neededHelpers.has("events")) {
     claim(reactEventsArtifact(hasDeclaredEvents), "helper");
@@ -491,8 +625,9 @@ export async function convertComponents(options: ConvertOptions): Promise<Conver
     targetVersion,
     graph: options.mode,
     package: Object.freeze({
-      dependencies: Object.freeze(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}),
-      peerDependencies: Object.freeze({ [options.target]: `^${targetVersion}.0` }),
+      dependencies: Object.freeze({ ...(neededHelpers.has("html") ? { parse5: "^8.0.1" } : {}), ...(options.target === "svelte" && neededHelpers.has("style") ? { cssstyle: "^6.2.0", "css-tree": "^3.2.1" } : {}) }),
+      // Vue 3.5.43 restores generic inference through runtime PropType declarations.
+      peerDependencies: Object.freeze({ [options.target]: options.target === "vue" ? "^3.5.43" : `^${targetVersion}${options.target === "svelte" ? "" : ".0"}` }),
     }),
     entries: Object.freeze(conversionEntries),
     sourceFiles: Object.freeze([...sourceFiles].map((path) => relative(projectRoot, path).split(sep).join("/")).sort()),

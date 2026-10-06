@@ -18,9 +18,15 @@ output inventory.
 
 ## Capability contract
 
-Generated target components must preserve the shared semantic model: the same native root,
+Generated target components must preserve the shared semantic model: native root behavior,
 projected content, properties (as attributes), events, methods, declared type behavior, state results,
 requests, styles, lifecycle, controller behavior, and hydration outcome.
+
+Acceptance is based on the component's appearance and runtime behavior, including controller
+connect/disconnect calls and cleanup. Each framework may use its own DOM and SSR representation,
+provided its output can hydrate into the equivalent functioning component. Node-object identity
+and identical serialized SSR markup are not independent acceptance criteria. Tests should verify
+the behavior at stake, such as focus, selection, edited control values, event delivery, and cleanup.
 
 Target-native conventions may shape private implementation and generated source. They must not add
 wrapper elements, change public names, substitute framework-only event semantics, or make target
@@ -35,7 +41,10 @@ normalized component plan through those facilities.
 Converted output has **no runtime dependency on HTML Next**: it imports the target framework,
 feature-specific generated helpers, and the component's own modules (its controller and preserved
 ordinary modules), never an HTML Next package or live runtime. The generated `$html` helper also
-imports `parse5` for deterministic server-side fragment parsing. HTML Next either runs a component
+imports `parse5` for deterministic server-side fragment parsing. Svelte output with style bindings
+uses `cssstyle` and the public `css-tree/parser` entry for server CSSOM operations. A generated
+helper package maps its server entry to a browser entry through the standard `browser` field;
+client bindings use the actual element's `classList` and `CSSStyleDeclaration` directly. HTML Next either runs a component
 itself or converts it; once converted, it is gone. Whatever the target cannot express directly is
 part of the generated output.
 

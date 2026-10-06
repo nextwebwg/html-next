@@ -5,7 +5,7 @@ import { resolveConfig } from "vite";
 try {
   const config = await resolveConfig({ logLevel: "error" }, "build");
   if (!config.plugins.some((plugin) => plugin.name === "html-next-framework")) {
-    throw new Error('Configure htmlNext({ target: "vue" | "react" }) in vite.config before running html-next-sync.');
+    throw new Error('Configure htmlNext({ target: "vue" | "react" | "svelte" }) in vite.config before running html-next-sync.');
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

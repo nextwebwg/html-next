@@ -1,11 +1,9 @@
 /**
  * Converts a definition to a Vue 3.5 single-file component that depends only on Vue and the
  * component's own modules. Props, state, computed values, bindings, structural directives, slots,
- * events, and methods map to Vue's own facilities; the controller receives a host generated here from
+ * events map to Vue's own facilities; the controller receives a host generated here from
  * Vue refs, effects, and lifecycle; styles become `<style scoped>`.
  */
-import { parseFragment } from "parse5";
-
 import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
 import { parseDuration } from "../duration.js";
@@ -29,7 +27,7 @@ import { compileComponentStylesForVue } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, typeSource } from "./shared.js";
+import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_SPECIFIER } from "./vue-host.js";
 import { VUE_HTML_SPECIFIER } from "./vue-html.js";
@@ -41,25 +39,11 @@ import { handlerDestinationCheck, typeCheck } from "./type-guards.js";
 /** The Vue APIs a converted component uses itself; the shared module imports lifecycle and effects. */
 const VUE_APIS = ["computed", "defineComponent", "createTextVNode", "getCurrentInstance", "h", "inject", "provide", "ref", "useSlots", "useTemplateRef", "watchSyncEffect"] as const;
 
-// HTML parsing lowercases directive names even inside SVG. Ask the HTML parser for the same
-// SVG adjustment it applies to literal attributes, then force Vue to write that exact attribute.
-const adjustedSvgAttributes = new Map<string, string>();
-function svgAttributeName(name: string): string {
-  let adjusted = adjustedSvgAttributes.get(name);
-  if (adjusted === undefined) {
-    const fragment = parseFragment(`<svg ${name}></svg>`);
-    const svg = fragment.childNodes[0] as { attrs?: readonly { name: string }[] } | undefined;
-    adjusted = svg?.attrs?.[0]?.name ?? name;
-    adjustedSvgAttributes.set(name, adjusted);
-  }
-  return adjusted;
-}
-
 /** Names the generated script defines itself, which declared names must not take. */
 const RESERVED = new Set([
-  "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
+  "htmlNextAuthoredCheck", "htmlNextAuthoredCheckReported", "props", "emit", "root", "refs", "dispatch", "host", "hostState", "read", "write", "stops", "cleanup", "ready",
   "model", "controllerModule", "event", "element", "truthy", "text", "attribute", "list", "number", "concat", "join", "formatValue", "math", "sortBy", "eachRows", "uniqueKeys", "KeyedBoundary", "KeyedFailure",
-  "useComponentHost", "createDispatch", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
+  "useComponentHost", "createDispatch", "dispatchToTargets", "useDataRead", "runFilteredEvent", "componentInstance", "reflectedProp", "nativeAttrs",
   "checkedProps", "checkedProp", "propValidityContract", "vPropValidity", "PropType", "vBindControl", "readBoundControl",
   "SelectedOptions", "scopedSlotName", "projectedSlots", "cycleCheckedComputed",
   "SanitizedHtml", "RetainedInlineText", "inlineTextSegment", "moduleFormatValue",
@@ -177,7 +161,7 @@ function referenceCheck(type: TypeNode, value: string): string {
 }
 
 /** The same declared path checks as the live evaluator, before a generated expression can update. */
-function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>): string | undefined {
+function expressionGuard(plan: CompiledExpression, scope: Scope, definition: ComponentDefinition, locals?: ReadonlySet<string>, lowering?: Lowering): string | undefined {
   const checks: string[] = [];
   for (const dependency of typeCheckedDependencies(plan)) {
     const [root, ...steps] = dependency.split(".");
@@ -208,7 +192,9 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
     const base = scope.code.get(root!);
     if (base === undefined) continue;
     const read = `${readAbsentField ? `(${base} as any)` : base}${steps.map((step) => `?.[${quote(step)}]`).join("")}`;
-    checks.push(`(${read} == null || ${referenceCheck(type, read)})`);
+    const accepted = `(${read} == null || ${referenceCheck(type, read)})`;
+    checks.push(lowering?.authoredCheck(accepted, `${plan.source}:${dependency}`,
+      `${definition.source.file}: HR007: Reference ${dependency} does not satisfy its declared type.`) ?? accepted);
   }
   return checks.length === 0 ? undefined : checks.join(" && ");
 }
@@ -218,7 +204,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
     const root = dependency.split(".")[0]!;
     return !context.globals.has(root) || names.locals?.has(root);
   })) return undefined;
-  const guard = expressionGuard(plan, names.script, context.definition);
+  const guard = expressionGuard(plan, names.script, context.definition, names.locals, context.lowering);
   const retains = mayProduceInvalidResult(plan.ast, names.script);
   if (guard === undefined && !retains) return undefined;
   const name = context.identifiers.take("guarded", "Binding");
@@ -397,7 +383,7 @@ function renderNode(node: TemplateNode, names: Names, context: Context, receivin
         if (plan === undefined) return `{ value: ${quote(segment.value)}, text: ${quote(segment.value)}, accepted: true }`;
         const candidate = context.identifiers.take("candidate", "Text");
         const local = withLocal(names, [[candidate, typeOf(plan.ast, names.template)]]);
-        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
+        return `inlineTextSegment(${lowering.value(plan.ast, names.template)}, ${expressionGuard(plan, names.template, context.definition, names.locals, lowering) ?? "true"}, (${candidate}) => ${lowering.text({ kind: "id", name: candidate }, local.template)})`;
       });
       return `<RetainedInlineText :segments=${bound(`[${parts.join(", ")}]`)} />`;
     }
@@ -628,7 +614,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   }
   if (node.ref !== undefined) {
     if (!context.refs.has(node.ref)) context.refs.set(node.ref, context.identifiers.take(`${node.ref}Element`, ""));
-    attributes.push(`ref=${quote(node.ref)}`);
+    // Keep Vue's template-ref namespace separate from authored state and props.
+    attributes.push(`ref=${quote(context.refs.get(node.ref)!)}`);
   }
   if (isRoot) {
     // The consumer's attributes win over the template's literals and lose to its bindings, as in
@@ -651,7 +638,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const event = node.name === "select" || node.name === "input" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "type" && ["checkbox", "radio", "file"].includes(entry.value))
           ? "change" : "input";
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
-        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: 'value', value: model, ${authoredDefault("value")} }`)}`);
+        attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: 'value', value: model, optionalValue: true, ${authoredDefault("value")} }`)}`);
         attributes.push(`@${event}=${bound(`model = readBoundControl(${control}) as any`)}`);
     }
     if (context.hostState) attributes.push(`:${stateAttribute(tag)}="hostState || undefined"`);
@@ -687,7 +674,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
   // v-model the owner of the live control value.
   const children = node.name === "select" && (selectProperty !== undefined ||
     twoWayControl || isRoot && context.model)
-    ? `<SelectedOptions :value=${bound(selectedValue)} :multiple=${bound(selectedMultiple)} :native-property=${bound(selectProperty !== undefined && !twoWayControl ? "true" : "false")}>${renderedChildren}</SelectedOptions>`
+    ? `<SelectedOptions :value=${bound(selectedValue)} :multiple=${bound(selectedMultiple)} :native-property=${bound(selectProperty !== undefined && !twoWayControl ? "true" : "false")}${isRoot && context.model && !twoWayControl && selectProperty === undefined ? " :optional-value=\"true\"" : ""}>${renderedChildren}</SelectedOptions>`
     : renderedChildren;
   // An empty component closes itself, as Vue's style guide has it.
   if (component && children === "") return `${open.slice(0, -1)} />`;
@@ -697,7 +684,7 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
 function handlerSource(handler: HandlerDeclaration, name: string, names: Names, events: readonly EventDeclaration[], context: Context): string {
   const { lowering } = context;
   const lines: string[] = [];
-  const local = withLocal(names, [["event", UNKNOWN]]);
+  const local = withLocal(names, [["$$event", { type: { kind: "terminal", name: "event" }, nullable: false }, "event"]]);
   const element = (ref: string): string => {
     if (!context.refs.has(ref)) context.refs.set(ref, context.identifiers.take(`${ref}Element`, ""));
     return context.refs.get(ref)!;
@@ -709,26 +696,31 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       const target = writableTarget(step.writablePath, local.script, lowering);
       const value = lowering.value(step.value.ast, local.script);
       const mayBeInvalid = mayProduceInvalidResult(step.value.ast, local.script);
-      const check = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
+      const destinationCheck = handlerDestinationCheck(local.script.types.get(String(step.writablePath[0]))?.type,
         step.writablePath, 1, `next${index}`, local.script, lowering);
+      const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
+        `(next${index} === undefined || ${destinationCheck})`,
+        `handler:${handler.name}:${step.path}`,
+        `${context.definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
       if (check === undefined && !mayBeInvalid) {
         lines.push(`  ${guard}${target} = ${value};`);
       } else {
         const next = `next${index}`;
         lines.push(`  ${guard}{`);
         lines.push(`    const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`);
-        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${next} === null || ${next} === undefined || ${check})`}) ${target} = ${next} as never;`);
+        lines.push(`    if (${mayBeInvalid ? `${next} !== Symbol.for("html-next.invalid-result") && ` : ""}${check === undefined ? "true" : `(${check})`}) ${target} = ${next} as never;`);
         lines.push("  }");
       }
     } else if (step.kind === "dispatch") {
       const declaration = events.find((event) => event.name === step.event);
       if (declaration === undefined) fail("HT034", `Handler \`${handler.name}\` dispatches undeclared event \`${step.event}\`.`);
+      const destination = step.target === undefined ? "" : `, ${element(step.target)}.value ?? []`;
       if (step.value !== undefined && mayProduceInvalidResult(step.value.ast, local.script)) {
         const detail = `detail${index}`;
-        lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}); }`);
+        lines.push(`  ${guard}{ const ${detail}: any = ${lowering.value(step.value.ast, local.script)}; if (${detail} !== Symbol.for("html-next.invalid-result")) dispatch(${quote(step.event)}, ${detail}${destination}); }`);
       } else {
-        const detail = step.value === undefined ? "" : `, ${lowering.value(step.value.ast, local.script)}`;
-        lines.push(`  ${guard}dispatch(${quote(step.event)}${detail});`);
+        const detail = step.value === undefined ? (step.target === undefined ? "" : ", undefined") : `, ${lowering.value(step.value.ast, local.script)}`;
+        lines.push(`  ${guard}dispatch(${quote(step.event)}${detail}${destination});`);
       }
     } else if (step.kind === "focus") {
       lines.push(`  ${guard}${element(step.target)}.value?.focus();`);
@@ -736,7 +728,7 @@ function handlerSource(handler: HandlerDeclaration, name: string, names: Names, 
       lines.push(`  ${guard}(${element(step.target)}.value as HTMLInputElement | null)?.reportValidity?.();`);
     }
   }
-  const parameter = lines.some((line) => /\bevent\b/.test(line)) ? "event?: Event" : "";
+  const parameter = lines.some((line) => /\bevent\b/.test(line)) ? "event: Event" : "";
   return [`function ${name}(${parameter}): void {`, ...lines, "}"].join("\n");
 }
 
@@ -810,7 +802,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ? target.props.find((prop) => prop.name === "value")
     : undefined;
   const identifiers = new Identifiers(target.props.map((prop) => prop.name));
-  const lowering = new Lowering();
+  const lowering = new Lowering(identifiers.take("htmlNextAuthoredCheck", ""));
   const templateScope = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const script = { code: new Map<string, string>(), types: new Map<string, Static>() };
   const names: Names = { template: templateScope, script };
@@ -992,7 +984,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
   const checkNames = new Map<EventDeclaration, string>();
   const checksBySource = new Map<string, string>();
   for (const event of events) {
-    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail").replace(/^\((.*)\)$/s, "$1");
+    const source = typeCheck(declarationTypeNode(event.type, event.shape)!, "detail");
     let name = checksBySource.get(source);
     if (name === undefined) {
       name = identifiers.take(`is${pascal(event.name)}Detail`, "Check");
@@ -1019,7 +1011,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     const name = stateNames.get(declaration)!;
     const initial = declaration.expression === undefined ? "null" : lowering.value(declaration.expression.ast, script);
     if (declaration.kind === "computed") {
-      const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition);
+      const guard = declaration.expression === undefined ? undefined : expressionGuard(declaration.expression, script, definition, undefined, lowering);
       const retains = declaration.expression !== undefined && mayProduceInvalidResult(declaration.expression.ast, script);
       if (retains) return `let ${name}Previous: any = null;\nconst ${name} = cycleCheckedComputed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}const next: any = ${initial}; if (next === Symbol.for("html-next.invalid-result")) return ${name}Previous; return ${name}Previous = next; });`;
       if (guard !== undefined) return `let ${name}Previous: any;\nconst ${name} = cycleCheckedComputed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${initial}; });`;
@@ -1128,7 +1120,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     "",
     ...(arms === undefined && needsRoot && template.ref === undefined ? ["const root = ref<HTMLElement | null>(null);"] : []),
     ...(unnamedRootRef === undefined ? [] : [`const ${unnamedRootRef} = useTemplateRef<HTMLElement>(${quote(context.rootArmRef!)});`]),
-    ...[...context.refs].map(([ref, name]) => `const ${name} = useTemplateRef<HTMLElement>(${quote(ref)});`),
+    ...[...context.refs.values()].map((name) => `const ${name} = useTemplateRef<HTMLElement>(${quote(name)});`),
     ...(arms === undefined && needsRoot && template.ref !== undefined ? [`const root = ${context.refs.get(template.ref)!};`] : []),
     ...(arms === undefined ? [] : [`const root = ${rootValues.length === 1 ? rootValues[0] : `computed(() => ${rootValues.map((name) => `${name}.value`).join(" ?? ")} ?? null)`};`]),
     ...(arms === undefined ? [] : ["preserveRootFocus(root);"]),
@@ -1196,7 +1188,7 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(!dispatches ? [] : ["", ...checkSources, dispatchSource]),
     ...handlerSources.flatMap((source) => ["", source]),
     "",
-    ...hostSource(definition, target.methods, {
+    ...hostSource(definition, {
       props: target.props.length > 0,
       refs: context.refs,
       state: new Map(states.map((state) => [state.name, stateNames.get(state)!])),
@@ -1223,12 +1215,15 @@ export function generateVue(definition: ComponentDefinition, version: string, op
     ...(target.props.length === 0 && !context.usesRetainedInlineText ? [] : ["PropType"]),
     ...(context.usesKeyedBoundary ? ["VNode"] : []),
   ];
+  const moduleSources = [...moduleFallbacks, ...lowering.authoredFallbacks()];
   const lines: string[] = [
     `<!-- Generated by HTML Next ${version} for Vue 3.5. Do not edit. -->`,
-    ...(moduleFallbacks.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleFallbacks, "</script>", ""]),
+    ...(moduleSources.length === 0 ? [] : ["<script lang=\"ts\">", ...moduleSources, "</script>", ""]),
     `<script setup lang="ts"${generics.length === 0 ? "" : ` generic="${generics.map(({ declaration }) => declaration.replaceAll('"', "'")).join(", ")}"`}>`,
     ...(apis.length === 0 ? [] : [`import { ${apis.join(", ")} } from "vue";`]),
     ...(vueTypes.length === 0 ? [] : [`import type { ${vueTypes.join(", ")} } from "vue";`]),
+    ...(definition.controller !== undefined && states.some((state) => state.type !== undefined || state.shape !== undefined)
+      ? [`import { acceptsControllerWrite } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`] : []),
     ...(target.props.length === 0 ? [] : [`import { checkedProp, vPropValidity${definition.controller === undefined ? "" : ", propValidityState"}${target.props.some((prop) => prop.contract.select !== undefined) ? ", selectedPropNode" : ""} } from ${quote(options.helperSpecifier?.("props") ?? VUE_PROPS_SPECIFIER)};`]),
     ...(shared.length === 0 ? [] : [`import { ${shared.join(", ")} } from ${quote(options.helperSpecifier?.("host") ?? VUE_HOST_SPECIFIER)};`]),
     ...(context.usesHtml ? [`import { SanitizedHtml } from ${quote(options.helperSpecifier?.("html") ?? VUE_HTML_SPECIFIER)};`] : []),
@@ -1258,10 +1253,9 @@ function defaultSource(value: unknown): string {
   return value !== null && typeof value === "object" ? `() => (${JSON.stringify(value)})` : JSON.stringify(value);
 }
 
-/** The controller host and the methods it exposes: the shared module holds everything repeated. */
+/** The controller host shares namespace and connection behavior across components. */
 function hostSource(
   definition: ComponentDefinition,
-  methods: ReturnType<typeof targetComponent>["methods"],
   values: {
     readonly props: boolean;
     readonly refs: ReadonlyMap<string, string>;
@@ -1273,17 +1267,17 @@ function hostSource(
   },
   controllerSpecifier?: string,
 ): string[] {
-  if (definition.controller === undefined) {
-    return methods.length === 0 ? [] : [
-      `defineExpose({ ${methods.map((method) => `${propKey(method.name)}: () => Promise.reject(new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}))`).join(", ")} });`,
-    ];
-  }
+  if (definition.controller === undefined) return [];
   const record = (entries: ReadonlyMap<string, string>): string =>
     `{ ${[...entries].map(([name, identifier]) => name === identifier ? name : `${propKey(name)}: ${identifier}`).join(", ")} }`;
+  const stateTypes = Object.fromEntries((definition.declarations ?? []).flatMap((declaration) =>
+    declaration.kind === "state" && declarationTypeNode(declaration.type, declaration.shape) !== undefined
+      ? [[declaration.name, declarationTypeNode(declaration.type, declaration.shape)]] : []));
   const call = [
     `useComponentHost(() => import(${quote(definition.controller)}), {`,
     "  root,",
     "  dispatch,",
+    ...(Object.keys(stateTypes).length === 0 ? [] : [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, (${JSON.stringify(stateTypes)} as Record<string, any>)[name], keys),`]),
     `  controllerSource: { specifier: ${quote(controllerSpecifier ?? definition.controller!)}, definition: ${quote(definition.source.file)} },`,
     ...(values.props ? [
       "  props: checkedProps,",
@@ -1307,17 +1301,7 @@ function hostSource(
     ...(values.context.size === 0 ? [] : [`  context: ${record(values.context)},`]),
     "})",
   ].join("\n");
-  if (methods.length === 0) return [`${call};`];
-  return [
-    `const { host, ready } = ${call};`,
-    "",
-    "defineExpose({",
-    ...methods.map((method) => {
-      const message = `Controller does not export method \`${method.exportName}\`.`;
-      return `  ${propKey(method.name)}: async (...args: unknown[]) => { const controllerModule = await ready(); if (controllerModule === undefined) throw new TypeError(${quote(`Controller method \`${method.name}\` is not ready for <${definition.contract.tag}>.`)}); const method = Reflect.get(controllerModule, ${quote(method.exportName)}); if (typeof method !== "function") throw Object.assign(new Error(${quote(`HJ003: ${message}`)}), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HJ003", message: ${quote(message)} }) }); return method(host, ...args); },`;
-    }),
-    "});",
-  ];
+  return [`${call};`];
 }
 
 /** `query-change` as `QueryChange`, for a name derived from a declared event. */

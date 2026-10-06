@@ -95,7 +95,7 @@ edits, focus and selection. `tests/package.test.ts` executes the renderer from a
 `tests/server-continuation.test.ts` compares the exact Node and browser baseline markup, then feeds
 Node output through the live graph loader and a minified, tree-shaken browser bundle with pre-parsed
 definitions and controller imports. Both deliveries adopt existing nodes, preserve input edits,
-attach controller effects and public methods, resolve and refetch declared reads, and dispose and
+attach controller effects and event subscriptions, resolve and refetch declared reads, and dispose and
 reattach behavior on removal/reconnection. The bundle inventory excludes Node dependencies; the
 pre-parsed delivery also excludes the live parser. These checks run in Chromium, Firefox and WebKit.
 

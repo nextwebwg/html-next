@@ -71,7 +71,7 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     `  ${JSON.stringify(tag)}: () => import(${JSON.stringify(`../${path}`)}), // controller ${index + 1}`
   );
   return [
-    'import { getComponentHost, observeDocument, registerComponentDefinitions, setControllerModule } from "@nextwebwg/html-next/runtime";',
+    'import { getComponentHost, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     "",
     `export const definitions = ${JSON.stringify(definitions)};`,
     "const controllerImports = {",
@@ -79,6 +79,7 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     "};",
     "",
     "const active = new WeakMap();",
+    "const initialized = new WeakSet();",
     "export function register(root = document) {",
     "  registerComponentDefinitions(definitions, root);",
     "  return observeDocument(root, {",
@@ -87,8 +88,13 @@ function packageEntry(definitions: readonly ComponentDefinition[], controllers: 
     "      if (load == null) return;",
     "      let disposed = false; let cleanup;",
     "      const module = load();",
-    "      setControllerModule(element, module);",
-    "      module.then(value => value.default(getComponentHost(element))).then(value => {",
+    "      module.then(value => {",
+    "        if (disposed) return;",
+    "        const host = getComponentHost(element);",
+    "        if (initialized.has(host)) return;",
+    "        initialized.add(host);",
+    "        return value.default(host);",
+    "      }).then(value => {",
     "        if (typeof value !== 'function') return;",
     "        if (disposed) value(); else cleanup = value;",
     "      });",

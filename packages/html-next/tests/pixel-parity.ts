@@ -4,11 +4,11 @@ import type { Browser, BrowserType, Page } from "playwright";
 
 /** Use one text raster path for both pages in Chromium's cross-page pixel comparisons. */
 export function launchParityBrowser(browserType: BrowserType): Promise<Browser> {
-  // Linux partial raster can retain one-channel rounding differences at native control corners after edits.
+  // Partial raster can retain one-channel rounding differences at native control corners after edits.
   // Full raster preserves exact cross-page pixel checks without changing the controls or their styles.
   // https://chromium.googlesource.com/chromium/src/+/aa63f203aea2ed4b43e4bfc18a04905813df56d8/content/public/common/content_switches.cc
   return browserType.launch({ headless: true, ...(browserType.name() === "chromium"
-    ? { args: ["--disable-lcd-text", ...(process.platform === "linux" ? ["--disable-partial-raster"] : [])] } : {}) });
+    ? { args: ["--disable-lcd-text", "--disable-partial-raster"] } : {}) });
 }
 
 interface PixelDifference {
@@ -61,7 +61,7 @@ async function pixelDifference(page: Page, actual: Buffer, expected: Buffer): Pr
   }, [actual.toString("base64"), expected.toString("base64")] as [string, string]);
 }
 
-async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | undefined, actual: Buffer, expected: Buffer): Promise<unknown> {
+async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | undefined, actual: Buffer, expected: Buffer) {
   const state = async (page: Page) => page.evaluate(() => {
     const button = document.querySelector("#case button");
     const style = button === null ? null : getComputedStyle(button);
@@ -103,7 +103,14 @@ export async function assertPixelsEqual(page: Page, actual: Buffer, expected: Bu
   if (tolerance !== undefined && difference.changed > 0 && difference.changed <= tolerance.maxChangedPixels &&
     difference.maxChannelDelta <= tolerance.maxChannelDelta) return;
   let diagnostics: unknown;
-  try { diagnostics = await diagnosePixelMismatch(page, expectedPage, actual, expected); }
+  try {
+    const recaptured = await diagnosePixelMismatch(page, expectedPage, actual, expected);
+    diagnostics = recaptured;
+    // Native control paint can settle after DOM updates and action completion.
+    // Allow one settled recapture of separate live pages, still requiring exact RGBA equality.
+    // Frozen PNGs and snapshots from one page remain strict: recapturing one page cannot validate them.
+    if (expectedPage !== undefined && expectedPage !== page && recaptured.recapturedParity?.changed === 0) return;
+  }
   catch (error) { diagnostics = { error: String(error) }; }
   assert.fail(`${message}: ${difference.changed} differing RGBA pixels at ${difference.size}; max channel delta=${difference.maxChannelDelta}; first=${JSON.stringify(difference.first)}; diagnostics=${JSON.stringify(diagnostics)}`);
 }

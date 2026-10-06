@@ -8,11 +8,11 @@ eyebrow: HTML Next · Build
 
 # Build an HTML Next component
 
-Define a reactive counter in HTML. Use the same component in an HTML page, a native Vite app, Vue, or React.
+Build a guest counter for workshop check-in. Choose a framework in any section; the rest of the page follows your choice. The component definition stays the same.
 
 ## Write the component
 
-Save this as `counter.html`. It declares state and two click handlers, with native buttons for incrementing and resetting the count.
+Save this as `counter.html`. Click the count as guests arrive, then Reset for the next session. The definition keeps the count and both button actions together.
 
 ```html title="counter.html"
 <template component="x-counter">
@@ -38,9 +38,55 @@ Save this as `counter.html`. It declares state and two click handlers, with nati
 
 Add a `<style>` inside the definition when it needs scoped CSS. An optional `controller="./counter.js"` connects an ordinary ES module for imperative behavior. Start with the markup and add JavaScript where you need it.
 
+::: framework-html-next
+
+Use this HTML definition directly in the browser, or let Vite build native DOM factories.
+
+:::
+
+::: framework-vue
+
+The Vue adapter turns this HTML definition into a Vue component when your app builds.
+
+:::
+
+::: framework-react
+
+The React adapter turns this HTML definition into a React component when your app builds.
+
+:::
+
+::: framework-svelte
+
+The Svelte adapter turns this HTML definition into a Svelte component when your app builds.
+
+:::
+
 ## Use what you built
 
-[Use the component](/html-next/usage) with HTML Next. That guide starts with native Vite setup and includes a browser runtime option. Its switcher also covers Vue and React; Svelte support is coming soon.
+::: framework-html-next
+
+[Set up HTML Next](/html-next/usage). Use Vite for a native app, or load the definition directly in an HTML page.
+
+:::
+
+::: framework-vue
+
+[Set up Vue](/html-next/usage/vue). Import `XCounter` from `counter.html` and use it like another Vue component.
+
+:::
+
+::: framework-react
+
+[Set up React](/html-next/usage/react). Import `XCounter` from `counter.html` and use it like another React component.
+
+:::
+
+::: framework-svelte
+
+[Set up Svelte](/html-next/usage/svelte). Import `XCounter` from `counter.html` and use it like another Svelte component.
+
+:::
 
 ## Keep learning
 

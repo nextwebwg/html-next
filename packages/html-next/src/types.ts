@@ -26,6 +26,7 @@ export type PropValue =
   | boolean
   | number
   | null
+  | Event
   | TrustedContentValue
   | readonly PropValue[]
   | PropValueRecord;

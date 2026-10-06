@@ -1,8 +1,14 @@
+import { parseFragment } from "parse5";
+
 import type { ComponentDefinition, ElementNode, TemplateAttribute, TemplateNode } from "../template.js";
 import type { PropContract, PropType } from "../types.js";
 import { kebabCase } from "../names.js";
 import { resolveDomProperty } from "../platform.js";
 import { typeScriptType } from "../type-system.js";
+
+/** Reflected native properties with an HTML representation during server rendering. */
+export const SSR_BOOLEAN_PROPERTIES = new Set(["disabled", "hidden", "required", "readOnly", "multiple", "open", "controls"]);
+export const SSR_STRING_PROPERTIES = new Set(["formAction", "title", "id", "name", "placeholder", "alt"]);
 
 const VOID_ELEMENTS = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
@@ -11,6 +17,19 @@ const VOID_ELEMENTS = new Set([
 
 export function isVoidElement(name: string): boolean {
   return VOID_ELEMENTS.has(name);
+}
+
+// Bound names are lowercased by the HTML parser. Recover SVG's adjusted attribute spelling.
+const adjustedSvgAttributes = new Map<string, string>();
+export function svgAttributeName(name: string): string {
+  let adjusted = adjustedSvgAttributes.get(name);
+  if (adjusted === undefined) {
+    const fragment = parseFragment(`<svg ${name}></svg>`);
+    const svg = fragment.childNodes[0] as { attrs?: readonly { name: string }[] } | undefined;
+    adjusted = svg?.attrs?.[0]?.name ?? name;
+    adjustedSvgAttributes.set(name, adjusted);
+  }
+  return adjusted;
 }
 
 const NATIVE_BOOLEAN_ATTRIBUTES = new Set([

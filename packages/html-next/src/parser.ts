@@ -234,7 +234,7 @@ function validateCompiledExpression(
 ): void {
   for (const dependency of expression.dependencies) {
     const root = dependency.split(".", 1)[0]!;
-    if (!scope.roots.has(root) && scope.allowUndeclared !== true) {
+    if (!scope.roots.has(root) && (root === "$$event" || scope.allowUndeclared !== true)) {
       fail("HT003", `Expression root \`${root}\` is not declared in this scope.`, source);
     }
   }
@@ -616,6 +616,8 @@ function readHandlerSteps(
       if (attr(step, ":value") !== undefined || attr(step, ":detail") !== undefined || attr(step, "from:value") !== undefined) {
         fail("HC023", "Use `expr:value` for an expression on <dispatch>.", source);
       }
+      const target = attr(step, "target");
+      if (target !== undefined && !NAME_RE.test(target)) fail("HC023", "A <dispatch> target must name a component-local $ref.", source);
       const expressionSource = attr(step, "expr:value");
       const literal = attr(step, "value");
       if (expressionSource !== undefined && literal !== undefined) {
@@ -632,6 +634,7 @@ function readHandlerSteps(
           : compileScopedExpression(expressionSource ?? JSON.stringify(parsedLiteral?.ok ? parsedLiteral.value : literal), scope, source);
       const parsed: {
         kind: "dispatch";
+        target?: string;
         event: string;
         value?: CompiledExpression;
         guard?: CompiledExpression;
@@ -639,6 +642,7 @@ function readHandlerSteps(
         kind: "dispatch",
         event,
       };
+      if (target !== undefined) parsed.target = target;
       if (value !== undefined) parsed.value = value;
       if (guard !== undefined) parsed.guard = guard;
       steps.push(parsed);
@@ -687,7 +691,7 @@ function readDeclarations(
     const element = node;
     elements.push(element);
     const kind = sourceTag(element);
-    if (!/^(?:prop|type|state|computed|data|context|handler|event|method)$/.test(kind)) {
+    if (!/^(?:prop|type|state|computed|data|context|handler|event)$/.test(kind)) {
       fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
     }
     if (kind === "type") continue;
@@ -707,7 +711,7 @@ function readDeclarations(
     if (kind === "context" && !isIdentifier(localName)) {
       fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
     }
-    if (kind !== "handler" && kind !== "method" && !isIdentifier(localName)) {
+    if (kind !== "handler" && !isIdentifier(localName)) {
       fail("HC013", `Declaration \`${localName}\` is not a valid expression identifier.`, source);
     }
     if (names.has(localName)) {
@@ -867,19 +871,10 @@ function readDeclarations(
       });
       continue;
     }
-    if (kind === "method") {
-      declarations.push({
-        kind,
-        name,
-        exportName: attr(element, "export") ?? name,
-        returns: attr(element, "returns") ?? "undefined",
-      });
-      continue;
-    }
     declarations.push({
       kind: "handler",
       name,
-      steps: readHandlerSteps(element, scope, source, stateTypes, eventTypes),
+      steps: readHandlerSteps(element, { ...scope, roots: new Set([...roots, "$$event"]) }, source, stateTypes, eventTypes),
     });
   }
   for (const declaration of declarations) {
@@ -1482,6 +1477,14 @@ export function parseComponentNodes(
   const template = parseElement(root, contract, scope, source, slotState, platform, rootArms !== undefined);
   if (template.flow !== undefined && template.flow.kind !== "with" && template.flow.kind !== "match") {
     fail("HT021", "A component root must always select exactly one native or delegated element.", source);
+  }
+  for (const declaration of declarations) {
+    if (declaration.kind !== "handler") continue;
+    for (const step of declaration.steps) {
+      if (step.kind === "dispatch" && step.target !== undefined && !slotState.refs.has(step.target)) {
+        fail("HC023", `Dispatch target \`${step.target}\` is not a declared component-local $ref.`, source);
+      }
+    }
   }
   const controller = attr(wrapper, "controller");
   if (controller === "") fail("HC022", "A controller specifier cannot be empty.", source);

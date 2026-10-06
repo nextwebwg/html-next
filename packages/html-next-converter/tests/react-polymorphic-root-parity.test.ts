@@ -14,22 +14,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
-const source = `<template component="x-switch" status="early" summary="Polymorphic root." controller="./switch.js"><defs>
-  <state type="boolean" name="linked" value="false"></state>
-  <handler name="switch"><set name="linked" expr:value="linked = false"></set></handler>
-</defs><template $match><a $when="linked" href="#next" on:click.prevent="switch">Link</a>
-  <button $else type="button" on:click="switch">Button</button></template>
-<style>:host { display: inline-block; padding: 4px; color: rgb(20 70 130); font: 16px/24px Arial, sans-serif; }</style></template>`;
-const controller = `export default function connect(host) {
-  const root = host.root;
-  window.switchTrace.push(["connect", root.localName]);
-  const stop = host.effect(() => {
-    const current = host.root;
-    current.setAttribute("data-controller-root", current.localName);
-    window.switchEffects.push(current.localName);
-  });
-  return () => { stop(); window.switchTrace.push(["disconnect", root.localName]); };
-}`;
+import { polymorphicControllerSource as source, polymorphicControllerModule as controller } from "./fixtures/polymorphic-controller.js";
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

@@ -1,5 +1,6 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { typedPropsModule } from "./vue-props.js";
+import { DECLARED_EVENT_TYPE_SOURCE } from "./shared-generated.js";
 
 const BOUNDARY = `interface PropBoundaryProps<P> {
   readonly value: P;
@@ -38,9 +39,5 @@ export class PropBoundary<P> extends React.Component<PropBoundaryProps<P>, PropB
 
 export function reactPropsArtifact(version: string): GeneratedArtifact {
   return Object.freeze({ path: "react/props.ts", content: `import React from "react";\n${typedPropsModule(version)}
-/** Declared event details use the same nested type and constraint check as typed values. */
-export function acceptsDeclaredEvent(value: unknown, type: Parameters<typeof parse>[1]): boolean {
-  return parse(value, type, "$").ok;
-}
-${BOUNDARY}` });
+${DECLARED_EVENT_TYPE_SOURCE}${BOUNDARY}` });
 }

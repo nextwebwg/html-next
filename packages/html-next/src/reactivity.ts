@@ -1,3 +1,4 @@
+import { isNativeEvent } from "./freeze.js";
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
 import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
@@ -597,6 +598,7 @@ export class ReactiveScope implements Scope {
     if (value === null || typeof value !== "object") return value;
     const cached = proxyCache.get(value);
     if (cached !== undefined) return cached as Value;
+    if (isNativeEvent(value) || Object.isFrozen(value)) return value;
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => {
         if (activeEffect !== undefined) {
@@ -615,10 +617,26 @@ export class ReactiveScope implements Scope {
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },
       set: (target, key, next, receiver) => {
+        const previousLength = Array.isArray(target) ? target.length : undefined;
         const previous = Reflect.get(target, key, receiver);
         const wrapped = this.#wrap(next as Value);
         const result = Reflect.set(target, key, wrapped, receiver);
         if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+        // Defining an array index can extend length before push writes that same length again.
+        if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+          trigger(objectSubscribers.get(target)?.get("length"));
+        }
+        // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+        if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+          const length = (target as Value[]).length;
+          for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+            if (typeof property !== "string") continue;
+            const index = Number(property);
+            if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+              trigger(subscribers);
+            }
+          }
+        }
         return result;
       },
       deleteProperty: (target, key) => {

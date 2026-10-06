@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
@@ -15,6 +15,7 @@ import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { chromium } from "playwright";
 import react from "@vitejs/plugin-react";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import htmlNext from "../src/vite.js";
 import { syncHtmlNext } from "../src/framework.js";
 import { installSourcePackage } from "./source-package.js";
@@ -34,7 +35,7 @@ async function fixture() {
   await mkdir(library, { recursive: true });
   await mkdir(join(root, "src"));
   await mkdir(join(root, "node_modules", "@types"));
-  for (const name of ["vue", "react", "react-dom", "@types/react", "@types/react-dom"]) {
+  for (const name of ["vue", "react", "react-dom", "svelte", "@types/react", "@types/react-dom"]) {
     await symlink(join(modules, name), join(root, "node_modules", name), "dir");
   }
   await writeFile(join(root, "package.json"), JSON.stringify({ type: "module", dependencies: { "@example/controls": "1.0.0" } }));
@@ -300,3 +301,253 @@ for (const target of ["vue", "react"] as const) it(`${target} supplies the sanit
     assert.doesNotMatch(markup.match(/<div>([\s\S]*)<\/div>/)?.[1] ?? "", /unsafe|<script/);
   } finally { await server.close(); }
 }, 60_000);
+
+
+describe("svelte source adapter", () => {
+  it("consumes a packed component folder without an authored index or build script", async () => {
+    const { root, library } = await fixture();
+    await installSourcePackage(root, {
+      "components/controls.html": await readFile(join(library, "controls.html"), "utf8"),
+      "components/nested/card.html": '<template component="ui-card" controller="./card.js" status="early" summary="Card."><section>Nested card</section></template>',
+      "components/nested/card.js": 'export default host => host.root.setAttribute("data-ready", "yes");',
+    });
+    const app = join(root, "src", "App.svelte");
+    await writeFile(app, `<script lang="ts">
+      import { UiButton } from "@example/controls"; import { UiCard } from "@example/controls/nested";
+      </script><main><UiButton label="Save" /><UiCard /></main>`);
+    const entry = join(root, "src", "folder.ts");
+    await writeFile(entry, `import { render } from "svelte/server"; import App from "./App.svelte";
+      export const markup = () => render(App).body;`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { ssr: entry, outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "folder.js")).href) as { markup(): string };
+    assert.match(output.markup(), /Save.*Badge.*Nested card/s);
+    assert.doesNotMatch(await readFile(join(root, "dist", "folder.js"), "utf8"), /UNUSED_COMPONENT_MARKER|parseComponent|parse5/);
+    const prepared = await syncHtmlNext({ root, target: "svelte" });
+    const declarations = await readFile(prepared.declarationsFile, "utf8");
+    assert.match(declarations, /export const UiButton:/);
+    assert.match(declarations, /declare module "@example\/controls\/nested"/);
+    assert.ok(prepared.sourceFiles.includes(await realpath(join(library, "components", "nested", "card.html"))));
+    const config = join(root, "tsconfig.json");
+    await writeFile(config, JSON.stringify({ compilerOptions: {
+      strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
+    }, include: ["src"] }));
+    const checker = require.resolve("svelte-check/bin/svelte-check");
+    await run(process.execPath, [checker, "--tsconfig", config, "--output", "machine"], { cwd: root });
+    await writeFile(join(root, "src", "Invalid.svelte"), `<script lang="ts">import { UiButton } from "@example/controls";</script><UiButton label={42} size="huge" />`);
+    await assert.rejects(run(process.execPath, [checker, "--tsconfig", config, "--output", "machine"], { cwd: root }), (error: unknown) => {
+      const { stdout } = error as { stdout: string };
+      assert.match(stdout, /number.*string/);
+      assert.match(stdout, /huge/);
+      return true;
+    });
+    await rm(join(root, "src", "Invalid.svelte"));
+    await writeFile(join(root, "src", "client.ts"), `import { mount } from "svelte"; import App from "./App.svelte";
+      mount(App, { target: document.getElementById("app")! });`);
+    await writeFile(join(root, "index.html"), '<div id="app"></div><script type="module" src="/src/client.ts"></script>');
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { outDir: "client-dist" } });
+    assert.match(await readFile(join(root, "client-dist", "index.html"), "utf8"), /assets\//);
+  }, 60_000);
+
+  it.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("mounts on-demand local imports in Vite and updates native output", async () => {
+    const { root, library } = await fixture();
+    await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
+    const controlled = (await readFile(join(library, "controls.html"), "utf8"))
+      .replace('component="ui-button"', 'component="ui-button" controller="./controlled.js"')
+      .replace('<handler name="increment">', '<event name="increment-request" type="event">Native input event.</event><handler name="increment">')
+      .replace('<set name="count" expr:value="$count + 1"></set>', () => '<dispatch event="increment-request" expr:value="$$event"></dispatch>');
+    await writeFile(join(root, "src", "controls.html"), controlled);
+    await writeFile(join(root, "src", "controlled.js"), `export default function initialize(host) {
+      host.on("connect", () => {
+        host.root.setAttribute("data-connected", "yes");
+        return () => host.root.removeAttribute("data-connected");
+      });
+      host.on("increment-request", event => {
+        host.state.count += 1;
+        host.root.setAttribute("data-native-event", String(event.detail instanceof MouseEvent));
+        host.root.setAttribute("data-source-event", event.detail.type);
+      });
+    }`);
+    await writeFile(join(root, "src", "App.svelte"), `<script lang="ts">import { UiButton } from "./controls.html";</script><UiButton label="Save" />`);
+    await writeFile(join(root, "src", "mount.ts"), `import { mount } from "svelte"; import App from "./App.svelte"; mount(App, { target: document.getElementById("app")! });`);
+    await writeFile(join(root, "index.html"), `<div id="app"></div><script type="module" src="/src/mount.ts"></script>`);
+    const server = await createServer({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()], server: { port: 0, host: "127.0.0.1" } });
+    const browser = await chromium.launch();
+    try {
+      await server.listen();
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      page.on("response", response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
+      await page.goto(server.resolvedUrls!.local[0]!);
+      try { await page.waitForFunction(() => document.querySelector("output")?.textContent === "0", undefined, { timeout: 5000 }); }
+      catch (error) { assert.fail(`${String(error)}; browser errors: ${JSON.stringify(errors)}`); }
+      await page.locator('button[data-connected="yes"]').waitFor();
+      await page.locator("button").click();
+      await page.waitForFunction(() => document.querySelector("output")?.textContent === "1");
+      assert.equal(await page.locator("button").getAttribute("data-connected"), "yes");
+      assert.equal(await page.locator("button").getAttribute("data-native-event"), "true");
+      assert.equal(await page.locator("button").getAttribute("data-source-event"), "click");
+      await page.locator("button").click();
+      await page.waitForFunction(() => document.querySelector("output")?.textContent === "2");
+      assert.equal(await page.locator("ui-button, ui-badge").count(), 0);
+      assert.equal(await page.locator("button").evaluate((element) => getComputedStyle(element).color), "rgb(1, 2, 3)");
+      assert.deepEqual(errors, []);
+      assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
+    } finally { await browser.close(); await server.close(); }
+  }, 60_000);
+
+  it("converts package and local imports with precise declarations and tree shaking", async () => {
+    const { root, library } = await fixture();
+    const authored = (await readFile(join(library, "controls.html"), "utf8"))
+      .replace('<handler name="increment">', '<event name="change" type="integer" cancelable="true">Count.</event><handler name="increment">')
+      .replace('<set name="count" expr:value="$count + 1"></set>', '<set name="count" expr:value="$count + 1" $if="count >= 0"></set><dispatch event="change" expr:value="count"></dispatch><focus ref="label"></focus>')
+      .replace('on:click="increment"', 'on:click.self="increment"').replace('<span $value="$label">', '<span $ref="label" $value="$label">')
+      .replace('<span>Badge</span>', `<defs><data name="feed" src="/api/feed" type="object({ label: string })"><param name="text" expr:value="form.text"></param></data><state name="form" type="object({ text: string, choices: list(string) })" value="{ text: 'Ready', choices: ['b'] }"></state></defs>
+        <section .scrollTop="10">Badge<output $value="feed.value.label"></output><p .textContent="form.text"></p><input value="authored" .title="form.text" bind:value="form.text"><textarea bind:value="form.text">default area</textarea>
+          <select multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
+          <ui-rows><template slot="row"><li .title="item.name" $value="item.name"></li></template></ui-rows></section>`)
+      + `<template component="ui-rows" status="early" summary="Scoped rows."><defs>
+        <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state></defs>
+        <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row"><li>Fallback</li></slot></ul></template>
+        <template component="ui-selected" status="early" summary="Selected input."><defs>
+          <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
+          <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+          </defs><output $value="value"></output></template>
+        <template component="ui-structured" status="early" summary="Selected structured input." controller="./controlled.js"><defs>
+          <state name="kind" type="keyword" values="list, object, text" value="list"></state>
+          <prop name="value">Value.<type from="kind"><option value="list" type="list(number)"></option><option value="object" type="object({ label: string })"></option><option value="text" type="string"></option></type></prop>
+          </defs><output $value="value"></output></template>
+        <template component="ui-structured-owner" status="early" summary="Structured input binding."><defs><state name="box" type="object({ value: unknown })" value="{ value: '[1, 2]' }"></state></defs><section><ui-structured from:value="box.value"></ui-structured><ui-structured bind:value="box.value"></ui-structured></section></template>
+        <template component="ui-no-controller" status="early" summary="Controller-free native output."><button class="">Ping</button></template>
+        <template component="ui-context" status="early" summary="Context alias."><defs><context name="count" from="ui-button" as="activeCount"></context><computed name="twice" from="activeCount + 1"></computed></defs><output $value="twice"></output></template>
+        <template component="ui-switch" status="early" summary="Focused root." controller="./controlled.js"><defs><state name="linked" type="boolean" value="false"></state></defs><template $match><a $when="linked" $ref="link" href="#next">Link</a><button $else $ref="button">Button</button></template></template>
+        <template component="ui-controlled" status="early" summary="Controller events." controller="./controlled.js"><defs><prop name="amount" type="number" default="1">Amount.</prop><state name="count" type="number" value="0"></state><event name="increment-request" type="event">Native input event.</event><handler name="increment"><dispatch event="increment-request" expr:value="$$event"></dispatch></handler></defs><section><button on:click="increment" $ref="button" $value="count"></button><span $each="row of [count]" $ref="rows" $value="row"></span></section></template>
+        <template component="ui-reserved" status="early" summary="Public slot names."><defs><prop name="children" type="string">Public children.</prop><prop name="slots" type="string">Public slots.</prop></defs><section><output $value="concat(children, '/', slots)"></output><slot name="title"></slot><slot></slot></section></template>
+        <template component="ui-names" status="early" summary="Import collisions."><defs><state name="UiReserved" value="Ready"></state><state name="Map" value="1"></state><state name="String" value="Ready"></state><state name="Symbol" value="Kept"></state><state name="absent" type="number"></state><handler name="UiControlled"><set name="absent" expr:value="1"></set></handler></defs><section><ui-reserved from:children="UiReserved" slots="Public"><b slot="title">Title</b><span $value="UiReserved"></span></ui-reserved><ui-controlled $ref="controlled" on:click="UiControlled"></ui-controlled><output .title="absent" $value="concat(String, '/', Map, '/', Symbol)"></output></section></template>
+        <template component="ui-bound" status="early" summary="Component binding."><defs><state name="form" type="object({ amount: number })" value="{ amount: 2 }"></state></defs><section><ui-controlled bind:amount="form.amount"></ui-controlled><ui-native-delegate bind:value="form.amount"></ui-native-delegate><ui-owned-input bind:value="form.amount"></ui-owned-input><ui-untyped-number bind:value="form.amount"></ui-untyped-number><ui-untyped-output bind:value="form.amount"></ui-untyped-output><ui-untyped-output bind:__proto__="form.amount" bind:constructor="form.amount"></ui-untyped-output><ui-untyped-output from:value="form.amount"></ui-untyped-output><ui-untyped-flag bind:checked="form.amount"></ui-untyped-flag><ui-untyped-radio bind:checked="form.amount"></ui-untyped-radio><ui-untyped-file bind:value="form.amount"></ui-untyped-file><ui-untyped-area bind:value="form.amount"></ui-untyped-area><ui-untyped-select bind:value="form.amount"></ui-untyped-select><ui-untyped-select from:value="form.amount"></ui-untyped-select><ui-plain-select from:value="form.amount"></ui-plain-select><select from:value="form.amount"><option value="1" selected>One</option><option value="2">Two</option></select><ui-untyped-multiple bind:value="form.amount"></ui-untyped-multiple><ui-selected kind="number" bind:value="form.amount"></ui-selected><ui-state-selected bind:value="form.amount"></ui-state-selected></section></template>
+        <template component="ui-native-switch" status="early" summary="Changing native root."><defs><prop name="mode" type="keyword" values="field, area" default="field">Root.</prop></defs><template $match><input $when="mode = 'field'" value="Default"><textarea $else>Default area</textarea></template></template>
+        <template component="ui-native-delegate" status="early" summary="Native binding delegate."><ui-native-switch></ui-native-switch></template>
+        <template component="ui-owned-input" status="early" summary="Locally controlled native root."><defs><state name="local" type="string" value="Own"></state></defs><input value="Own default" .value="local" .title="local" from:data-local="local"></template>
+        <template component="ui-untyped-number" status="early" summary="Undeclared number."><input type="number" value="9"></template>
+        <template component="ui-untyped-output" status="early" summary="Undeclared generic."><output value="literal">Generic</output></template>
+        <template component="ui-untyped-flag" status="early" summary="Undeclared checkbox."><input type="checkbox"></template>
+        <template component="ui-untyped-radio" status="early" summary="Undeclared radio."><input type="radio"></template>
+        <template component="ui-untyped-file" status="early" summary="Undeclared file."><input type="file"></template>
+        <template component="ui-untyped-area" status="early" summary="Undeclared textarea."><textarea>Default</textarea></template>
+        <template component="ui-plain-select" status="early" summary="Ordinary select root."><select value="2"><option value="1" selected>One</option><option value="2">Two</option></select></template>
+        <template component="ui-untyped-select" status="early" summary="Undeclared select."><select><option value="1">One</option><option value="2" selected>Two</option></select></template>
+        <template component="ui-untyped-multiple" status="early" summary="Undeclared multiple select."><select multiple><option value="1">One</option><option value="2" selected>Two</option></select></template>
+        <template component="ui-decorated" status="early" summary="Delegated decoration."><defs><state name="active" type="boolean" value="false"></state><state name="color" type="string" value="red"></state></defs><ui-controlled class="decorated active" style="color: blue !important" class:active="active" style:color="color"></ui-controlled></template>
+        <template component="ui-cycle" status="early" summary="Computed cycle."><defs>
+          <computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed></defs><output $value="left"></output></template>
+        <template component="ui-depth" status="early" summary="Recursive graph."><defs>
+          <prop name="level" type="number" default="0">Depth.</prop></defs>
+          <section><span $value="level"></span><ui-depth $if="level < 2" from:level="level + 1"></ui-depth></section></template>
+        <template component="ui-state-selected" status="early" summary="State-selected input."><defs>
+          <state name="kind" type="keyword" values="text, number" value="number"></state>
+          <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+          <handler name="switch"><set name="kind" value="text"></set></handler>
+          </defs><output on:click="switch" $value="value"></output></template>
+        <template component="ui-primary" status="early" summary="Primary."><defs>
+          <prop name="label" type="string" required>Label.</prop><state name="active" type="boolean" value="false"></state>
+          <event name="change" type="boolean">Change.</event><handler name="toggle"><set name="active" expr:value="active = false"></set><dispatch event="change" expr:value="active"></dispatch><focus ref="root"></focus></handler>
+        </defs><ui-button $ref="root" from:label="label" class="primary" class:active="active" on:click="toggle"><slot></slot></ui-button></template>`;
+    await writeFile(join(library, "controls.html"), authored);
+    await writeFile(join(root, "src", "controls.html"), await readFile(join(library, "controls.html"), "utf8"));
+    const controllerSource = `export default function initialize(host) {
+      host.on("connect", () => {
+        host.root.setAttribute("data-connected", "yes");
+        return () => host.root.removeAttribute("data-connected");
+      });
+      host.on("increment-request", () => { host.state.count += 1; });
+    }`;
+    await writeFile(join(library, "controlled.js"), controllerSource);
+    await writeFile(join(root, "src", "controlled.js"), controllerSource);
+    const prepared = await syncHtmlNext({ target: "svelte", root, entries: ["src/controls.html"] });
+    assert.ok(prepared.aliases.has("@example/controls"));
+    assert.match(await readFile(prepared.declarationsFile, "utf8"), /export const Button:/);
+    assert.match(await readFile(join(root, "src", "controls.d.html.ts"), "utf8"), /export \*/);
+    const checker = require.resolve("svelte-check/bin/svelte-check");
+    const cache = dirname(dirname(prepared.aliases.get("@example/controls")!));
+    // Svelte deliberately suppresses diagnostics under node_modules, including the adapter cache.
+    // Validate a standalone copy and prove that the checker rejects an invalid native consumer.
+    const validation = join(root, "checked-svelte");
+    await cp(cache, validation, { recursive: true, filter: (source) => basename(source) !== "node_modules" });
+    const config = JSON.parse(await readFile(join(cache, "tsconfig.json"), "utf8")) as { files: string[]; compilerOptions: Record<string, unknown> };
+    const validationConfig = join(validation, "tsconfig.json");
+    const validationFiles = config.files.map((file) => join(validation, relative(cache, file)));
+    await writeFile(validationConfig, JSON.stringify({ ...config, files: validationFiles,
+      compilerOptions: { ...config.compilerOptions, rootDir: validation, outDir: join(validation, "types") } }));
+    const checkSvelte = async (project: string): Promise<void> => {
+      try { await run(process.execPath, [checker, "--tsconfig", project, "--output", "machine"], { cwd: root }); }
+      catch (error) { assert.fail((error as { stdout?: string }).stdout ?? String(error)); }
+    };
+    await checkSvelte(validationConfig);
+    const selectedConsumer = join(validation, "SelectedConsumer.svelte");
+    const selected = validationFiles.find((file) => basename(file) === "UiSelected.svelte")!;
+    assert.ok(selected);
+    const selectedImport = `./${relative(validation, selected).split("\\").join("/")}`;
+    const selectedConfig = join(validation, "tsconfig.consumer.json");
+    await writeFile(selectedConfig, JSON.stringify({ ...config, files: [selectedConsumer],
+      compilerOptions: { ...config.compilerOptions, rootDir: validation, outDir: join(validation, "types") } }));
+    await writeFile(selectedConsumer, `<script lang="ts">import UiSelected from ${JSON.stringify(selectedImport)};</script><UiSelected kind="number" value={2} /><UiSelected kind="text" value="Ready" />`);
+    await checkSvelte(selectedConfig);
+    await writeFile(selectedConsumer, `<script lang="ts">import UiSelected from ${JSON.stringify(selectedImport)};</script><UiSelected kind="number" value="Ready" />`);
+    await assert.rejects(run(process.execPath, [checker, "--tsconfig", selectedConfig, "--output", "machine"], { cwd: root }), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /string.*number/);
+      return true;
+    });
+    await rm(selectedConsumer);
+    await rm(selectedConfig);
+    const entry = join(root, "src", "entry.ts");
+    await writeFile(entry, `import { render } from "svelte/server";
+      import { Button } from "@example/controls";
+      import { UiBadge, UiDecorated, UiNoController } from "./controls.html";
+      export const markup = () => render(Button, { props: { label: "Save", size: "large" } }).body + render(UiBadge).body + render(UiDecorated).body + render(UiNoController).body;`);
+    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext({ target: "svelte" }), svelte()],
+      build: { ssr: entry, outDir: "dist", minify: false } });
+    const output = await import(pathToFileURL(join(root, "dist", "entry.js")).href) as { markup(): string };
+    assert.match(output.markup(), /Save/);
+    assert.match(output.markup(), /Badge/);
+    assert.match(output.markup(), /class="decorated"/);
+    assert.match(output.markup(), /style="color: red;"/);
+    assert.match(output.markup(), /<button\b[^>]*>Ping<\/button>/);
+    const bundle = await readFile(join(root, "dist", "entry.js"), "utf8");
+    assert.equal(/<ui-button|<ui-badge|UNUSED_COMPONENT_MARKER|parse(?:BrowserComponent|Component(?:Nodes|Resource)?)\b|html-next\/live/.test(bundle), false, "unused components and HTML Next runtime must be absent");
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
+      strict: true, skipLibCheck: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", noEmit: true,
+    }, include: ["src"] }));
+    await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte";
+      import { Button } from "@example/controls"; import { UiButton, UiControlled, UiReserved, UiNoController } from "./controls.html";
+      export const controlled: ComponentProps<typeof UiControlled> = { amount: 2 };
+      export const controllerFree: ComponentProps<typeof UiNoController> = {};
+      export const good: ComponentProps<typeof Button> = { label: "Save", size: "large" };
+      export const local: ComponentProps<typeof UiButton> = { label: "Save" };
+      export const reserved: ComponentProps<typeof UiReserved> = { children: "Child", slots: "Slots" };`);
+    const compiler = require.resolve("typescript/bin/tsc");
+    await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
+    await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { Button } from "@example/controls";
+      export const bad: ComponentProps<typeof Button> = { label: 42, size: "huge" };`);
+    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+      const result = error as { stdout: string };
+      assert.match(result.stdout, /number.*string/);
+      assert.match(result.stdout, /huge/);
+      return true;
+    });
+    await writeFile(join(root, "src", "invalid.ts"), `import type { ComponentProps } from "svelte"; import { UiReserved } from "./controls.html";
+      export const bad: ComponentProps<typeof UiReserved> = { children: 42, slots: "Slots" };`);
+    await assert.rejects(run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root }), (error: unknown) => {
+      assert.match((error as { stdout: string }).stdout, /number.*string/);
+      return true;
+    });
+    await rm(join(root, "src", "invalid.ts"));
+    await writeFile(join(library, "controls.html"), (await readFile(join(library, "controls.html"), "utf8")).replace('values="small, large"', 'values="small, large, huge"'));
+    await syncHtmlNext({ target: "svelte", root });
+    await writeFile(join(root, "src", "consumer.ts"), `import type { ComponentProps } from "svelte"; import { Button } from "@example/controls";
+      export const refreshed: ComponentProps<typeof Button> = { label: "Save", size: "huge" };`);
+    await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
+  }, 60_000);
+});

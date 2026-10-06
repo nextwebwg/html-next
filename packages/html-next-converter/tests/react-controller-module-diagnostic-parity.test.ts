@@ -12,14 +12,8 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 import { convertComponents } from "../src/index.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const cases = [
-  { tag: "x-load-failure", code: "HJ001", source: `<template component="x-load-failure" status="early" summary="Load failure." controller="./bad.js"><button type="button">Ready</button></template>`,
-    controller: `throw new Error("load exploded"); export default function controller() {}`,
-    message: "Controller module `https://app.example/components/bad.js` failed to load: load exploded." },
-  { tag: "x-invalid-export", code: "HJ002", source: `<template component="x-invalid-export" status="early" summary="Invalid export." controller="./bad.js"><button type="button">Ready</button></template>`,
-    controller: "export default 7;",
-    message: "Controller module `https://app.example/components/bad.js` must default-export a function." },
-] as const;
+import { controllerDiagnosticCases as cases } from "./fixtures/controller-diagnostics.js";
+
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string; readonly source: string | null };
 
 describe.skipIf(!enabled)("public React converter controller module diagnostic parity", () => {

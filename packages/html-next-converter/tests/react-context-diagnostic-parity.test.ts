@@ -13,9 +13,8 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const source = `<template component="x-context-reader" status="early" summary="Context reader."><defs>
-  <context name="current" from="x-steps"></context>
-</defs><span $value="current"></span></template>`;
+import { missingContextSource as source } from "./fixtures/context-diagnostic.js";
+
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };
 
 describe.skipIf(!enabled)("public React converter missing-context diagnostic parity", () => {

@@ -250,7 +250,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           body:
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
             `<defs><state type="number" name="count" value="1"></state>` +
-            `<method name="focusInput" export="focusInput" returns="promise(undefined)"></method></defs>` +
+            `</defs>` +
             `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
         });
       } else if (url.endsWith("/ui/app.js")) {
@@ -258,12 +258,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           contentType: "text/javascript",
           headers: { "access-control-allow-origin": "*" },
           body:
-            `export default (host) => {` +
+            `export default (host) => { host.on("connect", () => {` +
             ` const add = () => { host.state.count += 1; };` +
             ` host.refs.button.addEventListener("click", add);` +
             ` const stop = host.effect(() => { host.root.dataset.count = host.state.count; });` +
             ` return () => { stop(); host.refs.button.removeEventListener("click", add); };` +
-            `}; export const focusInput = (host) => { host.refs.button.dataset.focused = "yes"; };`,
+            ` }); host.on("focus-request", () => { host.refs.button.focus(); }); };`,
         });
       } else {
         await route.fulfill({
@@ -289,18 +289,18 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       const root = document.querySelector("#app")!;
       root.querySelector("button")!.click();
       await Promise.resolve();
-      await (root as Element & { focusInput(): Promise<void> }).focusInput();
+      root.dispatchEvent(new Event("focus-request"));
       const value = {
         tag: root.localName,
         count: root.querySelector("output")!.textContent,
         effectCount: (root as HTMLElement).dataset.count,
-        methodCalled: (root.querySelector("button") as HTMLElement).dataset.focused,
+        focused: document.activeElement === root.querySelector("button"),
       };
       started.stop();
       return value;
     });
     await page.close();
-    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", methodCalled: "yes" });
+    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", focused: true });
   });
 
   it("does not invoke a controller whose module resolves after disconnection", async () => {

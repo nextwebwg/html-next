@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { deepFreeze } from "../src/freeze.js";
 
 import {
   TypeSyntaxError,
+  isAttributeType,
+  typeScriptType,
   formatType,
   parseTypedValue,
   parseTypeExpression,
@@ -107,5 +110,52 @@ describe("HTML Next type system", () => {
 
   it("recognizes unknown for structured fields while prop validation keeps it property-only", () => {
     assert.equal(formatType(parseTypeExpression("unknown")), "unknown");
+  });
+});
+
+
+describe("native event values", () => {
+  it("accepts native Event and subclasses by reference, including structured payloads", () => {
+    const type = parseTypeExpression("event");
+    assert.equal(formatType(type), "event");
+    assert.equal(typeScriptType(type), "Event");
+    for (const event of [new Event("activate"), new CustomEvent("select", { detail: 42 })]) {
+      assert.deepEqual(parseTypedValue(event, type, "$", "value"), { ok: true, value: event });
+      const payloadType = parseTypeExpression("object({ source: event, item: string })");
+      const parsed = parseTypedValue({ source: event, item: "Ada" }, payloadType, "$", "value");
+      assert.equal(parsed.ok, true);
+      if (parsed.ok) assert.equal((parsed.value as { source: Event }).source, event);
+      assert.equal(typeScriptType(payloadType), "{ readonly source: Event; readonly item: string }");
+    }
+  });
+
+  it("rejects event-like objects, strings, and counterfeit prototypes", () => {
+    const type = parseTypeExpression("event");
+    for (const value of ["click", "{ type: 'click' }", { type: "click", target: null }, { [Symbol.toStringTag]: "Event" }, Object.create(Event.prototype)]) {
+      assert.equal(parseTypedValue(value, type).ok, false);
+    }
+    assert.equal(isAttributeType(type), false);
+    assert.equal(isAttributeType(parseTypeExpression("object({ source: event })")), false);
+    assert.equal(parseTypedValue("{ source: { type: 'click' } }", parseTypeExpression("object({ source: event })")).ok, false);
+  });
+
+  it("never freezes native events or their detail while freezing surrounding authored structures", () => {
+    const detail = { item: "Ada" };
+    const event = new CustomEvent("select", { detail, cancelable: true });
+    const wrapped = deepFreeze({ source: event, extra: { label: "selection" } });
+    assert.equal(wrapped.source, event);
+    assert.equal(Object.isFrozen(wrapped), true);
+    assert.equal(Object.isFrozen(wrapped.extra), true);
+    assert.equal(Object.isFrozen(event), false);
+    assert.equal(Object.isFrozen(detail), false);
+    event.preventDefault();
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  it("rejects native event serialization while retaining serializable absent event values", () => {
+    const type = parseTypeExpression("event");
+    assert.throws(() => serializeTypedValue(new Event("activate"), type), /cannot be serialized/);
+    assert.throws(() => serializeTypedValue({ source: new Event("activate") }, parseTypeExpression("object({ source: event })")), /cannot be serialized/);
+    assert.equal(serializeTypedValue(null, { kind: "union", members: [type, { kind: "terminal", name: "null" }] }), "null");
   });
 });
