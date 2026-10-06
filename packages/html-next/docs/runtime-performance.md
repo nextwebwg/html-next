@@ -76,3 +76,154 @@ compares the six shared HTML Next workloads against main in fresh processes;
 it rejects demonstrated slowdowns over 10% in aggregate or 25% in any workload.
 Unstable controls produce an inconclusive failure after one retry. The Required
 CI job includes this check; the full third-party matrix remains optional.
+
+## Keyed component rendering: confirmed October 2026 results
+
+Four retained runtime changes removed the dominant dependency-tracking and controller-identity costs and reduced list-clearing work. Through experiment 005, live rendering's weighted time ratio against Solid fell from 4.591× to 1.465×. The target of beating all four framework controls remains unmet: live rendering was still 1.089× React, 1.272× Vue, and 1.424× Svelte. Ordinary compiled-native output was measured separately and reached 1.444× Solid. These are results for one keyed component and its nine workloads, not a general framework ranking.
+
+### Measurement and baseline boundaries
+
+Measurements use [the public js-framework-benchmark fork](https://github.com/nextwebwg/js-framework-benchmark/tree/f566154cc9a70400ca99024f32793f1e25a9eed8), pinned to `f566154cc9a70400ca99024f32793f1e25a9eed8`. Controls are React Hooks 19.2.0, Vue 3.5.39, Svelte 5.42.1, and Solid 1.9.3. The environment was headless Chrome for Testing 153.0.8010.12 on Apple M4 Pro, macOS 26.5.2, with Node 24.20.0 and the upstream Puppeteer runner.
+
+Every retained candidate completed two full standard sweeps: 15 samples per CPU workload, 25 for selection. Reduced exploratory samples identified opportunities only. Each sweep included the original live entry and all four controls; experiments 002, 003, and 005 also included a byte-frozen previous-best live entry for paired incremental comparisons. The candidate's live and ordinary compiled-native entries used the same authored component and controller throughout. No benchmark-specific renderer or new dependency was introduced.
+
+The original comparison entry is pinned to `f86dc05`. Commit `77889b8` corrected native fallback DOM ownership so ordinary compiled-native behavior could be measured; that prerequisite is not counted as an optimization. Its live bundle was byte-identical to the original live bundle (`c5fa33dfd359…`). The initial live baseline combines the original full sweep and an unchanged repeated sweep; ordinary compiled-native was first measured in the repeat. The final workload table below instead keeps the original and candidate entries paired inside both 005 sweeps.
+
+Each workload uses its median total browser duration, not a CPU-profile sample share. The aggregate is a weighted geometric mean; framework ratios divide scores from the same sweep, then take the median across the two sweeps. A ratio below 1 means less time. “Fastest competitor” means the lowest aggregate among the four framework controls, which was Solid here; it does not mean that one implementation won every workload. The nine workload weights, in table order, are 0.642802, 0.560718, 0.564380, 0.192564, 0.132006, 0.527709, 0.564445, 0.550836, and 0.422584.
+
+The `_x16`, `_x8`, and `_x2` suffixes are legacy CPU-throttle labels, not operation counts. The pinned runner's effective throttle factors were 4 for update, selection, swap, and clear; 2 for removal; and unthrottled for the other four workloads. Keep the pinned configuration when reproducing these figures.
+
+### Confirmed framework ratios
+
+| Entry | React Hooks | Vue | Svelte | Solid |
+| --- | ---: | ---: | ---: | ---: |
+| Original live baseline | 3.404× | 4.085× | 4.493× | 4.591× |
+| After 001 (`27860af`) | 1.906× | 2.220× | 2.468× | 2.602× |
+| After 002 (`fc49506`) | 1.176× | 1.397× | 1.535× | 1.587× |
+| After 003 (`5392613`) | 1.121× | 1.276× | 1.435× | 1.484× |
+| After 005 (`537ce4c`) | 1.089× | 1.272× | 1.424× | 1.465× |
+| Ordinary compiled-native after 005 | 1.074× | 1.254× | 1.404× | 1.444× |
+
+The required live objectives changed as follows; all remain above the 0.99 target.
+These are normalized time ratios, not absolute milliseconds.
+
+| Required comparison | Original → final | Ratio change | Relative reduction |
+| --- | ---: | ---: | ---: |
+| React Hooks | 3.404 → 1.089 | -2.315 | 68.0% |
+| Vue | 4.085 → 1.272 | -2.813 | 68.9% |
+| Svelte | 4.493 → 1.424 | -3.069 | 68.3% |
+| Solid / fastest competitor | 4.591 → 1.465 | -3.125 | 68.1% |
+
+Ratios in successive rows were collected at different times. Do not add successive percentage gains or infer a tiny win from these aggregates alone. The paired results and control spread determine the incremental decisions.
+
+### Paired workload medians through 005
+
+Each cell contains sweep 1 / sweep 2 medians in milliseconds. The original column is the unchanged `f86dc05` comparison entry measured in those same sweeps.
+
+| Workload | Original live | Live after 005 | Ordinary compiled-native after 005 |
+| --- | ---: | ---: | ---: |
+| `01_run1k` | 55.0 / 57.1 | 33.7 / 32.9 | 32.2 / 32.6 |
+| `02_replace1k` | 64.5 / 60.6 | 40.4 / 37.9 | 39.0 / 38.0 |
+| `03_update10th1k_x16` | 24.1 / 17.5 | 22.8 / 15.8 | 22.4 / 16.1 |
+| `04_select1k` | 9.8 / 7.3 | 12.3 / 7.3 | 11.2 / 7.6 |
+| `05_swap1k` | 94.3 / 90.6 | 30.8 / 28.9 | 34.3 / 27.7 |
+| `06_remove-one-1k` | 1081.3 / 1120.4 | 20.6 / 22.2 | 22.3 / 22.5 |
+| `07_create10k` | 2110.9 / 1898.8 | 354.6 / 346.2 | 335.3 / 332.6 |
+| `08_create1k-after1k_x2` | 224.6 / 215.7 | 41.1 / 35.2 | 40.1 / 34.9 |
+| `09_clear1k_x8` | 27.5 / 23.2 | 20.3 / 19.0 | 20.3 / 17.2 |
+
+Selection and updating had much smaller original costs. Selection was 12.3 / 7.3 ms
+versus the original's 9.8 / 7.3 ms, and versus the previous best's 10.9 / 7.9 ms.
+The first sweep's slowdown did not repeat; no selection improvement or zero-regression
+claim follows. Against the unchanged original within these final sweeps, the live
+weighted ratio was 0.3098 / 0.3049: 69.0% / 69.5% less weighted time.
+
+### Forecasts and retained changes
+
+| Change | Attributed opportunity before implementation | Confirmed result against its paired baseline |
+| --- | --- | --- |
+| 001: bound dependency membership scans | Tracking occupied 90.3% of one sampled creation interval and 76.3% of one sampled swap interval. These were ceilings on sampled work, not predicted total-browser gains. | Creation: 390.9 / 408.0 ms versus 2,093.4 / 2,209.2 ms, about 81% lower. Swap: 45.4 / 53.4 ms versus 106.3 / 111.5 ms. Wide effects switch from bounded linked checks to native Set membership while retaining ordered reuse and dynamic cleanup. |
+| 002: canonicalize writable controller aliases | Descriptor and nested guard reads occupied about 90.4% of the sampled removal interval. Reassigning guarded facades accumulated reactive wrapper layers. | Removal: 25.4 / 23.6 ms versus 773.4 / 760.3 ms, about 96.8% lower. Append: 46.2 / 41.7 ms versus 64.3 / 60.7 ms, 28–31% lower. A native WeakMap preserves canonical reactive identity while retaining destination guards and readonly barriers. |
+| 003: native removal of adjacent stale blocks | Individual `removeChild` calls occupied 59.3% of the sampled clear interval and 20.3% of a sampled replacement interval. | Clear: 18.5 / 20.7 ms versus 26.6 / 28.8 ms, 30.5% / 28.1% lower. The paired weighted improvement was 3.8%. Replacement was +3.2% / −3.9%, so no repeatable replacement win is claimed. Exact fully owned parents use `replaceChildren`; consecutive stale groups use Range deletion; singleton removal keeps its prior path. Effects stop before removal and retained or foreign nodes split groups. |
+| 005: clone cached native templates | Static construction and literal DOM writes occupied about 17.8 ms in a sampled pre-change creation interval; a broader 32.9 ms included binding work that remains. These sampled budgets are not comparable to total-browser percentages. | Creation: 33.7 / 32.9 ms versus 37.9 / 36.3 ms (11.1% / 9.4% lower). Create-10k: 354.6 / 346.2 ms versus 390.8 / 364.4 ms (9.3% / 5.0% lower). Append: 41.1 / 35.2 ms versus 44.8 / 39.3 ms (8.3% / 10.4% lower). Paired weighted time fell 5.3% / 3.0%. Native deep cloning and precomputed binding locations share the existing dynamic binding helpers. |
+
+The forecasts attributed existing cost; they did not predict the resulting percentages. Experiment 002's selection was +22% / +4.3% versus its frozen reference, while replacement and clear were modestly slower. Experiment 001 also showed selection uncertainty. Acceptance is not a claim of zero workload regressions: the aggregate improvements were repeatable, behavior checks passed, and no paired confirmed case exceeded the repository's 25% review threshold. In 003, other paired workloads remained within 6% of their reference. In 005, selection was +12.8% / −7.6%, removal −1.9% / +10.4%, and clear −1.0% / +9.2% against the frozen previous best. None exceeded 25%; the small, inconsistent differences remain uncertain.
+
+### Benchmark entry sizes
+
+These are complete benchmark-entry bytes, raw / gzip level 6, for the two measured delivery modes. They are distinct from isolated capability fixtures and the general public browser-entry size gates.
+
+| Stage | Live bytes | Ordinary compiled-native bytes |
+| --- | ---: | ---: |
+| Baseline | 161,152 / 53,261 | 122,404 / 38,806 |
+| After 001 | 161,485 / 53,353 | 122,737 / 38,912 |
+| After 002 | 161,553 / 53,368 | 122,805 / 38,927 |
+| After 003 | 162,255 / 53,611 | 123,507 / 39,168 |
+| After 005 | 164,747 / 54,482 | 126,002 / 39,977 |
+
+Through 005, the live entry added 1,221 gzip bytes and ordinary compiled-native added 1,171 gzip bytes relative to the measurable baseline. The [native runtime audit](./native-runtime-audit.md) records the final product-level sizes and the native mechanisms separately.
+
+### Coverage and remaining work
+
+Cloning applies to fresh ordinary repeated HTML regions. Refs, properties, controls,
+resources, custom elements, namespaces, slots, descendant flows, framework-owned DOM,
+and existing server DOM retain the ordinary renderer or adoption. The prototype cache
+is resolved when a region initializes: two WeakMap lookups outside the row loop, no
+per-row cache lookup and no new freezing. Values, validation, listeners, and effect
+ownership remain dynamic. Empty and one-row cold-cache costs were not measured.
+
+A fresh profile of three recorded create-10k intervals averaged 89.059 ms of sampled
+CPU work. Its leading self costs included DOM insertion (10.195 ms), cloning
+(8.621 ms), proxy reads (5.181 ms), mutation synchronization (5.169 ms), and binding-path
+resolution (3.766 ms); GC accounted for 10.227 ms without assigned allocation ownership.
+These are sampled intervals, not total-browser medians or promised optimization gains.
+
+Source inspection also found that the flat render-owner array retains stopped effects
+and their callbacks after row removal. Callback reachability can retain detached row
+DOM and scopes; nested effects created after an outer snapshot require a broader
+ownership correction. This predates the retained changes. A three-page Chrome probe performed ten
+create-1000/clear cycles, sampling after two animation frames and two forced garbage collections. From the first to the tenth clear,
+each page added 90,000 reported DOM nodes while showing zero rows; the median JavaScript
+heap increase was 13.6 MiB. These counters quantify retention after GC, without assigning
+allocation ownership or GC latency. Six new cleanup regressions fail on the confirmed runtime in all three browser engines:
+later-created nested bindings/listeners remain active after their containing row or branch
+is removed. A separate ownership candidate passes those six cases, all 309 affected
+browser cases, and `verify:inner` (618 Node tests). In the same three-page probe, its
+additional DOM-node count is zero and median JavaScript heap growth is 0.45 MiB.
+The candidate adds 240 live / 259 compiled-native gzip bytes (level 6). It is archived
+and absent from the confirmed source: throughput and primitive reactivity costs still
+need measurement, including two full rendering confirmations. Other controller/ref/follower
+retention paths remain separate. Proxy-local metadata and stable consumer-reader plans
+are prepared opportunities; WebAssembly has no demonstrated suitable hot kernel here.
+
+### Final verification
+
+`pnpm --filter @nextwebwg/html-next verify:performance --base=77889b8` passed
+on the final runtime: 27 fresh processes, six workloads, nine rotated candidate/A/A
+rounds at iteration scale 40. The median aggregate ratio was 1.0266
+(2.7% slower); the worst workload median was
+1.0580 (5.8% slower, dynamic-dependencies).
+A/A aggregate spread was 0.24%. This passes the existing 10%
+aggregate and 25% workload regression limits, while recording the slowdown.
+
+The longer `measure:reactivity --iteration-scale=10` matrix passed its consistency
+check and ranked HTML Next third of 14, behind S.js and anod, with 1.10% aggregate
+A/A spread. Pota failed expected-result validation; Svelte exhausted Node's default
+heap. All six results were checked; excluded libraries have no rank. The standard iteration
+setting also passed and ranked HTML Next third of 15, with
+1.07% aggregate A/A spread (10.3% worst individual workload spread). Svelte completed
+that setting; pota was excluded for an incorrect result. These are Node scalar
+reactivity workloads, independent of the browser-rendering comparison.
+
+`pnpm verify:pr` passed: 615 Node tests plus lint, strict types, generated artifacts,
+runtime size gates, package builds, and eight package/CLI tests. The Node configuration
+skips browser/target configurations; it is not an all-browser pass. Separately, the final
+runtime passed 303 Chromium/Firefox/WebKit runtime, server-hydration, and server-continuation
+cases, including six focused cloning/fallback cases, and both ordinary benchmark entries
+passed the 20-removal/10k-row/keyed-identity/update/event/reconnect/clear smoke check.
+Another 118 generated-target runtime tests and three installed-package tests passed.
+The complete unrelated browser/parity suites were not rerun. `measure:runtime` produced
+exactly the final source's attribution summarized in the native audit; its gzip level 9
+figures differ from the benchmark entries' gzip level 6 figures.
+
+Raw profiles, build hashes, runner receipts, summaries, and experiment decisions are stored in the workspace's gitignored `.context/compound-engineering/ce-optimize/component-rendering/` directory. Those local files do not travel with the branch. This checked-in summary should remain self-contained; publishing the raw evidence requires an explicit retained artifact location. Local machine activity was not fully controlled, so paired frozen references, independent controls, and repeated sweeps remain necessary to interpret small differences.
