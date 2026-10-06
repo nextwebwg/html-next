@@ -6,6 +6,9 @@
   "protocol": "full_standard",
   "measuredAt": "20261006T200518Z",
   "source": "Imported from the pre-tracking harness run 20261006T200518.275972Z. A/A sweep: the live candidate and live reference were the same bytes. Both live and compiled bundles are byte-identical to builds of the recorded commit, which was verified on import; the run itself predates commit tracking, so the dirty state is unknown.",
+  "entryNotes": {
+    "html-next-compiled-candidate": "Esbuild-compiled diagnostic from the pre-tracking harness: the component through parseComponent and generateVanilla, bundled by esbuild without the Vite plugin. It is not the gated Vite-compiled entry (html-next-vite-candidate), and its compiled_* fields have no successor."
+  },
   "frameworks": [
     "html-next-live-candidate",
     "html-next-compiled-candidate",

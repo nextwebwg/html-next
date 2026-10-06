@@ -17,12 +17,20 @@ export const WEIGHTS: Readonly<Record<WorkloadId, number>> = {
   "09_clear1k_x8": 0.4225836631419211,
 };
 export const CONTROLS = ["react-hooks", "vue", "svelte", "solid"] as const;
+/** The owner's target: the Vite-compiled entry at or below 0.99x each of these. Svelte is reported only. */
+export const GATED_CONTROLS = ["solid", "vue", "react-hooks"] as const;
+export const TARGET = 0.99;
+/** Summary prefix for each HTML Next candidate entry directory. */
+export const MODES = { vite: "html-next-vite-candidate", live: "html-next-live-candidate" } as const;
 /**
  * Gate limits: aggregate noise allowance and the repository's 25% hot-path threshold. The gate is
  * deliberately stricter than that rule: it does not apply the rule's 1 KB / 5% gzip savings
  * exemption, so a size-saving trade fails here and goes to owner review with both bundle sizes.
  */
 export const LIMITS = { weighted: 1.03, workload: 1.25 } as const;
+/** No bundle bloat: the Vite-compiled entry may not grow by more than 1 KB gzip or by more than 5%. */
+export const SIZE_LIMITS = { gzipBytes: 1024, ratio: 0.05 } as const;
+export type Status = "pass" | "regression" | "inconclusive";
 
 export type Rows = Partial<Record<WorkloadId, number>>;
 export type Medians = Record<string, Rows>;
@@ -88,31 +96,37 @@ export function entryName(medians: Medians, directory: string): string | undefin
   return matches[0];
 }
 
-/** Flat metrics named as in the pre-tracking evaluator, so older summaries stay comparable. */
+/**
+ * Flat metrics: `<mode>_score`, `<mode>_vs_<control>` for each control that ran, `<mode>_vs_gated_max`
+ * (the largest ratio to Solid, Vue and React), `<mode>_vs_fastest_competitor` (all four controls) and
+ * `gated_target_met`. `live_*` names match the pre-tracking evaluator, so older summaries stay comparable.
+ */
 export function summarize(medians: Medians): Record<string, unknown> {
   const score = scores(medians);
-  const controls = Object.fromEntries(CONTROLS.flatMap((control) => {
+  const controls: Partial<Record<(typeof CONTROLS)[number], string>> = Object.fromEntries(CONTROLS.flatMap((control) => {
     const name = entryName(medians, control);
     return name === undefined ? [] : [[control, name]];
   }));
-  // "Fastest competitor" means the fastest of all four controls, never of a partial field.
-  const fastest = Object.keys(controls).length === CONTROLS.length ? Math.min(...Object.values(controls).map((name) => score[name]!)) : undefined;
+  const ran = (all: readonly (typeof CONTROLS)[number][]): string[] | undefined =>
+    all.every((control) => controls[control] !== undefined) ? all.map((control) => controls[control]!) : undefined;
   const summary: Record<string, unknown> = { median_ms: medians, scores: score, controls };
-  const live = entryName(medians, "html-next-live-candidate");
-  if (live !== undefined) {
-    summary["live_score"] = score[live];
-    for (const [control, name] of Object.entries(controls)) {
-      summary[`live_vs_${control.replace("-", "_")}`] = score[live]! / score[name]!;
-    }
-    if (fastest !== undefined) summary["live_vs_fastest_competitor"] = score[live]! / fastest;
-    const reference = entryName(medians, "html-next-live-reference");
-    if (reference !== undefined) summary["live_vs_reference"] = weightedRatio(medians[live]!, medians[reference]!);
+  for (const [mode, directory] of Object.entries(MODES)) {
+    const name = entryName(medians, directory);
+    if (name === undefined) continue;
+    const ratio = (control: string): number => score[name]! / score[control]!;
+    summary[`${mode}_score`] = score[name];
+    for (const [control, entry] of Object.entries(controls)) summary[`${mode}_vs_${control.replace("-", "_")}`] = ratio(entry);
+    // The fastest control has the lowest score, so it gives the largest ratio. "Fastest competitor"
+    // means the fastest of all four controls, never of a partial field.
+    const gated = ran(GATED_CONTROLS);
+    if (gated !== undefined) summary[`${mode}_vs_gated_max`] = Math.max(...gated.map(ratio));
+    const all = ran(CONTROLS);
+    if (all !== undefined) summary[`${mode}_vs_fastest_competitor`] = Math.max(...all.map(ratio));
   }
-  const compiled = entryName(medians, "html-next-compiled-candidate");
-  if (compiled !== undefined) {
-    summary["compiled_score"] = score[compiled];
-    if (fastest !== undefined) summary["compiled_vs_fastest_competitor"] = score[compiled]! / fastest;
-  }
+  if (typeof summary["vite_vs_gated_max"] === "number") summary["gated_target_met"] = summary["vite_vs_gated_max"] <= TARGET;
+  const live = entryName(medians, MODES.live);
+  const reference = entryName(medians, "html-next-live-reference");
+  if (live !== undefined && reference !== undefined) summary["live_vs_reference"] = weightedRatio(medians[live]!, medians[reference]!);
   return summary;
 }
 
@@ -147,4 +161,22 @@ export function assessComparison(sweeps: readonly SweepComparison[]) {
     medianWeightedRatio: median(sweeps.map((sweep) => sweep.weightedRatio)),
     workloadMedianRatios: Object.fromEntries(measured.map((id) => [id, median(sweeps.map((sweep) => sweep.workloads[id]!))])),
   } as const;
+}
+
+/** The Vite-compiled entry's gzip growth against the base build; see SIZE_LIMITS. */
+export function assessSize(candidateGzip: number, baseGzip: number) {
+  const growth = candidateGzip - baseGzip;
+  return {
+    status: growth > SIZE_LIMITS.gzipBytes || growth > baseGzip * SIZE_LIMITS.ratio ? "regression" : "pass",
+    limits: SIZE_LIMITS,
+    candidateGzip,
+    baseGzip,
+    growthBytes: growth,
+    growthRatio: growth / baseGzip,
+  } as const;
+}
+
+/** The gate passes only when every part passes; any regression outranks an inconclusive part. */
+export function combineStatus(statuses: readonly Status[]): Status {
+  return statuses.includes("regression") ? "regression" : statuses.includes("inconclusive") ? "inconclusive" : "pass";
 }
