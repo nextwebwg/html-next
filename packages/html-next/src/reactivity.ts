@@ -206,6 +206,8 @@ export class ReactiveEffect {
   queued = false;
   #cleanup: Cleanup = undefined;
   #dependencyTail: Subscription | undefined = undefined;
+  #tracked: Set<Dependency> | undefined = undefined;
+  #inserted = false;
 
   constructor(
     readonly scheduler: ReactiveScheduler,
@@ -217,6 +219,7 @@ export class ReactiveEffect {
   execute(): void {
     if (this.stopped || this.paused) return;
     this.#dependencyTail = undefined;
+    this.#inserted = false;
     if (this.#cleanup !== undefined) {
       const cleanup = this.#cleanup;
       this.#cleanup = undefined;
@@ -230,6 +233,7 @@ export class ReactiveEffect {
       if (cleanup !== undefined) this.#cleanup = cleanup;
     } finally {
       activeEffect = previous;
+      this.#tracked = undefined;
       const tail = this.#dependencyTail as Subscription | undefined;
       let subscription = tail === undefined ? this.dependencies : tail.nextDependency;
       if (tail === undefined) this.dependencies = undefined;
@@ -247,12 +251,35 @@ export class ReactiveEffect {
       this.#dependencyTail === undefined
         ? this.dependencies
         : this.#dependencyTail.nextDependency;
-    if (next?.dependency === dependency) {
+    const reusable = next?.dependency === dependency;
+    // Before any insertion, the unique old order proves this next link has not been consumed.
+    if (reusable && !this.#inserted) {
       this.#dependencyTail = next;
+      this.#tracked?.add(dependency);
       return;
     }
-    for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
-      if (current?.dependency === dependency) return;
+    if (this.#tracked !== undefined) {
+      if (this.#tracked.has(dependency)) return;
+    } else {
+      let inspected = 0;
+      for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
+        if (current?.dependency === dependency) return;
+        // Keep small effects allocation-free; one wider miss indexes the consumed prefix once.
+        if (++inspected === 8) {
+          const tracked = new Set<Dependency>();
+          for (let used = this.dependencies; used !== next; used = used!.nextDependency) {
+            tracked.add(used!.dependency);
+          }
+          this.#tracked = tracked;
+          if (tracked.has(dependency)) return;
+          break;
+        }
+      }
+    }
+    this.#tracked?.add(dependency);
+    if (reusable) {
+      this.#dependencyTail = next;
+      return;
     }
     const subscription: Subscription = {
       dependency,
@@ -264,6 +291,7 @@ export class ReactiveEffect {
     if (this.#dependencyTail === undefined) this.dependencies = subscription;
     else this.#dependencyTail.nextDependency = subscription;
     this.#dependencyTail = subscription;
+    this.#inserted = true;
     const first = dependency.first;
     // Computeds lead the subscriber list so invalidation can dirty the derived graph before an
     // ordinary effect observes it. Priority-zero data effects still use normal scheduler ordering.
@@ -315,6 +343,7 @@ export class ReactiveEffect {
     }
     this.dependencies = undefined;
     this.#dependencyTail = undefined;
+    this.#tracked = undefined;
   }
 }
 

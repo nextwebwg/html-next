@@ -95,6 +95,15 @@ contains all of them for arbitrary later graphs.
 
 ## Native-build capability fixtures
 
+Dependency membership uses native identity lookup. Ordered effects reuse their linked
+subscriptions; small duplicate checks inspect at most eight consumed links before a wider miss
+builds one execution-local `Set`. The runtime still owns read-to-consumer routing because DOM
+observation does not expose authored JavaScript state reads. After reordered reads insert a new
+subscription, membership is checked before consuming an old link so the same dependency is not
+subscribed twice. Execution completion releases the membership index; conditional cleanup,
+pause, and stop release obsolete subscriptions. Direct scalar native output compiles this layer
+away; live components and generated general-runtime fallbacks share it.
+
 | Authored feature | Gzip bytes | Runtime shape |
 | --- | ---: | --- |
 | Static markup | 302 | Direct DOM creation |
