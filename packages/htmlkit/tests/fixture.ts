@@ -21,7 +21,7 @@ export async function fixture(): Promise<string> {
   }`);
   await write(root, "app/pages/index.html", `<meta name="htmlkit:page" content="home-page">
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
-    <template component="home-page" controller="./home.ts"><meta name="description" from:content="asset"><defs>
+    <template component="home-page" controller="./home.js"><meta name="description" from:content="asset"><defs>
     <prop name="asset" type="string" required>Asset URL</prop>
     <state name="count" type="number" value="0"></state>
     <state name="text" type="string" value="initial"></state>

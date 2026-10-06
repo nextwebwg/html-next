@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-alpha.30
+
+- Build styles preserve `@import` and other statement at-rule semicolons when hoisted.
+
+- HTMLKit can strip numeric file-route ordering prefixes without changing physical loader and import paths.
+- HTMLKit exposes ordered concrete route navigation to applications and loaders, with an exported native navigation component.
+- Installed and browser consumers exercise TypeScript controllers referenced with emitted `.js` module names.
+
 ## Unreleased
 
 ## 1.0.0-alpha.29
