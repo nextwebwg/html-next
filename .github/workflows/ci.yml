@@ -66,6 +66,57 @@ jobs:
           PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: pnpm verify:performance --base="$PERFORMANCE_BASE"
 
+  framework-changes:
+    name: Detect live runtime changes
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.diff.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git diff --quiet "$PERFORMANCE_BASE" HEAD -- packages/html-next/src; then
+            echo "runtime=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Not yet in Required: the paired rendering gate's noise on hosted runners is unknown.
+  frameworks:
+    name: Framework rendering against main
+    needs: framework-changes
+    if: needs.framework-changes.outputs.runtime == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --global --ignore-scripts --force corepack@0.34.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium
+      # The pinned Puppeteer runner keeps Chrome's sandbox, which needs unprivileged user namespaces.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/html-next/.benchmark/js-framework-benchmark
+          # The script holds the fork pin and the control lockfile hashes.
+          key: js-framework-benchmark-${{ runner.os }}-${{ hashFiles('packages/html-next/scripts/framework-benchmark.ts') }}
+      - run: pnpm setup:frameworks
+      - name: Compare the nine keyed rendering workloads
+        env:
+          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: pnpm verify:frameworks --base="$PERFORMANCE_BASE"
+
   required:
     name: Required
     if: always()

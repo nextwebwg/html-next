@@ -77,6 +77,15 @@ it rejects demonstrated slowdowns over 10% in aggregate or 25% in any workload.
 Unstable controls produce an inconclusive failure after one retry. The Required
 CI job includes this check; the full third-party matrix remains optional.
 
+## Framework rendering comparison
+
+The [framework comparison benchmark](./framework-benchmark.md) is the tracked tooling for the
+keyed rendering results below. `pnpm setup:frameworks` prepares the pinned fork,
+`pnpm measure:frameworks` runs a serial sweep against the framework controls, and
+`pnpm verify:frameworks --base=<ref>` compares the live runtime with a base revision in paired
+sweeps. Recorded summaries form a ledger in `benchmarks/framework-results/`; raw results stay
+local. The CI job runs the comparison but is not yet Required.
+
 ## Keyed component rendering: confirmed October 2026 results
 
 Four retained runtime changes removed the dominant dependency-tracking and controller-identity costs and reduced list-clearing work. Through experiment 005, live rendering's weighted time ratio against Solid fell from 4.591× to 1.465×. The target of beating all four framework controls remains unmet: live rendering was still 1.089× React, 1.272× Vue, and 1.424× Svelte. Ordinary compiled-native output was measured separately and reached 1.444× Solid. These are results for one keyed component and its nine workloads, not a general framework ranking.
