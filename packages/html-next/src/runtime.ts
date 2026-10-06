@@ -28,6 +28,7 @@ import {
   createEffect,
   createSignal,
   ReactiveScope,
+  readList,
   registerReactiveAlias,
   untracked,
   type ReactiveEffect,
@@ -1254,7 +1255,7 @@ function shapeList(
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
 ): Value[] {
-  let result = items.slice();
+  let result = readList(items);
   if (flow.where !== undefined) {
     const where = flow.where;
     result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));

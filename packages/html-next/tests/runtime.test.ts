@@ -421,6 +421,48 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} reruns a keyed list exactly for index, length and order changes`, async () => {
+      const definition = parseComponent(`<template component="list-rerun-count"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          // Each list run evaluates every row key once, so key reads count runs times rows.
+          let reads = 0;
+          const row = (id: number, label: string) => ({ get id() { reads += 1; return id; }, label });
+          const step = async (change: () => void) => {
+            reads = 0;
+            change();
+            await Promise.resolve();
+            return [reads, Array.from(root.querySelectorAll("span"), span => span.textContent).join("")];
+          };
+          return [
+            await step(() => { host.state.rows = [row(1, "a"), row(2, "b"), row(3, "c")]; }),
+            // The raw array held the raw row; the write stores its canonical proxy instead.
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => {
+              const first = host.state.rows[0];
+              host.state.rows[0] = host.state.rows[2];
+              host.state.rows[2] = first;
+            }),
+            await step(() => { host.state.rows.push(row(4, "d")); }),
+            await step(() => { host.state.rows.length = 2; }),
+            await step(() => { host.state.rows[1].label = "z"; }),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [[3, "abc"], [3, "abc"], [0, "abc"], [3, "cba"], [4, "cbad"], [2, "cb"], [0, "cz"]]);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
       const definition = parseComponent(`<template component="reversed-removal-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>

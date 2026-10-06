@@ -40,6 +40,79 @@ const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
 
+function propertyDependency(target: object, key: PropertyKey): Dependency {
+  let properties = objectSubscribers.get(target);
+  if (properties === undefined) {
+    properties = new Map();
+    objectSubscribers.set(target, properties);
+  }
+  let subscribers = properties.get(key);
+  if (subscribers === undefined) {
+    subscribers = { first: undefined, last: undefined };
+    properties.set(key, subscribers);
+  }
+  return subscribers;
+}
+
+/**
+ * Per array, keyed by a count `n`: one dependency that stands in for the index dependencies `0` to
+ * `n - 1` of every `readList` that read exactly those indices.
+ */
+const iterateSubscribers = new WeakMap<object, Map<number, Dependency>>();
+
+/** Triggers the iterate dependencies that stand in for index `key`. */
+function triggerIterate(target: object, key: PropertyKey): void {
+  const iterates = iterateSubscribers.get(target);
+  if (iterates === undefined || typeof key !== "string") return;
+  const index = Number(key);
+  if (!Number.isInteger(index) || index < 0 || String(index) !== key) return;
+  for (const [count, dependency] of iterates) {
+    // A count nobody still depends on can go; a later read recreates it.
+    if (dependency.first === undefined) iterates.delete(count);
+    else if (index < count) trigger(dependency);
+  }
+}
+
+interface ListRead {
+  readonly receiver: object;
+  readonly effect: ReactiveEffect;
+  target: object | undefined;
+  readonly keys: PropertyKey[];
+}
+
+let listRead: ListRead | undefined;
+
+/**
+ * Reads a list exactly as `items.slice()` does. When its index reads were exactly `0` to `n - 1`,
+ * one dependency for that `n` replaces their `n` dependencies: writes and deletes trigger it exactly
+ * when they would have triggered one of them. Every other read keeps its own dependency.
+ */
+export function readList(items: readonly Value[]): Value[] {
+  const effect = activeEffect;
+  const slice = items.slice;
+  if (effect === undefined) return Reflect.apply(slice, items, []) as Value[];
+  const previous = listRead;
+  const read: ListRead = { receiver: items, effect, target: undefined, keys: [] };
+  listRead = read;
+  try {
+    return Reflect.apply(slice, items, []) as Value[];
+  } finally {
+    listRead = previous;
+    const { target, keys } = read;
+    let dense = true;
+    for (let index = 0; dense && index < keys.length; index += 1) dense = keys[index] === String(index);
+    if (target !== undefined && dense) {
+      let iterates = iterateSubscribers.get(target);
+      if (iterates === undefined) iterateSubscribers.set(target, iterates = new Map());
+      let iterate = iterates.get(keys.length);
+      if (iterate === undefined) iterates.set(keys.length, iterate = { first: undefined, last: undefined });
+      effect.track(iterate);
+    } else if (target !== undefined) {
+      for (const key of keys) effect.track(propertyDependency(target, key));
+    }
+  }
+}
+
 /** Keep a writable controller facade from becoming another layer of reactive identity. */
 export function registerReactiveAlias(alias: object, value: object): void {
   const canonical = proxyCache.get(value);
@@ -644,17 +717,14 @@ export class ReactiveScope implements Scope {
     const proxy = new Proxy(value, {
       get: (target, key, receiver) => {
         if (activeEffect !== undefined) {
-          let properties = objectSubscribers.get(target);
-          if (properties === undefined) {
-            properties = new Map();
-            objectSubscribers.set(target, properties);
-          }
-          let subscribers = properties.get(key);
-          if (subscribers === undefined) {
-            subscribers = { first: undefined, last: undefined };
-            properties.set(key, subscribers);
-          }
-          activeEffect.track(subscribers);
+          const read = listRead;
+          // A list read records its keys before the native read, as tracking does, so a throwing
+          // getter still leaves its key recorded. It tracks `length` and `constructor` as usual.
+          if (read !== undefined && read.receiver === receiver && read.effect === activeEffect &&
+              key !== "length" && key !== "constructor") {
+            read.target = target;
+            read.keys.push(key);
+          } else activeEffect.track(propertyDependency(target, key));
         }
         return this.#wrap(Reflect.get(target, key, receiver) as Value);
       },
@@ -663,7 +733,10 @@ export class ReactiveScope implements Scope {
         const previous = Reflect.get(target, key, receiver);
         const wrapped = this.#wrap(next as Value);
         const result = Reflect.set(target, key, wrapped, receiver);
-        if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+        if (!Object.is(previous, wrapped)) {
+          trigger(objectSubscribers.get(target)?.get(key));
+          triggerIterate(target, key);
+        }
         // Defining an array index can extend length before push writes that same length again.
         if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
           trigger(objectSubscribers.get(target)?.get("length"));
@@ -684,7 +757,10 @@ export class ReactiveScope implements Scope {
       deleteProperty: (target, key) => {
         const had = Reflect.has(target, key);
         const result = Reflect.deleteProperty(target, key);
-        if (had) trigger(objectSubscribers.get(target)?.get(key));
+        if (had) {
+          trigger(objectSubscribers.get(target)?.get(key));
+          triggerIterate(target, key);
+        }
         return result;
       },
     });
