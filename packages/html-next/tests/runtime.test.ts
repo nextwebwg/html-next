@@ -62,6 +62,76 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} removes owned block groups while preserving foreign siblings and cleanup`, async () => {
+      const definition = parseComponent(`<template component="owned-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>
+        <event name="activate" type="event"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><button on:click="activate" $value="row.label"></button></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const anchors = [list.firstChild!, list.lastChild!];
+          const rows = Array.from(list.querySelectorAll("li"));
+          const removedButton = rows[0]!.querySelector("button")!;
+          const removedValue = host.state.rows[0];
+          const retained = rows[3]!;
+          const events: number[] = [];
+          host.on("activate", (event: CustomEvent) => events.push(Number(event.detail.target.parentElement.getAttribute("data-id"))));
+          const before = document.createElement("i");
+          const between = document.createElement("i");
+          const after = document.createElement("i");
+          list.prepend(before);
+          rows[1]!.nextSibling!.after(between);
+          list.append(after);
+          removedButton.click();
+          host.state.rows = host.state.rows.filter((row: any) => row.id === 4)
+            .concat([{ id: 6, label: "F" }]);
+          await Promise.resolve();
+          const mixed = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id"));
+          const identity = list.querySelector("li") === retained;
+          removedButton.click();
+          removedValue.label = "stale";
+          await Promise.resolve();
+          const stoppedContent = removedButton.textContent === "A";
+          retained.querySelector("button")!.click();
+          host.state.rows = [];
+          await Promise.resolve();
+          const foreignKept = [before, between, after].every(node => node.parentNode === list);
+          before.remove(); between.remove(); after.remove();
+          host.state.rows = [{ id: 7, label: "G" }, { id: 8, label: "H" }, { id: 9, label: "I" }];
+          await Promise.resolve();
+          const bulkButton = list.querySelector("button")!;
+          host.state.rows = [];
+          await Promise.resolve();
+          bulkButton.click();
+          const sameAnchors = list.childNodes.length === 2 && list.firstChild === anchors[0] && list.lastChild === anchors[1];
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 10, label: "J" }];
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          removedButton.click(); bulkButton.click();
+          const reconnected = Array.from(list.querySelectorAll("li"), row => row.textContent);
+          list.querySelector("button")!.click();
+          return { mixed, identity, stoppedContent, foreignKept, sameAnchors, reconnected, events };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { mixed: ["4", "6"], identity: true, stoppedContent: true,
+          foreignKept: true, sameAnchors: true, reconnected: ["J"], events: [1, 4, 10] });
+        assert.equal(warnings.length, 0);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} canonicalizes writable controller aliases without losing destination guards`, async () => {
       const definition = parseComponent(`<template component="controller-alias-list"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>

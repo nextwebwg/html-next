@@ -111,6 +111,13 @@ around an old controller guard. The next controller read applies its destination
 Readonly facades are not registered as writable aliases: their barriers survive assignments
 into writable state. Frozen values and native events keep their existing handling.
 
+Repeated-region removal uses native `replaceChildren` when the removed blocks and outer
+anchors occupy the entire parent, or `Range.deleteContents` for adjacent removed blocks.
+Native operations supply the DOM mutation and lifecycle behavior; the remaining runtime
+layer stops each block's effects and preserves ownership boundaries. Retained blocks and
+foreign siblings split removal groups. A single removed block keeps the direct removal
+path, and outer anchors retain their identity for later updates and hydration.
+
 | Authored feature | Gzip bytes | Runtime shape |
 | --- | ---: | --- |
 | Static markup | 302 | Direct DOM creation |

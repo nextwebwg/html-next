@@ -1378,6 +1378,52 @@ function removeBlock(block: EachBlock): void {
   }
 }
 
+/** Remove only adjacent stale blocks; foreign siblings and retained blocks split a group. */
+function removeStaleBlocks(
+  blocks: ReadonlyMap<unknown, EachBlock>,
+  retained: ReadonlyMap<unknown, EachBlock>,
+  start: Comment,
+  end: Comment,
+): void {
+  let group: EachBlock[] = [];
+  const flush = (): void => {
+    if (group.length === 0) return;
+    if (group.length === 1) removeBlock(group[0]!);
+    else {
+      for (const block of group) for (const effect of block.effects) effect.stop();
+      const first = group[0]!;
+      const last = group.at(-1)!;
+      const parent = first.start.parentNode;
+      if (parent !== null && last.end.parentNode === parent &&
+          (first.start.compareDocumentPosition(last.end) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+        if ((parent instanceof Element || parent instanceof DocumentFragment) &&
+            first.start.previousSibling === start && last.end.nextSibling === end &&
+            start.previousSibling === null && end.nextSibling === null) {
+          // The entire parent is this removed region. Keep its existing outer anchors.
+          parent.replaceChildren(start, end);
+        } else {
+          const range = first.start.ownerDocument.createRange();
+          range.setStartBefore(first.start);
+          range.setEndAfter(last.end);
+          range.deleteContents();
+        }
+      } else {
+        for (const block of group) removeBlock(block);
+      }
+    }
+    group = [];
+  };
+  for (const [key, block] of blocks) {
+    if (retained.has(key)) {
+      flush();
+      continue;
+    }
+    if (group.length > 0 && group.at(-1)!.end.nextSibling !== block.start) flush();
+    group.push(block);
+  }
+  flush();
+}
+
 /** Mark the longest subsequence of retained blocks that is already in DOM order. */
 function stableBlockPositions(previous: readonly number[]): Uint8Array | undefined {
   let last = -1;
@@ -1503,7 +1549,7 @@ function renderEachRegion(
     }
     adopting.length = 0;
     adoptionIndex = 0;
-    for (const [key, block] of blocks) if (!next.has(key)) removeBlock(block);
+    removeStaleBlocks(blocks, next, start, end);
     if (ordered !== undefined && previous !== undefined) {
       const stable = stableBlockPositions(previous);
       let reference: Node = end;
