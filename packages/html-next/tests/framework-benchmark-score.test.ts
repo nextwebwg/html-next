@@ -33,6 +33,8 @@ describe("framework benchmark scoring", () => {
       ...sweep("html-next-compiled-candidate-v1+def-keyed", 24),
       ...sweep("solid-v1.9.3-keyed", 20),
       ...sweep("vue-v3.5.39-keyed", 25),
+      ...sweep("react-hooks-v19.2.0-keyed", 27),
+      ...sweep("svelte-v5.42.1-keyed", 21),
       ...sweep("vanillajs-keyed", 15),
     ], 3);
     const summary = summarize(medians);
@@ -42,7 +44,12 @@ describe("framework benchmark scoring", () => {
     expect(summary["live_vs_fastest_competitor"]).toBeCloseTo(1.5);
     expect(summary["live_vs_reference"]).toBeCloseTo(1);
     expect(summary["compiled_vs_fastest_competitor"]).toBeCloseTo(1.2);
-    expect(summary["controls"]).toEqual({ vue: "vue-v3.5.39-keyed", solid: "solid-v1.9.3-keyed" });
+    expect(summary["controls"]).toEqual({
+      "react-hooks": "react-hooks-v19.2.0-keyed", vue: "vue-v3.5.39-keyed", svelte: "svelte-v5.42.1-keyed", solid: "solid-v1.9.3-keyed",
+    });
+    const partial = Object.fromEntries(Object.entries(medians).filter(([name]) => !name.startsWith("svelte-")));
+    expect(summarize(partial)).not.toHaveProperty("live_vs_fastest_competitor");
+    expect(summarize(partial)).not.toHaveProperty("compiled_vs_fastest_competitor");
   });
 
   it("passes two clean sweeps and rejects a repeated aggregate or hot-path regression", () => {

@@ -42,6 +42,8 @@ const PORT = 8080;
 const LIVE = "html-next-live-candidate";
 const COMPILED = "html-next-compiled-candidate";
 const REFERENCE = "html-next-live-reference";
+/** Neutral, equal-length entry names for the paired gate; the candidate alternates between them. */
+const SLOTS = ["html-next-live-a", "html-next-live-b"] as const;
 const DEFAULT_FRAMEWORKS = [LIVE, COMPILED, "vanillajs", "vue", "react-hooks", "svelte", "solid"];
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -100,10 +102,7 @@ function setup(force: boolean): void {
   if (force || head !== PIN) run("git", ["fetch", "--depth=1", "--filter=blob:none", "origin", PIN], work);
   git(["sparse-checkout", "set", ...SPARSE], work);
   if (force || head !== PIN) run("git", ["-c", "advice.detachedHead=false", "checkout", "--force", "--detach", PIN], work);
-  assert.equal(git(["rev-parse", "HEAD"], work), PIN, "Benchmark checkout is not at the pinned revision.");
-  for (const [name, expected] of Object.entries(LOCKFILES)) {
-    assert.equal(sha256(readFileSync(join(keyed, name, "package-lock.json"))), expected, `${name}/package-lock.json differs from the pin.`);
-  }
+  verifyCheckout();
   // ponytail: the server lists keyed and non-keyed directories; the sparse checkout needs only keyed entries.
   mkdirSync(join(work, "frameworks/non-keyed"), { recursive: true });
   for (const [directory, commands] of STEPS) {
@@ -117,15 +116,32 @@ function setup(force: boolean): void {
   console.error(`Setup finished in ${((performance.now() - started) / 1000).toFixed(1)} s.`);
 }
 
-function ensureSetup(): void {
-  if (STEPS.some(([directory]) => !existsSync(marker(directory)) || readFileSync(marker(directory), "utf8") !== PIN)) {
-    throw new Error("The benchmark checkout is not set up; run `pnpm setup:frameworks` first.");
+/** The pin, no edited tracked files (setup markers, builds and entries are untracked) and the control lockfiles. */
+function verifyCheckout(): void {
+  const repair = "run `pnpm setup:frameworks --force` to restore it";
+  assert.equal(git(["rev-parse", "HEAD"], work), PIN, `Benchmark checkout is not at the pinned revision; ${repair}.`);
+  const modified = git(["status", "--porcelain", "--untracked-files=no"], work);
+  assert.equal(modified, "", `Benchmark checkout has modified tracked files; ${repair}.\n${modified}`);
+  for (const [name, expected] of Object.entries(LOCKFILES)) {
+    assert.equal(sha256(readFileSync(join(keyed, name, "package-lock.json"))), expected, `${name}/package-lock.json differs from the pin.`);
   }
 }
 
-function assertNoActiveRunner(): void {
+async function assertPortFree(): Promise<void> {
+  if (await portInUse()) {
+    throw new Error(`Port ${PORT} is already in use. The pinned runner only connects to localhost:${PORT}; stop the other server first.`);
+  }
+}
+
+/** Runs before any entry is rebuilt, so a refused run never touches directories a concurrent runner is loading. */
+async function preflight(): Promise<void> {
+  if (STEPS.some(([directory]) => !existsSync(marker(directory)) || readFileSync(marker(directory), "utf8") !== PIN)) {
+    throw new Error("The benchmark checkout is not set up; run `pnpm setup:frameworks` first.");
+  }
+  verifyCheckout();
   const active = execFileSync("ps", ["-A", "-o", "pid=,command="], { encoding: "utf8" }).split("\n").filter((line) => /[bB]enchmarkRunner/.test(line));
   if (active.length > 0) throw new Error(`Another js-framework-benchmark runner is active; measurements must be serial.\n${active.join("\n")}`);
+  await assertPortFree();
 }
 
 function chromeBinary(): string {
@@ -144,6 +160,7 @@ async function environment() {
     os: platform() === "darwin" ? `macOS ${execFileSync("sw_vers", ["-productVersion"], { encoding: "utf8" }).trim()}` : `${osType()} ${release()}`,
     platform: `${process.platform}-${process.arch}`,
     node: process.version,
+    // Asserted against the checkout by verifyCheckout() in preflight().
     benchmark: { repository: REPOSITORY, revision: PIN, lockfileSha256: LOCKFILES },
     htmlNext: { commit: git(["rev-parse", "HEAD"]), dirty: git(["status", "--porcelain", "--untracked-files=no"]) !== "" },
   };
@@ -193,15 +210,15 @@ async function buildEntry(name: string, mode: "live" | "compiled", source = src)
   return bundle;
 }
 
-/** The live entry built from another revision's `packages/html-next/src`. */
-async function buildReference(ref: string): Promise<Bundle> {
+/** Another revision's `packages/html-next/src`, extracted for building its live entry. */
+function extractRevision(ref: string): { readonly revision: string; readonly source: string } {
   const revision = git(["rev-parse", "--verify", `${ref}^{commit}`]);
   const directory = join(benchmarkRoot, "reference");
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
   const archive = execFileSync("git", ["archive", revision, "packages/html-next/src"], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
   execFileSync("tar", ["-xf", "-", "-C", directory], { input: archive });
-  return { ...(await buildEntry(REFERENCE, "live", join(directory, "packages/html-next/src"))), revision };
+  return { revision, source: join(directory, "packages/html-next/src") };
 }
 
 const portInUse = (): Promise<boolean> => new Promise((done) => {
@@ -212,9 +229,7 @@ const portInUse = (): Promise<boolean> => new Promise((done) => {
 
 /** Runs a task against the fork's own server for this checkout, started here and always stopped. */
 async function withServer<T>(directory: string, task: () => Promise<T> | T): Promise<T> {
-  if (await portInUse()) {
-    throw new Error(`Port ${PORT} is already in use. The pinned runner only connects to localhost:${PORT}; stop the other server first.`);
-  }
+  await assertPortFree();
   const log = join(directory, "server.log");
   const fd = openSync(log, "w");
   // File descriptors, not pipes: a synchronous runner must never stall the server on a full pipe.
@@ -261,8 +276,7 @@ function runSweep(directory: string, frameworks: readonly string[], ids: readonl
 }
 
 async function measure(): Promise<void> {
-  ensureSetup();
-  assertNoActiveRunner();
+  await preflight();
   const reference = one("reference");
   const frameworks = options.get("frameworks")?.length ? options.get("frameworks")! : [...DEFAULT_FRAMEWORKS];
   if (reference !== undefined && !frameworks.includes(REFERENCE)) frameworks.push(REFERENCE);
@@ -274,7 +288,10 @@ async function measure(): Promise<void> {
   for (const name of frameworks) {
     if (name === LIVE) bundles[name] = await buildEntry(name, "live");
     if (name === COMPILED) bundles[name] = await buildEntry(name, "compiled");
-    if (name === REFERENCE) bundles[name] = await buildReference(reference!);
+    if (name === REFERENCE) {
+      const { revision, source } = extractRevision(reference!);
+      bundles[name] = { ...(await buildEntry(name, "live", source)), revision };
+    }
   }
   const measuredAt = stamp();
   const directory = join(benchmarkRoot, "runs", measuredAt);
@@ -282,9 +299,11 @@ async function measure(): Promise<void> {
   const env = await environment();
   const medians = await withServer(directory, () => runSweep(directory, frameworks, ids));
   const standard = (count ?? 15) === 15;
+  // Scores are relative to the fastest entry per workload, so a full run needs the whole default field.
+  const full = standard && ids.length === IDS.length && DEFAULT_FRAMEWORKS.every((name) => frameworks.includes(name));
   const summary = {
     complete: true, runner_success: true, standard_samples: standard, cpu_samples: count ?? 15,
-    protocol: standard && ids.length === IDS.length ? "full_standard" : "reduced",
+    protocol: full ? "full_standard" : "reduced",
     measuredAt, frameworks, benchmarks: ids, environment: env, bundles,
     live_gzip_bytes: bundles[LIVE]?.gzip, compiled_gzip_bytes: bundles[COMPILED]?.gzip,
     ...summarize(medians),
@@ -299,28 +318,37 @@ async function measure(): Promise<void> {
 }
 
 async function compare(): Promise<void> {
-  ensureSetup();
-  assertNoActiveRunner();
-  const reference = await buildReference(one("base") ?? "origin/main");
-  const bundles = { candidate: await buildEntry(LIVE, "live"), reference };
+  await preflight();
+  const base = extractRevision(one("base") ?? "origin/main");
+  const [first, second] = SLOTS;
+  const bundles = { candidate: await buildEntry(first, "live"), reference: { ...(await buildEntry(second, "live", base.source)), revision: base.revision } };
   const directory = join(benchmarkRoot, "runs", `${stamp()}-compare`);
   mkdirSync(directory, { recursive: true });
   const env = await environment();
-  const sweeps: Array<SweepComparison & { readonly directory: string; readonly medians: Medians }> = [];
+  const sweeps: Array<SweepComparison & { readonly directory: string; readonly candidateEntry: string; readonly medians: Medians }> = [];
   // Identical bytes cannot regress; skip the browser sweeps.
-  const identical = bundles.candidate.sha256 === reference.sha256;
-  if (!identical) await withServer(directory, () => {
+  const identical = bundles.candidate.sha256 === bundles.reference.sha256;
+  if (!identical) await withServer(directory, async () => {
     // Two sweeps, plus one bounded extra sweep only when they disagree; a regression is never retried.
     while (sweeps.length < 2 || (sweeps.length < 3 && assessComparison(sweeps).status === "inconclusive")) {
+      // The runner orders entries by directory listing, so alternate which slot holds the candidate.
+      const [candidate, other] = sweeps.length % 2 === 0 ? [first, second] : [second, first];
+      if (sweeps.length > 0) {
+        await buildEntry(candidate, "live");
+        await buildEntry(other, "live", base.source);
+      }
       const sweep = join(directory, `sweep-${sweeps.length + 1}`);
-      const medians = runSweep(sweep, [LIVE, REFERENCE], IDS);
-      sweeps.push({ directory: sweep, medians, ...compareSweep(medians[entryName(medians, LIVE)!]!, medians[entryName(medians, REFERENCE)!]!) });
+      const medians = runSweep(sweep, SLOTS, IDS);
+      sweeps.push({
+        directory: sweep, candidateEntry: candidate, medians,
+        ...compareSweep(medians[entryName(medians, candidate)!]!, medians[entryName(medians, other)!]!),
+      });
     }
   });
   const assessment = identical ? undefined : assessComparison(sweeps);
   const report = {
     status: assessment?.status ?? "pass", identicalBundles: identical,
-    baselineRevision: reference.revision, candidateRevision: env.htmlNext.commit, candidateDirty: env.htmlNext.dirty,
+    baselineRevision: base.revision, candidateRevision: env.htmlNext.commit, candidateDirty: env.htmlNext.dirty,
     measuredAt: new Date().toISOString(), protocol: (count ?? 15) === 15 ? "full_standard" : "reduced", cpuSamples: count ?? 15,
     environment: env, bundles, assessment, sweeps,
   };
@@ -395,9 +423,9 @@ async function smokeEntry(browser: Browser, name: string, removals: number): Pro
 }
 
 async function smoke(): Promise<void> {
-  ensureSetup();
   const removals = Number(one("removals") ?? "20");
   if (!(Number.isInteger(removals) && removals >= 0 && removals < 990)) throw new Error("--removals must be an integer from 0 to 989.");
+  await preflight();
   await buildEntry(LIVE, "live");
   await buildEntry(COMPILED, "compiled");
   const directory = join(benchmarkRoot, "runs", `${stamp()}-smoke`);

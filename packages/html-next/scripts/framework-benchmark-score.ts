@@ -17,7 +17,11 @@ export const WEIGHTS: Readonly<Record<WorkloadId, number>> = {
   "09_clear1k_x8": 0.4225836631419211,
 };
 export const CONTROLS = ["react-hooks", "vue", "svelte", "solid"] as const;
-/** Gate limits: aggregate noise allowance and the repository's 25% hot-path rule. */
+/**
+ * Gate limits: aggregate noise allowance and the repository's 25% hot-path threshold. The gate is
+ * deliberately stricter than that rule: it does not apply the rule's 1 KB / 5% gzip savings
+ * exemption, so a size-saving trade fails here and goes to owner review with both bundle sizes.
+ */
 export const LIMITS = { weighted: 1.03, workload: 1.25 } as const;
 
 export type Rows = Partial<Record<WorkloadId, number>>;
@@ -91,7 +95,8 @@ export function summarize(medians: Medians): Record<string, unknown> {
     const name = entryName(medians, control);
     return name === undefined ? [] : [[control, name]];
   }));
-  const controlScores = Object.values(controls).map((name) => score[name]!);
+  // "Fastest competitor" means the fastest of all four controls, never of a partial field.
+  const fastest = Object.keys(controls).length === CONTROLS.length ? Math.min(...Object.values(controls).map((name) => score[name]!)) : undefined;
   const summary: Record<string, unknown> = { median_ms: medians, scores: score, controls };
   const live = entryName(medians, "html-next-live-candidate");
   if (live !== undefined) {
@@ -99,14 +104,14 @@ export function summarize(medians: Medians): Record<string, unknown> {
     for (const [control, name] of Object.entries(controls)) {
       summary[`live_vs_${control.replace("-", "_")}`] = score[live]! / score[name]!;
     }
-    if (controlScores.length > 0) summary["live_vs_fastest_competitor"] = score[live]! / Math.min(...controlScores);
+    if (fastest !== undefined) summary["live_vs_fastest_competitor"] = score[live]! / fastest;
     const reference = entryName(medians, "html-next-live-reference");
     if (reference !== undefined) summary["live_vs_reference"] = weightedRatio(medians[live]!, medians[reference]!);
   }
   const compiled = entryName(medians, "html-next-compiled-candidate");
   if (compiled !== undefined) {
     summary["compiled_score"] = score[compiled];
-    if (controlScores.length > 0) summary["compiled_vs_fastest_competitor"] = score[compiled]! / Math.min(...controlScores);
+    if (fastest !== undefined) summary["compiled_vs_fastest_competitor"] = score[compiled]! / fastest;
   }
   return summary;
 }

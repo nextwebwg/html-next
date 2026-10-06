@@ -24,6 +24,9 @@ Setup makes a sparse, blob-filtered checkout of the pinned fork containing only 
 `solid` keyed entries. It verifies the checked-out revision and the four controls'
 `package-lock.json` SHA-256 values, then runs `npm ci` and the fork's own build for the runner, the
 server and each control. Completed steps are skipped for the same pin unless `--force` is passed.
+Every command also refuses a checkout that has left the pin or has modified tracked files, such as an
+edited `controller.js`; `setup:frameworks --force` restores it. The ledger's fork revision and
+lockfile hashes are therefore the checked values, not assumptions.
 
 `measure:frameworks` options:
 
@@ -33,7 +36,8 @@ server and each control. Completed steps are skipped for the same pin unless `--
 - `--benchmarks <prefixes...>`: workload prefixes such as `01_ 09_`; the default is all nine.
 - `--count <n>`: CPU samples per workload. Omit it for the standard 15 (25 for selection).
 - `--reference <git ref>`: also build `html-next-live-reference` from that revision's
-  `packages/html-next/src`. With `--reference=HEAD` and a clean tree it is an A/A control.
+  `packages/html-next/src`. With `--reference=HEAD` and a clean tree it is an A/A control; entry
+  positions are fixed here, so it includes any position effect as well as noise.
 - `--record`: also write the summary to the ledger (below).
 
 Each run writes `packages/html-next/.benchmark/runs/<UTC stamp>/` with the runner's `results/`,
@@ -51,7 +55,8 @@ real directories under the checkout's `frameworks/keyed/`.
 
 The command starts the fork's server for its own checkout and stops it afterward. The pinned runner
 and server only use port 8080, so a run fails if anything else listens there. It also refuses to
-start while another `benchmarkRunner` process is active.
+start while another `benchmarkRunner` process is active. Both checks run before any entry is rebuilt,
+so a refused command never rewrites an entry another run is loading.
 
 ## Protocol
 
@@ -67,8 +72,10 @@ relative to the fastest entry for each workload in the same sweep, using the wei
 [the runtime performance guide](./runtime-performance.md#measurement-and-baseline-boundaries).
 Ratios divide scores from the same sweep: `live_vs_<control>`, `live_vs_fastest_competitor` (against
 the lowest-scoring of the four controls), `compiled_vs_fastest_competitor`, and `live_vs_reference`
-when a reference is measured. A run with fewer samples or workloads is marked `reduced`; it can
-locate opportunities but does not confirm them.
+when a reference is measured. The fastest-competitor ratios are omitted unless all four controls
+ran. A run is `full_standard` only with standard samples, all nine workloads and the whole default
+entry set, because scores are relative to the fastest entry in the sweep; anything else is marked
+`reduced`. A reduced run can locate opportunities but does not confirm them.
 
 ## Gate
 
@@ -76,8 +83,14 @@ locate opportunities but does not confirm them.
 runs paired sweeps containing only those two entries. Each sweep yields a weighted candidate/reference
 ratio and nine per-workload ratios.
 
+The runner orders entries by the server's directory listing, not by its arguments, so the gate
+builds the two sides into neutral entries `html-next-live-a` and `html-next-live-b` and swaps them
+between sweeps. Neither side always runs first. Each sweep records which entry held the candidate.
+
 - A sweep fails when its weighted ratio exceeds 1.03 or any workload ratio exceeds 1.25, the
-  repository's 25% hot-path review threshold.
+  repository's 25% hot-path review threshold. The gate is deliberately stricter than that rule: it
+  does not apply the rule's 1 KB / 5% gzip savings exemption. A size-saving trade therefore fails and
+  goes to owner review with both bundle sizes in the report.
 - The same failed limit in two sweeps is a `regression`. Two clean sweeps `pass`.
 - When the first two sweeps disagree, one extra sweep is run. Anything still undecided is
   `inconclusive`. A regression is never retried to obtain a pass.
