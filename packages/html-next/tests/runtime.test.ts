@@ -3846,6 +3846,84 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} applies a delegate's invocation bindings before its parent's on their shared root`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-in" status="early" summary="Native root."><button type="button"><slot></slot></button></template>` +
+          `<template component="x-mid" status="early" summary="Delegates its root.">` +
+            `<defs><state name="pressed" type="boolean" value="false"></state><handler name="press"><set name="pressed" expr:value="true"></set></handler></defs>` +
+            `<x-in from:title="'inner'" on:click.prevent="press"><slot></slot></x-in>` +
+          `</template>` +
+          `<template component="x-out" status="early" summary="Binds the delegating invocation.">` +
+            `<defs><state name="prevented" type="boolean" value="false"></state><handler name="read"><set name="prevented" expr:value="$$event.defaultPrevented"></set></handler></defs>` +
+            `<section><x-mid from:title="'outer'" on:click="read">Go</x-mid><output $value="prevented"></output></section>` +
+          `</template>` +
+          `<x-out id="out"></x-out>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.lowerDocument();
+          await settle();
+          const button = document.querySelector('#out button');
+          const title = button.title;
+          button.click();
+          await settle();
+          return { title, prevented: document.querySelector('#out output').textContent };
+        })()`);
+        // The outer invocation's value wins, and the inner listener runs before the outer one.
+        assert.deepEqual(result, { title: "outer", prevented: "true" });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} attaches a parent's bindings to a component whose definition arrives after the parent renders`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-p" status="early" summary="Renders a later component.">` +
+            `<defs><state name="n" type="number" value="1"></state><handler name="inc"><set name="n" expr:value="n + 1"></set></handler></defs>` +
+            `<main><x-k $ref="k" from:title="n" on:click="inc"></x-k><output $value="n"></output></main>` +
+          `</template>` +
+          `<x-p id="p"></x-p>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          const stop = window.HtmlRuntime.observeDocument(document);
+          await settle();
+          const pending = document.querySelector('#p x-k') !== null;
+          const definition = document.createElement('template');
+          definition.setAttribute('component', 'x-k');
+          definition.setAttribute('status', 'early');
+          definition.setAttribute('summary', 'Defined later.');
+          definition.innerHTML = '<button type="button">K</button>';
+          document.body.append(definition);
+          await settle();
+          const button = document.querySelector('#p button');
+          button.click();
+          await settle();
+          const host = window.HtmlRuntime.getComponentHost(document.querySelector('#p'));
+          const outcome = { pending, output: document.querySelector('#p output').textContent, title: button.title, ref: host.refs.k === button };
+          stop();
+          return outcome;
+        })()`);
+        assert.deepEqual(result, { pending: true, output: "2", title: "2", ref: true });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} parses structured props from JSON attributes and reflects only explicit ones`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

@@ -169,6 +169,8 @@ function whenLowered(invocation: Element, rebind: (root: Element) => void): void
  */
 interface InvocationBinding {
   readonly tag: string;
+  /** A registered component's invocation: lowering replaces it, so nothing attaches to it meanwhile. */
+  readonly awaitsLowering: boolean;
   component: RuntimeInstance | undefined;
   /** Run against the component's root when it lowers and again whenever that root is replaced. */
   readonly effects: ReactiveEffect[];
@@ -197,11 +199,22 @@ function valueTarget(element: Element, invocation: InvocationBinding | undefined
   return component === undefined ? element : untracked(() => component.rootElement.get()) ?? component.element;
 }
 
-/** Where listeners and properties go: never an invocation, only the root of the component it became. */
+/**
+ * Where listeners, properties and refs go: the root of the component an invocation became. Before
+ * then, a server-rendered root or an element no registered component claims yet is itself the target.
+ */
 function rootTarget(element: Element, invocation: InvocationBinding | undefined): Element | undefined {
-  if (invocation === undefined) return element;
-  const component = invocation.component;
-  return component === undefined ? undefined : untracked(() => component.rootElement.get());
+  const component = invocation?.component;
+  if (component !== undefined) return untracked(() => component.rootElement.get());
+  return invocation?.awaitsLowering === true ? undefined : element;
+}
+
+/** Re-run what invocations bound on a root, a delegate's bindings before those of the component it serves. */
+function followRoot(owner: RuntimeInstance, root: Element): void {
+  for (let index = owner.delegates.length; index >= 0; index -= 1) {
+    const instance = index === 0 ? owner : owner.delegates[index - 1]!;
+    for (const follow of instance.followers) follow(root);
+  }
 }
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
 /** How deep one lowering pass follows component invocations that other components render. */
@@ -1767,8 +1780,11 @@ function bindInvocation(
   node: ElementNode,
   scope: ReactiveScope,
   context: RuntimeRenderContext,
+  awaitsLowering: boolean,
 ): InvocationBinding {
-  const invocation: InvocationBinding = { tag: node.name, component: committedComponent(element, node.name), effects: [] };
+  const invocation: InvocationBinding = {
+    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [],
+  };
   if (node.ref !== undefined) {
     const ref = node.ref;
     // Hold the ref's place in render order until the component's root fills it.
@@ -1797,18 +1813,15 @@ function settleInvocation(element: Element, invocation: InvocationBinding): void
 }
 
 /** Attach what parents bound on an invocation to the component that just lowered there. */
-function claimInvocationBindings(element: Element, component: RuntimeInstance): void {
+function claimInvocationBindings(element: Element, component: RuntimeInstance): boolean {
   const pending = pendingInvocationBindings.get(element);
-  if (pending === undefined) return;
+  if (pending === undefined) return false;
   const tag = component.definition.contract.tag;
-  const rest = pending.filter((invocation) => invocation.tag !== tag);
-  if (rest.length === 0) pendingInvocationBindings.delete(element);
-  else pendingInvocationBindings.set(element, rest);
-  for (const invocation of pending) {
-    if (invocation.tag !== tag) continue;
-    followComponent(invocation, component);
-    for (const effect of invocation.effects) effect.execute();
-  }
+  const claimed = pending.filter((invocation) => invocation.tag === tag);
+  if (claimed.length === pending.length) pendingInvocationBindings.delete(element);
+  else pendingInvocationBindings.set(element, pending.filter((invocation) => invocation.tag !== tag));
+  for (const invocation of claimed) followComponent(invocation, component);
+  return claimed.length > 0;
 }
 
 /** Install the existing attribute/property bindings on an element, or on an invocation's component. */
@@ -2095,7 +2108,7 @@ function renderInstance(
     // not as the authored invocation tag. That child owns its already-adopted
     // subtree; walking the parent's invocation shape would move its projected
     // nodes into a disconnected synthetic element.
-    const invocation = bindInvocation(candidate, node, scope, context);
+    const invocation = bindInvocation(candidate, node, scope, context, false);
     bindEvents(candidate, node, scope, context, invocation);
     settleInvocation(candidate, invocation);
     return [candidate];
@@ -2110,7 +2123,7 @@ function renderInstance(
     // A nested component the server already lowered. Keep its root, and bind this
     // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
     // carrier), exactly where lowering put them.
-    const invocation = bindInvocation(candidate, node, scope, context);
+    const invocation = bindInvocation(candidate, node, scope, context, false);
     bindEvents(candidate, node, scope, context, invocation);
     settleInvocation(candidate, invocation);
     const nested = serverRanges(candidate, false);
@@ -2181,10 +2194,10 @@ function renderInstance(
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
     element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
-  // Lowering replaces a template-component invocation, so nothing binds the element itself.
-  const invocation = registryFor(document).definitions.has(elementName) &&
-    document.defaultView?.customElements.get(elementName) === undefined
-    ? bindInvocation(element, node, scope, context) : undefined;
+  // A component may lower onto any custom-element name. Lowering replaces a registered component's
+  // invocation, so nothing attaches to it; an unregistered one keeps its bindings until claimed.
+  const invocation = elementName.includes("-") && document.defaultView?.customElements.get(elementName) === undefined
+    ? bindInvocation(element, node, scope, context, registryFor(document).definitions.has(elementName)) : undefined;
   if (invocation === undefined) bindElement(element, node, scope, context);
 
   if (contentDirective !== undefined) {
@@ -2930,13 +2943,7 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   runtimeInstances.set(element, instance);
   instance.rootElement.set(element);
   // A delegated root may already have followers before its first native root is installed.
-  if (previous !== element) {
-    // Inner bindings apply before the outer invocation's bindings on a shared root.
-    for (let index = instance.delegates.length; index >= 0; index -= 1) {
-      const owner = index === 0 ? instance : instance.delegates[index - 1]!;
-      for (const follow of owner.followers) follow(element);
-    }
-  }
+  if (previous !== element) followRoot(instance, element);
 }
 
 /**
@@ -3090,7 +3097,11 @@ function commitRuntimeInvocations(
     } else {
       adoptComponentRoot(invocation.instance, host);
     }
-    claimInvocationBindings(invocation.invocation, invocation.instance);
+    if (claimInvocationBindings(invocation.invocation, invocation.instance)) {
+      const root = untracked(() => invocation.instance.rootElement.get());
+      // A delegate claims after the component it serves attached the root; keep inner before outer.
+      if (root !== undefined) followRoot(runtimeInstances.get(root) ?? invocation.instance, root);
+    }
     connectRuntimeInstance(invocation.instance);
   }
 }
