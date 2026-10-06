@@ -76,6 +76,7 @@ const cases = [
   { name: "keyed lists and retained row identity", html: '<ssr-list id="subject"></ssr-list>', state: { rows: ["Ada", "Bea"] } },
   { name: "nested components and shared state", html: '<ssr-provider id="subject"><strong>Projected</strong></ssr-provider>', state: { current: 5 } },
   { name: "parent bindings and events on nested native roots", html: '<ssr-bound-parent id="subject"></ssr-bound-parent>', state: { count: 5 } },
+  { name: "parent bindings on nested native roots adopted in an earlier pass", html: '<ssr-bound-parent id="subject"></ssr-bound-parent>', state: { count: 5 }, earlierPass: "ssr-bound-button" },
   { name: "native form controls and edits before hydration", html: '<ssr-control id="subject"></ssr-control>', state: { text: "server" } },
   { name: "delegated roots and slot passthrough", html: '<ssr-delegate id="subject">Delegated</ssr-delegate>', state: {} },
   { name: "structured, boolean and rejected prop inputs", html: '<ssr-props id="subject" enabled items="[&quot;&lt;/script&gt;&amp;&quot;]" amount="invalid"></ssr-props>', state: {} },
@@ -115,7 +116,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             }
           });
           await page.addScriptTag({ path: bundle });
-          const result = await page.evaluate(async ({ definitionJSON, stateJSON }) => {
+          const result = await page.evaluate(async ({ definitionJSON, stateJSON, earlierPass }) => {
             const definitions = JSON.parse(definitionJSON) as unknown[];
             const state = JSON.parse(stateJSON) as Record<string, unknown>;
             const context = window as unknown as {
@@ -129,7 +130,13 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
               originalNodes: Element[];
             };
             const runtime = context.HtmlRuntime;
-            runtime.registerComponentDefinitions(definitions);
+            // A child adopted before its parent is registered has already committed when the parent binds it.
+            const first = definitions.filter((definition) => (definition as { contract: { tag: string } }).contract.tag === earlierPass);
+            if (first.length > 0) {
+              runtime.registerComponentDefinitions(first);
+              runtime.lowerDocument();
+            }
+            runtime.registerComponentDefinitions(definitions.filter((definition) => !first.includes(definition)));
             runtime.lowerDocument();
             const server = document.querySelector("#server")!;
             const client = document.querySelector("#client")!;
@@ -174,7 +181,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             await Promise.resolve();
             return { initial, identity, metadataRemoved, control, after, rowKept, parentBindings,
               editedState: root instanceof HTMLInputElement ? runtime.getComponentHost(root)?.state.text : null };
-          }, { definitionJSON: JSON.stringify(definitions), stateJSON: JSON.stringify(fixture.state) });
+          }, { definitionJSON: JSON.stringify(definitions), stateJSON: JSON.stringify(fixture.state),
+            earlierPass: "earlierPass" in fixture ? fixture.earlierPass : undefined });
           assert.deepEqual(result.initial.server, result.initial.client);
           assert.equal(result.identity, true, "hydrate existing nodes in place");
           assert.equal(result.metadataRemoved, true);
