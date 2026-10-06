@@ -284,11 +284,10 @@ function supportSource(
   runtimeRendered: ReadonlyMap<string, ComponentDefinition>,
 ): string {
   const lines: string[] = [];
-  if (imports.has("@nextwebwg/html-next/generated-runtime")) {
-    lines.push('export { manageGeneratedProp, manageGeneratedProps } from "@nextwebwg/html-next/generated-runtime";');
-  }
-  if (imports.has("@nextwebwg/html-next/runtime")) {
-    lines.push('export { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";');
+  // Generated modules import whichever helpers their features use; re-exporting the whole entry
+  // keeps every one of them resolvable, and the bundler still drops what nothing imports.
+  for (const source of ["@nextwebwg/html-next/generated-runtime", "@nextwebwg/html-next/runtime"]) {
+    if (imports.has(source)) lines.push(`export * from ${JSON.stringify(source)};`);
   }
   if (runtimeRendered.size > 0) {
     // Components another component's template invokes, where the general runtime renders that

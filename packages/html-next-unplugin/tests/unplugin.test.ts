@@ -160,6 +160,62 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /function manageGeneratedProp(?:s)?/);
   });
 
+  it("resolves every helper a generated module imports through the shared support module", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-support-"));
+    temporary.push(root);
+    await writeFile(join(root, "once.html"), `<template component="x-once" status="early" summary="Once listener.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+    </template>`);
+    await writeFile(join(root, "dispatch.html"), `<template component="x-dispatch" status="early" summary="Declared dispatch.">
+      <defs>
+        <event name="saved" type="number"></event>
+        <state type="number" name="count" value="0"></state>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save</button>
+    </template>`);
+    await writeFile(join(root, "polymorphic.html"), `<template component="x-polymorphic" status="early" summary="Root match.">
+      <defs><prop name="as" type="keyword" values="button, a" default="button">Element.</prop></defs>
+      <template $match>
+        <a $when="as = 'a'" href="/next"><slot></slot></a>
+        <button $else type="button"><slot></slot></button>
+      </template>
+    </template>`);
+    const aliases = {
+      "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+      "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+    };
+    const bundle = async (entry: string, factory: string): Promise<string> => {
+      const directory = join(root, entry.replace(".html", ""));
+      await mkdir(directory);
+      await writeFile(join(directory, "main.js"), `export { ${factory} } from ${JSON.stringify(componentsModule)};`);
+      await build({
+        root,
+        logLevel: "silent",
+        plugins: [htmlNext.vite({ entries: [entry], root, manifestFile: false })],
+        resolve: { alias: aliases },
+        build: {
+          minify: false,
+          outDir: join(directory, "dist"),
+          lib: { entry: join(directory, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" },
+        },
+      });
+      return readFile(join(directory, "dist/app.js"), "utf8");
+    };
+
+    const once = await bundle("once.html", "createXOnce");
+    assert.match(once, /function manageGeneratedLifecycle/);
+    // Re-exporting the whole entry still leaves unused helpers and the general runtime out.
+    assert.doesNotMatch(once, /function manageGeneratedProps?\b|function manageComponentLifecycle/);
+    const dispatch = await bundle("dispatch.html", "createXDispatch");
+    assert.match(dispatch, /function dispatchGeneratedEvent/);
+    assert.doesNotMatch(dispatch, /function manageComponentLifecycle/);
+    const polymorphic = await bundle("polymorphic.html", "createXPolymorphic");
+    assert.match(polymorphic, /function componentRootIndex/);
+    assert.match(polymorphic, /function manageComponentLifecycle/);
+  });
+
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-linked-"));
     temporary.push(root);
