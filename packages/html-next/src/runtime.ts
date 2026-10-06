@@ -1157,6 +1157,7 @@ function bindEvents(
       return detach;
     }, 2);
     whenLowered(element, (root) => {
+      if (target === root) return;
       const live = attached;
       if (live) detach();
       target = root;
@@ -1616,6 +1617,118 @@ function renderMatch(
   return renderInstance(armNode, match.scope, document, [], context, candidate);
 }
 
+/** Bind the parent's invocation without walking the child-owned native subtree. */
+function bindElement(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+): void {
+  if (node.ref !== undefined) {
+    if (iteratedRefNames(context.definition).has(node.ref)) {
+      ((context.refs[node.ref] ??= []) as Element[]).push(element);
+    } else context.refs[node.ref] = element;
+    if (node.name.includes("-")) {
+      let current = element;
+      whenLowered(element, (root) => {
+        const recorded = context.refs[node.ref!];
+        if (Array.isArray(recorded)) {
+          const index = recorded.indexOf(current);
+          if (index >= 0) (recorded as Element[])[index] = root;
+        } else if (recorded === current) context.refs[node.ref!] = root;
+        current = root;
+      });
+    }
+  }
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute") {
+      let bindingTarget = element;
+      const applyBinding = (): void => {
+        const value = evalConforming(attribute.expression, scope, context.definition);
+        // A reference that broke its declared type writes nothing, so this binding keeps whatever
+        // it last rendered rather than showing a value the declaration forbids.
+        if (value === NONCONFORMING) return;
+        // A lowered child owns its props: write them through the same channel framework adapters
+        // use, so the child re-parses the declared type and reflects the value itself.
+        const owner = node.name.includes("-") ? runtimeInstances.get(element) : undefined;
+        const child = loweredInvocations.get(element)?.instance ?? (owner?.definition.contract.tag === node.name
+          ? owner : owner?.delegates.find(instance => instance.definition.contract.tag === node.name));
+        const childDefinition = child?.definition ?? (node.name.includes("-")
+          ? registryFor(element.ownerDocument).definitions.get(node.name)?.definition : undefined);
+        if (childDefinition !== undefined && attribute.target === undefined) {
+          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
+          if (propName !== undefined) {
+            const contract = childDefinition.contract;
+            const prop = contract.props[propName]!;
+            const selected = prop.select === undefined ? prop.type : child === undefined ? undefined
+              : selectedPropType(contract, prop, { [prop.select.from]: child.scope.get(prop.select.from) });
+            if (!conformsAtDestination(value, selected)) return;
+            if (child !== undefined) {
+              applyComponentProps(child, { [propName]: value });
+              return;
+            }
+            // A hydrated child already carries serialized props. Its instance is prepared
+            // after the parent; replay on adoption rather than leaking a prop onto native DOM.
+            if (element.localName !== node.name) return;
+          }
+        }
+        if (attribute.target === "class") {
+          bindingTarget.classList.toggle(attribute.name, truthy(value));
+        } else if (attribute.target === "style") {
+          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
+        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
+          // Native form-control properties carry the live value; no duplicate attribute write.
+        } else {
+          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
+        }
+      };
+      const bindingEffect = ownEffect(context, scope, applyBinding);
+      if (node.name.includes("-")) whenLowered(element, (root) => {
+        bindingTarget = root;
+        bindingEffect.execute();
+      });
+      if (attribute.twoWay === true && attribute.writablePath !== undefined) {
+        let target = element;
+        let attached = false;
+        let eventName = "input";
+        const listener = (): void => {
+          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
+          setWritablePath(scope, attribute.writablePath!, controlValue(target));
+        };
+        const attach = (): void => {
+          eventName = target instanceof HTMLSelectElement ||
+            (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
+            ? "change" : "input";
+          target.addEventListener(eventName, listener);
+          attached = true;
+        };
+        const detach = (): void => {
+          target.removeEventListener(eventName, listener);
+          attached = false;
+        };
+        ownEffect(context, scope, () => {
+          attach();
+          return detach;
+        }, 2);
+        whenLowered(element, (root) => {
+          if (target === root) return;
+          const live = attached;
+          if (live) detach();
+          target = root;
+          if (live) attach();
+        });
+      }
+    } else if (attribute.kind === "property") {
+      ownEffect(context, scope, () => {
+        const property = evalConforming(attribute.expression, scope, context.definition);
+        if (property === NONCONFORMING) return;
+        (element as unknown as Record<string, unknown>)[attribute.name] = property;
+      });
+    }
+    // Content directives are handled by the renderer.
+  }
+}
+
 /** Render one instance of a node (its structural flow already resolved) into 0+ nodes. */
 function renderInstance(
   node: ElementNode,
@@ -1676,6 +1789,8 @@ function renderInstance(
     // not as the authored invocation tag. That child owns its already-adopted
     // subtree; walking the parent's invocation shape would move its projected
     // nodes into a disconnected synthetic element.
+    bindElement(candidate, node, scope, context);
+    bindEvents(candidate, node, scope, context);
     return [candidate];
   }
   if (
@@ -1688,6 +1803,8 @@ function renderInstance(
     // A nested component the server already lowered. Keep its root, and bind this
     // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
     // carrier), exactly where lowering put them.
+    bindElement(candidate, node, scope, context);
+    bindEvents(candidate, node, scope, context);
     const nested = serverRanges(candidate, false);
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
@@ -1729,22 +1846,6 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
-  if (node.ref !== undefined) {
-    if (iteratedRefNames(context.definition).has(node.ref)) {
-      ((context.refs[node.ref] ??= []) as Element[]).push(element);
-    } else context.refs[node.ref] = element;
-    if (node.name.includes("-")) {
-      let current = element;
-      whenLowered(element, (root) => {
-        const recorded = context.refs[node.ref!];
-        if (Array.isArray(recorded)) {
-          const index = recorded.indexOf(current);
-          if (index >= 0) (recorded as Element[])[index] = root;
-        } else if (recorded === current) context.refs[node.ref!] = root;
-        current = root;
-      });
-    }
-  }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
   }
@@ -1772,87 +1873,7 @@ function renderInstance(
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
     element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
-  for (const attribute of node.attributes) {
-    if (attribute.kind === "attribute") {
-      let bindingTarget = element;
-      const applyBinding = (): void => {
-        const value = evalConforming(attribute.expression, scope, context.definition);
-        // A reference that broke its declared type writes nothing, so this binding keeps whatever
-        // it last rendered rather than showing a value the declaration forbids.
-        if (value === NONCONFORMING) return;
-        // A lowered child owns its props: write them through the same channel framework adapters
-        // use, so the child re-parses the declared type and reflects the value itself.
-        const lowered = loweredInvocations.get(element);
-        const childDefinition = lowered?.instance.definition ?? (element.localName.includes("-")
-          ? registryFor(element.ownerDocument).definitions.get(element.localName)?.definition : undefined);
-        if (childDefinition !== undefined && attribute.target === undefined) {
-          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
-          if (propName !== undefined) {
-            const contract = childDefinition.contract;
-            const prop = contract.props[propName]!;
-            const selected = prop.select === undefined ? prop.type : lowered === undefined ? undefined
-              : selectedPropType(contract, prop, { [prop.select.from]: lowered.instance.scope.get(prop.select.from) });
-            if (!conformsAtDestination(value, selected)) return;
-            if (lowered !== undefined) {
-              applyComponentProps(lowered.instance, { [propName]: value });
-              return;
-            }
-          }
-        }
-        if (attribute.target === "class") {
-          bindingTarget.classList.toggle(attribute.name, truthy(value));
-        } else if (attribute.target === "style") {
-          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
-        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
-          // Native form-control properties carry the live value; no duplicate attribute write.
-        } else {
-          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
-        }
-      };
-      const bindingEffect = ownEffect(context, scope, applyBinding);
-      if (node.name.includes("-")) whenLowered(element, (root) => {
-        bindingTarget = root;
-        bindingEffect.execute();
-      });
-      if (attribute.twoWay === true && attribute.writablePath !== undefined) {
-        let target = element;
-        let attached = false;
-        let eventName = "input";
-        const listener = (): void => {
-          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
-          setWritablePath(scope, attribute.writablePath!, controlValue(target));
-        };
-        const attach = (): void => {
-          eventName = target instanceof HTMLSelectElement ||
-            (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
-            ? "change" : "input";
-          target.addEventListener(eventName, listener);
-          attached = true;
-        };
-        const detach = (): void => {
-          target.removeEventListener(eventName, listener);
-          attached = false;
-        };
-        ownEffect(context, scope, () => {
-          attach();
-          return detach;
-        }, 2);
-        whenLowered(element, (root) => {
-          const live = attached;
-          if (live) detach();
-          target = root;
-          if (live) attach();
-        });
-      }
-    } else if (attribute.kind === "property") {
-      ownEffect(context, scope, () => {
-        const property = evalConforming(attribute.expression, scope, context.definition);
-        if (property === NONCONFORMING) return;
-        (element as unknown as Record<string, unknown>)[attribute.name] = property;
-      });
-    }
-    // Content directives are handled below.
-  }
+  bindElement(element, node, scope, context);
 
   if (contentDirective !== undefined) {
     ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document, context.definition));
@@ -2768,6 +2789,15 @@ function commitRuntimeInvocations(
       });
     } else {
       adoptComponentRoot(invocation.instance, host);
+    }
+    if (!invocation.replace) {
+      // Hydration starts with the native root. Parent bindings queued against it must replay
+      // after the child owns its props, and follow later root replacements just like lowering.
+      for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {
+        rebind(host);
+        invocation.instance.followers.push(rebind);
+      }
+      rebindOnLower.delete(invocation.invocation);
     }
     connectRuntimeInstance(invocation.instance);
   }

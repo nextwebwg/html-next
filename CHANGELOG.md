@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.31
+
+- Browser adoption retains parent refs, reactive bindings, declared child props, and events on nested components rendered as native roots. Bindings and refs follow child root replacement without replacing projected content.
+
 ## 1.0.0-alpha.30
 
 - Build styles preserve `@import` and other statement at-rule semicolons when hoisted.

@@ -26,6 +26,7 @@
 - Native-first is a design method, not a requirement to delegate every operation at runtime. Measure bundle size and representative runtime cost together. Reject a change that makes a hot path more than 25% slower while saving less than both 1 KB gzip and 5% of its bundle; any greater than 2x hot-path regression requires a unique correctness or interoperability benefit and explicit owner review.
 - For generalized validation, probe detached native controls configured with the proposed type and constraints, then preserve the observed behavior with cross-browser conformance tests. Native controls use `ValidityState` directly; ordinary elements may use a faster equivalent implementation when runtime delegation has a disproportionate cost.
 - Keep the live parser/interpreter separate from generated component output. Generated components import only the helpers required by their authored features.
+- When an application consumer exposes a platform defect, fix it in the owning HTMLKit or HTML Next package with independent regression coverage. Remove consumer workarounds before delivery.
 
 ## Safe work
 
