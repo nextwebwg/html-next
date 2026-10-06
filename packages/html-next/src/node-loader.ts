@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { glob, lstat, readFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ComponentGraph } from "./graph.js";
@@ -18,6 +19,8 @@ export interface InspectedModule {
 }
 
 export interface NodeLoaderOptions {
+  /** Check-only recovery. Rejects with all collected compiler diagnostics. */
+  readonly collectDiagnostics?: boolean;
   readonly baseURL?: string;
   readonly resolvePackage?: (specifier: string, parentURL: string) => ResolvedResource;
   readonly readComponent?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
@@ -121,6 +124,7 @@ export async function loadNodeComponents(
   const graph = await buildComponentGraph(rootSpecifiers, {
     resolver: new NodeResourceResolver(baseURL, resolvePackage),
     fetchComponent: readComponent,
+    ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
   });
 
   const moduleInputs = new Set<string>();
@@ -144,4 +148,37 @@ export async function loadNodeComponents(
     ...graph,
     moduleInputs: Object.freeze([...moduleInputs].sort()),
   });
+}
+
+function hasGlob(pattern: string): boolean {
+  return pattern.includes("*") || pattern.includes("?") || pattern.includes("[") || pattern.includes("{");
+}
+
+/** A file remains an entry; a glob or directory expands to every HTML component below it. */
+export async function expandComponentEntries(projectRoot: string, patterns: readonly string[]): Promise<string[]> {
+  const entries: string[] = [];
+  for (const pattern of patterns) {
+    let scan = pattern;
+    if (!hasGlob(pattern)) {
+      const path = resolve(projectRoot, pattern);
+      const metadata = await lstat(path).catch((error: unknown) => {
+        if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (!metadata?.isDirectory()) {
+        entries.push(pattern);
+        continue;
+      }
+      scan = `${pattern.replace(/[\\/]$/, "")}/**`;
+    }
+    const matches: string[] = [];
+    for await (const match of glob(scan, { cwd: projectRoot })) {
+      if (extname(match).toLowerCase() !== ".html") continue;
+      if (!(await lstat(resolve(projectRoot, match))).isFile()) continue;
+      matches.push(match);
+    }
+    if (matches.length === 0) throw new Error(`Component input ${JSON.stringify(pattern)} matched no HTML component files.`);
+    entries.push(...matches.sort());
+  }
+  return entries;
 }

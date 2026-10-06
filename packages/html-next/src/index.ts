@@ -1,5 +1,5 @@
 export { defineContract, serializePropTarget } from "./contract-platform.js";
-export { HtmlDiagnosticError } from "./diagnostics.js";
+export { getDiagnosticLocation, HtmlDiagnosticAggregateError, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type DiagnosticLocation, type HtmlDiagnostic } from "./diagnostics.js";
 export {
   generateComponent,
   generateVueComponent,
@@ -41,7 +41,7 @@ export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
-export { loadNodeComponents } from "./node-loader.js";
+export { expandComponentEntries, loadNodeComponents } from "./node-loader.js";
 export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";
 export {

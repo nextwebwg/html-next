@@ -1,4 +1,4 @@
-import { fail, HtmlDiagnosticError } from "./diagnostics.js";
+import { fail, HtmlDiagnosticError, HtmlDiagnosticAggregateError, recoverDiagnostic, type HtmlDiagnostic } from "./diagnostics.js";
 import type { ComponentResourceResolver, ResolvedResource } from "./resolve.js";
 import type { ComponentDefinition } from "./template.js";
 
@@ -36,6 +36,8 @@ export interface ComponentGraph {
 }
 
 export interface BuildGraphOptions {
+  /** Collect independent resource failures, then reject with all diagnostics. */
+  readonly collectDiagnostics?: boolean;
   readonly resolver: ComponentResourceResolver;
   readonly fetchComponent: ComponentFetcher;
   readonly parseComponentResource: ComponentResourceParser;
@@ -49,10 +51,17 @@ export interface ParsedComponentResource {
   readonly dependencies: readonly string[];
 }
 
+/** A check parser can retain dependency links while withholding invalid definitions. */
+export interface DiagnosedComponentResource {
+  readonly definitions: readonly ComponentDefinition[];
+  readonly dependencies: readonly string[];
+  readonly diagnostics: readonly HtmlDiagnostic[];
+}
+
 export type ComponentResourceParser = (
   sourceText: string,
   source: string,
-) => ParsedComponentResource;
+) => ParsedComponentResource | DiagnosedComponentResource;
 
 function byKey([left]: readonly [string, unknown], [right]: readonly [string, unknown]): number {
   return left.localeCompare(right);
@@ -72,6 +81,8 @@ export async function buildComponentGraph(
   rootSpecifiers: readonly string[],
   options: BuildGraphOptions,
 ): Promise<ComponentGraph> {
+  const diagnostics: HtmlDiagnostic[] = [];
+  const report = options.collectDiagnostics ? (diagnostic: HtmlDiagnostic): void => { diagnostics.push(diagnostic); } : undefined;
   const drafts = new Map<string, DraftNode>();
   const aliases = new Map<string, string>();
   const tags = new Map<string, string>();
@@ -79,6 +90,15 @@ export async function buildComponentGraph(
   // Cache resources separately from definitions: one fetch can supply several graph nodes.
   const resources = new Map<string, readonly string[]>();
   const load = async (resource: ResolvedResource): Promise<readonly string[]> => {
+    try { return await loadResource(resource); }
+    catch (error) {
+      recoverDiagnostic(error, report);
+      // Cache failed resources as well, so shared invalid dependencies are checked once.
+      resources.set(aliases.get(resource.url) ?? resource.url, []);
+      return [];
+    }
+  };
+  const loadResource = async (resource: ResolvedResource): Promise<readonly string[]> => {
     const requestedURL = new URL(resource.url).href;
     const knownURL = aliases.get(requestedURL) ?? requestedURL;
     const known = resources.get(knownURL);
@@ -101,6 +121,9 @@ export async function buildComponentGraph(
     if (redirected !== undefined) return redirected;
 
     const parsed = options.parseComponentResource(response.source, finalURL);
+    if ("diagnostics" in parsed && parsed.diagnostics.length > 0) {
+      recoverDiagnostic(new HtmlDiagnosticAggregateError(parsed.diagnostics), report);
+    }
     const ids = parsed.definitions.map((definition) => {
       const tag = definition.contract.tag;
       const prior = tags.get(tag);
@@ -120,8 +143,10 @@ export async function buildComponentGraph(
     resources.set(finalURL, Object.freeze(ids));
     const dependencies = new Set<string>();
     for (const specifier of parsed.dependencies) {
-      const dependency = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
-      for (const id of await load(dependency)) dependencies.add(id);
+      try {
+        const dependency = options.resolver.resolveDependency(specifier, finalURL, resource.trustRoot);
+        for (const id of await load(dependency)) dependencies.add(id);
+      } catch (error) { recoverDiagnostic(error, report); }
     }
     for (const id of ids) {
       const draft = drafts.get(id)!;
@@ -146,10 +171,13 @@ export async function buildComponentGraph(
 
   const roots: string[] = [];
   for (const specifier of rootSpecifiers) {
-    for (const id of await load(options.resolver.resolveRoot(specifier))) {
-      if (!roots.includes(id)) roots.push(id);
-    }
+    try {
+      for (const id of await load(options.resolver.resolveRoot(specifier))) {
+        if (!roots.includes(id)) roots.push(id);
+      }
+    } catch (error) { recoverDiagnostic(error, report); }
   }
+  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
 
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
   for (const [id, draft] of Array.from(drafts).sort(byKey)) {

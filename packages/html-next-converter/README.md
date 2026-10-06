@@ -22,6 +22,14 @@ components do not include this helper.
 html-next-convert vue 'components/**' --mode library --out-dir generated
 ```
 
+For a check without output, use `html-next-check --target vue --mode library 'components/**'`
+from `@nextwebwg/html-next-unplugin`. See the [CI and diagnostic API guide](../html-next-unplugin/README.md#check-components-in-ci)
+for combining compiler checks with TypeScript and framework typecheckers. Programmatic converter
+users can call `checkConversion` with the same options as `convertComponents`, omitting
+`outDirectory`; it returns the planned conversion manifest, writes no files, and throws the same
+compiler diagnostics as conversion. Independent check failures are collected in
+`HtmlDiagnosticAggregateError.diagnostics`; conversion itself continues to stop at the first error.
+
 Quote the glob so the converter, not your shell, expands it. It discovers every `.html`
 component below `components/`, including definitions with no incoming component link, and
 preserves the source directory layout beneath `generated/vue/`. One HTML resource may define

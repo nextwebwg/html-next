@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -179,6 +179,56 @@ describe("workspace package contracts", () => {
     const library = join(consumer, "node_modules", "@example", "source-controls");
     const source = join(consumer, "controls.html");
     writeFileSync(source, `<template component="ui-label" status="early" summary="Label."><defs><prop name="label" type="string" required>Label.</prop></defs><output $value="$label"></output></template>`);
+    const checkCli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/check-cli.js");
+    const filesBeforeCheck = readdirSync(consumer, { recursive: true }).map(String).sort();
+    for (const target of ["native", "vue", "react", "svelte"]) {
+      const output = execFileSync(process.execPath, [checkCli, "--target", target, "--mode", "library", "controls.html", "--json"],
+        { cwd: consumer, encoding: "utf8" });
+      expect(JSON.parse(output)).toEqual({ diagnostics: [] });
+    }
+    expect(readdirSync(consumer, { recursive: true }).map(String).sort()).toEqual(filesBeforeCheck);
+    const invalid = join(consumer, "invalid.html");
+    writeFileSync(invalid, '<template component="ui-invalid">\n  <ui-missing></ui-missing>\n</template>');
+    const failedCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });
+    expect(failedCheck.status).toBe(1);
+    expect(failedCheck.stderr).toBe("");
+    expect(JSON.parse(failedCheck.stdout)).toMatchObject({ diagnostics: [{ code: "HN001", severity: "error", line: 2, column: 3 }] });
+    expect(failedCheck.stdout).not.toContain("\x1b");
+    const terminalEnvironment = { ...process.env };
+    delete terminalEnvironment.NO_COLOR;
+    const textCheck = spawnSync(process.execPath, [checkCli, "invalid.html"], { cwd: consumer, encoding: "utf8", env: terminalEnvironment });
+    expect(textCheck.status).toBe(1);
+    expect(textCheck.stdout).toBe("");
+    expect(textCheck.stderr).toContain("error HN001");
+    expect(textCheck.stderr).toContain("invalid.html:2:3");
+    expect(textCheck.stderr).toContain("\x1b]8;;vscode://file/");
+    expect(textCheck.stderr.trim().split("\n")).toHaveLength(1);
+    const plainCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--no-color"], { cwd: consumer, encoding: "utf8" });
+    expect(plainCheck.status).toBe(1);
+    expect(plainCheck.stderr).not.toContain("\x1b");
+    expect(plainCheck.stderr).toContain("invalid.html:2:3");
+    for (const args of [["--target", "unknown"], ["--mode"], ["--json", "missing/**/*.html"]]) {
+      const failedCommand = spawnSync(process.execPath, [checkCli, ...args], { cwd: consumer, encoding: "utf8" });
+      expect(failedCommand.status).toBe(2);
+      expect(failedCommand.stderr.length).toBeGreaterThan(0);
+    }
+    writeFileSync(invalid, `<template component="ui-invalid">
+  <defs>
+    <prop name="age" type="integer" default="wrong">Age.</prop>
+    <prop name="enabled" type="boolean" default="wrong">Enabled.</prop>
+  </defs>
+  <main></main>
+</template>`);
+    const multipleCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });
+    expect(multipleCheck.status).toBe(1);
+    expect(multipleCheck.stderr).toBe("");
+    expect(JSON.parse(multipleCheck.stdout).diagnostics).toMatchObject([
+      { code: "HC015", line: 3, column: 5 }, { code: "HC015", line: 4, column: 5 },
+    ]);
+    const multipleText = spawnSync(process.execPath, [checkCli, "invalid.html", "--no-color"], { cwd: consumer, encoding: "utf8" });
+    expect(multipleText.status).toBe(1);
+    expect(multipleText.stderr.trim().split("\n")).toHaveLength(2);
+    rmSync(invalid);
     const assembly = join(consumer, "assemble.mjs");
     writeFileSync(assembly, `import { assembleComponentPackage } from "@nextwebwg/html-next"; await assembleComponentPackage(${JSON.stringify({
       name: "@example/source-controls", version: "1.0.0", sourceOnly: true, outDirectory: library, components: [{ source }],
@@ -196,6 +246,12 @@ describe("workspace package contracts", () => {
       skipLibCheck: false, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
     const tsc = join(consumer, "node_modules/typescript/bin/tsc");
     execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
+    writeFileSync(join(consumer, "check-api.ts"), 'import { checkHtmlNext, formatCheckDiagnostic, type HtmlNextCheckDiagnostic } from "@nextwebwg/html-next-unplugin"; export const check = () => checkHtmlNext({ target: "react", mode: "library", entries: ["controls.html"] }); export const format = (diagnostic: HtmlNextCheckDiagnostic) => formatCheckDiagnostic(diagnostic);');
+    // Unplugin's declarations reference optional bundlers; check API usage without installing each one.
+    writeFileSync(join(consumer, "tsconfig.check.json"), JSON.stringify({ extends: "./tsconfig.json",
+      compilerOptions: { skipLibCheck: true }, include: ["check-api.ts"] }));
+    const checkedTypes = spawnSync(process.execPath, [tsc, "-p", "tsconfig.check.json"], { cwd: consumer, encoding: "utf8" });
+    expect(checkedTypes.status, checkedTypes.stdout + checkedTypes.stderr).toBe(0);
     const libraryManifest = JSON.parse(readFileSync(join(library, "package.json"), "utf8")) as { exports: Record<string, unknown> };
     libraryManifest.exports["."] = { "html-next": "./components/" };
     writeFileSync(join(library, "package.json"), JSON.stringify(libraryManifest));

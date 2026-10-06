@@ -66,6 +66,7 @@
     "directory": "packages/html-next-unplugin"
   },
   "bin": {
+    "html-next-check": "./dist/check-cli.js",
     "html-next-sync": "./dist/cli.js"
   },
   "peerDependencies": {

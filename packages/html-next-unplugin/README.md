@@ -3,6 +3,128 @@
 Vite can convert imported Declarative Components sources into Vue, React, or Svelte components. Libraries
 publish their HTML definitions; consumers use their normal component imports.
 
+## Check components in CI
+
+Run `html-next-check` to check an authored component graph without writing generated components,
+declarations, caches, or build output. Install `@nextwebwg/html-next-unplugin` as a development
+dependency to use the command. Select the backend and graph mode used by your build:
+
+```sh
+html-next-check --target native --mode application src/components/app.html
+html-next-check --target react --mode library 'components/**/*.html'
+```
+
+The default target is `native` and the default mode is `application`. All targets accept files,
+directories, and quoted globs; directories scan recursively for HTML files. Linked components are
+checked transitively. Avoid overlapping inputs: an entry listed twice is an error. Native checks
+also discover installed HTML source packages, as the native Vite plugin does, and may omit local
+entries when an installed source package supplies them. Framework checks require explicit HTML
+entries and use the converter's graph planner.
+
+The command checks the parser's declarations and constraints, graph resolution, and the selected
+backend's lowering restrictions and output collisions. Controllers are never executed. It runs
+compiler checks in memory; it does not run Vite, resolve application imports, or invoke the
+framework's own typechecker. The existing `html-next check` remains a parser/graph inspection
+check; use `html-next-check` for backend validation.
+
+This command does not load `vite.config`. Pass the same entries, target, and mode as your build.
+For framework checks with component-relative data URLs, supply `--public-root-url /app/` as you
+would for conversion. Native checks accept repeated `--external-custom-element x-tag` options
+corresponding to the plugin's declared dynamic boundaries.
+
+### Combine with TypeScript
+
+Use both checks: HTML Next checks authored HTML and compiler contracts; TypeScript checks authored
+JS/TS controllers and application code. Include those files in your TypeScript project. To check
+JavaScript too, enable [`allowJs`](https://www.typescriptlang.org/tsconfig/allowJs.html) and
+[`checkJs`](https://www.typescriptlang.org/tsconfig/checkJs.html), with `noEmit: true`.
+
+For a native project, a CI script can run:
+
+```json
+{
+  "scripts": {
+    "check:html": "html-next-check --target native src/components/app.html",
+    "typecheck": "pnpm check:html && tsc --noEmit",
+    "ci": "pnpm typecheck && vite build"
+  }
+}
+```
+
+For a framework project using the Vite source adapter, prepare consumer declarations before
+checking component imports:
+
+```json
+{
+  "scripts": {
+    "check:html": "html-next-check --target react --mode application 'src/components/**/*.html'",
+    "typecheck": "pnpm check:html && html-next-sync && tsc --noEmit",
+    "ci": "pnpm typecheck && vite build"
+  }
+}
+```
+
+Use `--target vue` with `vue-tsc --noEmit`, or `--target svelte` with `svelte-check`, for those
+frameworks. Configure local HTML entries in the Vite adapter so `html-next-sync` prepares their
+types. Include the generated declarations in the consumer project; local `.html` imports also
+need [`allowArbitraryExtensions`](https://www.typescriptlang.org/tsconfig/allowArbitraryExtensions.html).
+`html-next-sync` writes the files those typecheckers need; `html-next-check` itself writes none.
+For preconverted output, run the converter before the framework typechecker instead of syncing.
+Neither the check command nor declaration preparation provides general TypeScript-style inference
+for every HTML binding expression. Runtime behavior and bundler failures still need tests/builds.
+
+### Diagnostics for tooling
+
+`html-next-check --json ...` writes `{ "diagnostics": [...] }` to stdout. Success has an empty
+array. Each diagnostic has `code`, `message`, `severity: "error"`, and an optional `source`
+(a file URL or a converter-relative path). Source-located diagnostics also include one-based
+`line` and `column` coordinates. Human-readable failures go to stderr as compact Jess-style rows,
+without code excerpts:
+
+```text
+error HC013  Prop `age` has a min constraint that does not conform to its type; the constraint is ignored.  ·  components/child.html:3:5
+```
+
+The `file:line:column` label is an OSC 8 hyperlink to `vscode://file/…:line:column`, so terminals
+that support these links can open the authored location in VS Code. Use `--no-color` or set
+`NO_COLOR` to disable links for plain logs. JSON never includes terminal escape sequences.
+Exit status is
+`0` for success, `1` for a compiler diagnostic, and `2` for invalid arguments or an operational
+failure without a compiler diagnostic. Such operational failures go to stderr even with `--json`.
+
+Checks collect independent failures across declarations, markup elements, component carriers,
+and linked resources. Shared invalid resources are checked once, and diagnostics are deduplicated
+and sorted by source location. Invalid declarations reserve their names during checking to avoid
+secondary undeclared-name errors. An invalid element stops analysis of that element's dependent
+contents; its siblings can still be checked. Parsing or graph-resolution failures stop backend
+lowering for that graph, while a valid graph can report failures across several backend components.
+Builds and conversions continue to stop at the first error and never emit output from recovered
+check data. The checker can therefore report several errors in one run without promising every
+possible error after a broken prerequisite.
+
+Parser diagnostics point
+to the relevant declaration or element; backend failures can point to the enclosing component.
+Failures without an authored location show only the available file or message. Diagnostics do
+not yet provide end ranges, unsaved-buffer analysis, or a language server. An editor or lint
+adapter can call the same API:
+
+```ts
+import { checkHtmlNext } from "@nextwebwg/html-next-unplugin";
+
+const diagnostics = await checkHtmlNext({
+  target: "react",
+  mode: "library",
+  entries: ["components/"],
+  root: process.cwd(),
+});
+```
+
+The API returns a readonly diagnostic array and rejects on operational failures without a
+compiler diagnostic. Native options accept the plugin's `dynamicBoundaries`; framework options
+accept the converter's `publicRootURL` and `targetVersion`.
+`formatCheckDiagnostic(diagnostic, { hyperlinks: false })` formats the same compact row for a
+plain log; omit `hyperlinks: false` to embed the terminal file link.
+
 ## Framework source imports
 
 ```ts
