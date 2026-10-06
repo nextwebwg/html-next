@@ -28,6 +28,7 @@ import {
   createEffect,
   createSignal,
   ReactiveScope,
+  registerReactiveAlias,
   untracked,
   type ReactiveOwner,
   type ReactiveSignal,
@@ -3491,6 +3492,9 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
         return Reflect.defineProperty(value, key, descriptor);
       },
     });
+    // Storage retains reactive identity, while controller reads install the destination's guard.
+    // Readonly facades must keep their write barrier even when assigned into writable state.
+    if (!readonly) registerReactiveAlias(proxy, value);
     paths.set(path, proxy);
     return proxy;
   };

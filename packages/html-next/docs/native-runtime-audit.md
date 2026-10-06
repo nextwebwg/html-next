@@ -104,6 +104,13 @@ subscribed twice. Execution completion releases the membership index; conditiona
 pause, and stop release obsolete subscriptions. Direct scalar native output compiles this layer
 away; live components and generated general-runtime fallbacks share it.
 
+Controller paths retain separate write guards for their destination types. Native `WeakMap`
+identity associates writable facades with their existing reactive objects, so assigning values
+returned by array filtering, concatenation, or swapping does not stack another reactive proxy
+around an old controller guard. The next controller read applies its destination's guard.
+Readonly facades are not registered as writable aliases: their barriers survive assignments
+into writable state. Frozen values and native events keep their existing handling.
+
 | Authored feature | Gzip bytes | Runtime shape |
 | --- | ---: | --- |
 | Static markup | 302 | Direct DOM creation |

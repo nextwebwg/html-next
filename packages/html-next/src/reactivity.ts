@@ -40,6 +40,12 @@ const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
 
+/** Keep a writable controller facade from becoming another layer of reactive identity. */
+export function registerReactiveAlias(alias: object, value: object): void {
+  const canonical = proxyCache.get(value);
+  if (canonical !== undefined) proxyCache.set(alias, canonical);
+}
+
 function unsubscribe(subscription: Subscription): void {
   const { dependency, previousSubscriber, nextSubscriber } = subscription;
   if (previousSubscriber === undefined) dependency.first = nextSubscriber;

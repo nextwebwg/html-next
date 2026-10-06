@@ -62,6 +62,73 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} canonicalizes writable controller aliases without losing destination guards`, async () => {
+      const definition = parseComponent(`<template component="controller-alias-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="left" type="object({ value: number })" value="{ value: 1 }"></state>
+        <state name="right" type="object({ value: string })" value="{ value: 'old' }"></state>
+        <state name="alias" type="object({ id: number, label: string })" value="{ id: 0, label: 'unused' }"></state>
+        <computed name="locked" type="object({ id: number, label: string })" from="rows[0]"></computed>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const crossPath = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          host.state.right = host.state.left;
+          host.state.right.value = "right-text";
+          await Promise.resolve();
+          return { right: host.state.right.value, left: host.state.left.value };
+        }, JSON.stringify(definition));
+        // This fails before repeated writes on the old implementation: the source guard rejects
+        // a value that is valid at the destination, and every assignment adds another wrapper.
+        assert.deepEqual(crossPath, { right: "right-text", left: "right-text" });
+        assert.equal(warnings.length, 0);
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const host = runtime.getComponentHost(root);
+          const originals = new Map(Array.from(root.querySelectorAll("li"), node => [node.getAttribute("data-id"), node]));
+          host.state.right.value = 7;
+          const invalidDestination = host.state.right.value;
+          host.state.alias = host.state.locked;
+          host.state.alias.label = "blocked";
+          const readonlyAlias = host.state.alias.label;
+          const readonlySource = host.state.rows[0].label;
+          for (let index = 0; index < 32; index += 1) {
+            host.state.rows = host.state.rows.filter(() => true).concat([]);
+            const first = host.state.rows[0];
+            host.state.rows[0] = host.state.rows[2];
+            host.state.rows[2] = first;
+            host.state.rows[0].label = `label-${index}`;
+            await Promise.resolve();
+          }
+          host.state.rows = host.state.rows.filter((row: any) => row.id !== 2).concat([{ id: 4, label: "new" }]);
+          host.state.rows[0].label = "final";
+          await Promise.resolve();
+          const nodes = Array.from(root.querySelectorAll("li"));
+          const retained = nodes.filter(node => node.getAttribute("data-id") !== "4")
+            .every(node => originals.get(node.getAttribute("data-id")) === node);
+          return { invalidDestination, readonlyAlias, readonlySource, retained,
+            ids: nodes.map(node => node.getAttribute("data-id")), labels: nodes.map(node => node.textContent) };
+        });
+        assert.deepEqual(actual, { invalidDestination: "right-text", readonlyAlias: "A", readonlySource: "A",
+          retained: true, ids: ["1", "3", "4"], labels: ["final", "label-30", "new"] });
+        assert.equal(warnings.length, 2);
+        assert.ok(warnings.some(message => message.includes("right.value") && message.includes("declared type")));
+        assert.ok(warnings.some(message => message.includes("locked.label") && message.includes("read-only")));
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${engine} manages native structural bindings and reconnects the same state`, async () => {
       const definition = parseComponent(`<template component="native-owned-list"><defs>
         <state name="shown" type="boolean" value="true"></state>
