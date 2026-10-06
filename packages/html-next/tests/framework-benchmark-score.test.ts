@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  IDS, assessComparison, assessSize, collectMedians, combineStatus, compareSweep, median, summarize,
+  IDS, assessComparison, assessSize, collectMedians, combineStatus, compareSweep, entryName, median, summarize,
   type ResultFile, type Rows, type WorkloadId,
 } from "../scripts/framework-benchmark-score.js";
 
@@ -14,6 +14,13 @@ describe("framework benchmark scoring", () => {
   it("takes the statistical median", () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([4, 1, 3, 2])).toBe(2.5);
+  });
+
+  it("resolves an entry only to its own versioned name", () => {
+    const medians = { "html-next-v1.0.0-alpha.30+cae92ab-keyed": rows(1), "html-next-vite-candidate-v1.0.0-alpha.30+b92afc0-keyed": rows(1) };
+    expect(entryName(medians, "html-next")).toBe("html-next-v1.0.0-alpha.30+cae92ab-keyed");
+    expect(entryName(medians, "html-next-vite-candidate")).toBe("html-next-vite-candidate-v1.0.0-alpha.30+b92afc0-keyed");
+    expect(entryName({ "vanillajs-keyed": rows(1) }, "vanillajs")).toBe("vanillajs-keyed");
   });
 
   it("requires complete, positive, standard-sized samples", () => {

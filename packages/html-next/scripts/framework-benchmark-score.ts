@@ -91,7 +91,9 @@ export function scores(medians: Medians): Record<string, number> {
 
 /** Resolves an entry directory to its versioned result name, e.g. `solid` to `solid-v1.9.3-keyed`. */
 export function entryName(medians: Medians, directory: string): string | undefined {
-  const matches = Object.keys(medians).filter((name) => name.startsWith(`${directory}-v`) || name === `${directory}-keyed`);
+  // The version must start with a digit, so `html-next` never matches `html-next-vite-candidate-v1…`.
+  const matches = Object.keys(medians).filter((name) =>
+    (name.startsWith(`${directory}-v`) && /\d/.test(name.charAt(directory.length + 2))) || name === `${directory}-keyed`);
   if (matches.length > 1) throw new Error(`Ambiguous entry ${directory}: ${matches.join(", ")}.`);
   return matches[0];
 }
