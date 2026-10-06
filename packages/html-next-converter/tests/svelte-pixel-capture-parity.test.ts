@@ -39,11 +39,14 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("pixel capture settlin
 
         // Fixtures without a doctype render in quirks mode, where a bare :hover or :active matches only links.
         assert.equal(await actual.evaluate(() => document.compatMode), "BackCompat");
-        await actual.locator("#case").evaluate((element) => { element.innerHTML = '<input id="flag" type="checkbox">'; });
+        // A form control named "id" shadows the form's id property; diagnostics must still name the form plainly.
+        await actual.locator("#case").evaluate((element) => {
+          element.innerHTML = '<form><input name="id" type="hidden"><input id="flag" type="checkbox"></form>';
+        });
         await actual.hover("#flag");
         await actual.mouse.down();
         await assert.rejects(assertPixelsEqual(actual, different, reference, "pointer diagnostics"),
-          /"hovered":\[[^\]]*"input#flag".*"active":\[[^\]]*"input#flag"/);
+          /"hovered":\[[^\]]*"form","input#flag".*"active":\[[^\]]*"input#flag"/);
       } finally {
         await browser.close();
       }

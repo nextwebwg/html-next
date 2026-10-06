@@ -65,7 +65,11 @@ async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | unde
   const state = async (page: Page) => page.evaluate(() => {
     const button = document.querySelector("#case button");
     const style = button === null ? null : getComputedStyle(button);
-    const name = (element: Element) => element.id === "" ? element.localName : `${element.localName}#${element.id}`;
+    // A form control named "id" shadows the form's id property, so read the attribute.
+    const name = (element: Element) => {
+      const id = element.getAttribute("id");
+      return id ? `${element.localName}#${id}` : element.localName;
+    };
     return {
       activeElement: document.activeElement && name(document.activeElement),
       documentFocused: document.hasFocus(),
