@@ -463,6 +463,56 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} updates a list and another component's index reader in subscription order`, async () => {
+      const list = parseComponent(`<template component="order-list"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $value="row"></li></ul></section></template>`);
+      const first = parseComponent(`<template component="order-first"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><output $value="rows[0]"></output></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="list"></section><section id="first"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async ([listDefinition, firstDefinition]) => {
+          const runtime = (window as any).BareRuntime;
+          const listRoot = document.querySelector("#list")!;
+          const firstRoot = document.querySelector("#first")!;
+          runtime.manageComponentLifecycle(listRoot, JSON.parse(listDefinition!));
+          runtime.manageComponentLifecycle(firstRoot, JSON.parse(firstDefinition!));
+          const listHost = runtime.getComponentHost(listRoot);
+          const firstHost = runtime.getComponentHost(firstRoot);
+          // The list reads every index before the other component, in its own scheduler, reads index 0.
+          listHost.state.rows = [1, 2, 3];
+          await new Promise(resolve => setTimeout(resolve, 0));
+          firstHost.state.rows = listHost.state.rows;
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const records: MutationRecord[] = [];
+          new MutationObserver(batch => { records.push(...batch); })
+            .observe(document.body, { childList: true, characterData: true, subtree: true });
+          // Each component flushes in its own microtask; the first one queued renders first.
+          const step = async (change: () => void) => {
+            change();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const order: string[] = [];
+            for (const record of records.splice(0)) {
+              const target = record.target as Node;
+              const id = (target instanceof Element ? target : target.parentElement)!.closest("section[id]")!.id;
+              if (order.at(-1) !== id) order.push(id);
+            }
+            return order;
+          };
+          return [
+            await step(() => { listHost.state.rows[0] = 9; }),
+            await step(() => { listHost.state.rows.reverse(); }),
+            [listRoot.textContent, firstRoot.textContent],
+          ];
+        }, [JSON.stringify(list), JSON.stringify(first)]);
+        assert.deepEqual(actual, [["list", "first"], ["list", "first"], ["329", "3"]]);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} renews each loop record on every list run`, async () => {
       const definition = parseComponent(`<template component="loop-record-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
