@@ -421,6 +421,37 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
+      const definition = parseComponent(`<template component="reversed-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const describe = (node: Node): string => node instanceof Element
+            ? `li:${node.getAttribute("data-id")}` : node instanceof Comment ? node.data.replace("html-next:", "") : node.nodeName;
+          // A foreign move puts block 1's start after block 2's end. Adjacency still joins blocks 1
+          // and 2 into one stale group, but the group's first start now follows its last end.
+          const [first, second] = Array.from(list.querySelectorAll("li"));
+          second!.nextSibling!.after(first!.previousSibling!);
+          list.append(document.createElement("i"));
+          host.state.rows = host.state.rows.filter((row: any) => row.id > 2);
+          await Promise.resolve();
+          return Array.from(list.childNodes, describe);
+        }, JSON.stringify(definition));
+        // Each block is removed through its own start-to-end walk, as before the group bulk path.
+        assert.deepEqual(actual, ["each-start", "li:1", "item-end"]);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} canonicalizes writable controller aliases without losing destination guards`, async () => {
       const definition = parseComponent(`<template component="controller-alias-list"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>

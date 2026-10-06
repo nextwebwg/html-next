@@ -1449,8 +1449,10 @@ function removeStaleBlocks(
       const first = group[0]!;
       const last = group.at(-1)!;
       const parent = first.start.parentNode;
-      if (parent !== null && last.end.parentNode === parent &&
-          (first.start.compareDocumentPosition(last.end) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+      if (parent !== null && last.end.parentNode === parent) {
+        // Order needs no sibling walk. Whole-parent anchors place the first start second and the
+        // last end second to last, so it follows. Otherwise the range collapses exactly when a
+        // foreign move put the first start after the last end, which keeps per-block removal.
         if ((parent instanceof Element || parent instanceof DocumentFragment) &&
             first.start.previousSibling === start && last.end.nextSibling === end &&
             start.previousSibling === null && end.nextSibling === null) {
@@ -1460,7 +1462,8 @@ function removeStaleBlocks(
           const range = first.start.ownerDocument.createRange();
           range.setStartBefore(first.start);
           range.setEndAfter(last.end);
-          range.deleteContents();
+          if (range.collapsed) for (const block of group) removeBlock(block);
+          else range.deleteContents();
         }
       } else {
         for (const block of group) removeBlock(block);
