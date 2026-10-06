@@ -6,10 +6,13 @@ import {
   createComputed,
   createEffect,
   createSignal,
+  notifyPropertyDelete,
+  notifyPropertySet,
   type ReactiveEffect,
   ReactiveScope,
   readList,
   registerReactiveAlias,
+  trackProperty,
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
@@ -957,5 +960,31 @@ describe("reactive proxies", () => {
     assert.deepEqual(snapshots.at(-1), ["a", undefined, undefined, "z"]);
     assert.deepEqual(lengths, [4, 1, 4]);
     symbolReader.stop(); iterator.stop(); lengthReader.stop();
+  });
+
+  it("lets raw-target owners share property dependencies with reactive proxies", () => {
+    // Compiled controller facades track and notify raw targets directly, through the same registry.
+    const scope = new ReactiveScope([["rows", ["a", "b"]]]);
+    const rows = scope.get("rows") as Value[];
+    const raw = ["x"];
+    const scheduler = scope.scheduler;
+    const seen: unknown[] = [];
+    const reader = createEffect(scheduler, () => { seen.push((rows as Value[]).length); });
+    const rawReader = createEffect(scheduler, () => { trackProperty(raw, "0"); seen.push(raw[0]); });
+    const target = rows as unknown as { [key: string]: Value };
+    target[2] = "c";
+    scheduler.flush();
+    raw[0] = "y";
+    notifyPropertySet(raw, "0", "x", "y", 1);
+    scheduler.flush();
+    notifyPropertySet(raw, "0", "y", "y", 1);
+    scheduler.flush();
+    delete raw[0];
+    notifyPropertyDelete(raw, "0", true);
+    scheduler.flush();
+    notifyPropertyDelete(raw, "0", false);
+    scheduler.flush();
+    assert.deepEqual(seen, [2, "x", 3, "y", undefined]);
+    reader.stop(); rawReader.stop();
   });
 });

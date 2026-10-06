@@ -749,7 +749,7 @@ const reactiveHandler: ProxyHandler<object> = {
           key !== "length" && key !== "constructor") {
         read.target = target;
         read.keys.push(key);
-      } else activeEffect.track(propertyDependency(target, key));
+      } else trackProperty(target, key);
     }
     return wrap(Reflect.get(target, key, receiver) as Value);
   },
@@ -758,37 +758,60 @@ const reactiveHandler: ProxyHandler<object> = {
     const previous = Reflect.get(target, key, receiver);
     const wrapped = wrap(next as Value);
     const result = Reflect.set(target, key, wrapped, receiver);
-    if (!Object.is(previous, wrapped)) {
-      trigger(objectSubscribers.get(target)?.get(key));
-      triggerIterate(target, key);
-    }
-    // Defining an array index can extend length before push writes that same length again.
-    if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
-      trigger(objectSubscribers.get(target)?.get("length"));
-    }
-    // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
-    if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
-      const length = (target as Value[]).length;
-      for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
-        if (typeof property !== "string") continue;
-        const index = Number(property);
-        if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
-          trigger(subscribers);
-        }
-      }
-    }
+    notifyPropertySet(target, key, previous, wrapped, previousLength);
     return result;
   },
   deleteProperty(target, key) {
     const had = Reflect.has(target, key);
     const result = Reflect.deleteProperty(target, key);
-    if (had) {
-      trigger(objectSubscribers.get(target)?.get(key));
-      triggerIterate(target, key);
-    }
+    notifyPropertyDelete(target, key, had);
     return result;
   },
 };
+
+/** Records that the running effect read `target[key]`; the raw target is the dependency's identity. */
+export function trackProperty(target: object, key: PropertyKey): void {
+  activeEffect?.track(propertyDependency(target, key));
+}
+
+/**
+ * Notifies the readers a property write affects, after the write. `previousLength` is the array's
+ * length before it, or undefined for other targets.
+ */
+export function notifyPropertySet(
+  target: object,
+  key: PropertyKey,
+  previous: unknown,
+  next: unknown,
+  previousLength: number | undefined,
+): void {
+  if (!Object.is(previous, next)) {
+    trigger(objectSubscribers.get(target)?.get(key));
+    triggerIterate(target, key);
+  }
+  // Defining an array index can extend length before push writes that same length again.
+  if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+    trigger(objectSubscribers.get(target)?.get("length"));
+  }
+  // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+  if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+    const length = (target as Value[]).length;
+    for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+      if (typeof property !== "string") continue;
+      const index = Number(property);
+      if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+        trigger(subscribers);
+      }
+    }
+  }
+}
+
+/** Notifies the readers of a deleted property; `had` is whether it existed before the delete. */
+export function notifyPropertyDelete(target: object, key: PropertyKey, had: boolean): void {
+  if (!had) return;
+  trigger(objectSubscribers.get(target)?.get(key));
+  triggerIterate(target, key);
+}
 
 /** The canonical reactive proxy for a mutable object; primitives, frozen values and events stay as they are. */
 function wrap(value: Value): Value {
