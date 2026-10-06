@@ -40,6 +40,12 @@ const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
 
+/** Keep a writable controller facade from becoming another layer of reactive identity. */
+export function registerReactiveAlias(alias: object, value: object): void {
+  const canonical = proxyCache.get(value);
+  if (canonical !== undefined) proxyCache.set(alias, canonical);
+}
+
 function unsubscribe(subscription: Subscription): void {
   const { dependency, previousSubscriber, nextSubscriber } = subscription;
   if (previousSubscriber === undefined) dependency.first = nextSubscriber;
@@ -202,10 +208,14 @@ export class ReactiveEffect {
   readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
   stopped = false;
+  /** Internal ownership registration; pause keeps it, permanent stop releases it. */
+  registration: { release(effect: ReactiveEffect): void } | undefined = undefined;
   paused = false;
   queued = false;
   #cleanup: Cleanup = undefined;
   #dependencyTail: Subscription | undefined = undefined;
+  #tracked: Set<Dependency> | undefined = undefined;
+  #inserted = false;
 
   constructor(
     readonly scheduler: ReactiveScheduler,
@@ -217,6 +227,7 @@ export class ReactiveEffect {
   execute(): void {
     if (this.stopped || this.paused) return;
     this.#dependencyTail = undefined;
+    this.#inserted = false;
     if (this.#cleanup !== undefined) {
       const cleanup = this.#cleanup;
       this.#cleanup = undefined;
@@ -230,6 +241,7 @@ export class ReactiveEffect {
       if (cleanup !== undefined) this.#cleanup = cleanup;
     } finally {
       activeEffect = previous;
+      this.#tracked = undefined;
       const tail = this.#dependencyTail as Subscription | undefined;
       let subscription = tail === undefined ? this.dependencies : tail.nextDependency;
       if (tail === undefined) this.dependencies = undefined;
@@ -247,12 +259,35 @@ export class ReactiveEffect {
       this.#dependencyTail === undefined
         ? this.dependencies
         : this.#dependencyTail.nextDependency;
-    if (next?.dependency === dependency) {
+    const reusable = next?.dependency === dependency;
+    // Before any insertion, the unique old order proves this next link has not been consumed.
+    if (reusable && !this.#inserted) {
       this.#dependencyTail = next;
+      this.#tracked?.add(dependency);
       return;
     }
-    for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
-      if (current?.dependency === dependency) return;
+    if (this.#tracked !== undefined) {
+      if (this.#tracked.has(dependency)) return;
+    } else {
+      let inspected = 0;
+      for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
+        if (current?.dependency === dependency) return;
+        // Keep small effects allocation-free; one wider miss indexes the consumed prefix once.
+        if (++inspected === 8) {
+          const tracked = new Set<Dependency>();
+          for (let used = this.dependencies; used !== next; used = used!.nextDependency) {
+            tracked.add(used!.dependency);
+          }
+          this.#tracked = tracked;
+          if (tracked.has(dependency)) return;
+          break;
+        }
+      }
+    }
+    this.#tracked?.add(dependency);
+    if (reusable) {
+      this.#dependencyTail = next;
+      return;
     }
     const subscription: Subscription = {
       dependency,
@@ -264,6 +299,7 @@ export class ReactiveEffect {
     if (this.#dependencyTail === undefined) this.dependencies = subscription;
     else this.#dependencyTail.nextDependency = subscription;
     this.#dependencyTail = subscription;
+    this.#inserted = true;
     const first = dependency.first;
     // Computeds lead the subscriber list so invalidation can dirty the derived graph before an
     // ordinary effect observes it. Priority-zero data effects still use normal scheduler ordering.
@@ -288,8 +324,9 @@ export class ReactiveEffect {
     if (this.stopped || this.paused) return;
     this.paused = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    cleanup?.();
   }
 
   resume(): void {
@@ -302,8 +339,12 @@ export class ReactiveEffect {
     if (this.stopped) return;
     this.stopped = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    const registration = this.registration;
+    this.registration = undefined;
+    try { cleanup?.(); }
+    finally { registration?.release(this); }
   }
 
   #unsubscribe(): void {
@@ -315,6 +356,7 @@ export class ReactiveEffect {
     }
     this.dependencies = undefined;
     this.#dependencyTail = undefined;
+    this.#tracked = undefined;
   }
 }
 
