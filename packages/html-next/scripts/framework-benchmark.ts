@@ -113,12 +113,14 @@ function setup(force: boolean): void {
     git(["remote", "add", "origin", REPOSITORY], work);
   }
   const head = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: work, encoding: "utf8" }).stdout.trim();
-  if (force || head !== PIN) run("git", ["fetch", "--depth=1", "--filter=blob:none", "origin", PIN], work);
+  const migrating = force || head !== PIN;
+  if (migrating) run("git", ["fetch", "--depth=1", "--filter=blob:none", "origin", PIN], work);
   git(["sparse-checkout", "set", ...SPARSE], work);
-  if (force || head !== PIN) run("git", ["-c", "advice.detachedHead=false", "checkout", "--force", "--detach", PIN], work);
+  if (migrating) run("git", ["-c", "advice.detachedHead=false", "checkout", "--force", "--detach", PIN], work);
   verifyCheckout();
   // Entries this tool generates are untracked and rebuilt by every command; drop any from an earlier pin or harness.
-  for (const name of readdirSync(keyed)) if (name.startsWith("html-next-")) rmSync(join(keyed, name), { recursive: true, force: true });
+  // Only when migrating, so a no-op setup never deletes the slots a running sweep is loading.
+  if (migrating) for (const name of readdirSync(keyed)) if (name.startsWith("html-next-")) rmSync(join(keyed, name), { recursive: true, force: true });
   // ponytail: the server lists keyed and non-keyed directories; the sparse checkout needs only keyed entries.
   mkdirSync(join(work, "frameworks/non-keyed"), { recursive: true });
   const trees = pinnedTrees();
