@@ -9,9 +9,9 @@ export function parameter(segment: string): string | undefined { return /^\[([A-
 export function validSegment(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !value.includes("/") && !/[\\\0?#]/.test(value);
 }
-export async function discoverRoutes(root = process.cwd(), options: Pick<ApplicationOptions, "routes" | "fileRoutes" | "layout" | "layoutDefaults"> = {}): Promise<readonly ApplicationRoute[]> {
+export async function discoverRoutes(root = process.cwd(), options: Pick<ApplicationOptions, "routes" | "fileRoutes" | "layout" | "layoutDefaults" | "routeOrdering"> = {}): Promise<readonly ApplicationRoute[]> {
   const routes: Omit<ApplicationRoute, "pageName">[] = [];
-  const add = (input: RouteInput): void => {
+  const add = (input: RouteInput, order?: readonly (string | null)[]): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
     const segments = input.pattern.slice(1, -1).split("/").filter(Boolean);
     if (segments[0] === "_htmlkit") throw new HtmlKitError("_htmlkit is reserved for generated assets.", input.component);
@@ -22,9 +22,14 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
     if (new Set(params).size !== params.length) throw new HtmlKitError("Route parameter names must be unique.", input.component);
     const absolute = (layer: RouteLayer): RouteLayer => ({ component: resolve(root, layer.component),
       ...(layer.server === undefined ? {} : { server: resolve(root, layer.server) }) });
-    routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute) });
+    routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), ...(order === undefined ? {} : { order }) });
   };
-  const visit = async (directory: string, segments: string[]): Promise<void> => {
+  const ordered = (name: string, source: string) => {
+    const prefix = options.routeOrdering ? /^(\d+)-(.*)$/.exec(name) : null;
+    if (prefix?.[2] === "") throw new HtmlKitError("Ordering prefix leaves an empty route segment.", source);
+    return { slug: prefix?.[2] ?? name, rank: prefix?.[1] ?? null };
+  };
+  const visit = async (directory: string, segments: string[], order: (string | null)[]): Promise<void> => {
     const files = await readdir(directory, { withFileTypes: true });
     const names = new Set(files.filter(file => file.isFile()).map(file => file.name));
     const layer = (name: string): RouteLayer => {
@@ -35,15 +40,17 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
     for (const name of [...names].sort()) {
       if (!name.endsWith(".html") || name.startsWith("_") || name.startsWith(".")) continue;
       const stem = name.slice(0, -5);
-      const parts = stem === "index" ? segments : [...segments, stem];
-      add({ ...layer(stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}` });
+      const { slug, rank } = ordered(stem, join(directory, name));
+      const parts = slug === "index" ? segments : [...segments, slug];
+      add({ ...layer(stem), pattern: `/${parts.length === 0 ? "" : parts.join("/") + "/"}` }, slug === "index" ? order : [...order, rank]);
     }
     for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isDirectory() || file.name.startsWith(".") || file.name.startsWith("_")) continue;
-      if (parameter(file.name) === undefined && !/^[A-Za-z0-9_-]+$/.test(file.name)) {
+      const { slug, rank } = ordered(file.name, join(directory, file.name));
+      if (parameter(slug) === undefined && !/^[A-Za-z0-9_-]+$/.test(slug)) {
         throw new HtmlKitError("Route directories must be URL slugs or [named] parameters.", join(directory, file.name));
       }
-      await visit(join(directory, file.name), [...segments, file.name]);
+      await visit(join(directory, file.name), [...segments, slug], [...order, rank]);
     }
   };
   if (options.fileRoutes !== false) {
@@ -51,7 +58,7 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
     let present = true;
     try { await stat(pages); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; present = false; }
-    if (present) await visit(pages, []);
+    if (present) await visit(pages, [], []);
   }
   for (const route of options.routes ?? []) add(route);
   for (const prefix of Object.keys(options.layoutDefaults ?? {})) {
@@ -60,8 +67,8 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
   const patterns = new Map<string, string>();
   for (const route of routes) {
     const normalized = route.segments.map(segment => parameter(segment) === undefined ? segment.toLowerCase() : "[]").join("/");
-    if (patterns.has(normalized)) throw new HtmlKitError(`Route conflict with ${patterns.get(normalized)}.`, route.component);
-    patterns.set(normalized, route.pattern);
+    if (patterns.has(normalized)) throw new HtmlKitError(`Route conflict: ${patterns.get(normalized)} and ${route.component} (${route.pattern}).`, route.component);
+    patterns.set(normalized, `${route.component} (${route.pattern})`);
   }
   const pageFiles = new Map<string, ReturnType<typeof applicationResource>>();
   const pageNames = new Map<string, { component: string; pattern: string; identity: string }>();

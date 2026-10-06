@@ -6,6 +6,14 @@ import { rewriteComponentSelector, stateAttributeValue } from "../src/component-
 import { parseComponent } from "../src/source-parser.js";
 
 const compilers = [compileComponentStylesForBuild, compileComponentStylesForSvelte, compileComponentStylesForVue];
+
+it("preserves statement at-rule terminators when hoisting build styles", () => {
+  const definition = parseComponent('<template component="import-demo"><div></div></template>');
+  const compiled = compileComponentStylesForBuild('@import "one.css"; @import "two.css"; :host { color: red; }', definition).css;
+  assert.match(compiled, /@import "one\.css";/);
+  assert.match(compiled, /@import "two\.css";/);
+  assert.match(compiled, /@scope/);
+});
 const definition = parseComponent(`<template component="x-style-contract"><defs>
   <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
   <state name="open" type="boolean" value="false"></state>
