@@ -463,6 +463,45 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} renews each loop record on every list run`, async () => {
+      const definition = parseComponent(`<template component="loop-record-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-index="loop.index" from:data-edge="loop.first ? 'first' : loop.last ? 'last' : ''">
+        <span $value="loop.count"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const read = () => Array.from(list.querySelectorAll("li"), row =>
+            [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
+          const initial = read();
+          // An equal-keyed replacement reruns the list without changing any row's loop fields. Each
+          // run still gives every row a new loop record, so loop readers rerun and write again.
+          const observer = new MutationObserver(() => undefined);
+          observer.observe(list, { attributes: true, subtree: true });
+          host.state.rows[1] = { id: 2 };
+          await Promise.resolve();
+          const indexWrites = observer.takeRecords().filter(record => record.attributeName === "data-index").length;
+          observer.disconnect();
+          host.state.rows = [host.state.rows[2], host.state.rows[0]];
+          await Promise.resolve();
+          return { initial, indexWrites, reordered: read() };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: ["0 first 3", "1  3", "2 last 3"],
+          indexWrites: 3,
+          reordered: ["0 first 2", "1 last 2"],
+        });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
       const definition = parseComponent(`<template component="reversed-removal-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>

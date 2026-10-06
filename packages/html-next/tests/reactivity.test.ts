@@ -638,6 +638,33 @@ describe("reactive scope", () => {
     assert.equal(runs, 400);
   });
 
+  it("binds an unread object exactly as set would, wrapping it on first read", () => {
+    const record = { n: 1 };
+    const scope = new ReactiveScope();
+    scope.setUnread("record", record);
+    const seen: unknown[] = [];
+    createEffect(scope.scheduler, () => { seen.push((scope.get("record") as typeof record).n); });
+    // The first read wraps the record into the same canonical proxy that `set` would store.
+    const proxy = scope.get("record") as typeof record;
+    assert.equal(new ReactiveScope([["record", record]]).get("record"), proxy);
+    proxy.n = 2;
+    scope.scheduler.flush();
+    // Writing the value it already holds is still no change, read or not.
+    scope.set("record", proxy);
+    scope.scheduler.flush();
+    const next = { n: 3 };
+    scope.setUnread("record", next);
+    scope.scheduler.flush();
+    scope.setUnread("record", { n: 4 });
+    scope.set("record", new ReactiveScope([["other", next]]).get("other")!);
+    scope.scheduler.flush();
+    const frozen = Object.freeze({ n: 5 });
+    scope.setUnread("record", frozen);
+    scope.scheduler.flush();
+    assert.equal(scope.get("record"), frozen);
+    assert.deepEqual(seen, [1, 2, 3, 3, 5]);
+  });
+
   it("falls back without duplicating effects when one dependency spans schedulers", async () => {
     const shared = { value: 0 };
     const first = new ReactiveScope([["shared", shared]]);

@@ -16,6 +16,8 @@ interface Dependency {
 interface ReactiveCell extends Dependency {
   computed?: ReactiveComputed<Value>;
   value: Value;
+  /** The value is still the raw object `setUnread` bound; its first read wraps it. */
+  unread: boolean;
 }
 
 interface Subscription {
@@ -640,20 +642,38 @@ export class ReactiveScope implements Scope {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
     activeEffect?.track(cell);
-    return cell.value;
+    return cell.unread ? this.#read(cell) : cell.value;
   }
 
   set(name: string, value: Value): void {
     const wrapped = this.#wrap(value);
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: wrapped, first: undefined, last: undefined };
+      cell = { value: wrapped, first: undefined, last: undefined, unread: false };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
       return;
     }
-    if (Object.is(cell.value, wrapped)) return;
+    if (Object.is(cell.unread ? this.#read(cell) : cell.value, wrapped)) return;
     cell.value = wrapped;
+    trigger(cell);
+  }
+
+  /**
+   * Binds an object this binding has never held, as `set` would, but defers its proxy to the first
+   * read. Wrapping has no observable effect, so a value nothing reads never needs a proxy. Being a
+   * new value, it notifies the binding's readers like `set` does.
+   */
+  setUnread(name: string, value: Record<string, Value>): void {
+    const cell = this.#local(name);
+    if (cell === undefined) {
+      const created: ReactiveCell = { value, first: undefined, last: undefined, unread: true };
+      this.#cells.set(name, created);
+      this.#cachedCell = created;
+      return;
+    }
+    cell.value = value;
+    cell.unread = true;
     trigger(cell);
   }
 
@@ -670,7 +690,7 @@ export class ReactiveScope implements Scope {
   defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: null, first: undefined, last: undefined };
+      cell = { value: null, first: undefined, last: undefined, unread: false };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
     }
@@ -706,7 +726,12 @@ export class ReactiveScope implements Scope {
     if (cell === undefined) return this.parent?.get(name);
     if (cell.computed !== undefined) return cell.computed.get();
     activeEffect?.track(cell);
-    return cell.value;
+    return cell.unread ? this.#read(cell) : cell.value;
+  }
+
+  #read(cell: ReactiveCell): Value {
+    cell.unread = false;
+    return cell.value = this.#wrap(cell.value);
   }
 
   #wrap(value: Value): Value {

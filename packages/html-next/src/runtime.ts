@@ -1519,6 +1519,18 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
   return stable;
 }
 
+/** A row's scope. Its loop record gets a proxy only if something reads it. */
+function rowScope(
+  parent: ReactiveScope,
+  locals: Record<string, Value>,
+  types: Readonly<Record<string, TypeNode | undefined>>,
+  loop: Record<string, Value> | undefined,
+): ReactiveScope {
+  const local = typedLayer(parent, locals, types);
+  if (loop !== undefined) local.setUnread("loop", loop);
+  return local;
+}
+
 function renderEachRegion(
   node: ElementNode | SlotNode,
   scope: ReactiveScope,
@@ -1546,6 +1558,8 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
+  // An item or index named `loop` shadows the record, so it then stays an ordinary local.
+  const unreadLoop = flow.item !== "loop" && flow.index !== "loop";
   const { flow: _flow, ...body } = node;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
@@ -1564,21 +1578,19 @@ function renderEachRegion(
     const previous: number[] | undefined = keyed ? [] : undefined;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      const locals: Record<string, Value> = {
-        [flow.item]: item,
-        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
-      };
+      const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
+      const locals: Record<string, Value> = unreadLoop ? { [flow.item]: item } : { [flow.item]: item, loop };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = typedLayer(scope, locals, { [flow.item]: itemType });
+        local = rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
+        local ??= rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(context, owned);
         const adopted = adopting[adoptionIndex++];
@@ -1599,7 +1611,8 @@ function renderEachRegion(
       } else {
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        block.scope.set("loop", locals.loop!);
+        if (unreadLoop) block.scope.setUnread("loop", loop);
+        else block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
       ordered?.push(block);
