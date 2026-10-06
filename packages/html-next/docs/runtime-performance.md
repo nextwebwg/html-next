@@ -178,25 +178,75 @@ CPU work. Its leading self costs included DOM insertion (10.195 ms), cloning
 resolution (3.766 ms); GC accounted for 10.227 ms without assigned allocation ownership.
 These are sampled intervals, not total-browser medians or promised optimization gains.
 
-Source inspection also found that the flat render-owner array retains stopped effects
-and their callbacks after row removal. Callback reachability can retain detached row
-DOM and scopes; nested effects created after an outer snapshot require a broader
-ownership correction. This predates the retained changes. A three-page Chrome probe performed ten
-create-1000/clear cycles, sampling after two animation frames and two forced garbage collections. From the first to the tenth clear,
-each page added 90,000 reported DOM nodes while showing zero rows; the median JavaScript
-heap increase was 13.6 MiB. These counters quantify retention after GC, without assigning
-allocation ownership or GC latency. Six new cleanup regressions fail on the confirmed runtime in all three browser engines:
-later-created nested bindings/listeners remain active after their containing row or branch
-is removed. A separate ownership candidate passes those six cases, all 309 affected
-browser cases, and `verify:inner` (618 Node tests). In the same three-page probe, its
-additional DOM-node count is zero and median JavaScript heap growth is 0.45 MiB.
-The candidate adds 240 live / 259 compiled-native gzip bytes (level 6). It is archived
-and absent from the confirmed source: throughput and primitive reactivity costs still
-need measurement, including two full rendering confirmations. Other controller/ref/follower
-retention paths remain separate. Proxy-local metadata and stable consumer-reader plans
-are prepared opportunities; WebAssembly has no demonstrated suitable hot kernel here.
+### Ownership cleanup and retention after 006
 
-### Final verification
+The render-owner array retained stopped row effects and their callbacks. Structural
+snapshots also missed descendants created after their first render. The ownership
+correction removes permanent registrations and owns later-created descendants;
+root pause and reconnect retain live effects in creation order. This fixes pre-existing
+cleanup failures rather than changing authored bindings or caching application values.
+
+Three fresh Chrome pages performed ten create-1000/clear cycles, sampling after two
+animation frames and two forced garbage collections. Between the first and tenth
+clear, the previous best retained 90,000 additional DOM nodes in each page despite
+showing zero rows. Median JavaScript heap growth was 13.6178 MiB. The corrected
+ownership retained no additional DOM nodes, with median heap growth of 0.4513 MiB.
+These are retained-node and heap-growth diagnostics, not process RSS, allocation
+attribution or a GC-latency saving. Controller handles, references and follower
+registries have separate lifetimes; no zero-growth claim applies to the entire library.
+
+Six new browser cleanup regressions fail on the previous best across all three
+engines and pass on the correction. All 309 affected runtime/hydration/continuation
+checks pass. A fresh primitive comparison against 005 passed: aggregate ratio
+0.99994, worst case 1.01091, A/A aggregate spread 0.58%. Fresh `pnpm verify:pr`
+passed with 618 Node tests and eight package/CLI checks, including lint, types,
+generated artifacts, size gates and package builds.
+
+Both full standard rendering sweeps completed. Paired weighted CPU ratios were
+0.98302 and 1.00239: 1.70% less time and 0.24% more time. Their median ratio is
+0.99270, about 0.73% less time. The existing 2% decision threshold returned
+inconclusive with no violated objective. That threshold is a practical noise guard;
+it does not prove a smaller gain is unreal. The owner approved retaining the cleanup
+and measured memory improvement independently of a throughput win. This correction
+is not counted as an additional CPU keeper.
+
+| Workload | Ownership live A / B, ms | Frozen 005 A / B, ms | Paired change A / B |
+| --- | ---: | ---: | ---: |
+| `01_run1k` | 29.6 / 34.8 | 29.3 / 35.2 | +1.0% / -1.1% |
+| `02_replace1k` | 34.3 / 41.9 | 34.6 / 43.1 | -0.9% / -2.8% |
+| `03_update10th1k_x16` | 21.3 / 27.1 | 21.6 / 24.2 | -1.4% / +12.0% |
+| `04_select1k` | 10.3 / 12.9 | 10.3 / 12.3 | +0.0% / +4.9% |
+| `05_swap1k` | 36.0 / 41.7 | 34.9 / 38.7 | +3.2% / +7.8% |
+| `06_remove-one-1k` | 23.7 / 26.2 | 24.2 / 27.6 | -2.1% / -5.1% |
+| `07_create10k` | 362.2 / 362.2 | 377.8 / 366.4 | -4.1% / -1.1% |
+| `08_create1k-after1k_x2` | 41.6 / 45.1 | 43.8 / 45.5 | -5.0% / -0.9% |
+| `09_clear1k_x8` | 21.5 / 22.8 | 21.8 / 23.4 | -1.4% / -2.6% |
+
+Swap was slower in both sweeps; updating was mixed. These costs remain explicit
+alongside the memory benefit. The ownership entries contain 165,504 raw / 54,722
+level-6 gzip live bytes and 126,760 / 40,236 ordinary compiled-native bytes: +240 /
++259 gzip bytes versus 005. Latest normalized live ratios are React 1.0493, Vue
+1.2080, Svelte 1.3818 and Solid 1.4418; ordinary compiled-native ratios are 1.0621,
+1.2227, 1.3987 and 1.4594 respectively. Comparing these endpoint ratios to earlier
+runs is not evidence of a causal incremental CPU gain; the paired table supplies that
+comparison. All four required live targets remain unmet.
+
+A separate sustained diagnostic ran nine rotated candidate/reference/reference rounds,
+each with a fresh Chrome process and 100 create1000/clear cycles after three warmups
+(2,700 measured cycles total). Main-thread `Performance.TaskDuration` was 5.38% lower
+at the median, with reductions of 2.14–8.98% across all nine rounds. The two references
+had a median absolute spread of 0.96% and a maximum of 4.33%. Timing included no forced
+GC; post-timing GC showed 73 DOM nodes and a median 3.18 MiB JavaScript heap for the
+candidate, versus 1,030,073 nodes and 159.93 MiB for the reference. Programmatic button
+activation and this repeated workload differ from the official benchmark, so this
+supports sustained creation/cleanup without establishing a nine-workload CPU win or
+attributing the time reduction specifically to garbage collection.
+
+Prepared component-shaped binding/validation readers, compact row boundaries and
+proxy-local metadata remain experiments. WebAssembly has no demonstrated suitable
+hot kernel here.
+
+### Verification through 005
 
 `pnpm --filter @nextwebwg/html-next verify:performance --base=77889b8` passed
 on the final runtime: 27 fresh processes, six workloads, nine rotated candidate/A/A

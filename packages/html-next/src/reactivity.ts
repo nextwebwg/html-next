@@ -208,6 +208,8 @@ export class ReactiveEffect {
   readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
   stopped = false;
+  /** Internal ownership registration; pause keeps it, permanent stop releases it. */
+  registration: { release(effect: ReactiveEffect): void } | undefined = undefined;
   paused = false;
   queued = false;
   #cleanup: Cleanup = undefined;
@@ -322,8 +324,9 @@ export class ReactiveEffect {
     if (this.stopped || this.paused) return;
     this.paused = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    cleanup?.();
   }
 
   resume(): void {
@@ -336,8 +339,12 @@ export class ReactiveEffect {
     if (this.stopped) return;
     this.stopped = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    const registration = this.registration;
+    this.registration = undefined;
+    try { cleanup?.(); }
+    finally { registration?.release(this); }
   }
 
   #unsubscribe(): void {

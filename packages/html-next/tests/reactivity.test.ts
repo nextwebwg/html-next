@@ -11,6 +11,81 @@ import {
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("keeps paused registrations reconnectable and releases permanent stops once", () => {
+    const scope = new ReactiveScope([["n", 0]]);
+    const live = new Set<ReactiveEffect>();
+    let runs = 0;
+    let cleanups = 0;
+    const effect = createEffect(scope.scheduler, () => {
+      scope.get("n");
+      runs += 1;
+      return () => { cleanups += 1; };
+    });
+    live.add(effect);
+    effect.registration = { release(owner) { live.delete(owner); } };
+    effect.pause();
+    effect.pause();
+    assert.equal(live.size, 1);
+    assert.equal(cleanups, 1);
+    scope.set("n", 1);
+    scope.scheduler.flush();
+    assert.equal(runs, 1);
+    effect.resume();
+    assert.equal(runs, 2);
+    effect.stop();
+    effect.stop();
+    effect.resume();
+    assert.equal(live.size, 0);
+    assert.equal(cleanups, 2);
+    assert.equal(runs, 2);
+  });
+
+  it("releases a stopped owner even when cleanup throws or reenters stop", () => {
+    for (const throws of [false, true]) {
+      const scope = new ReactiveScope([["n", 0]]);
+      const live = new Set<ReactiveEffect>();
+      const failure = new Error("cleanup failed");
+      let cleanups = 0;
+      let releases = 0;
+      let effect: ReactiveEffect;
+      effect = createEffect(scope.scheduler, () => {
+        scope.get("n");
+        return () => {
+          cleanups += 1;
+          effect.stop();
+          if (throws) throw failure;
+        };
+      });
+      live.add(effect);
+      effect.registration = { release(owner) { releases += 1; live.delete(owner); } };
+      if (throws) assert.throws(() => effect.stop(), error => error === failure);
+      else effect.stop();
+      effect.stop();
+      scope.set("n", 1);
+      scope.scheduler.flush();
+      assert.equal(cleanups, 1);
+      assert.equal(releases, 1);
+      assert.equal(live.size, 0);
+      assert.equal(effect.dependencies, undefined);
+    }
+  });
+
+  it("runs cleanup only once when pausing synchronously stops the same owner", () => {
+    const scope = new ReactiveScope();
+    let effect: ReactiveEffect;
+    let cleanups = 0;
+    let releases = 0;
+    effect = createEffect(scope.scheduler, () => () => {
+      cleanups += 1;
+      effect.stop();
+    });
+    effect.registration = { release() { releases += 1; } };
+    effect.pause();
+    effect.stop();
+    assert.equal(cleanups, 1);
+    assert.equal(releases, 1);
+  });
+
   it("keeps one subscription per dependency when reordered reads repeat", () => {
     for (const width of [3, 96]) {
       const scheduler = new ReactiveScope().scheduler;

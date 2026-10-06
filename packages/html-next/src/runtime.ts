@@ -30,6 +30,7 @@ import {
   ReactiveScope,
   registerReactiveAlias,
   untracked,
+  type ReactiveEffect,
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
@@ -841,12 +842,64 @@ interface HydrationRange {
  * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
  * add. A root switch stops them all and starts afresh.
  */
-interface RenderOwned {
-  readonly effects: ReactiveOwner[];
+class RenderOwned {
+  /** Flat creation order for instance pause/resume and root replacement. */
+  readonly effects: Set<ReactiveEffect>;
+  /** Structural ownership includes descendants added after the first render. */
+  readonly #entries = new Set<ReactiveEffect | RenderOwned>();
+  readonly #root: RenderOwned;
+  #stopped = false;
+
+  constructor(readonly parent?: RenderOwned) {
+    this.#root = parent === undefined ? this : parent.#root;
+    this.effects = parent?.effects ?? new Set();
+    if (parent !== undefined) {
+      this.#stopped = parent.#stopped || this.#root.#stopped;
+      if (!this.#stopped) parent.#entries.add(this);
+    }
+  }
+
+  add(effect: ReactiveEffect): void {
+    if (effect.stopped) return;
+    if (this.#stopped || this.#root.#stopped) {
+      effect.stop();
+      return;
+    }
+    this.#entries.add(effect);
+    this.effects.add(effect);
+    effect.registration = this;
+  }
+
+  release(effect: ReactiveEffect): void {
+    this.#entries.delete(effect);
+    this.effects.delete(effect);
+  }
+
+  stop(): void {
+    if (this.#stopped) return;
+    this.#stopped = true;
+    if (this.parent !== undefined) this.parent.#entries.delete(this);
+    let failed = false;
+    let failure: unknown;
+    const stop = (owner: ReactiveEffect | RenderOwned): void => {
+      try { owner.stop(); }
+      catch (error) { if (!failed) { failed = true; failure = error; } }
+    };
+    // Root replacement retains the old flat cleanup order. A local group stops its tree.
+    if (this.parent === undefined) for (const effect of this.effects) stop(effect);
+    for (const owner of this.#entries) stop(owner);
+    this.#entries.clear();
+    if (failed) throw failure;
+  }
 }
 
-function renderOwned(): RenderOwned {
-  return { effects: [] };
+function renderOwned(parent?: RenderOwned): RenderOwned {
+  return new RenderOwned(parent);
+}
+
+function ownedContext(context: RuntimeRenderContext, owned: RenderOwned): RuntimeRenderContext {
+  // Preserve live root/committed fields and inherited namespace/projection context fields.
+  return Object.create(context, { owned: { value: owned, enumerable: true } }) as RuntimeRenderContext;
 }
 
 interface RuntimeRenderContext {
@@ -918,8 +971,9 @@ function ownEffect(
   run: () => void | (() => void),
   priority = 1,
 ): ReturnType<typeof createEffect> {
+  const owned = context.owned;
   const effect = createEffect(scope.scheduler, run, priority);
-  context.owned.effects.push(effect);
+  owned.add(effect);
   return effect;
 }
 
@@ -1291,34 +1345,34 @@ function renderDynamicNode(
   const end = existing?.[1] ?? document.createComment("html-next:end");
   const fragment = existing === undefined ? document.createDocumentFragment() : undefined;
   fragment?.append(start, end);
-  let childEffects: ReactiveOwner[] = [];
+  let childOwned: RenderOwned | undefined;
   let adopting = existing !== undefined;
   ownEffect(context, scope, () => {
     const test = node.flow?.kind === "if" ? evalConforming(node.flow.test, scope, context.definition) : undefined;
     const aliased = node.flow?.kind === "with" ? evalConforming(node.flow.expr, scope, context.definition) : undefined;
     const match = node.flow?.kind === "match" ? prepareMatch(node, scope, context.definition) : undefined;
     if (test === NONCONFORMING || aliased === NONCONFORMING || match === NONCONFORMING) return;
-    for (const effect of childEffects) effect.stop();
-    childEffects = [];
+    childOwned?.stop();
+    childOwned = undefined;
     const previous = adopting ? rangeNodes(start, end).slice(1, -1) : [];
     if (!adopting) clearRange(start, end);
-    const effectsStart = context.owned.effects.length;
+    childOwned = renderOwned(context.owned);
+    const childContext = ownedContext(context, childOwned);
     let rendered: Node[] = [];
     if (node.flow?.kind === "if") {
       if (truthy(test!)) {
         const { flow: _flow, ...body } = node;
-        rendered = renderInstance(body, scope, document, passThrough, context, previous[0]);
+        rendered = renderInstance(body, scope, document, passThrough, childContext, previous[0]);
       }
     } else if (node.flow?.kind === "with") {
       const local = typedLayer(scope, { [node.flow.alias]: aliased! }, {
         [node.flow.alias]: declaredExpressionType(node.flow.expressionPlan ?? node.flow.expr, scope),
       });
       const { flow: _flow, ...body } = node;
-      rendered = renderInstance(body, local, document, passThrough, context, previous[0]);
+      rendered = renderInstance(body, local, document, passThrough, childContext, previous[0]);
     } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(match!, document, context, previous[0]);
+      rendered = renderMatch(match!, document, childContext, previous[0]);
     }
-    childEffects = context.owned.effects.slice(effectsStart);
     const output = materialize(rendered, document);
     if (adopting) {
       for (const stale of previous) if (!output.includes(stale)) stale.parentNode?.removeChild(stale);
@@ -1334,7 +1388,7 @@ interface EachBlock {
   readonly start: Comment;
   readonly end: Comment;
   readonly scope: ReactiveScope;
-  readonly effects: readonly ReactiveOwner[];
+  readonly owned: RenderOwned;
 }
 
 function existingEachRange(candidate: Node | undefined, kind: "each" | "item"): readonly [Comment, Comment] | undefined {
@@ -1369,7 +1423,7 @@ function moveBlockBefore(block: EachBlock, reference: Node): void {
 }
 
 function removeBlock(block: EachBlock): void {
-  for (const effect of block.effects) effect.stop();
+  block.owned.stop();
   let current: Node | null = block.start;
   while (current !== null) {
     const next: Node | null = current.nextSibling;
@@ -1391,7 +1445,7 @@ function removeStaleBlocks(
     if (group.length === 0) return;
     if (group.length === 1) removeBlock(group[0]!);
     else {
-      for (const block of group) for (const effect of block.effects) effect.stop();
+      for (const block of group) block.owned.stop();
       const first = group[0]!;
       const last = group.at(-1)!;
       const parent = first.start.parentNode;
@@ -1521,13 +1575,14 @@ function renderEachRegion(
       let block = blocks.get(key);
       if (block === undefined) {
         local ??= typedLayer(scope, locals, { [flow.item]: itemType });
-        const effectsStart = context.owned.effects.length;
+        const owned = renderOwned(context.owned);
+        const blockContext = ownedContext(context, owned);
         const adopted = adopting[adoptionIndex++];
         const rendered = materialize(node.kind === "slot"
-          ? renderSlot(body as SlotNode, local, document, context)
+          ? renderSlot(body as SlotNode, local, document, blockContext)
           : nativePlan !== undefined && adopted === undefined
-            ? instantiateNativeTemplate(nativePlan, body as ElementNode, local, document, passThrough, context)
-            : renderInstance(body as ElementNode, local, document, passThrough, context, adopted?.[0].nextSibling ?? undefined), document);
+            ? instantiateNativeTemplate(nativePlan, body as ElementNode, local, document, passThrough, blockContext)
+            : renderInstance(body as ElementNode, local, document, passThrough, blockContext, adopted?.[0].nextSibling ?? undefined), document);
         const blockStart = adopted?.[0] ?? document.createComment("html-next:item-start");
         const blockEnd = adopted?.[1] ?? document.createComment("html-next:item-end");
         end.before(blockStart, ...rendered, blockEnd);
@@ -1535,7 +1590,7 @@ function renderEachRegion(
           start: blockStart,
           end: blockEnd,
           scope: local,
-          effects: context.owned.effects.slice(effectsStart),
+          owned,
         };
       } else {
         block.scope.set(flow.item, item);
@@ -2188,11 +2243,10 @@ function renderSlot(
     }
     const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, node.props!.map((prop) => prop.name));
     const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
-    const projectionContext = authored === undefined ? context : {
-      ...context,
-      definition: authored.context.definition,
-      refs: authored.context.refs,
-    };
+    const projectionContext = authored === undefined ? context : Object.create(context, {
+      definition: { value: authored.context.definition, enumerable: true },
+      refs: { value: authored.context.refs, enumerable: true },
+    }) as RuntimeRenderContext;
     for (const prop of node.props!) {
       ownEffect(context, scope, () => {
         const value = evalConforming(prop.expression, scope, context.definition);
@@ -2872,7 +2926,7 @@ function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderCont
       }
     }
 
-    for (const effect of instance.owned.effects) effect.stop();
+    instance.owned.stop();
     instance.owned = context.owned = renderOwned();
     for (const ref of Object.keys(instance.refs)) delete instance.refs[ref];
     context.rootNode = instance.rootNode = next;

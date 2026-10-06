@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
@@ -40,6 +40,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
       outfile: runtimeOnlyBundlePath,
       platform: "browser",
       target: ["es2022"],
+      // Test-only export shares the runtime's actual class; no production ABI is added.
+      plugins: [{ name: "observe-runtime-effect-ownership", setup(builder) {
+        builder.onLoad({ filter: /[/\\]runtime\.ts$/ }, async args => ({
+          contents: `${await readFile(args.path, "utf8")}\nexport { ReactiveEffect as TestReactiveEffect } from "./reactivity.js";\n`,
+          loader: "ts",
+          resolveDir: dirname(args.path),
+        }));
+      } }],
     });
     await build({
       entryPoints: [runtimeUrl.pathname],
@@ -62,6 +70,130 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} releases removed row owners and stops descendants created by later branches`, async () => {
+      const definition = parseComponent(`<template component="row-owner-release"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }]"></state>
+        <state name="shown" type="boolean" value="false"></state>
+        <state name="n" type="number" value="0"></state>
+        <state name="calls" type="number" value="0"></state>
+        <handler name="activate"><set name="calls" expr:value="calls + 1"></set></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $if="shown" on:click="activate" $value="n"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", error => pageErrors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const prototype = runtime.TestReactiveEffect.prototype;
+          const originalPause = prototype.pause;
+          const originalResume = prototype.resume;
+          let stoppedPauses = 0;
+          let stoppedResumes = 0;
+          // Observe lifecycle visits directly; a stopped effect's execute() is deliberately a no-op.
+          prototype.pause = function() { if (this.stopped) stoppedPauses += 1; return originalPause.call(this); };
+          prototype.resume = function() { if (this.stopped) stoppedResumes += 1; return originalResume.call(this); };
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          try {
+            // The row originally captures only the $if effect. Its child effects arrive later.
+            host.state.shown = true;
+            await settle();
+            const removed = root.querySelector("span")!;
+            host.state.rows = [];
+            await settle();
+            host.state.n = 9;
+            await settle();
+            removed.click();
+            await settle();
+            const removedState = [removed.textContent, host.state.calls];
+            for (let index = 0; index < 12; index += 1) {
+              host.state.rows = [{ id: index * 2 + 10 }, { id: index * 2 + 11 }];
+              await settle();
+              host.state.rows = [];
+              await settle();
+            }
+            host.state.rows = [{ id: 42 }, { id: 43 }];
+            await settle();
+            const first = root.querySelector("li");
+            host.state.rows = [{ id: 43 }, { id: 42 }];
+            await settle();
+            const retained = root.querySelectorAll("li")[1] === first;
+            const survivor = root.querySelector("span")!;
+            survivor.click();
+            await settle();
+            root.remove();
+            await settle();
+            host.state.n = 20;
+            await settle();
+            survivor.click();
+            await settle();
+            const detachedState = [survivor.textContent, host.state.calls];
+            document.body.append(root);
+            await settle();
+            // Reconnecting a conditional region renders its body again; the keyed li survives.
+            const reconnected = root.querySelector("span")!;
+            reconnected.click();
+            await settle();
+            const reconnectedState = [reconnected.textContent, host.state.calls, runtime.getComponentHost(root) === host];
+            stop();
+            stop();
+            return { removedState, retained, detachedState, reconnectedState, stoppedPauses, stoppedResumes };
+          } finally {
+            stop();
+            prototype.pause = originalPause;
+            prototype.resume = originalResume;
+          }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removedState: ["0", 0], retained: true, detachedState: ["9", 1],
+          reconnectedState: ["20", 2, true], stoppedPauses: 0, stoppedResumes: 0 });
+        assert.deepEqual(pageErrors, []);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} releases later descendants when an outer conditional region disappears`, async () => {
+      const definition = parseComponent(`<template component="nested-owner-release"><defs>
+        <state name="outer" type="boolean" value="true"></state>
+        <state name="inner" type="boolean" value="false"></state>
+        <state name="rows" type="list(number)" value="[1]"></state>
+        <state name="n" type="number" value="0"></state>
+        </defs><section><div $if="outer"><ul $if="inner"><li $each="row of rows" $value="n"></li></ul></div></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          try {
+            host.state.inner = true;
+            await settle();
+            host.state.rows = [1, 2];
+            await settle();
+            const oldRows = Array.from(root.querySelectorAll("li"));
+            host.state.outer = false;
+            await settle();
+            host.state.n = 7;
+            host.state.rows = [1, 2, 3];
+            await settle();
+            const removed = oldRows.map(row => row.textContent);
+            host.state.outer = true;
+            await settle();
+            return { removed, restored: Array.from(root.querySelectorAll("li"), row => row.textContent) };
+          } finally { stop(); }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removed: ["0", "0"], restored: ["7", "7", "7"] });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} clones keyed native rows and preserves bindings, events, identity and guards`, async () => {
       const definition = parseComponent(`<template component="native-clone-list"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
