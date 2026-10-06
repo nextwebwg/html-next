@@ -196,6 +196,8 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     }
     case "id": {
       if (node.name === scope.alias) return { source: "o", bits: 0, nested: false, item: true, boolean: false, deep: true, key };
+      // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
+      if (scope.alias !== undefined && node.name === "loop") ineligible();
       const index = scope.roots.findIndex((root) => root.name === node.name);
       if (index < 0) ineligible();
       const root = scope.roots[index]!;

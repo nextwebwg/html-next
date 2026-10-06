@@ -113,6 +113,7 @@ describe("direct-extend Vanilla generation", () => {
     "nested flow in a row": component(state, '<ul><li $each="row of rows" $key="row.id"><b $if="ready">x</b></li></ul>'),
     "deep item path": component(state, '<ul><li $each="row of rows" $key="row.id" $value="row.user.name"></li></ul>'),
     "loop record": component(state, '<ul><li $each="row of rows" $key="row.id" $value="loop.index"></li></ul>'),
+    "loop shadows a root": component(`${state}<state name="loop" type="number" value="1"></state>`, '<ul><li $each="row of rows" $key="row.id" $value="loop"></li></ul>'),
     "key reads state": component(state, '<ul><li $each="row of rows" $key="ready" $value="row.label"></li></ul>'),
     "constrained root path": component('<state name="user" type="object({ name: string })" value="{ name: \'a\' }"></state>', '<p $value="user.name"></p>'),
     "member test": component(state, '<p><b $if="rows.length">x</b></p>'),
