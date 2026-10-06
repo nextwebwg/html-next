@@ -3,6 +3,7 @@
 ## 1.0.0-alpha.31
 
 - Browser adoption retains parent refs, reactive bindings, declared child props, and events on nested components rendered as native roots. Bindings and refs follow child root replacement without replacing projected content.
+- Reactive list rendering does less work per row: ordinary native rows clone a cached structure, adjacent removed rows are removed together, and stopped render effects release their ownership, so repeated create and clear cycles no longer retain DOM nodes.
 
 ## 1.0.0-alpha.30
 
