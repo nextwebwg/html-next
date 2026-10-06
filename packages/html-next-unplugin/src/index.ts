@@ -35,6 +35,11 @@ export interface HtmlNextNativePluginOptions {
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
+  /**
+   * Experimental: compile eligible controller components (declared state, `$if`, keyed `$each`)
+   * to direct DOM updates instead of the general runtime. Other components are unchanged.
+   */
+  readonly experimentalDirectExtend?: boolean;
 }
 
 export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
@@ -534,6 +539,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
     const artifacts = generateComponent(definition, {
       noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+      directExtend: options.experimentalDirectExtend === true,
     });
     const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);

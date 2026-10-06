@@ -216,6 +216,44 @@ describe("HTML Next unplugin", () => {
     assert.match(polymorphic, /function manageComponentLifecycle/);
   });
 
+  it("compiles eligible controller components directly with experimentalDirectExtend", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-direct-extend-"));
+    temporary.push(root);
+    await writeFile(join(root, "list.html"), `<template component="x-list" controller="./list.js" status="early" summary="List.">
+      <defs>
+        <state name="ready" type="boolean" value="false"></state>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      </defs>
+      <section><ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section>
+    </template>`);
+    await writeFile(join(root, "list.js"), `export default (host) => {
+      host.on("connect", () => { host.state.ready = true; host.state.rows = [{ id: 1, label: "one" }, { id: 2, label: "two" }]; });
+    };`);
+    await writeFile(join(root, "main.js"), `export { createXList } from ${JSON.stringify(componentsModule)};`);
+    const aliases = {
+      "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+      "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+    };
+    const bundle = async (experimentalDirectExtend: boolean): Promise<string> => {
+      const outDir = join(root, experimentalDirectExtend ? "direct" : "runtime");
+      await build({
+        root,
+        logLevel: "silent",
+        plugins: [htmlNext.vite({ entries: ["list.html"], root, manifestFile: false, experimentalDirectExtend })],
+        resolve: { alias: aliases },
+        build: { minify: false, outDir, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+      });
+      return readFile(join(outDir, "app.js"), "utf8");
+    };
+    const runtime = await bundle(false);
+    const direct = await bundle(true);
+    assert.match(runtime, /function manageComponentLifecycle/);
+    assert.doesNotMatch(direct, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
+    assert.match(direct, /function attachGeneratedController/);
+    assert.match(direct, /class KeyedList/);
+    assertClosedOverEntries(direct);
+  });
+
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-linked-"));
     temporary.push(root);
