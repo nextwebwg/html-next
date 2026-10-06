@@ -502,6 +502,64 @@ describe.skipIf(!enabled)("browser runtime", () => {
       } finally { await browser.close(); }
     });
 
+    it(`${engine} moves the same keyed blocks across reorders and after a duplicate-key failure`, async () => {
+      const definition = parseComponent(`<template component="keyed-move-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const rows = (ids: number[]) => ids.map(id => ({ id }));
+          // Reports the resulting order and which retained rows the reconcile moved.
+          const update = async (ids: number[]) => {
+            const before = new Map<Node, string | null>(Array.from(list.querySelectorAll("li"), row => [row, row.getAttribute("data-id")]));
+            const moved: string[] = [];
+            const observer = new MutationObserver(records => {
+              for (const record of records) {
+                for (const node of record.addedNodes) if (before.has(node)) moved.push(before.get(node)!);
+              }
+            });
+            observer.observe(list, { childList: true });
+            host.state.rows = rows(ids);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            observer.disconnect();
+            const order = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id")).join("");
+            const kept = Array.from(list.querySelectorAll("li")).filter(row => before.has(row)).length;
+            return [order, moved.join(""), kept];
+          };
+          return [
+            await update([1, 2, 3, 4, 5, 6]),
+            await update([1, 5, 3, 4, 2, 6]),
+            await update([6, 5, 1, 1]),
+            await update([2, 3, 4, 5, 6, 1]),
+            await update([4, 7, 5, 6, 2]),
+            await update([8, 9]),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [
+          ["123456", "", 0],
+          // The reverse pass moves the blocks outside the longest already-ordered run, last first.
+          ["153426", "25", 6],
+          ["153426", "", 6],
+          // The failed run left the previous order's positions intact.
+          ["234561", "152", 6],
+          ["47562", "2", 4],
+          ["89", "", 0],
+        ]);
+        assert.deepEqual(errors.map(message => message.includes("HR004")), [true]);
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
       const definition = parseComponent(`<template component="reversed-removal-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>
