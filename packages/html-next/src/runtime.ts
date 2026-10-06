@@ -1390,6 +1390,8 @@ interface EachBlock {
   readonly end: Comment;
   readonly scope: ReactiveScope;
   readonly owned: RenderOwned;
+  /** Index in the last completed keyed run; a failed run leaves it as it was. */
+  position: number;
 }
 
 function existingEachRange(candidate: Node | undefined, kind: "each" | "item"): readonly [Comment, Comment] | undefined {
@@ -1487,7 +1489,8 @@ function removeStaleBlocks(
 function stableBlockPositions(previous: readonly number[]): Uint8Array | undefined {
   let last = -1;
   let ordered = true;
-  for (const position of previous) {
+  for (let index = 0; index < previous.length; index += 1) {
+    const position = previous[index]!;
     if (position < 0) continue;
     if (position < last) ordered = false;
     last = position;
@@ -1569,13 +1572,8 @@ function renderEachRegion(
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
     const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
-    let oldPositions: Map<unknown, number> | undefined;
-    if (keyed) {
-      oldPositions = new Map();
-      let position = 0;
-      for (const key of blocks.keys()) oldPositions.set(key, position++);
-    }
     const previous: number[] | undefined = keyed ? [] : undefined;
+    let retained = 0;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
       const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
@@ -1607,8 +1605,12 @@ function renderEachRegion(
           end: blockEnd,
           scope: local,
           owned,
+          position: -1,
         };
+        previous?.push(-1);
       } else {
+        retained += 1;
+        previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
         if (unreadLoop) block.scope.setUnread("loop", loop);
@@ -1616,7 +1618,6 @@ function renderEachRegion(
       }
       next.set(key, block);
       ordered?.push(block);
-      previous?.push(oldPositions?.get(key) ?? -1);
     }
     for (const [blockStart, blockEnd] of adopting.slice(adoptionIndex)) {
       clearRange(blockStart, blockEnd);
@@ -1627,7 +1628,8 @@ function renderEachRegion(
     adoptionIndex = 0;
     removeStaleBlocks(blocks, next, start, end);
     if (ordered !== undefined && previous !== undefined) {
-      const stable = stableBlockPositions(previous);
+      // With no retained block every position is -1, which is already ordered.
+      const stable = retained === 0 ? undefined : stableBlockPositions(previous);
       let reference: Node = end;
       for (let index = ordered.length - 1; index >= 0; index -= 1) {
         const block = ordered[index]!;
@@ -1637,6 +1639,7 @@ function renderEachRegion(
         reference = block.start;
       }
     }
+    if (ordered !== undefined) for (let index = 0; index < ordered.length; index += 1) ordered[index]!.position = index;
     blocks = next;
     syncContainingSelect(end);
   });
