@@ -36,6 +36,14 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("pixel capture settlin
         await actual.locator("#case").evaluate((element) => { element.innerHTML = ""; });
         await assert.rejects(assertPixelsEqual(actual, different, reference, "immutable reference"),
           /immutable reference: 3200 differing RGBA pixels/);
+
+        // Fixtures without a doctype render in quirks mode, where a bare :hover or :active matches only links.
+        assert.equal(await actual.evaluate(() => document.compatMode), "BackCompat");
+        await actual.locator("#case").evaluate((element) => { element.innerHTML = '<input id="flag" type="checkbox">'; });
+        await actual.hover("#flag");
+        await actual.mouse.down();
+        await assert.rejects(assertPixelsEqual(actual, different, reference, "pointer diagnostics"),
+          /"hovered":\[[^\]]*"input#flag".*"active":\[[^\]]*"input#flag"/);
       } finally {
         await browser.close();
       }
