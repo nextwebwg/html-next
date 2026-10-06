@@ -91,9 +91,9 @@ jobs:
     needs: framework-changes
     if: needs.framework-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
-    # Up to three sweeps of four entries (Vite-compiled and live, candidate and base; about 18 minutes
-    # each on an M4 Pro) plus a cold setup, at up to 2.5x on hosted runners; tighten this from the
-    # first CI runs' per-sweep timing.
+    # Up to three sweeps of four entries (Vite-compiled and live, candidate and base; an estimated 18
+    # minutes each on an M4 Pro, twice the measured 9-minute two-entry sweep) plus a cold setup, at up
+    # to 2.5x on hosted runners; tighten this from the first CI runs' per-sweep timing.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

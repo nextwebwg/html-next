@@ -181,6 +181,7 @@
   "live_vs_vue": 1.2538662347857417,
   "live_vs_svelte": 1.4043752965421366,
   "live_vs_solid": 1.4531740883218316,
+  "live_vs_gated_max": 1.4531740883218316,
   "live_vs_fastest_competitor": 1.4531740883218316,
   "live_vs_reference": 0.9823631953385086,
   "compiled_score": 1.55903574199353,
