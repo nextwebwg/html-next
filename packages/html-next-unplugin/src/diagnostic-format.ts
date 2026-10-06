@@ -28,8 +28,9 @@ export function formatCheckDiagnostic(diagnostic: HtmlNextCheckDiagnostic, optio
     : resolve(root, source);
   const suffix = diagnostic.line === undefined || diagnostic.column === undefined ? "" : `:${diagnostic.line}:${diagnostic.column}`;
   const label = singleLine(`${file === undefined ? source : relative(root, file)}${suffix}`);
-  const location = file !== undefined && options.hyperlinks !== false
-    ? `\x1b]8;;vscode://file/${new URL(pathToFileURL(file).href).pathname}${suffix}\x1b\\${label}\x1b]8;;\x1b\\`
+  const uri = file === undefined ? undefined : new URL(pathToFileURL(file).href);
+  const location = uri !== undefined && options.hyperlinks !== false
+    ? `\x1b]8;;vscode://file${uri.hostname === "" ? "" : `//${uri.hostname}`}${uri.pathname}${suffix}\x1b\\${label}\x1b]8;;\x1b\\`
     : label;
   return `${row}  ·  ${location}`;
 }

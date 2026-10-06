@@ -10,8 +10,14 @@ describe("compact check diagnostics", () => {
     const source = pathToFileURL(resolve("card with spaces.html")).href;
     const output = formatCheckDiagnostic({ severity: "error", code: "HC013", message: "Invalid constraint.", source, line: 4, column: 7 });
     const uriPath = new URL(source).pathname;
-    assert.equal(output, `error HC013  Invalid constraint.  ·  \x1b]8;;vscode://file/${uriPath}:4:7\x1b\\card with spaces.html:4:7\x1b]8;;\x1b\\`);
+    assert.equal(output, `error HC013  Invalid constraint.  ·  \x1b]8;;vscode://file${uriPath}:4:7\x1b\\card with spaces.html:4:7\x1b]8;;\x1b\\`);
     assert.equal(output.split("\n").length, 1);
+  });
+
+  it.runIf(process.platform === "win32")("preserves the server in Windows network file links", () => {
+    const output = formatCheckDiagnostic({ severity: "error", code: "HC013", message: "Invalid constraint.",
+      source: "file://server/share/card.html", line: 4, column: 7 }, { root: "\\\\server\\share" });
+    assert.equal(output, "error HC013  Invalid constraint.  ·  \x1b]8;;vscode://file//server/share/card.html:4:7\x1b\\card.html:4:7\x1b]8;;\x1b\\");
   });
 
   it("supports plain output, missing locations, and converter messages without duplicate codes", () => {
