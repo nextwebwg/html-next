@@ -246,6 +246,35 @@ Prepared component-shaped binding/validation readers, compact row boundaries and
 proxy-local metadata remain experiments. WebAssembly has no demonstrated suitable
 hot kernel here.
 
+### Binding-reader experiments remain unconfirmed
+
+Prepared readers reduced repeated expression work but added installation cost. One full
+standard sweep of shared native-body readers was 2.39% slower against the frozen ownership
+reference: label updates were 7.84% faster, while 1,000-row creation was 9.79% slower and
+selection 5.97% slower. Sampled profiles showed inherited-scope guards in selection and extra
+reader preparation during creation. They did not establish garbage collection as the cause;
+sampled GC time was lower in the slower 10,000-row creation interval.
+
+A later prototype removed four wrapper closures per row and deferred reader capture until
+an update. Its single diagnostic run used the live candidate, frozen ownership reference and
+vanilla across all nine workloads at the standard 15/25 samples. The weighted candidate/reference
+ratio was 0.9953. Warm label updates were 13.02% faster and 10,000-row creation 6.55% faster;
+1,000-row creation, append and selection were 6.06%, 9.05% and 10.79% slower. This mixed result
+has no second sweep, independent framework controls or duplicate A/A reference and is not a
+retained optimization or a framework ranking.
+
+The pinned runner warms the same 100 label-update rows three times and selects once before
+tracing. Those timings exclude deferred reader preparation. A separate unthrottled diagnostic
+used three rotated candidate/reference pairs per workload to measure first and second actual
+clicks with CDP TaskDuration and assert unchanged keyed nodes and correct output. Selection
+was slower in the first-click pairs; label-update results varied. These small samples include
+other main-thread work and do not establish a repeatable first-interaction benefit.
+
+Both reader prototypes remain available for further measurement. A possible follow-up is to
+specialize demanded local content reads while retaining cheaper ordinary evaluation for other
+bindings. It must preserve validation, getter order, dynamic tracking and late scope shadowing.
+The published runtime retains the confirmed cloning and ownership implementations.
+
 ### Verification through 005
 
 `pnpm --filter @nextwebwg/html-next verify:performance --base=77889b8` passed
