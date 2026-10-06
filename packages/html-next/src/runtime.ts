@@ -3908,6 +3908,27 @@ export function observeDocument(
       else connected.set(element, dispose);
     } catch (error) { report(error); }
   };
+  /**
+   * Collects the connected roots a removed node held, in the order its marker query reports them.
+   * `contains` and `querySelectorAll` share light-DOM scope, so testing the few connected roots
+   * replaces querying every removed row.
+   */
+  const collectRemoved = (node: Element, removed: Element[]): void => {
+    // ponytail: O(removed nodes × connected roots); above 8 roots the subtree query is cheaper.
+    if (connected.size > 8) {
+      visitComponentRoots(node, (element) => {
+        if (connected.has(element)) removed.push(element);
+      });
+      return;
+    }
+    const start = removed.length;
+    for (const [element] of connected) {
+      if (node.contains(element) && element.matches("[data-component]")) removed.push(element);
+    }
+    if (removed.length - start > 1) {
+      removed.push(...removed.splice(start).sort((a, b) => a.compareDocumentPosition(b) & 4 ? -1 : 1));
+    }
+  };
   const synchronize = (mutations?: readonly MutationRecord[]): void => {
     if (stopped) return;
     const scopes: QueryRoot[] = [];
@@ -3917,10 +3938,7 @@ export function observeDocument(
       const removed: Element[] = [];
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) {
-          if (node.nodeType !== 1) continue;
-          visitComponentRoots(node as QueryRoot, (element) => {
-            if (connected.has(element)) removed.push(element);
-          });
+          if (node.nodeType === 1) collectRemoved(node as Element, removed);
         }
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;

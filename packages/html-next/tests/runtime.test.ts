@@ -2347,6 +2347,133 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} disconnects removed light-DOM roots in tree order from small and large connection sets`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-order" status="early" summary="Removal order fixture."><button><slot></slot></button></template>' +
+          '<main><section id="one"></section><section id="two"></section></main><aside id="many"></aside>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const events = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(element) {
+              events.push("connect:" + element.id);
+              return () => events.push("dispose:" + element.id);
+            },
+          });
+          const add = async (parent, id, before) => {
+            const element = document.createElement("demo-order");
+            element.id = id;
+            if (before === undefined) parent.append(element);
+            else parent.insertBefore(element, before);
+            await tick();
+            return document.getElementById(id);
+          };
+          const one = document.querySelector("#one");
+          const two = document.querySelector("#two");
+          // Connection order differs from tree order in each section.
+          const b = await add(one, "b");
+          await add(one, "a", b);
+          const d = await add(two, "d");
+          await add(two, "c", d);
+          // A moved root stays connected; a removed subtree without roots disposes nothing.
+          const moved = document.querySelector("#a");
+          moved.remove();
+          one.append(moved);
+          document.querySelector("main").append(document.createElement("p"));
+          await tick();
+          const small = events.splice(0);
+          document.querySelector("main").replaceChildren();
+          await tick();
+          const removedSmall = events.splice(0);
+          const many = document.querySelector("#many");
+          const tail = await add(many, "z");
+          for (let index = 0; index < 18; index += 1) await add(many, "m" + index, tail);
+          events.splice(0);
+          const late = document.createElement("div");
+          many.prepend(late);
+          await add(late, "y");
+          await add(late, "x", document.querySelector("#y"));
+          events.splice(0);
+          late.remove();
+          many.replaceChildren(...Array.from(many.children).filter(element => element.id !== "m3" && element.id !== "z"));
+          await tick();
+          const removedLarge = events.splice(0);
+          stop();
+          return { small, removedSmall, removedLarge };
+        })()`);
+        assert.deepEqual(result, {
+          small: ["connect:b", "connect:a", "connect:d", "connect:c"],
+          removedSmall: ["dispose:b", "dispose:a", "dispose:c", "dispose:d"],
+          removedLarge: ["dispose:x", "dispose:y", "dispose:m3", "dispose:z"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} discovers what a foreign script puts on or into a freshly rendered list row`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-cell" status="early" summary="Row content fixture."><b><slot></slot></b></template>' +
+          '<template component="demo-rows" status="early" summary="Row list fixture."><defs>' +
+          '<state name="rows" type="list(number)" value="[1]"></state></defs>' +
+          '<ul><li $each="row of rows" $key="row" from:data-id="row"><span $value="row"></span></li></ul></template>' +
+          '<demo-rows id="rows"></demo-rows>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onError(error) { errors.push(error.diagnostic?.code ?? error.message); },
+          });
+          await tick();
+          const root = document.querySelector("#rows");
+          const host = window.HtmlRuntime.getComponentHost(root);
+          const cell = text => {
+            const element = document.createElement("demo-cell");
+            element.textContent = text;
+            return element;
+          };
+          // The list renders in one microtask and observation runs in a later one, so these
+          // foreign changes land on fresh rows before observation first sees them.
+          host.state.rows = [1, 2];
+          await Promise.resolve();
+          root.querySelectorAll("li")[1].append(cell("inserted"));
+          await tick();
+          const inserted = errors.length;
+          host.state.rows = [1, 2, 3];
+          await Promise.resolve();
+          root.querySelectorAll("li")[2].setAttribute("data-component", "demo-cell");
+          await tick();
+          const marked = errors.splice(0);
+          root.querySelector("li").append(cell("later"));
+          await tick();
+          const lowered = Array.from(root.querySelectorAll("li"), row => [row.getAttribute("data-id"),
+            Array.from(row.querySelectorAll("b"), element => element.textContent).join(",")]);
+          stop();
+          return { inserted, marked, lowered, errors };
+        })()`);
+        assert.deepEqual(result, {
+          inserted: 0,
+          // Discovery treats the marked row as server markup to hydrate. The row is not that
+          // component's markup, so hydration reports it.
+          marked: ["HR005"],
+          lowered: [["1", "later"], ["2", "inserted"], ["3", ""]],
+          errors: [],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} can stop observation from a connection callback without leaking cleanup`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
