@@ -9,6 +9,8 @@ export interface ApplicationOptions {
   readonly outDir?: string;
   /** Discover app/pages by default; disable for an entirely registered route table. */
   readonly fileRoutes?: boolean;
+  /** Strip numeric ordering prefixes from file-route segments; default false. */
+  readonly routeOrdering?: boolean;
   /** Additional routes, using the same [param] pattern syntax as discovered pages. */
   readonly routes?: readonly RouteInput[];
   /** Named layout; default.html is automatic when present. false disables it. */
@@ -51,6 +53,8 @@ export interface LoadContext {
   readonly parent: Readonly<Record<string, unknown>>;
   readonly fetch: typeof globalThis.fetch;
   readonly signal: AbortSignal;
+  /** Ordered concrete routes. from is an application-relative directory prefix. */
+  readonly navigation: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
   /** Unavailable during static generation; accessing it throws a diagnostic. */
   readonly request: Request;
 }
@@ -72,6 +76,21 @@ export interface ApplicationRoute extends RouteLayer {
   readonly segments: readonly string[];
   readonly params: readonly string[];
   readonly layouts: readonly RouteLayer[];
+  /** Per-segment numeric file order; independent of URLs and component identity. */
+  readonly order?: readonly (string | null)[];
+}
+export interface NavigationQuery {
+  /** Application-relative subtree, e.g. /guide/. Defaults to /. */
+  readonly from?: string;
+  /** Deployment pathname used for aria-current. Loaders default to their current URL. */
+  readonly current?: string;
+}
+export interface NavigationItem {
+  readonly href: string;
+  readonly label: string;
+  readonly current: "page" | "false";
+  readonly depth: number;
+  readonly pageName: string;
 }
 export interface BrowserDefinition {
   readonly definition: ComponentDefinition;
@@ -94,6 +113,7 @@ export interface Application {
   readonly routes: readonly ApplicationRoute[];
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;
+  navigation(options?: NavigationQuery): Promise<readonly NavigationItem[]>;
   /** Render a fresh declarative baseline without executing browser controllers. */
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
   close(): Promise<void>;
