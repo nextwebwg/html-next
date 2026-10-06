@@ -3135,3 +3135,131 @@ createApp({ render: () => [
     }
   });
 });
+
+describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
+  let directory = "";
+  const bundles = new Map<string, string>();
+  const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
+
+  // One action script, run against the general-runtime fallback and the direct path in each engine.
+  const script = `
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+window.runParity = async () => {
+  const log = window.directExtendLog = { hosts: [], events: [] };
+  const warnings = [];
+  console.warn = (message) => warnings.push(String(message).replace(/^.*?: HR007/, "HR007"));
+  const element = createXParity();
+  const snapshots = [];
+  const identities = [];
+  let previous = new Map();
+  const record = () => {
+    snapshots.push(element.outerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
+    const rows = new Map(Array.from(element.querySelectorAll("li"), (row) => [row.getAttribute("data-id"), row]));
+    identities.push([...rows].map(([id, row]) => id + ":" + (previous.get(id) === row ? "same" : "new")).join(","));
+    previous = rows;
+  };
+  document.querySelector("main").append(element);
+  await flush();
+  record();
+  const host = log.hosts[0];
+  const steps = [
+    () => { host.state.rows = [1, 2, 3, 4, 5].map((id) => ({ id, label: "r" + id, tags: [] })); },
+    () => { host.state.selected = 2; },
+    () => { const rows = host.state.rows; const second = rows[1]; rows[1] = rows[3]; rows[3] = second; },
+    () => { host.state.rows[0].label = ""; host.state.rows[2].label += "!"; },
+    () => { host.state.rows[0].tags.push("a", "b"); },
+    () => { host.state.rows = host.state.rows.filter((row) => row.id !== 3); },
+    () => { host.state.rows = host.state.rows.concat([{ id: 9, label: "n", tags: ["t"] }]); },
+    () => { host.state.rows[1].id = 20; },
+    () => { host.state.rows = host.state.rows.toReversed(); },
+    () => { host.state.rows = [...host.state.rows.slice(2), ...host.state.rows.slice(0, 2)]; },
+    () => { host.state.rows[0].id = "bad"; host.state.selected = "bad"; host.state.title = 3; host.state.nope = 1; },
+    () => { host.state.title = ""; host.state.selected = null; },
+    () => { host.state.rows.length = 1; },
+    () => { host.state.ready = false; },
+    () => { host.state.ready = true; },
+    () => { host.state.rows = []; },
+  ];
+  for (const step of steps) {
+    step();
+    await flush();
+    record();
+  }
+  element.remove();
+  await flush();
+  host.state.rows = [{ id: 7, label: "back", tags: [] }];
+  await flush();
+  document.querySelector("main").append(element);
+  await flush();
+  record();
+  return { snapshots, identities, warnings, events: log.events };
+};`;
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-direct-extend-"));
+    const text = await readFile(new URL("parity.html", fixtures), "utf8");
+    const controller = await readFile(new URL("controller.js", fixtures), "utf8");
+    for (const directExtend of [false, true]) {
+      const variant = join(directory, directExtend ? "direct" : "runtime");
+      for (const artifact of generateComponent(parseComponent(text, "x-parity.html"), { directExtend })) {
+        const path = join(variant, artifact.path);
+        await mkdir(join(path, ".."), { recursive: true });
+        await writeFile(path, artifact.content);
+      }
+      await writeFile(join(variant, "vanilla", "controller.js"), controller);
+      await writeFile(join(variant, "entry.js"), `import { createXParity } from "./vanilla/XParity.js";\n${script}`);
+      const outfile = join(variant, "bundle.js");
+      await build({
+        entryPoints: [join(variant, "entry.js")],
+        outfile,
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: ["es2022"],
+        define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
+        loader: { ".css": "empty" },
+        alias: {
+          "@nextwebwg/html-next/generated-runtime": generatedRuntimePath,
+          "@nextwebwg/html-next/runtime": runtimePath,
+        },
+      });
+      bundles.set(directExtend ? "direct" : "runtime", outfile);
+    }
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  const engines: ReadonlyArray<[string, BrowserType]> = [
+    ["Chromium", chromium],
+    ["Firefox", firefox],
+    ["WebKit", webkit],
+  ];
+  for (const [name, browserType] of engines) {
+    it(`${name} renders, keeps row identity, warns and orders lifecycle callbacks like the general runtime`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const results: unknown[] = [];
+        for (const variant of ["runtime", "direct"]) {
+          const page = await browser.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", (error) => errors.push(error.message));
+          await page.setContent("<main></main>");
+          await page.addScriptTag({ path: bundles.get(variant)! });
+          results.push(await page.evaluate(() => (window as unknown as { runParity(): Promise<unknown> }).runParity()));
+          assert.deepEqual(errors, []);
+          await page.close();
+        }
+        const [live, compiled] = results as Array<{ snapshots: string[]; identities: string[]; warnings: string[]; events: string[] }>;
+        assert.equal(live!.snapshots.length, 18);
+        assert.deepEqual(compiled!.snapshots, live!.snapshots);
+        assert.deepEqual(compiled!.identities, live!.identities);
+        assert.deepEqual(compiled!.warnings, live!.warnings);
+        assert.deepEqual(compiled!.events, live!.events);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+});
