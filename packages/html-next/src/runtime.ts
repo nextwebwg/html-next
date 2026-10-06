@@ -3145,7 +3145,7 @@ export function manageComponentLifecycle(
 ): () => void {
   const coordinator = coordinatorFor(element.ownerDocument);
   const record: ManagedComponentLifecycle = {
-    connect: (current) => attachComponent(current, definition, options),
+    connect: (current) => attachRuntimeComponent(current, definition, options, false),
     disconnect: undefined,
     element,
   };
@@ -3200,6 +3200,16 @@ export function attachComponent(
   definition: ComponentDefinition,
   options: ComponentAttachmentOptions = {},
 ): () => void {
+  return attachRuntimeComponent(element, definition, options, true);
+}
+
+/** Native factories own their structural bindings; framework adapters own their renderer's DOM. */
+function attachRuntimeComponent(
+  element: Element,
+  definition: ComponentDefinition,
+  options: ComponentAttachmentOptions,
+  frameworkOwned: boolean,
+): () => void {
   const root = element.ownerDocument;
   const registry = registryFor(root);
   const existing = registry.definitions.get(definition.contract.tag);
@@ -3217,7 +3227,7 @@ export function attachComponent(
   // as rendered, so the observer's instance (and its controller) is released and the root is
   // re-attached as framework-owned.
   const observed = runtimeInstance(element);
-  if (observed !== undefined && !observed.frameworkOwned) {
+  if (frameworkOwned && observed !== undefined && !observed.frameworkOwned) {
     documentState(root).release?.(element);
     disconnectRuntimeInstance(observed);
     runtimeInstances.delete(element);
@@ -3242,7 +3252,7 @@ export function attachComponent(
       }
     }
     const attaching = [
-      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, true, invocationParent(element, new WeakMap()), options.props),
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, frameworkOwned, invocationParent(element, new WeakMap()), options.props),
     ];
     commitRuntimeInvocations(registry, attaching);
     // Generated output attaches its own root, so nothing else will lower the components this

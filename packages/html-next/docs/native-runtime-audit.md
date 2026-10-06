@@ -111,6 +111,12 @@ input graph, deduplicates shared support, and emits one coherent native target. 
 fixtures have hard size gates. The remaining fixtures expose current full-runtime fallbacks while
 their build-scoped implementations and budgets are evaluated.
 
+Native factories that use the general-runtime fallback own their structural bindings. Their shared
+MutationObserver coordinator reports connection changes; the runtime renders `$if` and `$each`
+regions and reconnects the same instance state. Framework adapters give structural ownership to
+their framework renderer instead. The attachment path preserves this distinction, with Chromium,
+Firefox, and WebKit tests covering native keyed updates, branch changes, and reconnect behavior.
+
 ## Review sequence
 
 The next decisions are intentionally separated so approval of one custom layer cannot be read as

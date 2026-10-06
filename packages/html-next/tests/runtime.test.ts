@@ -62,6 +62,53 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} manages native structural bindings and reconnects the same state`, async () => {
+      const definition = parseComponent(`<template component="native-owned-list"><defs>
+        <state name="shown" type="boolean" value="true"></state>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        </defs><section><ul $if="shown"><li $each="row of rows" $key="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The ordinary native factory emits a static skeleton before lifecycle attachment.
+        await page.setContent('<section id="case"><ul><li></li></ul></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async (serializedDefinition) => {
+          const definition = JSON.parse(serializedDefinition);
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector('#case')!;
+          const stop = runtime.manageComponentLifecycle(root, definition);
+          const host = runtime.getComponentHost(root);
+          const snapshot = () => Array.from(root.querySelectorAll('li'), row => row.textContent);
+          const initial = snapshot();
+          const first = root.querySelector('li');
+          host.state.rows = [{ id: 2, label: 'B' }, { id: 1, label: 'A' }];
+          await Promise.resolve();
+          const reordered = snapshot();
+          const retained = root.querySelectorAll('li')[1] === first;
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 3, label: 'C' }];
+          await Promise.resolve();
+          const detached = snapshot();
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const reconnected = snapshot();
+          const sameHost = runtime.getComponentHost(root) === host;
+          host.state.shown = false;
+          await Promise.resolve();
+          const hidden = root.querySelector('ul') === null;
+          host.state.shown = true;
+          await Promise.resolve();
+          const restored = snapshot();
+          stop();
+          return { initial, reordered, retained, detached, reconnected, sameHost, hidden, restored };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { initial: ['A', 'B'], reordered: ['B', 'A'], retained: true,
+          detached: ['B', 'A'], reconnected: ['C'], sameHost: true, hidden: true, restored: ['C'] });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} targets local refs across repeated instances and collection changes`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
