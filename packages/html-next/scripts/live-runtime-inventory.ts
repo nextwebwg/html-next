@@ -32,6 +32,7 @@ export const liveRuntimeSubsystemModules = {
   typesAndValidation: [
     "packages/html-next/src/css-color-keywords.ts",
     "packages/html-next/src/declared-types.ts",
+    "packages/html-next/src/formats.ts",
     "packages/html-next/src/freeze.ts",
     "packages/html-next/src/type-system.ts",
     "packages/html-next/src/structured-input.ts",
