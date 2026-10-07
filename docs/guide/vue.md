@@ -15,7 +15,7 @@ In a Vite project with its usual Vue plugin already configured:
 npm install --save-dev @nextwebwg/html-next-unplugin
 ```
 
-Use Node 22 or 24 and Vite 8. The current target is Vue 3.5.
+Use Node 22.22.2+ or 24.15+ and Vite 8. The current target is Vue 3.5.
 
 ## Configure Vite
 

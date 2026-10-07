@@ -12,7 +12,7 @@ Choose a framework in any section. Every selector on this page follows your choi
 
 ## Install
 
-Start with a Vite project and use Node 22 or 24. The plugin supports Vite 8.
+Start with a Vite project and use Node 22.22.2+ or 24.15+. The plugin supports Vite 8.
 
 ```bash
 npm install --save-dev @nextwebwg/html-next-unplugin
