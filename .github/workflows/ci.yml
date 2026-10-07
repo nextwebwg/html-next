@@ -31,9 +31,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:pr
 
+  playwright:
+    name: Playwright version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: pnpm-lock.yaml
+          sparse-checkout-cone-mode: false
+      # The catalog entry, the version every package installs.
+      - id: version
+        run: |
+          version=$(grep -A2 '^    playwright:$' pnpm-lock.yaml | sed -n 's/^      version: //p')
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No Playwright catalog version in pnpm-lock.yaml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   browser:
     name: Browser ${{ matrix.suite }}
+    needs: playwright
     runs-on: ubuntu-latest
+    # Playwright's image for the locked version carries the browsers and their OS libraries, so no
+    # step waits on Ubuntu's apt mirrors (14 minutes for 115 MB on 2026-10-07) or Playwright's CDN.
+    # pwuser shares the runner's uid 1001; Firefox refuses to run as root with a HOME it doesn't own.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      options: --user 1001 --ipc=host --init
     # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
     # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
     timeout-minutes: 15
@@ -58,15 +82,6 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      # Playwright's CDN has taken from seconds to 8 minutes for one browser; cache them per version.
-      - id: playwright
-        run: echo "version=$(pnpm --filter @nextwebwg/html-next exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # Every launch is headless, which uses Chromium's headless shell rather than the full browser.
-      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps --only-shell chromium firefox webkit
       - run: ${{ matrix.command }}
 
   performance:

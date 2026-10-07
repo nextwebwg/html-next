@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.34
+
+- CI runs the browser suites in Playwright's container image for the locked Playwright version, which already holds the browsers and their system libraries. A slow Ubuntu package mirror no longer holds a browser check past its 15-minute limit.
+
 ## 1.0.0-alpha.33
 
 - Simplify the public performance documentation and package READMEs.
