@@ -10,14 +10,14 @@
     </event>
 
     <handler name="choose">
-      <dispatch event="add" expr:value="{ id: itemId, label: label, unit: unit }"></dispatch>
+      <dispatch event="add" expr:value="{ id: $itemId, label: $label, unit: $unit }"></dispatch>
     </handler>
   </defs>
 
   <li class="suggestion">
-    <span class="suggestion__label" $value="label"></span>
-    <span class="suggestion__unit" $value="unit"></span>
-    <button type="button" on:click="choose" from:aria-label="concat('Add ', label, ' to the pantry')">Add</button>
+    <span class="suggestion__label" $value="$label"></span>
+    <span class="suggestion__unit" $value="$unit"></span>
+    <button type="button" on:click="choose" from:aria-label="concat('Add ', $label, ' to the pantry')">Add</button>
   </li>
 
   <style>

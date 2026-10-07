@@ -26,7 +26,7 @@ describe("expression: compilation", () => {
       assert.equal(evaluate(expression!, values), expected);
     }
     assert.equal(evaluate("$left-$right", scope({ left: 5, right: 2 })), 3);
-    assert.deepEqual(compileExpression("$first-name").dependencies, ["first", "name"]);
+    assert.deepEqual(compileExpression("$first-name").dependencies, ["first"]);
     for (const expression of ["$$name", "$1name", "$", "name$tail", "$record.$name", "{ $name: 1 }", String.raw`\name`, String.raw`na\me`]) {
       assert.throws(() => compileExpression(expression), SyntaxError, expression);
     }
@@ -46,7 +46,7 @@ describe("expression: compilation", () => {
     assert.equal(evaluate("$groups[0][1].name", scope({ groups: [[{ name: "A" }, { name: "B" }]] })), "B");
     assert.deepEqual(compileExpression("$items[0].name").dependencies, ["items.0.name"]);
     assert.deepEqual(getWritablePath("$items[0].name", new Set(["items"])), ["items", 0, "name"]);
-    assert.doesNotThrow(() => checkExpression("items[0].name"));
+    assert.doesNotThrow(() => checkExpression("$items[0].name"));
     assert.equal(evaluate("$items[-0].name", s), "Ada");
   });
   it("preserves the exact spelling of numeric object keys", () => {
@@ -80,10 +80,10 @@ describe("expression: compilation", () => {
   });
 
   it("checks the declared type of every concat argument", () => {
-    const compiled = compileExpression("concat(result.value.label, '/', result.value.note)");
+    const compiled = compileExpression("concat($result.value.label, '/', $result.value.note)");
     assert.deepEqual(compiled.dependencies, ["result.value.label", "result.value.note"]);
     assert.deepEqual(typeCheckedDependencies(compiled), ["result.value.label", "result.value.note"]);
-    assert.deepEqual(typeCheckedDependencies("result.value.label"), ["result.value.label"]);
+    assert.deepEqual(typeCheckedDependencies("$result.value.label"), ["result.value.label"]);
   });
 
   it("accepts only state-rooted access paths as writable bindings", () => {
@@ -219,18 +219,18 @@ describe("expression: native handler event", () => {
 describe("expression: reads and absent value", () => {
   it("reads declared identifiers and dotted paths", () => {
     const s = scope({ user: { name: "Ada" }, n: 3 });
-    assert.equal(evaluate("user.name", s), "Ada");
-    assert.equal(evaluate("n", s), 3);
+    assert.equal(evaluate("$user.name", s), "Ada");
+    assert.equal(evaluate("$n", s), 3);
   });
 
   it("an undeclared root is a compile error, not absent", () => {
-    assert.throws(() => evaluate("mystery", scope({})), UndeclaredName);
+    assert.throws(() => evaluate("$mystery", scope({})), UndeclaredName);
   });
 
   it("a missing property yields the absent value, and access on it stays absent", () => {
     const s = scope({ order: { total: 5 } });
-    assert.equal(evaluate("order.error", s), ABSENT);
-    assert.equal(evaluate("order.error.message", s), ABSENT); // safe navigation
+    assert.equal(evaluate("$order.error", s), ABSENT);
+    assert.equal(evaluate("$order.error.message", s), ABSENT); // safe navigation
   });
 
   it("null literal and out-of-range index behave as absent for access", () => {
@@ -238,15 +238,15 @@ describe("expression: reads and absent value", () => {
     assert.equal(evaluate("$items.5", s), ABSENT);
     assert.equal(evaluate("$items.0", s), 10);
     assert.equal(evaluate("$items.2", s), null);
-    assert.equal(evaluate("record.value", s), null);
+    assert.equal(evaluate("$record.value", s), null);
   });
 
   it("reads a list's or string's length as its count, as Vue conversion does", () => {
     const s = scope({ validation: { issues: [] as Value[] }, cart: { items: [1, 2] }, name: "Ada", record: { length: 7 } });
-    assert.equal(evaluate("not validation.issues.length", s), true);
-    assert.equal(evaluate("cart.items.length", s), 2);
-    assert.equal(evaluate("name.length", s), 3);
-    assert.equal(evaluate("record.length", s), 7);
+    assert.equal(evaluate("not $validation.issues.length", s), true);
+    assert.equal(evaluate("$cart.items.length", s), 2);
+    assert.equal(evaluate("$name.length", s), 3);
+    assert.equal(evaluate("$record.length", s), 7);
   });
 });
 
@@ -289,7 +289,7 @@ describe("expression: typed equality and no coercion", () => {
   });
   it("arithmetic with an absent operand propagates absent", () => {
     const s2 = scope({ cart: { total: 10 } });
-    assert.equal(evaluate("cart.total - cart.discount", s2), ABSENT);
+    assert.equal(evaluate("$cart.total - $cart.discount", s2), ABSENT);
   });
   it("and/or/not return booleans, not operands (no ||-swallows-zero)", () => {
     assert.equal(evaluate("0 or 5", s), true); // boolean, not 5
@@ -301,40 +301,40 @@ describe("expression: typed equality and no coercion", () => {
 describe("expression: conditional selection", () => {
   it("has lower precedence than or and associates to the right", () => {
     const s = scope({ a: false, b: true, c: false });
-    assert.equal(evaluate("a or b ? 'yes' : 'no'", s), "yes");
-    assert.equal(evaluate("a ? 1 : c ? 2 : 3", s), 3);
-    assert.equal(evaluate("a ? b ? 1 : 2 : 3", s), 3);
+    assert.equal(evaluate("$a or $b ? 'yes' : 'no'", s), "yes");
+    assert.equal(evaluate("$a ? 1 : $c ? 2 : 3", s), 3);
+    assert.equal(evaluate("$a ? $b ? 1 : 2 : 3", s), 3);
   });
 
   it("evaluates only the selected branch and preserves its value", () => {
-    assert.equal(evaluate("true ? 0 : missing", scope({})), 0);
-    assert.equal(evaluate("false ? missing : null", scope({})), null);
+    assert.equal(evaluate("true ? 0 : $missing", scope({})), 0);
+    assert.equal(evaluate("false ? $missing : null", scope({})), null);
     assert.equal(evaluate("[] ? 1 : 'empty'", scope({})), "empty");
     assert.deepEqual(evaluate("true ? [1, 2] : []", scope({})), [1, 2]);
   });
 
   it("works in nested expression positions and tracks every dependency", () => {
     const s = scope({ flag: true, value: 4, fallback: 9 });
-    assert.deepEqual(evaluate("{ selected: flag ? value : fallback }", s), { selected: 4 });
-    assert.equal(evaluate("[10, 20][flag ? 0 : 1]", s), 10);
-    assert.equal(evaluate("max(flag ? value : fallback, 2)", s), 4);
-    assert.deepEqual(compileExpression("flag ? value : fallback").dependencies, ["fallback", "flag", "value"]);
-    assert.equal(getWritablePath("flag ? value : fallback", new Set(["value"])), undefined);
+    assert.deepEqual(evaluate("{ selected: $flag ? $value : $fallback }", s), { selected: 4 });
+    assert.equal(evaluate("[10, 20][$flag ? 0 : 1]", s), 10);
+    assert.equal(evaluate("max($flag ? $value : $fallback, 2)", s), 4);
+    assert.deepEqual(compileExpression("$flag ? $value : $fallback").dependencies, ["fallback", "flag", "value"]);
+    assert.equal(getWritablePath("$flag ? $value : $fallback", new Set(["value"])), undefined);
   });
 
   it("rejects incomplete conditionals", () => {
-    assert.throws(() => checkExpression("flag ? value"), /Expected `:`/);
-    assert.throws(() => checkExpression("flag ? value :"), /Unexpected end of expression/);
+    assert.throws(() => checkExpression("$flag ? $value"), /Expected `:`/);
+    assert.throws(() => checkExpression("$flag ? $value :"), /Unexpected end of expression/);
   });
 });
 
 describe("expression: operators, comparison, functions", () => {
   const s = scope({ p: { name: "widget-pro" } });
   it("CSS attribute-selector string operators", () => {
-    assert.equal(evaluate('p.name ^= "widget"', s), true);
-    assert.equal(evaluate('p.name $= "pro"', s), true);
-    assert.equal(evaluate('p.name *= "get-p"', s), true);
-    assert.equal(evaluate('p.name ^= "x"', s), false);
+    assert.equal(evaluate('$p.name ^= "widget"', s), true);
+    assert.equal(evaluate('$p.name $= "pro"', s), true);
+    assert.equal(evaluate('$p.name *= "get-p"', s), true);
+    assert.equal(evaluate('$p.name ^= "x"', s), false);
   });
 
   it("assembles scalar text and joins typed lists", () => {
@@ -429,16 +429,25 @@ describe("expression: operators, comparison, functions", () => {
 describe("expression: object/array expressions", () => {
   it("builds structured values with bare keys and expression values", () => {
     const s = scope({ name: "Ada" });
-    assert.deepEqual(evaluate("{ label: name, open: true }", s), { label: "Ada", open: true });
-    assert.deepEqual(evaluate("[1, 2, name]", s), [1, 2, "Ada"]);
+    assert.deepEqual(evaluate("{ label: $name, open: true }", s), { label: "Ada", open: true });
+    assert.deepEqual(evaluate("[1, 2, $name]", s), [1, 2, "Ada"]);
     assert.deepEqual(evaluate("{ 'k': 1, }", s), { k: 1 }); // quoted key + trailing comma
+  });
+
+  it("reads a declaration only through $; a bare word is a keyword literal", () => {
+    const s = scope({ name: "Ada", mode: "compact" });
+    assert.deepEqual(evaluate("{ label: name }", s), { label: "name" });
+    assert.equal(evaluate("$mode = compact", s), true);
+    assert.equal(evaluate("$mode = name", s), false);
+    assert.deepEqual(compileExpression("$mode = compact").dependencies, ["mode"]);
+    assert.equal(evaluate("missing", scope({})), "missing");
   });
 });
 
 describe("expression: syntax diagnostics", () => {
   it("retains the public diagnostics for malformed input", () => {
     assert.throws(() => checkExpression("'open"), /Unterminated string literal\./);
-    assert.throws(() => checkExpression("value."), /Expected a property name after `\.`\./);
+    assert.throws(() => checkExpression("$value."), /Expected a property name after `\.`\./);
     assert.throws(() => checkExpression("{ 1: true }"), /Object keys must be identifiers or strings\./);
     assert.throws(() => checkExpression("(1"), /Expected `\)`\./);
     assert.throws(() => checkExpression("1 @ 2"), /Unexpected character `@`\./);

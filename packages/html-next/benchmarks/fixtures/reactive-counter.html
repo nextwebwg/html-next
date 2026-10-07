@@ -2,10 +2,10 @@
   <defs>
     <state type="number" name="count" value="0"></state>
     <handler name="increment">
-      <set name="count" expr:value="count + 1"></set>
+      <set name="count" expr:value="$count + 1"></set>
     </handler>
   </defs>
   <button type="button" on:click="increment">
-    Count: <output $value="count"></output>
+    Count: <output $value="$count"></output>
   </button>
 </template>

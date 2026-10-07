@@ -16,7 +16,7 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url).pathname;
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const staticSource = `<template component="x-static-scoped" status="early" summary="Static scoped slot."><div><slot name="row" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
-const dynamicSource = `<template component="x-dynamic-scoped" status="early" summary="Dynamic scoped slot."><defs><state name="slotName" value="row"></state></defs><div><slot from:name="slotName" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
+const dynamicSource = `<template component="x-dynamic-scoped" status="early" summary="Dynamic scoped slot."><defs><state name="slotName" value="row"></state></defs><div><slot from:name="$slotName" from:item="'Ada'"><span>Fallback</span></slot></div></template>`;
 
 describe.skipIf(!enabled)("public Vue converter scoped-slot fallback parity", () => {
   let directory = "";

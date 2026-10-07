@@ -19,7 +19,7 @@ Save this as `counter.html`. Click the count as guests arrive, then Reset for th
   <defs>
     <state name="count" type="number" value="0"></state>
     <handler name="increment">
-      <set name="count" expr:value="count + 1"></set>
+      <set name="count" expr:value="$count + 1"></set>
     </handler>
     <handler name="reset">
       <set name="count" expr:value="0"></set>
@@ -27,7 +27,7 @@ Save this as `counter.html`. Click the count as guests arrive, then Reset for th
   </defs>
   <div>
     <button type="button" on:click="increment">
-      Count: <span $value="count"></span>
+      Count: <span $value="$count"></span>
     </button>
     <button type="button" on:click="reset">Reset</button>
   </div>

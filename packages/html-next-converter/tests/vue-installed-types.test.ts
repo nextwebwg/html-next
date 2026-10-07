@@ -28,7 +28,7 @@ it("infers selected props from an independently installed Vue library's declarat
       <prop name="type" type="keyword" values="text, email, number" default="text">Mode.</prop>
       <prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="email" type="string"></option><option value="number" type="number"></option></type></prop>
       <prop name="disabled" type="boolean" default="false">Disabled.</prop>
-    </defs><input from:type="type" from:value="value" from:disabled="disabled"></template>`);
+    </defs><input from:type="$type" from:value="$value" from:disabled="$disabled"></template>`);
     await convertComponents({ target: "vue", mode: "library", root: source, outDirectory: pkg, entries: ["input.html"] });
     const compilerOptions = { strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true };
     await writeFile(join(pkg, "tsconfig.json"), JSON.stringify({ compilerOptions: { ...compilerOptions, declaration: true, emitDeclarationOnly: true, rootDir: "vue", outDir: "types" }, include: ["vue/**/*.vue", "vue/**/*.ts"] }));

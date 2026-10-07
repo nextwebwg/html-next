@@ -77,8 +77,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         <state name="shown" type="boolean" value="false"></state>
         <state name="n" type="number" value="0"></state>
         <state name="calls" type="number" value="0"></state>
-        <handler name="activate"><set name="calls" expr:value="calls + 1"></set></handler>
-        </defs><section><ul><li $each="row of rows" $key="row.id"><span $if="shown" on:click="activate" $value="n"></span></li></ul></section></template>`);
+        <handler name="activate"><set name="calls" expr:value="$calls + 1"></set></handler>
+        </defs><section><ul><li $each="row of $rows" $key="$row.id"><span $if="$shown" on:click="activate" $value="$n"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -162,7 +162,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         <state name="inner" type="boolean" value="false"></state>
         <state name="rows" type="list(number)" value="[1]"></state>
         <state name="n" type="number" value="0"></state>
-        </defs><section><div $if="outer"><ul $if="inner"><li $each="row of rows" $value="n"></li></ul></div></section></template>`);
+        </defs><section><div $if="$outer"><ul $if="$inner"><li $each="row of $rows" $value="$n"></li></ul></div></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -199,14 +199,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const definition = parseComponent(`<template component="native-clone-list"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
         <state name="selected" type="number" value="2"></state>
-        <computed name="snapshot" from="rows"></computed>
+        <computed name="snapshot" from="$rows"></computed>
         <event name="activate" type="number"></event>
         <handler name="activate"><dispatch event="activate" expr:value="$$event.detail"></dispatch></handler>
-        </defs><section><ul><li class="clone-row literal" $each="row of rows" $key="row.id"
-        from:data-id="row.id" from:aria-selected="row.id = selected" class:chosen="row.id = selected"
-        style:opacity="row.id = selected ? '1' : '0.5'">
-        <a class="activate" on:click.prevent="activate"><span class="mixed">Label: {row.label} / {selected}</span></a>
-        <span class="leaf" $value="row.label"></span></li></ul></section></template>`);
+        </defs><section><ul><li class="clone-row literal" $each="row of $rows" $key="$row.id"
+        from:data-id="$row.id" from:aria-selected="$row.id = $selected" class:chosen="$row.id = $selected"
+        style:opacity="$row.id = $selected ? '1' : '0.5'">
+        <a class="activate" on:click.prevent="activate"><span class="mixed">Label: {$row.label} / {$selected}</span></a>
+        <span class="leaf" $value="$row.label"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -290,15 +290,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
         <state name="text" type="string" value="start"></state><state name="shown" type="boolean" value="true"></state>
         </defs><section>
-        <ul><li class="fallback-ref" $each="row of rows" $key="row.id" $ref="rowRefs" from:data-id="row.id"><span $value="row.label"></span></li></ul>
-        <ul><li class="fallback-property" $each="row of rows" $key="row.id" from:data-id="row.id"><span .title="row.label" $value="row.label"></span></li></ul>
-        <ul><li class="fallback-control" $each="row of rows" $key="row.id" from:data-id="row.id"><input bind:value="text"></li></ul>
-        <ul><li class="fallback-flow" $each="row of rows" $key="row.id" from:data-id="row.id"><span $if="shown" $value="row.label"></span></li></ul>
-        <ul><li class="fallback-svg" $each="row of rows" $key="row.id" from:data-id="row.id"><svg viewBox="0 0 10 10"><text $value="row.label"></text></svg></li></ul>
-        <ul><li class="fallback-component" $each="row of rows" $key="row.id" from:data-id="row.id"><clone-child from:label="row.label"></clone-child></li></ul>
-        <ul><li class="fallback-slot" $each="row of rows" $key="row.id" from:data-id="row.id"><slot name="sample"><span $value="row.label"></span></slot></li></ul>
+        <ul><li class="fallback-ref" $each="row of $rows" $key="$row.id" $ref="rowRefs" from:data-id="$row.id"><span $value="$row.label"></span></li></ul>
+        <ul><li class="fallback-property" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><span .title="$row.label" $value="$row.label"></span></li></ul>
+        <ul><li class="fallback-control" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><input bind:value="text"></li></ul>
+        <ul><li class="fallback-flow" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><span $if="$shown" $value="$row.label"></span></li></ul>
+        <ul><li class="fallback-svg" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><svg viewBox="0 0 10 10"><text $value="$row.label"></text></svg></li></ul>
+        <ul><li class="fallback-component" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><clone-child from:label="$row.label"></clone-child></li></ul>
+        <ul><li class="fallback-slot" $each="row of $rows" $key="$row.id" from:data-id="$row.id"><slot name="sample"><span $value="$row.label"></span></slot></li></ul>
         </section></template>`);
-      const child = parseComponent(`<template component="clone-child"><defs><prop name="label" type="string">Label.</prop></defs><strong class="child" $value="label"></strong></template>`);
+      const child = parseComponent(`<template component="clone-child"><defs><prop name="label" type="string">Label.</prop></defs><strong class="child" $value="$label"></strong></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -357,7 +357,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>
         <event name="activate" type="event"></event>
         <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
-        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><button on:click="activate" $value="row.label"></button></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><button on:click="activate" $value="$row.label"></button></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -425,7 +425,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
     it(`${engine} reruns a keyed list exactly for index, length and order changes`, async () => {
       const definition = parseComponent(`<template component="list-rerun-count"><defs>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
-        </defs><section><ul><li $each="row of rows" $key="row.id"><span $value="row.label"></span></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $key="$row.id"><span $value="$row.label"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -467,10 +467,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
     it(`${engine} updates a list and another component's index reader in subscription order`, async () => {
       const list = parseComponent(`<template component="order-list"><defs>
         <state name="rows" type="list(number)" value="[]"></state>
-        </defs><section><ul><li $each="row of rows" $value="row"></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $value="$row"></li></ul></section></template>`);
       const first = parseComponent(`<template component="order-first"><defs>
         <state name="rows" type="list(number)" value="[]"></state>
-        </defs><section><output $value="rows[0]"></output></section></template>`);
+        </defs><section><output $value="$rows[0]"></output></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -517,8 +517,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
     it(`${engine} renews each loop record on every list run`, async () => {
       const definition = parseComponent(`<template component="loop-record-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
-        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-index="loop.index" from:data-edge="loop.first ? 'first' : loop.last ? 'last' : ''">
-        <span $value="loop.count"></span></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-index="$loop.index" from:data-edge="$loop.first ? 'first' : $loop.last ? 'last' : ''">
+        <span $value="$loop.count"></span></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -556,7 +556,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
     it(`${engine} moves the same keyed blocks across reorders and after a duplicate-key failure`, async () => {
       const definition = parseComponent(`<template component="keyed-move-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[]"></state>
-        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -614,7 +614,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
     it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
       const definition = parseComponent(`<template component="reversed-removal-list"><defs>
         <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>
-        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -648,8 +648,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         <state name="left" type="object({ value: number })" value="{ value: 1 }"></state>
         <state name="right" type="object({ value: string })" value="{ value: 'old' }"></state>
         <state name="alias" type="object({ id: number, label: string })" value="{ id: 0, label: 'unused' }"></state>
-        <computed name="locked" type="object({ id: number, label: string })" from="rows[0]"></computed>
-        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section></template>`);
+        <computed name="locked" type="object({ id: number, label: string })" from="$rows[0]"></computed>
+        </defs><section><ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id" $value="$row.label"></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -713,7 +713,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const definition = parseComponent(`<template component="native-owned-list"><defs>
         <state name="shown" type="boolean" value="true"></state>
         <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
-        </defs><section><ul $if="shown"><li $each="row of rows" $key="row.id" $value="row.label"></li></ul></section></template>`);
+        </defs><section><ul $if="$shown"><li $each="row of $rows" $key="$row.id" $value="$row.label"></li></ul></section></template>`);
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -764,7 +764,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state name="rows" type="list(number)" value="[1,2]"></state>
           <event name="check" type="number" bubbles="false" cancelable="true"></event>
           <handler name="send"><dispatch event="check" target="fields" expr:value="$$event.detail"></dispatch></handler>
-          </defs><section on:send="send"><button $each="row of rows" $key="row" $ref="fields" from:data-row="row"></button></section></template>
+          </defs><section on:send="send"><button $each="row of $rows" $key="$row" $ref="fields" from:data-row="$row"></button></section></template>
           <x-ref-dispatch id="first"></x-ref-dispatch><x-ref-dispatch id="second"></x-ref-dispatch>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -801,7 +801,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state name="rows" type="list(number)" value="[1,2]"></state>
           <event name="share" type="object({ n: number })"></event>
           <handler name="send"><dispatch event="share" target="fields" expr:value="$$event.detail"></dispatch></handler>
-          </defs><section on:send="send"><button $each="row of rows" $ref="fields"></button></section></template>
+          </defs><section on:send="send"><button $each="row of $rows" $ref="fields"></button></section></template>
           <x-shared-dispatch></x-shared-dispatch>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -909,15 +909,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-reading-default"><defs>
           <prop name="amount" type="number" default="5">Reading.</prop>
-        </defs><output from:data-amount="amount"></output></template>
+        </defs><output from:data-amount="$amount"></output></template>
         <template component="x-reading-empty"><defs>
           <prop name="amount" type="number">Reading.</prop>
-        </defs><output from:data-amount="amount"></output></template>
+        </defs><output from:data-amount="$amount"></output></template>
         <template component="x-reading-owner"><defs>
           <prop name="incoming" type="number" max="100">Source value.</prop>
-        </defs><main from:data-incoming="incoming"><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
-          <x-reading-empty id="without-default" from:amount="incoming"></x-reading-empty>
-          <x-reading-default id="from-function" from:amount="concat(incoming)"></x-reading-default>
+        </defs><main from:data-incoming="$incoming"><x-reading-default id="with-default" from:amount="$incoming"></x-reading-default>
+          <x-reading-empty id="without-default" from:amount="$incoming"></x-reading-empty>
+          <x-reading-default id="from-function" from:amount="concat($incoming)"></x-reading-default>
         </main></template>
         <x-reading-owner id="owner" incoming="oops"></x-reading-owner>`);
         await page.addScriptTag({ path: bundlePath });
@@ -990,11 +990,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
         await page.setContent(`<template component="x-email-display"><defs>
           <prop name="address" type="email">Address.</prop>
-        </defs><output from:data-address="address"></output></template>
+        </defs><output from:data-address="$address"></output></template>
         <template component="x-email-editor"><defs>
           <state name="address" type="email" value="ada@example.org"></state>
         </defs><section><input type="email" bind:value="address">
-          <x-email-display id="display" from:address="address"></x-email-display>
+          <x-email-display id="display" from:address="$address"></x-email-display>
         </section></template><x-email-editor id="editor"></x-email-editor>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1038,11 +1038,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-handler-type"><defs>
           <state name="count" type="number" value="2"></state>
-          <handler name="bad"><set name="count" expr:value="concat(count)"></set></handler>
+          <handler name="bad"><set name="count" expr:value="concat($count)"></set></handler>
           <handler name="good"><set name="count" value="7"></set></handler>
         </defs><section><button class="bad" on:click="bad">Bad</button>
           <button class="good" on:click="good">Good</button>
-          <output from:data-count="count"></output></section></template>
+          <output from:data-count="$count"></output></section></template>
         <x-handler-type id="handler-test"></x-handler-type>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1106,7 +1106,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-choice-state"><defs>
           <state name="size" type="keyword" values="sm, md" value="sm"></state>
-        </defs><section><input bind:value="size"><output from:data-size="size"></output></section></template>
+        </defs><section><input bind:value="size"><output from:data-size="$size"></output></section></template>
         <x-choice-state id="choice-state"></x-choice-state>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1138,7 +1138,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-bounds"><defs>
           <prop name="amount" type="number" min="1" max="5">Amount.</prop>
           <prop name="code" type="string" minlength="2" maxlength="4">Code.</prop>
-        </defs><div from:data-amount="amount" from:data-code="code"></div></template>
+        </defs><div from:data-amount="$amount" from:data-code="$code"></div></template>
         <x-bounds id="bounded" amount="0" code="x"></x-bounds>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1173,8 +1173,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-from-reactive"><defs>
           <prop name="label" type="string">Label.</prop>
           <state type="number" name="count" value="0"></state>
-          <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-        </defs><button from:data-label="label" from:data-count="count" on:click="increment">Go</button></template>
+          <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+        </defs><button from:data-label="$label" from:data-count="$count" on:click="increment">Go</button></template>
         <x-from-reactive id="test" label="First"></x-from-reactive>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1211,8 +1211,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
             <option value="text" type="string"></option>
             <option value="number" type="number"></option>
           </type></prop>
-          <handler name="toggle"><set name="mode" expr:value="mode = 'text' ? 'number' : 'text'"></set></handler>
-        </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>
+          <handler name="toggle"><set name="mode" expr:value="$mode = 'text' ? 'number' : 'text'"></set></handler>
+        </defs><button from:data-value="$value" on:click="toggle">Toggle</button></template>
         <x-state-selected id="test"></x-state-selected>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1253,12 +1253,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-selected-child"><defs>
           <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
           <prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-        </defs><input from:type="type" from:value="value"></template>
+        </defs><input from:type="$type" from:value="$value"></template>
         <template component="x-parent-source"><defs>
           <state name="mode" type="keyword" values="text, number" value="text"></state>
           <state name="entry" type="number"></state><state name="draft" type="number" value="2.5"></state>
           <handler name="switch"><set name="mode" value="number"></set><set name="entry" value="2.5"></set></handler>
-        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child><x-selected-child id="unchanged-from" from:type="mode" from:value="draft"></x-selected-child><x-selected-child id="unchanged-bind" from:type="mode" bind:value="draft"></x-selected-child></div></template>
+        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="$mode" from:value="$entry"></x-selected-child><x-selected-child id="unchanged-from" from:type="$mode" from:value="$draft"></x-selected-child><x-selected-child id="unchanged-bind" from:type="$mode" bind:value="draft"></x-selected-child></div></template>
         <x-parent-source id="parent"></x-parent-source>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
@@ -1298,10 +1298,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-structured-child"><defs>
           <state name="mode" type="keyword" values="list, object" value="list"></state>
           <prop name="value">Value.<type from="mode"><option value="list" type="list(number)"></option><option value="object" type="object({ count: number })"></option></type></prop>
-        </defs><output $value="value"></output></template>
-        <template component="x-list-child"><defs><prop name="value" type="list(number)">Value.</prop></defs><output $value="value"></output></template>
+        </defs><output $value="$value"></output></template>
+        <template component="x-list-child"><defs><prop name="value" type="list(number)">Value.</prop></defs><output $value="$value"></output></template>
         <template component="x-structured-parent"><defs><state name="box" type="object({ value: unknown })" value="{ value: [1, 2] }"></state></defs>
-          <section><x-structured-child id="from" from:value="box.value"></x-structured-child><x-structured-child id="bind" bind:value="box.value"></x-structured-child><x-list-child id="fixed-from" from:value="box.value"></x-list-child><x-list-child id="fixed-bind" bind:value="box.value"></x-list-child></section></template><x-structured-parent></x-structured-parent>`);
+          <section><x-structured-child id="from" from:value="$box.value"></x-structured-child><x-structured-child id="bind" bind:value="box.value"></x-structured-child><x-list-child id="fixed-from" from:value="$box.value"></x-list-child><x-list-child id="fixed-bind" bind:value="box.value"></x-list-child></section></template><x-structured-parent></x-structured-parent>`);
         await page.addScriptTag({ path: bundlePath });
         const actual = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1344,7 +1344,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             : `<type name="input-value" from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop>`;
           await page.setContent(`<template component="x-dependent"><defs>
             <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
-            ${definition}</defs><input from:type="type" from:value="value"></template>
+            ${definition}</defs><input from:type="$type" from:value="$value"></template>
             <x-dependent id="numeric" value="2.5" type="number"></x-dependent>
             <x-dependent id="text" value="2.5"></x-dependent>
             <x-dependent id="empty"></x-dependent>`);
@@ -1383,7 +1383,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(`<template component="x-choices"><defs>
           <prop name="size" type="keyword" values="sm, two words">Size.</prop>
           <prop name="count" type="number" min="oops">Count.</prop>
-        </defs><output from:data-size="size" from:data-count="count"></output></template><x-choices id="choice" size="lg" count="3"></x-choices>`);
+        </defs><output from:data-size="$size" from:data-count="$count"></output></template><x-choices id="choice" size="lg" count="3"></x-choices>`);
         await page.addScriptTag({ path: bundlePath });
         const size = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1447,7 +1447,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-email"><defs>
           <prop name="address" type="email">Email address.</prop>
-        </defs><output from:data-address="address"></output></template><x-email id="valid" address="a@b"></x-email>`);
+        </defs><output from:data-address="$address"></output></template><x-email id="valid" address="a@b"></x-email>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           const native = document.createElement("input");
@@ -1483,7 +1483,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-current"><defs>
           <prop name="current" type="integer" values="1, 2, 3">Current location.</prop>
-        </defs><div from:data-current="current"></div></template><x-current id="current" current="2"></x-current>`);
+        </defs><div from:data-current="$current"></div></template><x-current id="current" current="2"></x-current>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1514,7 +1514,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-sku"><defs>
           <prop name="sku" type="string" pattern="[A-Z]{3}-[0-9]{4}">Stock code.</prop>
-        </defs><div from:data-sku="sku"></div></template><x-sku id="valid" sku="ABC-1234"></x-sku>`);
+        </defs><div from:data-sku="$sku"></div></template><x-sku id="valid" sku="ABC-1234"></x-sku>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(async () => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1539,7 +1539,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       try {
         const definition = parseComponent(`<template component="x-null-choice" status="early" summary="Null root.">
           <defs><prop name="choice" type="keyword" values="on, off" default="on">Choice.</prop></defs>
-          <template $match><article $when="choice = null"><output $value="choice"></output></article><section $else><output $value="choice"></output></section></template>
+          <template $match><article $when="$choice = null"><output $value="$choice"></output></article><section $else><output $value="$choice"></output></section></template>
         </template>`, "null-choice.html");
         const page = await browser.newPage();
         await page.setContent(`<article id="null"></article><section id="default"></section>`);
@@ -1570,7 +1570,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-null-prop"><defs>
           <prop name="value" type="number">Optional count.</prop>
-        </defs><output from:data-value="value"></output></template><x-null-prop id="missing"></x-null-prop>`);
+        </defs><output from:data-value="$value"></output></template><x-null-prop id="missing"></x-null-prop>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
           const runtime = (window as unknown as { HtmlRuntime: {
@@ -1620,9 +1620,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button type="button" on:click="add">Add</button><ul>
-          <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index">
-          <li class="fallback" $value="row.name"></li></slot></ul></section></template>
-          <x-scoped-list id="filled"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-list>
+          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index">
+          <li class="fallback" $value="$row.name"></li></slot></ul></section></template>
+          <x-scoped-list id="filled"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-list>
           <x-scoped-list id="empty"></x-scoped-list>`);
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
@@ -1649,8 +1649,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
-          <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"></slot>
-          </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-hydrate></main>`);
+          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"></slot>
+          </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="$item.name"></b><em $value="$index"></em></li></template></x-scoped-hydrate></main>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
           const R = window.HtmlRuntime;
@@ -1698,11 +1698,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
           </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
-          <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>
+          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
-          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          <template slot="row"><li><b $value="$item.name"></b><i $value="$heading"></i></li></template>
           </x-scoped-rows></main></template><x-scoped-consumer id="parent"></x-scoped-consumer>`);
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
@@ -1726,11 +1726,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
           <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
           </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
-          <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>
+          <slot $each="row of $rows" $key="$row.id" name="row" from:item="$row"></slot></ul></section></template>
           <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
           <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
           <main><button class="rename" type="button" on:click="rename">Rename</button><x-hydrated-rows>
-          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          <template slot="row"><li><b $value="$item.name"></b><i $value="$heading"></i></li></template>
           </x-hydrated-rows></main></template><div><x-hydrated-consumer id="source"></x-hydrated-consumer></div>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -1880,7 +1880,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="icon-close" status="early" summary="SVG namespace fixture.">' +
           '<button type="button"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">' +
-          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="\'userSpaceOnUse\'"></linearGradient>' +
+          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="\'$userSpaceOnUse\'"></linearGradient>' +
           '<foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button></template>' +
           '<main><icon-close></icon-close></main>',
         );
@@ -1922,12 +1922,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="x-chip" status="early" summary="Chip.">' +
           '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
-          '<span class="chip" $value="label"></span></template>' +
+          '<span class="chip" $value="$label"></span></template>' +
           '<template component="x-row" status="early" summary="Row.">' +
           '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
-          '<li class="row"><x-chip from:label="tone"></x-chip><slot></slot></li></template>' +
+          '<li class="row"><x-chip from:label="$tone"></x-chip><slot></slot></li></template>' +
           '<template component="x-bar" status="early" summary="Bar.">' +
-          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'t\', index)">' +
+          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'$t\', $index)">' +
           '<b>projected</b></x-row></ul></main></template>' +
           '<x-bar></x-bar>',
         );
@@ -1961,12 +1961,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-steps"><defs>` +
           `<state type="number" name="current" value="1"></state>` +
-          `<handler name="next"><set name="current" expr:value="current + 1"></set></handler>` +
+          `<handler name="next"><set name="current" expr:value="$current + 1"></set></handler>` +
           `</defs><section><button type="button" on:click="next">Next</button><ol><slot></slot></ol></section></template>` +
           `<template component="x-step"><defs>` +
           `<prop name="index" type="number" required>Step index.</prop>` +
           `<context name="current" from="x-steps" as="activeStep"></context>` +
-          `</defs><li from:aria-current="activeStep = index ? 'step' : null"><slot></slot></li></template>` +
+          `</defs><li from:aria-current="$activeStep = $index ? 'step' : null"><slot></slot></li></template>` +
           `<x-steps><x-step index="1">Account</x-step><x-step index="2">Payment</x-step></x-steps>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -1991,7 +1991,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-reader"><defs>` +
           `<context name="current" from="x-steps"></context></defs>` +
-          `<span $value="current"></span></template><x-reader></x-reader>`);
+          `<span $value="$current"></span></template><x-reader></x-reader>`);
         await page.addScriptTag({ path: bundlePath });
         const message = await page.evaluate(() => {
           try {
@@ -2041,7 +2041,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<template component="x-note" status="early" summary="Note.">' +
           '<defs><state name="note"></state></defs>' +
           '<form><input name="note" bind:value="note" minlength="3" maxlength="6">' +
-          '<output class="echo" $value="note"></output></form></template>' +
+          '<output class="echo" $value="$note"></output></form></template>' +
           '<x-note></x-note>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2085,8 +2085,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<button type="button" class="pick" on:click="choose">pick</button></template>' +
           '<template component="x-collect" status="early" summary="Collector.">' +
           '<defs><state type="number" name="taken" value="0"></state>' +
-          '<handler name="count"><set name="taken" expr:value="taken + 1"></set></handler></defs>' +
-          '<main><x-emit on:picked="count"></x-emit><i class="taken" $value="taken"></i></main>' +
+          '<handler name="count"><set name="taken" expr:value="$taken + 1"></set></handler></defs>' +
+          '<main><x-emit on:picked="count"></x-emit><i class="taken" $value="$taken"></i></main>' +
           '</template><x-collect></x-collect>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2118,17 +2118,17 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="x-frame" status="early" summary="Frame.">' +
           '<defs><prop name="heading" type="string" default="none">Heading.</prop></defs>' +
-          '<section class="frame"><h2 class="heading" $value="heading"></h2>' +
+          '<section class="frame"><h2 class="heading" $value="$heading"></h2>' +
           '<slot name="body"></slot></section></template>' +
           '<template component="x-outer" status="early" summary="Outer.">' +
           '<defs><prop name="label" type="string" default="none">Label.</prop>' +
           '<state type="number" name="count" value="1"></state>' +
           '<data name="feed" src="https://api.example/feed" type="object({ label: string })"></data>' +
-          '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
-          '<x-frame from:heading="concat(\'count \', count)">' +
+          '<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler></defs>' +
+          '<x-frame from:heading="concat(\'$count \', $count)">' +
           '<span slot="body"><button type="button" class="bump" on:click="bump"></button>' +
-          '<i class="own" $value="count"></i>' +
-          '<output class="feed" $value="feed.value.label"></output></span></x-frame></template>' +
+          '<i class="own" $value="$count"></i>' +
+          '<output class="feed" $value="$feed.value.label"></output></span></x-frame></template>' +
           '<x-outer label="reflected"></x-outer>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2219,7 +2219,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           "<defs><state name=\"items\" type=\"list(string)\" value=\"['a', 'b', 'c']\"></state>" +
           "<handler name=\"drop\"><set name=\"items\" value=\"['a', 'c']\"></set></handler></defs>" +
           '<div class="panel" $ref="panel">' +
-          '<ul><li $each="n of items" $key="n" $ref="rows" $value="n"></li></ul>' +
+          '<ul><li $each="n of $items" $key="$n" $ref="rows" $value="$n"></li></ul>' +
           '<button type="button" class="drop" on:click="drop"></button>' +
           "</div></template>" +
           "<x-rows></x-rows>",
@@ -2261,12 +2261,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="x-child" status="early" summary="Child.">' +
           '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
-          '<p class="child" $value="label"></p></template>' +
+          '<p class="child" $value="$label"></p></template>' +
           '<template component="x-parent" status="early" summary="Parent.">' +
           '<defs><state type="number" name="count" value="1"></state>' +
-          '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
+          '<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler></defs>' +
           '<main><button type="button" class="bump" on:click="bump"></button>' +
-          '<x-child from:label="concat(\'count \', count)"></x-child></main></template>' +
+          '<x-child from:label="concat(\'$count \', $count)"></x-child></main></template>' +
           '<x-parent></x-parent>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2304,15 +2304,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<template component="rf-adj" status="early" summary="Rendered form fixture."><p>Hello <slot></slot>!</p></template>' +
           '<template component="rf-if" status="early" summary="Rendered form fixture.">' +
           '<defs><prop name="open" type="boolean" default="false">Open.</prop></defs>' +
-          '<div><section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
+          '<div><section $if="$open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-toggle" status="early" summary="Rendered form fixture."><defs>' +
           '<state type="boolean" name="open" value="false"></state>' +
-          '<handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>' +
+          '<handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>' +
           '<div><button type="button" on:click="toggle">More</button>' +
-          '<section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
+          '<section $if="$open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-list" status="early" summary="Rendered form fixture.">' +
           '<defs><prop name="rows" type="list(string)" default="[]">Rows.</prop></defs>' +
-          `<ul><li $each="row of rows" $key="row"><slot from:name="concat('row-', row)">Unnamed</slot></li></ul></template>` +
+          `<ul><li $each="row of $rows" $key="$row"><slot from:name="concat('row-', $row)">Unnamed</slot></li></ul></template>` +
           '<template component="rf-wrap" status="early" summary="Rendered form fixture.">' +
           '<section><rf-card><span slot="title"><slot name="heading"></slot></span><slot></slot></rf-card></section></template>',
         );
@@ -2666,7 +2666,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<template component="demo-cell" status="early" summary="Row content fixture."><b><slot></slot></b></template>' +
           '<template component="demo-rows" status="early" summary="Row list fixture."><defs>' +
           '<state name="rows" type="list(number)" value="[1]"></state></defs>' +
-          '<ul><li $each="row of rows" $key="row" from:data-id="row"><span $value="row"></span></li></ul></template>' +
+          '<ul><li $each="row of $rows" $key="$row" from:data-id="$row"><span $value="$row"></span></li></ul></template>' +
           '<demo-rows id="rows"></demo-rows>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2780,7 +2780,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        await page.setContent('<template component="demo-content" status="early" summary="Content."><defs><prop name="body" type="string">Content.</prop></defs><article $html="body"></article></template><template component="demo-safe" status="early" summary="Safe."><button></button></template>');
+        await page.setContent('<template component="demo-content" status="early" summary="Content."><defs><prop name="body" type="string">Content.</prop></defs><article $html="$body"></article></template><template component="demo-safe" status="early" summary="Safe."><button></button></template>');
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
           const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -2829,7 +2829,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const definitionMarkup =
           `<template component="demo-transactional-button" id="definition" status="early" summary="Transactional test component.">` +
           `<defs><prop name="label" type="string" required>Button label.</prop></defs>` +
-          `<button from:data-label="label"><slot></slot></button>` +
+          `<button from:data-label="$label"><slot></slot></button>` +
           `<style id="definition-style">button { color: red; }</style></template>`;
         await page.setContent(`${definitionMarkup}<main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
         await page.addScriptTag({ path: bundlePath });
@@ -2889,7 +2889,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const iframeMarkup =
           `<template component="demo-unsafe-frame" status="early" summary="Unsafe test component.">` +
           `<defs><prop name="markup" type="string">Embedded markup.</prop></defs>` +
-          `<iframe from:srcdoc="markup"></iframe></template>`;
+          `<iframe from:srcdoc="$markup"></iframe></template>`;
 
         assert.equal(await diagnostic(buttonMarkup), "HT010");
         assert.equal(await diagnostic(iframeMarkup), "HT007");
@@ -2906,7 +2906,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-note" status="early" summary="Note.">` +
             `<defs><prop name="body" type="string">Body markup.</prop>` +
             `<prop name="label" type="string" default="Note">Label.</prop></defs>` +
-            `<article><h3 $value="label"></h3><div class="body" $html="body"></div></article>` +
+            `<article><h3 $value="$label"></h3><div class="body" $html="$body"></div></article>` +
             `</template>` +
             `<x-note id="n" label="Hi" body="<b class='unsafe-class' id='unsafe-id' title='safe'>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3' target='_blank'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
         );
@@ -2949,7 +2949,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-inline-html" status="early" summary="Inline HTML.">` +
             `<defs><state name="body" type="string" value="<b>One</b>"></state>` +
             `<handler name="update"><set name="body" expr:value="'<i>Two</i>'"></set></handler></defs>` +
-            `<p>Before <template $html="body"></template> after <button on:click="update">Update</button></p>` +
+            `<p>Before <template $html="$body"></template> after <button on:click="update">Update</button></p>` +
             `</template><x-inline-html id="inline"></x-inline-html>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2977,7 +2977,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-link" status="early" summary="Link.">` +
             `<defs><prop name="destination" type="string">Destination.</prop></defs>` +
-            `<a from:href="destination"><slot></slot></a></template>` +
+            `<a from:href="$destination"><slot></slot></a></template>` +
             `<x-link id="link" destination="java&#x0A;script:alert(1)">Open</x-link>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3003,13 +3003,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<prop name="show" type="boolean" default="false">Show.</prop>` +
             `</defs>` +
             `<div>` +
-            `<ul class="nums"><li $each="n, i of [10, 20, 30]" $where="n > 10" from:data-i="i" $value="n"></li></ul>` +
-            `<p class="maybe" $if="show">extra</p>` +
-            `<template $match="tier as t">` +
-            `<span class="tier" $when="t = 'pro'">Pro</span>` +
+            `<ul class="nums"><li $each="n, i of [10, 20, 30]" $where="$n > 10" from:data-i="$i" $value="$n"></li></ul>` +
+            `<p class="maybe" $if="$show">extra</p>` +
+            `<template $match="$tier as t">` +
+            `<span class="tier" $when="$t = 'pro'">Pro</span>` +
             `<span class="tier" $else>Free</span>` +
             `</template>` +
-            `<template $with="{ name: 'Ada' } as u"><b class="who" $value="u.name"></b></template>` +
+            `<template $with="{ name: 'Ada' } as u"><b class="who" $value="$u.name"></b></template>` +
             `</div></template>` +
             `<x-demo id="d" tier="pro"></x-demo>`,
         );
@@ -3044,7 +3044,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-boolean" status="early" summary="Boolean attributes.">` +
             `<defs><prop name="enabled" type="boolean" default="true">Enabled.</prop></defs>` +
-            `<output from:data-enabled="enabled"></output></template>` +
+            `<output from:data-enabled="$enabled"></output></template>` +
             `<x-boolean id="bare" enabled></x-boolean>` +
             `<x-boolean id="explicit-true" enabled="true"></x-boolean>` +
             `<x-boolean id="explicit-false" enabled="false"></x-boolean>` +
@@ -3095,15 +3095,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-counter" status="early" summary="Counter.">` +
             `<defs>` +
             `<state name="count" type="number" value="5"></state>` +
-            `<computed name="doubled" from="count * 2"></computed>` +
+            `<computed name="doubled" from="$count * 2"></computed>` +
             `<data name="feed"></data>` +
-            `<handler name="inc"><set name="count" expr:value="count + 1"></set></handler>` +
+            `<handler name="inc"><set name="count" expr:value="$count + 1"></set></handler>` +
             `<handler name="ready"></handler>` +
             `</defs>` +
-            `<div from:data-count="count" from:data-doubled="doubled">` +
-            `<button on:click="inc" $value="count"></button>` +
+            `<div from:data-count="$count" from:data-doubled="$doubled">` +
+            `<button on:click="inc" $value="$count"></button>` +
             `<output bind:value="count"></output>` +
-            `<i $value="feed.pending"></i>` +
+            `<i $value="$feed.pending"></i>` +
             `<span on:mouseover="ready"></span>` +
             `</div></template>` +
             `<x-counter id="c"></x-counter>`,
@@ -3311,7 +3311,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<input class="radio" type="radio" bind:checked="form.radio">` +
             `<select class="choice" bind:value="form.choice"><option value="a">A</option><option value="b">B</option></select>` +
             `<input class="number" type="number" bind:value="form.count">` +
-            `<output class="result" $value="[form.text, form.checked, form.radio, form.choice, form.count]"></output>` +
+            `<output class="result" $value="[$form.text, $form.checked, $form.radio, $form.choice, $form.count]"></output>` +
             `</form></template><x-form id="f"></x-form>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3355,10 +3355,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<set name="person" expr:value="{ name: 'Grace' }"></set>` +
             `</handler></defs>` +
             `<main><button on:click="change">change</button>` +
-            `<i class="conditional" $if="show">shown</i>` +
-            `<ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul>` +
-            `<div $match="mode as current"><span class="a" $when="current = 'a'">A</span><span class="b" $else>B</span></div>` +
-            `<p $with="person as current" class="person" $value="current.name"></p>` +
+            `<i class="conditional" $if="$show">shown</i>` +
+            `<ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id" $value="$row.label"></li></ul>` +
+            `<div $match="$mode as current"><span class="a" $when="$current = 'a'">A</span><span class="b" $else>B</span></div>` +
+            `<p $with="$person as current" class="person" $value="$current.name"></p>` +
             `</main></template><x-structure id="s"></x-structure>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3429,7 +3429,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-key-order" status="early" summary="Key order.">` +
             `<defs><state type="list(unknown)" name="rows" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state></defs>` +
-            `<ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.id"></li></ul>` +
+            `<ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id" $value="$row.id"></li></ul>` +
             `</template><x-key-order id="keys"></x-key-order>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3494,9 +3494,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-data" status="early" summary="Data.">` +
             `<defs><state type="string" name="query" value="hello"></state>` +
             `<data name="result" src="https://api.example/search" type="object({ label: string })">` +
-            `<param name="q" from:value="query"></param></data></defs>` +
-            `<main><i class="pending" $value="result.pending"></i>` +
-            `<output class="label" $value="result.value.label"></output></main>` +
+            `<param name="q" from:value="$query"></param></data></defs>` +
+            `<main><i class="pending" $value="$result.pending"></i>` +
+            `<output class="label" $value="$result.value.label"></output></main>` +
             `</template><x-data id="data"></x-data>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -3529,14 +3529,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state name="query" type="string" value="first"></state>
           <state name="token" type="string" value="a"></state>
           <data name="result" src="https://api.example/search" type="object({ label: string })">
-            <param name="q" from:value="query"></param>
-            <param name="token" expr:value="token"></param>
+            <param name="q" from:value="$query"></param>
+            <param name="token" expr:value="$token"></param>
           </data>
           <handler name="changeToken"><set name="token" value="b"></set></handler>
           <handler name="changeQuery"><set name="query" value="second"></set></handler>
         </defs><section><button class="token" on:click="changeToken">Token</button>
           <button class="query" on:click="changeQuery">Query</button>
-          <output $value="result.value.label"></output></section></template><x-param-modes id="case"></x-param-modes>`);
+          <output $value="$result.value.label"></output></section></template><x-param-modes id="case"></x-param-modes>`);
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
         await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "first:a");
@@ -3566,12 +3566,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           <state name="width" type="length" value="8.8px"></state>
           <state name="step" type="length" value="1px"></state>
           <data name="result" src="https://api.example/search" type="object({ label: string })">
-            <param name="width" from:value="round(width, step)"></param>
+            <param name="width" from:value="round($width, $step)"></param>
           </data>
           <handler name="bad"><set name="step" value="1rem"></set></handler>
           <handler name="good"><set name="step" value="2px"></set></handler>
         </defs><section><button class="bad" on:click="bad">Bad</button><button class="good" on:click="good">Good</button>
-          <output $value="result.value.label"></output></section></template><x-data-unit id="case"></x-data-unit>`);
+          <output $value="$result.value.label"></output></section></template><x-data-unit id="case"></x-data-unit>`);
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
         await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "9px");
@@ -3649,13 +3649,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<defs><state type="number" name="round" value="1"></state>` +
             `<data name="result" src="https://api.example/search"` +
             ` type="object({ label: string, note: string, ... })">` +
-            `<param name="round" from:value="round"></param></data>` +
-            `<computed name="shouted" from="concat(result.value.label, '!')"></computed>` +
-            `<handler name="again"><set name="round" expr:value="round + 1"></set></handler></defs>` +
-            `<main><output class="label" $value="result.value.label"></output>` +
-            `<output class="note" $value="result.value.note"></output>` +
-            `<output class="shouted" $value="shouted"></output>` +
-            `<i class="ok" $value="result.ok"></i>` +
+            `<param name="round" from:value="$round"></param></data>` +
+            `<computed name="shouted" from="concat($result.value.label, '!')"></computed>` +
+            `<handler name="again"><set name="round" expr:value="$round + 1"></set></handler></defs>` +
+            `<main><output class="label" $value="$result.value.label"></output>` +
+            `<output class="note" $value="$result.value.note"></output>` +
+            `<output class="shouted" $value="$shouted"></output>` +
+            `<i class="ok" $value="$result.ok"></i>` +
             `<button type="button" class="again" on:click="again"></button></main>` +
             `</template><x-typed id="typed"></x-typed>`,
         );
@@ -3701,7 +3701,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `<template component="x-slug" status="early" summary="Slug editor.">` +
             `<defs><state type="string" name="slug" value=""></state></defs>` +
             `<fieldset><input name="slug" required pattern="[a-z-]+" bind:value="slug">` +
-            `<output $value="slug"></output></fieldset></template>` +
+            `<output $value="$slug"></output></fieldset></template>` +
             `<form id="post" action="/posts" method="post"><x-slug></x-slug>` +
             `<button type="submit">Save post</button></form>`,
         );
@@ -3858,13 +3858,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         // A root `$match` chooses the native root, and each arm declares the same slots.
         const panelBody = `<header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
-          `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
-          `<ul><li $each="row of rows" $key="row.id"><slot from:name="concat('row-', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
+          `<output class="label" $value="$label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
+          `<ul><li $each="row of $rows" $key="$row.id"><slot from:name="concat('row-', $row.id)"><span class="row-fallback" $value="$row.id"></span></slot></li></ul>`;
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
             `<defs><state type="list(unknown)" name="rows" value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
             `<prop name="as" type="keyword" values="section, article" default="section">Root.</prop></defs>` +
-            `<template $match><article $when="as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
+            `<template $match><article $when="$as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
           `<x-panel id="empty"></x-panel>`,
@@ -3949,9 +3949,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(`<template component="x-root-choice" status="early" summary="Root choice."><defs>
           <state name="kind" value="a"></state>
-          <handler name="toggle"><set name="kind" expr:value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
-          <section $match="kind as choice" class="choice" from:data-kind="kind" on:click="toggle">
-            <p $when="choice = 'a'">First</p><p $else>Second</p>
+          <handler name="toggle"><set name="kind" expr:value="$kind = 'a' ? 'b' : 'a'"></set></handler></defs>
+          <section $match="$kind as choice" class="choice" from:data-kind="$kind" on:click="toggle">
+            <p $when="$choice = 'a'">First</p><p $else>Second</p>
           </section></template><main><x-root-choice id="case"></x-root-choice></main>`);
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -3990,13 +3990,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         const pageErrors: string[] = [];
         page.on("pageerror", (error) => pageErrors.push(error.message));
-        const body = `<slot></slot><output $value="count"></output>`;
+        const body = `<slot></slot><output $value="$count"></output>`;
         await page.setContent(
           `<template component="x-action" status="early" summary="Button or link.">` +
             `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
-            `<state type="number" name="count" value="0"></state><handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>` +
-            `<template $match><a $when="as = 'a'" class="action" from:href="href" on:click="bump" $ref="control">${body}</a>` +
-            `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
+            `<state type="number" name="count" value="0"></state><handler name="bump"><set name="count" expr:value="$count + 1"></set></handler></defs>` +
+            `<template $match><a $when="$as = 'a'" class="action" from:href="$href" on:click="bump" $ref="control">${body}</a>` +
+            `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="$as" on:click="bump" $ref="control">${body}</button></template>` +
           `</template>` +
           `<x-action id="action" class="consumer" style="color: rgb(255, 0, 0)" href="#next"><b id="label">Go</b></x-action>`,
         );
@@ -4074,8 +4074,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
         await page.setContent(
           `<template component="x-disclosure" status="early" summary="Disclosure.">` +
-            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>` +
-            `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
+            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>` +
+            `<template $match><section $when="$open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<x-disclosure id="disclosure"><p id="body">Body</p></x-disclosure>`,
         );
@@ -4114,13 +4114,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-choice" status="early" summary="Button or link.">` +
             `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop></defs>` +
-            `<template $match><a $when="as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
+            `<template $match><a $when="$as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
           `</template>` +
           `<template component="x-host" status="early" summary="Parent.">` +
             `<defs><state type="boolean" name="linked" value="false"></state><state type="number" name="clicks" value="0"></state>` +
-            `<handler name="flip"><set name="clicks" expr:value="clicks + 1"></set><set name="linked" expr:value="not linked"></set></handler></defs>` +
-            `<section><x-choice id="choice" type="submit" from:as="{ true: 'a', false: 'button' }[concat(linked)]" on:click="flip">Go</x-choice>` +
-            `<output $value="clicks"></output></section>` +
+            `<handler name="flip"><set name="clicks" expr:value="$clicks + 1"></set><set name="linked" expr:value="not $linked"></set></handler></defs>` +
+            `<section><x-choice id="choice" type="submit" from:as="{ true: 'a', false: 'button' }[concat($linked)]" on:click="flip">Go</x-choice>` +
+            `<output $value="$clicks"></output></section>` +
           `</template>` +
           `<x-host></x-host>`,
         );
@@ -4160,12 +4160,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        const arm = `<i $if="show" $value="n"></i>`;
+        const arm = `<i $if="$show" $value="$n"></i>`;
         await page.setContent(
           `<template component="x-owned" status="early" summary="Ownership.">` +
             `<defs><state type="boolean" name="linked" value="false"></state><state type="boolean" name="show" value="true"></state>` +
             `<state type="number" name="n" value="0"></state></defs>` +
-            `<template $match><a $when="linked" href="#x">${arm}</a><div $else>${arm}</div></template>` +
+            `<template $match><a $when="$linked" href="#x">${arm}</a><div $else>${arm}</div></template>` +
           `</template>` +
           `<main><x-owned id="owned"></x-owned></main>`,
         );
@@ -4207,12 +4207,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
         await page.setContent(
           `<template component="x-fold" status="early" summary="Polymorphic.">` +
-            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>` +
-            `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
+            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>` +
+            `<template $match><section $when="$open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<template component="x-card" status="early" summary="Delegates.">` +
             `<defs><prop name="tone" type="keyword" values="warm, cool" default="warm">Tone.</prop></defs>` +
-            `<x-fold><output $value="tone"></output></x-fold>` +
+            `<x-fold><output $value="$tone"></output></x-fold>` +
           `</template>` +
           `<x-card id="card" tone="warm"></x-card>`,
         );
@@ -4260,7 +4260,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           `</template>` +
           `<template component="x-out" status="early" summary="Binds the delegating invocation.">` +
             `<defs><state name="prevented" type="boolean" value="false"></state><handler name="read"><set name="prevented" expr:value="$$event.defaultPrevented"></set></handler></defs>` +
-            `<section><x-mid from:title="'outer'" on:click="read">Go</x-mid><output $value="prevented"></output></section>` +
+            `<section><x-mid from:title="'outer'" on:click="read">Go</x-mid><output $value="$prevented"></output></section>` +
           `</template>` +
           `<x-out id="out"></x-out>`,
         );
@@ -4291,8 +4291,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.setContent(
           `<template component="x-p" status="early" summary="Renders a later component.">` +
-            `<defs><state name="n" type="number" value="1"></state><handler name="inc"><set name="n" expr:value="n + 1"></set></handler></defs>` +
-            `<main><x-k $ref="k" from:title="n" on:click="inc"></x-k><output $value="n"></output></main>` +
+            `<defs><state name="n" type="number" value="1"></state><handler name="inc"><set name="n" expr:value="$n + 1"></set></handler></defs>` +
+            `<main><x-k $ref="k" from:title="$n" on:click="inc"></x-k><output $value="$n"></output></main>` +
           `</template>` +
           `<x-p id="p"></x-p>`,
         );
@@ -4333,7 +4333,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-tags" status="early" summary="Structured props.">` +
             `<defs><prop name="tags" type="list(string)" default='["none"]'>Tags.</prop></defs>` +
-            `<ul><li $each="tag of tags" $key="tag" $value="tag"></li></ul></template>` +
+            `<ul><li $each="tag of $tags" $key="$tag" $value="$tag"></li></ul></template>` +
           `<x-tags id="authored" tags='["design","docs"]'></x-tags><x-tags id="default"></x-tags>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -4379,7 +4379,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-camel" status="early" summary="Camel-case props.">` +
             `<defs><prop name="defaultValue" type="string" default="fallback">Default value.</prop></defs>` +
-            `<output from:data-default="defaultValue"></output></template>` +
+            `<output from:data-default="$defaultValue"></output></template>` +
           `<x-camel id="camel" default-value="authored"></x-camel>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -4437,7 +4437,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-openable" status="early" summary="Openable.">` +
             `<defs><prop name="open" type="boolean">Open state.</prop><event name="open" type="boolean"></event></defs>` +
-            `<section from:data-open="open"></section></template><x-openable id="openable" open></x-openable>`,
+            `<section from:data-open="$open"></section></template><x-openable id="openable" open></x-openable>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {
@@ -4458,7 +4458,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-hydrated" status="early" summary="Hydration.">` +
             `<defs><prop name="label" type="string" default="Default">Label.</prop></defs>` +
-            `<article><h2 $value="label"></h2><input .value="label"><slot></slot></article></template>` +
+            `<article><h2 $value="$label"></h2><input .value="$label"><slot></slot></article></template>` +
           `<article id="server" data-component="x-hydrated" data-label="Server">` +
             `<h3>stale</h3>` +
             `<input value="server"><?start slot=""?><em id="projected" data-slotted>Projected</em><?end?>` +

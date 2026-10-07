@@ -310,17 +310,16 @@ function collectTargetsAtSource(
   };
   const visit = (element: Element): void => {
     for (const attribute of sourceAttributes(element)) {
+      // A target is a direct `$prop` reference.
+      const name = attribute.value.slice(1);
+      if (!attribute.value.startsWith("$") || !isIdentifier(name)) continue;
       if (attribute.name.startsWith("from:")) {
-        if (isIdentifier(attribute.value)) {
-          record(attribute.value, { attribute: attribute.name.slice("from:".length).toLowerCase() });
-        }
+        record(name, { attribute: attribute.name.slice("from:".length).toLowerCase() });
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
-        if (isIdentifier(attribute.value)) {
-          const property = platform.resolveDomProperty(sourceTag(element), key) ??
-            (attribute.value.toLowerCase() === key ? attribute.value : key);
-          record(attribute.value, { property });
-        }
+        const property = platform.resolveDomProperty(sourceTag(element), key) ??
+          (name.toLowerCase() === key ? name : key);
+        record(name, { property });
       }
     }
     for (const child of sourceChildren(element)) {
@@ -1003,7 +1002,8 @@ function parseAttributes(
       parsed.push({
         kind: "attribute",
         name,
-        expression: attribute.value,
+        // The path's read side, spelled as the expression `$path` for every consumer.
+        expression: expressionPlan.source,
         expressionPlan,
         twoWay: true,
         writablePath,

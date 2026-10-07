@@ -24,22 +24,22 @@ const source = `<template component="x-property" status="early" summary="Native 
   <state type="number" name="hits" value="0"></state>
   <state type="list(unknown)" name="items" value="[{ id: 'a', locked: true, label: 'A' }, { id: 'b', locked: false, label: 'B' }]"></state>
   <state type="object({ label: string })" name="firstItem" value="{ label: 'A' }"></state>
-  <handler name="rerender"><set name="pulse" expr:value="pulse + 1"></set></handler>
-  <handler name="record"><set name="hits" expr:value="hits + 1"></set></handler>
+  <handler name="rerender"><set name="pulse" expr:value="$pulse + 1"></set></handler>
+  <handler name="record"><set name="hits" expr:value="$hits + 1"></set></handler>
   <handler name="advance"><set name="locked" expr:value="false"></set>
     <set name="destination" expr:value="'https://example.test/b'"></set>
     <set name="position" expr:value="30"></set><set name="message" expr:value="'After'"></set>
     <set name="items" expr:value="[{ id: 'a', locked: false, label: 'AA' }, { id: 'b', locked: true, label: 'BB' }]"></set>
     <set name="firstItem" expr:value="{ label: 'AA' }"></set></handler>
-</defs><section><button class="submit" type="submit" .disabled="locked" .formAction="destination">Go</button>
-  <div class="scroll" .scrollTop="position"><p>One</p><p>Two</p><p>Three</p></div>
-  <span class="message" .textContent="message"></span>
-  <div class="row" $each="item of items" $key="item.id"><button class="row-button" type="button" .disabled="item.locked" on:click.once="record" $value="item.label"></button>
-    <input class="row-input" .value="item.label"></div>
-  <span class="alias" $with="firstItem as first" .title="first.label" $value="first.label"></span>
-  <template $match="firstItem as match"><span class="matched" $when="match.label = 'A'" .title="match.label" $value="match.label"></span>
-    <span class="matched" $else .title="match.label" $value="match.label"></span></template>
-  <button class="pulse" type="button" on:click="rerender">Pulse</button><output class="pulse-value" $value="pulse"></output><output class="hits" $value="hits"></output>
+</defs><section><button class="submit" type="submit" .disabled="$locked" .formAction="$destination">Go</button>
+  <div class="scroll" .scrollTop="$position"><p>One</p><p>Two</p><p>Three</p></div>
+  <span class="message" .textContent="$message"></span>
+  <div class="row" $each="item of $items" $key="$item.id"><button class="row-button" type="button" .disabled="$item.locked" on:click.once="record" $value="$item.label"></button>
+    <input class="row-input" .value="$item.label"></div>
+  <span class="alias" $with="$firstItem as first" .title="$first.label" $value="$first.label"></span>
+  <template $match="$firstItem as match"><span class="matched" $when="$match.label = 'A'" .title="$match.label" $value="$match.label"></span>
+    <span class="matched" $else .title="$match.label" $value="$match.label"></span></template>
+  <button class="pulse" type="button" on:click="rerender">Pulse</button><output class="pulse-value" $value="$pulse"></output><output class="hits" $value="$hits"></output>
   <button class="advance" type="button" on:click="advance">Advance</button></section>
 <style>:host { display: block; width: 180px; font: 16px/24px Arial, sans-serif; }
   .scroll { height: 24px; overflow: auto; } .scroll p { margin: 0; height: 24px; }</style></template>`;

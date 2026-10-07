@@ -19,7 +19,7 @@ const source = `<template component="x-controls" status="early" summary="Bound n
 </defs><section><input class="text" type="text" bind:value="draft">
   <input class="check" type="checkbox" bind:checked="done">
   <select class="choice" bind:value="choice"><option value="a">A</option><option value="b">B</option></select>
-  <output $value="concat(draft, done ? ' yes ' : ' no ', choice)"></output></section>
+  <output $value="concat($draft, $done ? ' yes ' : ' no ', $choice)"></output></section>
 <style>:host { display: block; width: 200px; padding: 8px; border: 1px solid #444; }</style></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, unknown>; readonly pixels: Buffer }> {

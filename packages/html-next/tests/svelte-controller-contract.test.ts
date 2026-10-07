@@ -56,7 +56,7 @@ describe("Svelte controller event contract", () => {
 
   it("lowers native event fields in guards and payload subsets", () => {
     const subset = source.replace('name="activate" type="event"', 'name="activate" type="number"')
-      .replace('expr:value="$$event"', () => 'expr:value="$$event.detail" $if="$$event.type = \'click\'"');
+      .replace('expr:value="$$event"', () => 'expr:value="$$event.detail" $if="$$event.type = \'$click\'"');
     const output = generateSvelteOutput(parseComponent(subset));
     assert.match(output.component, /event[^\n]*\.type/);
     assert.match(output.component, /event[^\n]*\.detail/);

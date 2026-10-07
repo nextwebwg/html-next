@@ -37,7 +37,7 @@ async function fixture(): Promise<string> {
   await writeFile(join(root, "package.json"), "{}");
   await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
     <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-    <article from:aria-label="label"><slot></slot></article>
+    <article from:aria-label="$label"><slot></slot></article>
     <style>:host { display: block; }</style>
   </template>`);
   return root;
@@ -90,7 +90,7 @@ describe("framework converter", () => {
       <template component="x-app" status="early" summary="App."><main><x-card label="Hello"></x-card></main></template>`);
     await writeFile(join(root, "components", "nested", "card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="label" type="string">Label.</prop></props>
-      <article class="card" style="border-radius: 2px" class:ready="true" style:color="'red'" from:aria-label="label"><slot></slot></article>
+      <article class="card" style="border-radius: 2px" class:ready="true" style:color="'red'" from:aria-label="$label"><slot></slot></article>
       <style>:host { color: red; } :host([label="Hello"]) { font-weight: bold; }</style>
     </template>`);
     await writeFile(join(root, "components", "nested", "orphan.html"),
@@ -149,8 +149,8 @@ describe("framework converter", () => {
     await writeFile(join(root, "card.html"), `<template component="x-card" status="early" summary="Strict TSX."><defs>
       <prop name="count" type="integer" default="1">Count.</prop>
       <prop name="choice" type="string">Choice.</prop>
-    </defs><div tabindex="-1" style:--_count="count" from:role="{ true: 'note', false: null }[choice]">
-      <template $value="concat('+', count)"></template>
+    </defs><div tabindex="-1" style:--_count="$count" from:role="{ true: 'note', false: null }[$choice]">
+      <template $value="concat('+', $count)"></template>
     </div></template>`);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./card.html">
       <template component="x-app" status="early" summary="App."><main><x-card style="--ui-color: red"></x-card></main></template>`);
@@ -190,7 +190,7 @@ describe("framework converter", () => {
     temporary.push(root);
     await writeFile(join(root, "reader.html"), `<template component="x-reader" status="early" summary="Context reader."><defs>
       <context name="current" from="x-provider"></context>
-    </defs><span $value="current"></span></template>`);
+    </defs><span $value="$current"></span></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["reader.html"] });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/context.ts"));
@@ -213,7 +213,7 @@ describe("framework converter", () => {
     </defs><section><slot></slot></section></template>`);
     await writeFile(join(root, "reader", "reader.html"), `<template component="x-reader" status="early" summary="Reader."><defs>
       <context name="current" from="x-provider"></context>
-    </defs><span $value="current"></span></template>`);
+    </defs><span $value="$current"></span></template>`);
     await convertComponents({ mode: "library", target: "react", root: join(root, "provider"),
       outDirectory: join(root, "provider-out"), entries: ["provider.html"] });
     await convertComponents({ mode: "library", target: "react", root: join(root, "reader"),
@@ -237,10 +237,10 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     temporary.push(root);
     await writeFile(join(root, "button.html"), `<template component="x-action" status="early" summary="Native properties."><defs>
       <state type="boolean" name="locked" value="true"></state><state name="destination" value="/next"></state>
-      </defs><button .disabled="locked" .formAction="destination">Go</button></template>`);
+      </defs><button .disabled="$locked" .formAction="$destination">Go</button></template>`);
     await writeFile(join(root, "text.html"), `<template component="x-text" status="early" summary="Text property."><defs>
       <state name="message" value="Hello"></state>
-      </defs><span .textContent="message"></span></template>`);
+      </defs><span .textContent="$message"></span></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
     const files = manifest.output.artifacts.filter((artifact) => /\.tsx?$/.test(artifact.path))
@@ -262,8 +262,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "field.html"), '<template component="x-field" status="early" summary="Focusable field."><input required aria-label="Name"></template>');
     await writeFile(join(root, "form.html"), `<link rel="component" href="./field.html"><template component="x-ref-actions" status="early" summary="Ref actions."><defs>
       <state type="number" name="count" value="0"></state>
-      <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
-    </defs><section><form $ref="form"><x-field $ref="field"></x-field></form><button type="button" on:click="submit">Submit</button><output $value="count"></output></section></template>`);
+      <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="$count + 1"></set></handler>
+    </defs><section><form $ref="form"><x-field $ref="field"></x-field></form><button type="button" on:click="submit">Submit</button><output $value="$count"></output></section></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["*.html"] });
     const component = await readFile(join(outDirectory, manifest.components.find((entry) => entry.tag === "x-ref-actions")!.artifact), "utf8");
@@ -291,13 +291,13 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "rows.html"), `<template component="x-nested-set" status="early" summary="Nested handler paths."><defs>
       <state type="object({ rows: list(object({ name: string })), selected: number })" name="form" value="{ rows: [{ name: 'Ada' }, { name: 'Bea' }], selected: 1 }"></state>
       <state type="number" name="missingIndex" value="9"></state>
-      <handler name="rename"><set name="form.rows[form.selected].name" value="Ann"></set>
-        <set name="form.selected" expr:value="form.selected - 1"></set>
-        <set name="form.rows[form.selected].name" value="Zoe"></set></handler>
-      <handler name="missing"><set name="form.rows[missingIndex].name" value="Ignored"></set></handler>
+      <handler name="rename"><set name="form.rows[$form.selected].name" value="Ann"></set>
+        <set name="form.selected" expr:value="$form.selected - 1"></set>
+        <set name="form.rows[$form.selected].name" value="Zoe"></set></handler>
+      <handler name="missing"><set name="form.rows[$missingIndex].name" value="Ignored"></set></handler>
     </defs><section><button type="button" on:click="rename">Rename</button><button type="button" on:click="missing">Missing</button>
-      <output $value="form.rows.0.name"></output><output $value="form.rows.1.name"></output>
-      <output $value="form.selected"></output></section></template>`);
+      <output $value="$form.rows.0.name"></output><output $value="$form.rows.1.name"></output>
+      <output $value="$form.selected"></output></section></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["rows.html"] });
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -322,12 +322,12 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await mkdir(join(root, "components"));
     await writeFile(join(root, "components", "feed.html"), `<template component="x-feed" status="early" summary="Declared data."><defs>
       <state type="number" name="page" value="1"></state>
-      <computed name="requestPage" from="page + 1"></computed>
+      <computed name="requestPage" from="$page + 1"></computed>
       <data name="result" src="./api/feed" type="object({ label: string })" debounce="500ms" poll="1500ms">
-        <param name="page" from:value="requestPage"></param>
+        <param name="page" from:value="$requestPage"></param>
       </data>
-    </defs><section><output class="value" $value="result.value.label"></output>
-      <output class="pending" $value="result.pending"></output><output class="ok" $value="result.ok"></output></section></template>`);
+    </defs><section><output class="value" $value="$result.value.label"></output>
+      <output class="pending" $value="$result.pending"></output><output class="ok" $value="$result.ok"></output></section></template>`);
     const outDirectory = join(root, "out");
     await assert.rejects(
       () => convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["components/**"] }),
@@ -376,7 +376,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Dynamic control path."><defs>
       <state type="list(unknown)" name="rows" value="[{ name: 'Ada' }, { name: 'Bea' }]"></state>
       <state type="number" name="selected" value="1"></state>
-    </defs><section><input bind:value="rows[selected].name"><output $value="rows[selected].name"></output></section></template>`);
+    </defs><section><input bind:value="rows[$selected].name"><output $value="$rows[$selected].name"></output></section></template>`);
     const outDirectory = join(root, "react-dynamic-control");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -399,11 +399,11 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     temporary.push(root);
     await writeFile(join(root, "controls.html"), `<template component="x-controls" status="early" summary="Read-only control properties."><defs>
       <state type="object" name="form" value="{ text: 'Ada', ready: false, choice: 'b', note: 'Memo' }"></state>
-      </defs><form><input class="text" value="Seed" .value="form.text">
-      <input class="check" type="checkbox" checked .checked="form.ready">
-      <select class="choice" .value="form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
-      <select class="multiple" multiple .value="form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
-      <textarea class="note" .value="form.note">Draft</textarea></form></template>`);
+      </defs><form><input class="text" value="Seed" .value="$form.text">
+      <input class="check" type="checkbox" checked .checked="$form.ready">
+      <select class="choice" .value="$form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
+      <select class="multiple" multiple .value="$form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
+      <textarea class="note" .value="$form.note">Draft</textarea></form></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["controls.html"] });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/control.ts" && artifact.kind === "helper"));
@@ -479,7 +479,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
   it("server-renders React structural templates and sorted loops without wrapper elements", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
-      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="i" from:data-last="loop.last" $value="n"></li></template></ul>
+      <ul><template $if="true"><li $each="n, i of [3, 1, 2]" $sort="n" from:data-i="$i" from:data-last="$loop.last" $value="$n"></li></template></ul>
     </template>`);
     const outDirectory = join(root, "out-react-structure");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -498,7 +498,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="status" type="keyword" values="ok, bad" default="ok">Status.</prop></props>
-      <table from:data-status="status"><tbody><template $match="status as s"><tr $when="s = 'ok'"><td>OK</td></tr><tr $else><td>No</td></tr></template></tbody></table>
+      <table from:data-status="$status"><tbody><template $match="$status as s"><tr $when="$s = 'ok'"><td>OK</td></tr><tr $else><td>No</td></tr></template></tbody></table>
     </template>`);
     const outDirectory = join(root, "out-react-match");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -517,7 +517,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
       <props><prop name="count" type="number" required>Count.</prop><prop name="active" type="boolean" default="false">Active.</prop></props>
-      <output from:data-count="count" from:data-active="active" $value="count"></output>
+      <output from:data-count="$count" from:data-active="$active" $value="$count"></output>
     </template>`);
     const outDirectory = join(root, "out-react-props");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -542,10 +542,10 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card."><defs>
       <state type="number" name="count" value="0"></state>
-      <computed name="double" from="count * 2"></computed>
+      <computed name="double" from="$count * 2"></computed>
       <event name="changed" type="number"></event>
-      <handler name="increment"><set name="count" expr:value="count + 1"></set><dispatch event="changed" expr:value="count"></dispatch></handler>
-    </defs><button type="button" on:click="increment" $value="double"></button></template>`);
+      <handler name="increment"><set name="count" expr:value="$count + 1"></set><dispatch event="changed" expr:value="$count"></dispatch></handler>
+    </defs><button type="button" on:click="increment" $value="$double"></button></template>`);
     const outDirectory = join(root, "out-react-reactive");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -560,7 +560,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       <state type="keyword" name="headingRole"></state>
       <event name="changed" type="object"><prop name="reason" type="keyword" values="action, programmatic" required></prop></event>
       <handler name="emit"><dispatch event="changed" expr:value="{ reason: 'action' }"></dispatch></handler>
-    </defs><button type="button" on:click="emit" from:role="headingRole">Change</button></template>`);
+    </defs><button type="button" on:click="emit" from:role="$headingRole">Change</button></template>`);
     const outDirectory = join(root, "out-react-declared-shapes");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -575,9 +575,9 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card."><defs>
       <state type="number" name="count" value="0"></state>
-      <handler name="switch"><set name="count" expr:value="count + 1"></set></handler>
-      <handler name="step-up"><set name="count" expr:value="count + 1"></set></handler>
-    </defs><button type="button" on:click="switch" on:keydown="step-up" $value="count"></button></template>`);
+      <handler name="switch"><set name="count" expr:value="$count + 1"></set></handler>
+      <handler name="step-up"><set name="count" expr:value="$count + 1"></set></handler>
+    </defs><button type="button" on:click="switch" on:keydown="step-up" $value="$count"></button></template>`);
     const outDirectory = join(root, "out-react-handler-names");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -590,9 +590,9 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card."><defs>
       <state type="number" name="switch" value="1"></state>
       <data name="default" type="number"></data>
-      <computed name="class" from="switch + 1"></computed>
-      <handler name="raise"><set name="switch" expr:value="switch + 1"></set></handler>
-    </defs><div><button type="button" on:click="raise" $value="class"></button><output $value="default.pending"></output></div></template>`);
+      <computed name="class" from="$switch + 1"></computed>
+      <handler name="raise"><set name="switch" expr:value="$switch + 1"></set></handler>
+    </defs><div><button type="button" on:click="raise" $value="$class"></button><output $value="$default.pending"></output></div></template>`);
     const outDirectory = join(root, "out-react-value-names");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -608,7 +608,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       </defs><section><x-reader></x-reader></section></template>`);
     await writeFile(join(root, "x-reader.html"), `<template component="x-reader" status="early" summary="Reader."><defs>
       <context name="selection😀" from="x-card" as="mode"></context>
-    </defs><output $value="mode"></output></template>`);
+    </defs><output $value="$mode"></output></template>`);
     const outDirectory = join(root, "out-react-context-name");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -621,7 +621,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card." controller="./controller.js"><defs>
       <state type="number" name="count" value="0"></state>
       <event name="changed" type="number"></event>
-    </defs><article><button type="button" $ref="button">Increase</button><output $value="count"></output><slot></slot></article></template>`);
+    </defs><article><button type="button" $ref="button">Increase</button><output $value="$count"></output><slot></slot></article></template>`);
     await writeFile(join(root, "controller.js"), `function connect(host) {
   const stop = host.effect(() => {
     const button = host.refs.button;
@@ -704,8 +704,8 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const root = await fixture();
     await writeFile(join(root, "x-switch.html"), `<template component="x-switch" status="early" summary="Polymorphic root."><defs>
       <state type="boolean" name="linked" value="false"></state>
-      <handler name="switch"><set name="linked" expr:value="linked = false"></set></handler>
-    </defs><template $match><a $when="linked" href="#next" on:click="switch">Link</a>
+      <handler name="switch"><set name="linked" expr:value="$linked = false"></set></handler>
+    </defs><template $match><a $when="$linked" href="#next" on:click="switch">Link</a>
       <button $else type="button" on:click="switch">Button</button></template>
     <style>:host { color: blue; }</style></template>`);
     const outDirectory = join(root, "out-react-polymorphic");
@@ -727,7 +727,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const root = await fixture();
     await writeFile(join(root, "x-editor.html"), `<template component="x-editor" status="early" summary="Generic binding."><defs>
       <state name="name" value="Ada"></state>
-    </defs><section><output bind:value="name"></output><span $value="name"></span></section></template>`);
+    </defs><section><output bind:value="name"></output><span $value="$name"></span></section></template>`);
     const outDirectory = join(root, "out-react-generic-binding");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-editor.html"] });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/control.ts"));
@@ -746,11 +746,11 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const root = await fixture();
     await writeFile(join(root, "x-field.html"), `<template component="x-field" status="early" summary="Text field."><defs>
       <prop name="value" type="string" default="">Value.</prop>
-    </defs><input type="text" from:value="value"></template>`);
+    </defs><input type="text" from:value="$value"></template>`);
     await writeFile(join(root, "x-form.html"), `<link rel="component" href="./x-field.html">
       <template component="x-form" status="early" summary="Bound field."><defs>
         <state name="name" value="Ada"></state>
-      </defs><section><x-field bind:value="name"></x-field><output $value="name"></output></section></template>`);
+      </defs><section><x-field bind:value="name"></x-field><output $value="$name"></output></section></template>`);
     const outDirectory = join(root, "out-react-nested-binding");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["*.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -768,7 +768,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(join(root, "x-editor.html"), `<template component="x-editor" status="early" summary="Dynamic bindings."><defs>
       <state type="list(unknown)" name="rows" value="[{ name: 'Ada' }, { name: 'Bea' }]"></state>
       <state type="number" name="selected" value="0"></state>
-    </defs><section><output bind:value="rows[selected].name" bind:title="rows[selected].name"></output></section></template>`);
+    </defs><section><output bind:value="rows[$selected].name" bind:title="rows[$selected].name"></output></section></template>`);
     const outDirectory = join(root, "out-react-dynamic-generic");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-editor.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -782,12 +782,12 @@ export default function initialize(host) { host.on("connect", () => connect(host
   });
 
   it.each([
-    ["self", '<computed name="loop" from="loop + 1"></computed>', "loop"],
-    ["mutual", '<computed name="left" from="right + 1"></computed><computed name="right" from="left + 1"></computed>', "left"],
+    ["self", '<computed name="loop" from="$loop + 1"></computed>', "loop"],
+    ["mutual", '<computed name="left" from="$right + 1"></computed><computed name="right" from="$left + 1"></computed>', "left"],
   ])("reports HR006 for a %s React computed cycle", async (_kind, declarations, value) => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card."><defs>${declarations}</defs>
-      <output from:data-value="${value}"></output></template>`);
+      <output from:data-value="$${value}"></output></template>`);
     const outDirectory = join(root, "out-react-cycle");
     const manifest = await convertComponents({ mode: "application", target: "react", root, outDirectory, entries: ["x-card.html"] });
     await typecheckReact(root, manifest.output.artifacts
@@ -809,7 +809,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
   it("server-renders a root $with and inline <template $value> without DOM wrappers", async () => {
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Card.">
-      <div $with="{ name: 'Ada' } as user"><template $value="user.name"></template></div>
+      <div $with="{ name: 'Ada' } as user"><template $value="$user.name"></template></div>
     </template>`);
     const outDirectory = join(root, "out-react-with");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -997,7 +997,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const invalid = [
       { code: "HC022", body: '<template component="x-card" status="early" summary="Card." controller=""><article></article></template>' },
       { code: "HC023", body: '<template component="x-card" status="early" summary="Card."><defs><handler name="go"><set name="count"></set></handler></defs><article></article></template>' },
-      { code: "HT017", body: '<template component="x-card" status="early" summary="Card."><article $match="oops"></article></template>' },
+      { code: "HT017", body: '<template component="x-card" status="early" summary="Card."><article $match="$oops"></article></template>' },
       { code: "HT019", body: '<template component="x-card" status="early" summary="Card."><article $ref="invalid name"></article></template>' },
       { code: "HT020", body: '<template component="x-card" status="early" summary="Card."><article style:1bad="true"></article></template>' },
       { code: "HY001", body: '<template component="x-card" status="early" summary="Card."><article></article><style>:host-state([missing]) { color: red; }</style></template>' },
@@ -1058,14 +1058,14 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="double" from="count * 2"></computed>
+        <computed name="double" from="$count * 2"></computed>
         <event name="count-change" type="number"></event>
         <handler name="increment">
-          <set name="count" expr:value="count + 1"></set>
-          <dispatch event="count-change" expr:value="count"></dispatch>
+          <set name="count" expr:value="$count + 1"></set>
+          <dispatch event="count-change" expr:value="$count"></dispatch>
         </handler>
       </defs>
-      <button from:data-count="count" on:click="increment"><output $value="double"></output></button>
+      <button from:data-count="$count" on:click="increment"><output $value="$double"></output></button>
     </template>`);
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["counter.html"], target: "vue", root, outDirectory });
@@ -1092,7 +1092,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     temporary.push(root);
     await writeFile(join(root, "feed.html"), `<template component="x-feed" status="early" summary="Feed."><defs>
       <data name="result" src="/api/feed" type="object({ label: string })"></data>
-    </defs><output $value="result.value.label"></output></template>`);
+    </defs><output $value="$result.value.label"></output></template>`);
     const outDirectory = join(root, "generated");
     await convertComponents({ mode: "application", entries: ["feed.html"], target: "vue", root, outDirectory });
     const source = await readFile(join(outDirectory, "vue", "XFeed.vue"), "utf8");
@@ -1108,7 +1108,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     await mkdir(join(root, "components"));
     await writeFile(join(root, "components", "feed.html"), `<template component="x-feed" status="early" summary="Feed."><defs>
       <data name="result" src="./api/feed" type="object({ label: string })"></data>
-    </defs><output $value="result.value.label"></output></template>`);
+    </defs><output $value="$result.value.label"></output></template>`);
     const outDirectory = join(root, "generated");
     await assert.rejects(
       () => convertComponents({ mode: "application", entries: ["components/feed.html"], target: "vue", root, outDirectory }),
@@ -1212,7 +1212,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     temporary.push(root);
     await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
       <defs><prop name="as" type="keyword" values="a, b" default="a">Kind.</prop></defs>
-      <section $match from:data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>
+      <section $match from:data-as="$as"><p $when="$as = 'a'">A</p><p $else>B</p></section>
     </template>`);
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["counter.html"], target: "vue", root, outDirectory });
@@ -1226,7 +1226,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     temporary.push(root);
     await writeFile(join(root, "guarded.html"), `<template component="x-guarded" status="early" summary="Guarded.">
       <defs><prop name="show" type="boolean" default="true">Visibility.</prop></defs>
-      <section $if="show" from:data-show="show">Visible</section>
+      <section $if="$show" from:data-show="$show">Visible</section>
     </template>`);
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(root, `generated-${mode}`);
@@ -1244,7 +1244,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     temporary.push(root);
     await writeFile(join(root, "markup.html"), `<template component="x-markup" status="early" summary="Safe markup.">
       <defs><prop name="body" type="string">Markup.</prop></defs>
-      <article $html="body"></article>
+      <article $html="$body"></article>
     </template>`);
     const outDirectory = join(root, "generated");
     const manifest = await convertComponents({ mode: "application", entries: ["markup.html"], target: "vue", root, outDirectory });
@@ -1265,7 +1265,7 @@ export default function initialize(host) { host.on("connect", () => connect(host
     const root = await fixture();
     await writeFile(join(root, "x-card.html"), `<template component="x-card" status="early" summary="Safe markup."><defs>
       <prop name="body" type="string">Markup.</prop></defs>
-      <article><div $html="body"></div><p>Before <template $html="body"></template> after</p></article>
+      <article><div $html="$body"></div><p>Before <template $html="$body"></template> after</p></article>
     </template>`);
     const outDirectory = join(root, "out-react-html");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["x-card.html"] });
@@ -1343,11 +1343,11 @@ void [named, functionSlot, undeclared];`);
     await mkdir(join(root, "components"), { recursive: true });
     await writeFile(join(root, "components/rows.html"), `<template component="x-rows" status="early" summary="Rows."><defs>
       <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></state>
-    </defs><ul><slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot></ul></template>`);
+    </defs><ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./rows.html">
       <template component="x-app" status="early" summary="App."><defs><state type="object" name="item" value="{ name: 'Parent' }"></state>
-      <state name="heading" value="Team"></state></defs><main><output $value="item.name"></output>
-      <x-rows><template slot="row"><li><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small></li></template></x-rows>
+      <state name="heading" value="Team"></state></defs><main><output $value="$item.name"></output>
+      <x-rows><template slot="row"><li><b $value="$item.name"></b><em $value="$heading"></em><small $value="$index"></small></li></template></x-rows>
       <x-rows></x-rows></main></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
@@ -1376,7 +1376,7 @@ void [scoped, staticNode];`);
     const root = await mkdtemp(join(tmpdir(), "html-next-react-invalid-scoped-slot-"));
     temporary.push(root);
     await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><div><slot name="row" from:item="\'Ada\'"><span>Fallback</span></slot></div></template>');
+    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><div><slot name="row" from:item="\'$Ada\'"><span>Fallback</span></slot></div></template>');
     await writeFile(join(root, "components/app.html"), '<link rel="component" href="./rows.html"><template component="x-app" status="early" summary="App."><main><x-rows><span slot="row">Invalid</span></x-rows></main></template>');
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
@@ -1399,11 +1399,11 @@ void [scoped, staticNode];`);
     await mkdir(join(root, "components"), { recursive: true });
     await writeFile(join(root, "components/receiver.html"), `<template component="x-receiver" status="early" summary="Receiver.">
       <props><prop name="which" type="string">Outlet name.</prop></props>
-      <div from:data-which="which"><slot from:name="which" from:item="'Ada'"><span>Fallback</span></slot></div></template>`);
+      <div from:data-which="$which"><slot from:name="$which" from:item="'Ada'"><span>Fallback</span></slot></div></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./receiver.html">
       <template component="x-app" status="early" summary="App."><main>
-      <x-receiver which="row"><template slot="row"><b $value="item"></b></template></x-receiver>
-      <x-receiver which="other"><template slot="row"><b $value="item"></b></template></x-receiver>
+      <x-receiver which="row"><template slot="row"><b $value="$item"></b></template></x-receiver>
+      <x-receiver which="other"><template slot="row"><b $value="$item"></b></template></x-receiver>
       </main></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
@@ -1430,7 +1430,7 @@ void [scoped, staticNode];`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./panel.html">
       <template component="x-app" status="early" summary="App."><defs>
       <state name="body" value="&lt;b&gt;&lt;em&gt;Hi&lt;/em&gt;&lt;/b&gt;&lt;span&gt;There&lt;/span&gt;"></state>
-      </defs><main><x-panel><template $html="body"></template></x-panel></main></template>`);
+      </defs><main><x-panel><template $html="$body"></template></x-panel></main></template>`);
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
     const files = manifest.output.artifacts
@@ -1454,12 +1454,12 @@ void [scoped, staticNode];`);
     await writeFile(join(root, "components/steps.html"), `<template component="x-steps" status="early" summary="Steps."><defs>
       <prop name="start" type="number" required>Initial step.</prop>
       <state type="number" name="current" value="1"></state>
-    </defs><section from:data-start="start"><slot></slot></section></template>`);
+    </defs><section from:data-start="$start"><slot></slot></section></template>`);
     await writeFile(join(root, "components/step.html"), `<template component="x-step" status="early" summary="Step."><defs>
       <prop name="number" type="number" required>Step number.</prop>
       <context name="current" from="x-steps" as="activeStep"></context>
-      <computed name="isActive" from="activeStep = number"></computed>
-    </defs><p from:data-active="isActive ? 'yes' : 'no'"><slot></slot></p></template>`);
+      <computed name="isActive" from="$activeStep = $number"></computed>
+    </defs><p from:data-active="$isActive ? 'yes' : 'no'"><slot></slot></p></template>`);
     await writeFile(join(root, "components/app.html"), `<link rel="component" href="./steps.html"><link rel="component" href="./step.html">
       <template component="x-app" status="early" summary="App."><main><x-steps start="1">
       <x-step from:number="1">Outer one</x-step><x-step from:number="2">Outer two</x-step>

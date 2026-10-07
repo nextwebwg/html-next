@@ -19,16 +19,16 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-counter" status="early" summary="Counter."><defs>
   <state type="number" name="count" value="0"></state>
   <state type="length" name="width" value="8.8px"></state>
-  <computed name="double" from="count * 2"></computed>
-  <computed name="padded" from="width + 2px"></computed>
+  <computed name="double" from="$count * 2"></computed>
+  <computed name="padded" from="$width + 2px"></computed>
   <event name="count-change" type="number"></event>
-  <handler name="increment"><set name="count" expr:value="count + 1"></set><set name="width" expr:value="'1rem'"></set><dispatch event="count-change" expr:value="count"></dispatch></handler>
-</defs><button type="button" class="base" style="border-radius: 0; color: rgb(200, 10, 20) !important" class:active="count > 0" class:invalid="min(width, 5px) = '4px'" class:from-object="{ value: min(width, 5px) }.value = '5px'" style:background-color="count > 0 ? 'rgb(250, 220, 210)' : 'rgb(230, 240, 250)'" style:padding-left="min(width, 5px)" style:margin-left="count >= 0 ? min(width, 5px) : '4px'" .title="min(width, 5px)" on:click.once="increment"
-  from:data-rounded="round(width)" from:data-minimum="min(width, 5px)" from:data-maximum="max(2, count + 1)"
-  from:data-clamped="clamp(0, count, 10)" from:data-absolute="abs(-3)" from:data-defaulted="default(null, count)"
-  from:data-concatenated="concat('count:', count)" from:data-joined="join(['a', 'b'], ',')" from:data-percent="round(25.5%)" from:data-nested="count >= 0 ? min(width, 5px) : 'skip'" from:data-array="['x', min(width, 5px)]" from:data-numeric-array="[min(2, count + 1), 3]" from:data-indexed="['x', min(width, 5px)][1]">
-  <span>{$double}</span><output $value="min(width, 5px)"></output><small $value="min(width, 5px)"></small><em $value="['x', min(width, 5px)]"></em><sub>{$padded}</sub><i $if="min(width, 5px) = '4px'">Invalid branch</i>
-  <template $match><b $when="min(width, 5px) = '4px'">Invalid match</b><b $else>Valid match</b></template>
+  <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="width" expr:value="'1rem'"></set><dispatch event="count-change" expr:value="$count"></dispatch></handler>
+</defs><button type="button" class="base" style="border-radius: 0; color: rgb(200, 10, 20) !important" class:active="$count > 0" class:invalid="min($width, 5px) = '4px'" class:from-object="{ $value: min($width, 5px) }.value = '5px'" style:background-color="$count > 0 ? 'rgb(250, 220, 210)' : 'rgb(230, 240, 250)'" style:padding-left="min($width, 5px)" style:margin-left="$count >= 0 ? min($width, 5px) : '4px'" .title="min($width, 5px)" on:click.once="increment"
+  from:data-rounded="round($width)" from:data-minimum="min($width, 5px)" from:data-maximum="max(2, $count + 1)"
+  from:data-clamped="clamp(0, $count, 10)" from:data-absolute="abs(-3)" from:data-defaulted="default(null, $count)"
+  from:data-concatenated="concat('count:', $count)" from:data-joined="join(['a', 'b'], ',')" from:data-percent="round(25.5%)" from:data-nested="$count >= 0 ? min($width, 5px) : 'skip'" from:data-array="['x', min($width, 5px)]" from:data-numeric-array="[min(2, $count + 1), 3]" from:data-indexed="['x', min($width, 5px)][1]">
+  <span>{$double}</span><output $value="min($width, 5px)"></output><small $value="min($width, 5px)"></small><em $value="['x', min($width, 5px)]"></em><sub>{$padded}</sub><i $if="min($width, 5px) = '4px'">Invalid branch</i>
+  <template $match><b $when="min($width, 5px) = '4px'">Invalid match</b><b $else>Valid match</b></template>
 </button>
 <style>:host { display: inline-block; appearance: none; border: 1px solid rgb(80, 80, 80); padding: 8px; color: rgb(30, 40, 50); } :host-state([count]) { outline: 2px solid rgb(90, 70, 50); }</style>
 </template>`;

@@ -17,7 +17,7 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-choice" status="early" summary="A form-associated select."><defs>
   <state name="choice" value="b"></state>
-</defs><select name="choice" required bind:value="choice" from:data-current="choice">
+</defs><select name="choice" required bind:value="choice" from:data-current="$choice">
   <option value="">Choose</option><option value="a" selected>Alpha</option><option value="b">Beta</option>
 </select></template>`;
 const invocation = `<form id="owner"><button type="submit">Send</button></form><x-choice id="case" form="owner"></x-choice>`;

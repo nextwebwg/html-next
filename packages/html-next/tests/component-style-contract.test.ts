@@ -17,7 +17,7 @@ it("preserves statement at-rule terminators when hoisting build styles", () => {
 const definition = parseComponent(`<template component="x-style-contract"><defs>
   <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
   <state name="open" type="boolean" value="false"></state>
-  <computed name="closed" from="not open"></computed>
+  <computed name="closed" from="not $open"></computed>
 </defs><section></section></template>`);
 const resolved: Readonly<Record<string, unknown>> = { size: "md", open: false, closed: true };
 

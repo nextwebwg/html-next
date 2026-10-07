@@ -22,28 +22,28 @@ const source = `<template component="x-form-matrix" status="early" summary="Nati
   <state type="list(unknown)" name="items" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]"></state>
   <state type="number" name="ticks" value="0"></state>
   <state type="boolean" name="showLate" value="false"></state>
-  <handler name="unrelated"><set name="ticks" expr:value="ticks + 1"></set></handler>
+  <handler name="unrelated"><set name="ticks" expr:value="$ticks + 1"></set></handler>
   <handler name="addLate"><set name="showLate" expr:value="true"></set></handler>
   <handler name="changeOptions"><set name="items" expr:value="[{ id: 'c', label: 'C' }, { id: 'a', label: 'A' }]"></set></handler>
   <handler name="relabelOptions"><set name="items" expr:value="[{ id: 'c', label: 'CC' }, { id: 'a', label: 'AA' }]"></set></handler>
   <handler name="chooseC"><set name="form.choice" expr:value="'c'"></set><set name="form.choices" expr:value="['c']"></set></handler>
   <handler name="mutateChoices"><set name="form.choices.0" expr:value="'a'"></set></handler>
 </defs><form><input class="text" name="text" required minlength="3" bind:value="form.text">
-  <input class="read-only" value="authored" .value="form.text">
+  <input class="read-only" value="authored" .value="$form.text">
   <input class="check" type="checkbox" name="check" bind:checked="form.checked">
   <input class="radio" type="radio" name="radio" value="r" bind:checked="form.radio">
-  <input $if="showLate" class="late" bind:value="form.text">
-  <select class="single" name="single" bind:value="form.choice"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
-  <select class="multiple" name="multiple" multiple bind:value="form.choices"><option $each="item of items" $key="item.id" from:value="item.id" $value="item.label"></option></select>
+  <input $if="$showLate" class="late" bind:value="form.text">
+  <select class="single" name="single" bind:value="form.choice"><option $each="item of $items" $key="$item.id" from:value="$item.id" $value="$item.label"></option></select>
+  <select class="multiple" name="multiple" multiple bind:value="form.choices"><option $each="item of $items" $key="$item.id" from:value="$item.id" $value="$item.label"></option></select>
   <button type="button" class="unrelated" on:click="unrelated">Unrelated</button>
   <button type="button" class="add-late" on:click="addLate">Add</button>
   <button type="button" class="options" on:click="changeOptions">Options</button>
   <button type="button" class="relabel" on:click="relabelOptions">Relabel</button>
   <button type="button" class="choose" on:click="chooseC">Choose C</button>
   <button type="button" class="mutate" on:click="mutateChoices">Mutate choices</button>
-  <output class="model" $value="[form.text, form.checked, form.radio, form.choice, form.choices, ticks]"></output>
-  <output class="typed" $value="form.text"></output>
-  <output class="row-output" $each="item of items" $key="item.id" $value="item.label"></output>
+  <output class="model" $value="[$form.text, $form.checked, $form.radio, $form.choice, $form.choices, $ticks]"></output>
+  <output class="typed" $value="$form.text"></output>
+  <output class="row-output" $each="item of $items" $key="$item.id" $value="$item.label"></output>
 </form></template>`;
 const baseStyle = `<style>
   html { color-scheme: light; }

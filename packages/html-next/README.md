@@ -24,11 +24,11 @@ HTML Next brings markup, state, events, slots, and scoped styles together in one
   <defs>
     <state name="count" type="number" value="0"></state>
     <handler name="increment">
-      <set name="count" expr:value="count + 1"></set>
+      <set name="count" expr:value="$count + 1"></set>
     </handler>
   </defs>
   <button type="button" on:click="increment">
-    Count: <span $value="count"></span>
+    Count: <span $value="$count"></span>
   </button>
 </template>
 ```

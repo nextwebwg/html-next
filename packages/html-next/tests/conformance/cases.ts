@@ -75,7 +75,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "icon-close",
       defs: `<state name="box" value="0 0 24 24"></state>`,
-      root: `<button type="button"><svg from:viewBox="box" width="24" height="24" fill="none" stroke="currentColor">
+      root: `<button type="button"><svg from:viewBox="$box" width="24" height="24" fill="none" stroke="currentColor">
         <path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="'userSpaceOnUse'"></linearGradient>
         <foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button>`,
       use: `<icon-close id="icon"></icon-close>`,
@@ -106,7 +106,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-root-with",
       defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" expr:value="'Bea'"></set></handler>`,
-      root: `<section $with="label as display" from:data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
+      root: `<section $with="$label as display" from:data-label="$display"><strong $value="$display"></strong><button type="button" on:click="rename">Rename</button></section>`,
       use: `<x-root-with id="person"></x-root-with>`,
     }),
     expect: {
@@ -145,7 +145,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-btn",
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button type="button" from:aria-label="label"><slot></slot></button>`,
+      root: `<button type="button" from:aria-label="$label"><slot></slot></button>`,
       use: `<x-btn id="b" class="cta" label="Save"><strong>now</strong></x-btn>`,
     }),
     expect: {
@@ -169,7 +169,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-pre",
       defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
-      root: `<button type="button" role="button" class="base" style="color: red" from:aria-label="label"></button>`,
+      root: `<button type="button" role="button" class="base" style="color: red" from:aria-label="$label"></button>`,
       use: `<x-pre id="p" type="submit" class="cta" style="margin: 0" aria-label="Ignored"></x-pre>`,
     }),
     expect: {
@@ -182,7 +182,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-aria",
       defs: `<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop><prop name="edit" type="boolean" default="false">Edit.</prop>`,
-      root: `<button from:aria-expanded="open" from:hidden="gone" from:contenteditable="edit"></button>`,
+      root: `<button from:aria-expanded="$open" from:hidden="$gone" from:contenteditable="$edit"></button>`,
       use: `<x-aria id="closed"></x-aria><x-aria id="open" open gone edit></x-aria>`,
     }),
     expect: {
@@ -222,7 +222,7 @@ const successes: ConformanceCase[] = [
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,
-      root: `<button from:data-label="label"></button>`,
+      root: `<button from:data-label="$label"></button>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: { probe: `return q('#b').getAttribute('data-label');`, result: "Hi" },
@@ -235,7 +235,7 @@ const successes: ConformanceCase[] = [
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>` +
         `<prop name="kind" type="keyword" values="a, b" default="a">Enum.</prop>` +
         `<prop name="s" type="string" default="">String.</prop>`,
-      root: `<div from:data-sum="n + 1" from:data-flag="flag" from:data-kind="kind" from:data-s="s"></div>`,
+      root: `<div from:data-sum="$n + 1" from:data-flag="$flag" from:data-kind="$kind" from:data-s="$s"></div>`,
       use: `<x-t id="b" n="5" flag kind="b" s="hey"></x-t>`,
     }),
     expect: {
@@ -252,7 +252,7 @@ const successes: ConformanceCase[] = [
       defs:
         `<prop name="missing" type="string">Missing.</prop>` +
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>`,
-      root: `<div from:data-missing="missing" from:data-off="flag" from:data-on="not flag" from:data-num="3" from:class="['a', 'b']"></div>`,
+      root: `<div from:data-missing="$missing" from:data-off="$flag" from:data-on="not $flag" from:data-num="3" from:class="['a', 'b']"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -282,7 +282,7 @@ const successes: ConformanceCase[] = [
         `<handler name="foo"></handler><handler name="c"></handler><handler name="d"></handler>`,
       root:
         `<div><output bind:value="v"></output>` +
-        `<button on:click="foo" $value="v"></button>` +
+        `<button on:click="foo" $value="$v"></button>` +
         `<span on:mouseover="c" on:mouseout="d"></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
@@ -305,7 +305,7 @@ const successes: ConformanceCase[] = [
     name: "$value renders escaped text (a <b> in data is literal characters)",
     source: scene({
       defs: `<prop name="body" type="string" default="">Body.</prop>`,
-      root: `<p $value="body"></p>`,
+      root: `<p $value="$body"></p>`,
       use: `<x-t id="b" body="<b>hi</b>"></x-t>`,
     }),
     expect: {
@@ -317,7 +317,7 @@ const successes: ConformanceCase[] = [
     name: "<template $value> renders inline text with no wrapper element",
     source: scene({
       defs: `<prop name="msg" type="string" default="yo">Message.</prop>`,
-      root: `<div><template $value="msg"></template></div>`,
+      root: `<div><template $value="$msg"></template></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -329,7 +329,7 @@ const successes: ConformanceCase[] = [
     name: "$html sanitizes: <script>, on* handlers, and javascript: URLs are stripped and do not execute",
     source: scene({
       defs: `<prop name="body" type="string" default="">Body.</prop>`,
-      root: `<div class="body" $html="body"></div>`,
+      root: `<div class="body" $html="$body"></div>`,
       use:
         `<x-t id="b" body="<b>ok</b><script>window.__x=1</script>` +
         `<img src=x onerror='window.__x=2'><a href='javascript:window.__x=3'>l</a>"></x-t>`,
@@ -353,8 +353,8 @@ const successes: ConformanceCase[] = [
       root:
         `<div><button type="button" on:click="invalidate">Invalidate</button>` +
         `<button type="button" on:click="restore">Restore</button>` +
-        `<p class="element" $html="concat('&lt;b&gt;', min(width, 5px), '&lt;/b&gt;')"></p>` +
-        `<span class="template"><template $html="concat('&lt;i&gt;', min(width, 5px), '&lt;/i&gt;')"></template></span></div>`,
+        `<p class="element" $html="concat('&lt;b&gt;', min($width, 5px), '&lt;/b&gt;')"></p>` +
+        `<span class="template"><template $html="concat('&lt;i&gt;', min($width, 5px), '&lt;/i&gt;')"></template></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -447,10 +447,10 @@ const successes: ConformanceCase[] = [
         `<div><button type="button" on:click="invalidate">Invalidate</button>` +
         `<button type="button" on:click="restore">Restore</button>` +
         `<button type="button" on:click="empty">Empty</button>` +
-        `<i class="conditional" $if="clear ? [] : [min(width, 5px)]">shown</i>` +
-        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
-        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
-        `<span class="row" $each="item of (clear ? [] : [min(width, 5px)])" $value="item"></span></div>`,
+        `<i class="conditional" $if="$clear ? [] : [min($width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min($width, 5px) as chosen" $value="$chosen"></u>` +
+        `<template $match="min($width, 5px) as picked"><b $when="$picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of ($clear ? [] : [min($width, 5px)])" $value="$item"></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -474,10 +474,10 @@ const successes: ConformanceCase[] = [
         `<handler name="restore"><set name="width" value="2px"></set></handler>`,
       root:
         `<div><button type="button" on:click="restore">Restore</button>` +
-        `<i class="conditional" $if="[min(width, 5px)]">shown</i>` +
-        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
-        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
-        `<span class="row" $each="item of [min(width, 5px)]" $value="item"></span></div>`,
+        `<i class="conditional" $if="[min($width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min($width, 5px) as chosen" $value="$chosen"></u>` +
+        `<template $match="min($width, 5px) as picked"><b $when="$picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of [min($width, 5px)]" $value="$item"></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -495,7 +495,7 @@ const successes: ConformanceCase[] = [
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
       defs: `<state type="object({ a: number })" name="obj" value="{ a: 1 }"></state>`,
-      root: `<div from:data-x="obj.b.c" $value="obj.missing"></div>`,
+      root: `<div from:data-x="$obj.b.c" $value="$obj.missing"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -508,7 +508,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       root:
         `<ul><li $each="n, i of [3, 1, 2, 5]" $sort="n" $limit="3" ` +
-        ` from:data-i="i" from:data-last="loop.last" from:data-count="loop.count" $value="n"></li></ul>`,
+        ` from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -525,7 +525,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$each $where filters and reindexes the loop",
     source: scene({
-      root: `<ul><li $each="n, i of [10, 20, 30]" $where="n > 10" from:data-i="i" $value="n"></li></ul>`,
+      root: `<ul><li $each="n, i of [10, 20, 30]" $where="$n > 10" from:data-i="$i" $value="$n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -539,7 +539,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$sort with multiple keys and descending (a,-b)",
     source: scene({
-      root: `<ul><li $each="r of [{ p: 1, q: 2 }, { p: 1, q: 1 }, { p: 2, q: 0 }]" $sort="p,-q" $value="r.q"></li></ul>`,
+      root: `<ul><li $each="r of [{ p: 1, q: 2 }, { p: 1, q: 1 }, { p: 2, q: 0 }]" $sort="p,-q" $value="$r.q"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -552,8 +552,8 @@ const successes: ConformanceCase[] = [
     source: scene({
       defs: `<prop name="tier" type="keyword" values="free, pro" default="free">Tier.</prop>`,
       root:
-        `<div><template $match="tier as t">` +
-        `<span class="t" $when="t = 'pro'">Pro</span>` +
+        `<div><template $match="$tier as t">` +
+        `<span class="t" $when="$t = 'pro'">Pro</span>` +
         `<span class="t" $else>Free</span></template></div>`,
       use: `<x-t id="b" tier="pro"></x-t>`,
     }),
@@ -567,8 +567,8 @@ const successes: ConformanceCase[] = [
     source: scene({
       defs: `<prop name="status" type="keyword" values="ok, bad" default="ok">Status.</prop>`,
       root:
-        `<table><tbody><template $match="status as s">` +
-        `<tr class="r" $when="s = 'ok'"><td>OK</td></tr>` +
+        `<table><tbody><template $match="$status as s">` +
+        `<tr class="r" $when="$s = 'ok'"><td>OK</td></tr>` +
         `<tr class="r" $else><td>No</td></tr></template></tbody></table>`,
       use: `<x-t id="b" status="bad"></x-t>`,
     }),
@@ -593,7 +593,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$with binds an aliased expression into a child scope",
     source: scene({
-      root: `<div><template $with="{ name: 'Ada' } as u"><b class="who" $value="u.name"></b></template></div>`,
+      root: `<div><template $with="{ name: 'Ada' } as u"><b class="who" $value="$u.name"></b></template></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: { probe: `return q('#b .who').textContent;`, result: "Ada" },
@@ -603,9 +603,9 @@ const successes: ConformanceCase[] = [
     source: scene({
       defs:
         `<state name="count" type="number" value="5"></state>` +
-        `<computed name="doubled" from="count * 2"></computed>` +
+        `<computed name="doubled" from="$count * 2"></computed>` +
         `<data name="feed"></data>`,
-      root: `<div from:data-count="count" from:data-doubled="doubled"><i $value="feed.pending"></i></div>`,
+      root: `<div from:data-count="$count" from:data-doubled="$doubled"><i $value="$feed.pending"></i></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -660,7 +660,7 @@ const diagnostics: ConformanceCase[] = [
     name: "an absent required prop lowers with valueMissing validity",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<div from:data-l="label"></div>`,
+      root: `<div from:data-l="$label"></div>`,
       use: `<x-t></x-t>`,
     }),
     expect: {
@@ -680,7 +680,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HC020: a name collides in the flat component namespace (prop and state)",
     source: scene({
       defs: `<prop name="count" type="number" default="0">Count.</prop><state type="number" name="count" value="1"></state>`,
-      root: `<div from:data-c="count"></div>`,
+      root: `<div from:data-c="$count"></div>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HC020" },
@@ -713,7 +713,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HT018: a $match child is neither a $when nor $else arm",
     source: scene({
       defs: `<prop name="s" type="keyword" values="a, b" default="a">S.</prop>`,
-      root: `<div $match="s as t"><span $when="t = 'a'">A</span><div>oops</div></div>`,
+      root: `<div $match="$s as t"><span $when="$t = 'a'">A</span><div>oops</div></div>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HT018" },
@@ -730,7 +730,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HT007: a :srcdoc binding into a raw content sink",
     source: scene({
       defs: `<prop name="h" type="string" default="">H.</prop>`,
-      root: `<iframe from:srcdoc="h"></iframe>`,
+      root: `<iframe from:srcdoc="$h"></iframe>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HT007" },
@@ -757,7 +757,7 @@ const diagnostics: ConformanceCase[] = [
   },
   {
     name: "HT015: $with not written `expr as name`",
-    source: scene({ root: `<div $with="foo"></div>`, use: `<x-t></x-t>` }),
+    source: scene({ root: `<div $with="$foo"></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT015" },
   },
   {
@@ -796,7 +796,7 @@ const diagnostics: ConformanceCase[] = [
     name: "an unparseable number prop renders its default and reports badInput",
     source: scene({
       defs: `<prop name="n" type="number" default="0">N.</prop>`,
-      root: `<div from:data-n="n"></div>`,
+      root: `<div from:data-n="$n"></div>`,
       use: `<x-t n="abc"></x-t>`,
     }),
     expect: {
@@ -806,7 +806,7 @@ const diagnostics: ConformanceCase[] = [
   },
   {
     name: "HT003: an undeclared name in an expression",
-    source: scene({ root: `<div $value="nope"></div>`, use: `<x-t></x-t>` }),
+    source: scene({ root: `<div $value="$nope"></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT003" },
   },
   {

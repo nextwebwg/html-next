@@ -15,7 +15,7 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-action" status="early" summary="Button or link."><defs>
   <prop name="as" type="keyword" values="button, a" default="button">Root.</prop>
   <prop name="href" type="string">Destination.</prop>
-</defs><template $match><a $when="as = 'a'" class="action" from:href="href">Go</a>
+</defs><template $match><a $when="$as = 'a'" class="action" from:href="$href">Go</a>
 <button $else class="action" type="button">Go</button></template>
 <style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }
   :host([as="a"]) { background: rgb(240, 240, 240); }</style></template>`;

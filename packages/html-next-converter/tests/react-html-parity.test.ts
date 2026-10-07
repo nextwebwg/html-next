@@ -18,8 +18,8 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-html" status="early" summary="Sanitized markup."><defs>
   <state name="body" value="&lt;b title='safe'&gt;One&lt;/b&gt;&lt;img src=x onerror=alert(1)&gt;"></state>
   <handler name="change"><set name="body" value="&lt;i title='next'&gt;Two&lt;/i&gt;&lt;img src=x onerror=alert(1)&gt;"></set></handler>
-</defs><article><div class="block" $html="body"></div>
-  <p>Before <template $html="body"></template> after</p>
+</defs><article><div class="block" $html="$body"></div>
+  <p>Before <template $html="$body"></template> after</p>
   <button type="button" on:click="change">Change</button></article>
 <style>b { color: rgb(12 34 56); } i { color: rgb(65 43 21); }</style></template>`;
 

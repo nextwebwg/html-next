@@ -31,9 +31,9 @@ const benchmarkShape = component(`
   <state name="ready" type="boolean" value="false"></state>
   <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
   <state name="selected" type="number" nullable></state>`, `
-  <div id="main"><div class="container" $if="ready"><table><tbody>
-    <tr $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected">
-      <td $value="row.id"></td><td><a data-action="select" $value="row.label"></a></td>
+  <div id="main"><div class="container" $if="$ready"><table><tbody>
+    <tr $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:danger="$row.id = $selected">
+      <td $value="$row.id"></td><td><a data-action="select" $value="$row.label"></a></td>
     </tr>
   </tbody></table></div></div>`);
 
@@ -89,47 +89,47 @@ describe("direct-extend Vanilla generation", () => {
 
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
-    "no controller": component(state, '<p $value="ready"></p>', false),
-    props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
-    computed: component(`${state}<computed name="count" from="rows.length"></computed>`, '<p $value="count"></p>'),
+    "no controller": component(state, '<p $value="$ready"></p>', false),
+    props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="$ready"></p>'),
+    computed: component(`${state}<computed name="count" from="$rows.length"></computed>`, '<p $value="$count"></p>'),
     handler: component(`${state}<handler name="go"><set name="ready" expr:value="true"></set></handler>`, '<button on:click="go">Go</button>'),
-    event: component(`${state}<event name="saved" type="number"></event>`, '<p $value="ready"></p>'),
-    "untyped state": component('<state name="x" value="1"></state>', '<p $value="x"></p>'),
-    "unknown state": component('<state name="x" type="unknown" value="1"></state>', '<p $value="x"></p>'),
-    "format type": component('<state name="x" type="url" value="https://a.example/"></state>', '<p $value="x"></p>'),
-    "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
-    "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
-    "host state": component(state, '<p $value="ready"></p><style>:host-state([ready]) { color: red; }</style>'),
+    event: component(`${state}<event name="saved" type="number"></event>`, '<p $value="$ready"></p>'),
+    "untyped state": component('<state name="x" value="1"></state>', '<p $value="$x"></p>'),
+    "unknown state": component('<state name="x" type="unknown" value="1"></state>', '<p $value="$x"></p>'),
+    "format type": component('<state name="x" type="url" value="https://a.example/"></state>', '<p $value="$x"></p>'),
+    "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="$x"></p>'),
+    "root match": component(state, '<template $match><a $when="$ready">A</a><b $else>B</b></template>'),
+    "host state": component(state, '<p $value="$ready"></p><style>:host-state([ready]) { color: red; }</style>'),
     slot: component(state, "<p><slot></slot></p>"),
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     ref: component(state, '<p><span $ref="label"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
-    svg: component(state, '<p><svg><circle from:r="rows.length"></circle></svg></p>'),
-    iframe: component(state, '<p><iframe from:title="ready"></iframe></p>'),
-    "select region": component(state, '<p><select><option $if="ready">A</option></select></p>'),
-    "style binding": component(state, '<p style:--x="rows.length"></p>'),
-    "url attribute": component(state, '<p><a from:href="rows.length">A</a></p>'),
-    "property binding": component(state, '<p><input .value="rows.length"></p>'),
+    svg: component(state, '<p><svg><circle from:r="$rows.length"></circle></svg></p>'),
+    iframe: component(state, '<p><iframe from:title="$ready"></iframe></p>'),
+    "select region": component(state, '<p><select><option $if="$ready">A</option></select></p>'),
+    "style binding": component(state, '<p style:--x="$rows.length"></p>'),
+    "url attribute": component(state, '<p><a from:href="$rows.length">A</a></p>'),
+    "property binding": component(state, '<p><input .value="$rows.length"></p>'),
     "two-way binding": component('<state name="name" type="string" value="a"></state>', '<p><input bind:value="name"></p>'),
-    html: component(state, '<p $html="rows.length"></p>'),
-    "mixed text": component(state, "<p>Rows: {rows.length}</p>"),
-    with: component(state, '<p><span $with="rows as list" $value="list.length"></span></p>'),
-    "unkeyed each": component(state, '<ul><li $each="row of rows" $value="row.label"></li></ul>'),
-    "each index": component(state, '<ul><li $each="row, i of rows" $key="row.id" $value="i"></li></ul>'),
-    "each where": component(state, '<ul><li $each="row of rows" $key="row.id" $where="row.id" $value="row.label"></li></ul>'),
-    "each sort": component(state, '<ul><li $each="row of rows" $key="row.id" $sort="id" $value="row.label"></li></ul>'),
-    "each limit": component(state, '<ul><li $each="row of rows" $key="row.id" $limit="2" $value="row.label"></li></ul>'),
-    "nested flow in a row": component(state, '<ul><li $each="row of rows" $key="row.id"><b $if="ready">x</b></li></ul>'),
-    "deep item path": component(state, '<ul><li $each="row of rows" $key="row.id" $value="row.user.name"></li></ul>'),
-    "loop record": component(state, '<ul><li $each="row of rows" $key="row.id" $value="loop.index"></li></ul>'),
-    "loop shadows a root": component(`${state}<state name="loop" type="number" value="1"></state>`, '<ul><li $each="row of rows" $key="row.id" $value="loop"></li></ul>'),
-    "key reads state": component(state, '<ul><li $each="row of rows" $key="ready" $value="row.label"></li></ul>'),
-    "constrained root path": component('<state name="user" type="object({ name: string })" value="{ name: \'a\' }"></state>', '<p $value="user.name"></p>'),
-    "member test": component(state, '<p><b $if="rows.length">x</b></p>'),
-    "container test": component(state, '<p><b $if="rows">x</b></p>'),
-    arithmetic: component('<state name="n" type="number" value="1"></state>', '<p $value="n + 1"></p>'),
-    "class attribute and toggle": component(state, '<p from:class="rows.length" class:on="ready"></p>'),
+    html: component(state, '<p $html="$rows.length"></p>'),
+    "mixed text": component(state, "<p>Rows: {$rows.length}</p>"),
+    with: component(state, '<p><span $with="$rows as list" $value="$list.length"></span></p>'),
+    "unkeyed each": component(state, '<ul><li $each="row of $rows" $value="$row.label"></li></ul>'),
+    "each index": component(state, '<ul><li $each="row, i of $rows" $key="$row.id" $value="$i"></li></ul>'),
+    "each where": component(state, '<ul><li $each="row of $rows" $key="$row.id" $where="$row.id" $value="$row.label"></li></ul>'),
+    "each sort": component(state, '<ul><li $each="row of $rows" $key="$row.id" $sort="id" $value="$row.label"></li></ul>'),
+    "each limit": component(state, '<ul><li $each="row of $rows" $key="$row.id" $limit="2" $value="$row.label"></li></ul>'),
+    "nested flow in a row": component(state, '<ul><li $each="row of $rows" $key="$row.id"><b $if="$ready">x</b></li></ul>'),
+    "deep item path": component(state, '<ul><li $each="row of $rows" $key="$row.id" $value="$row.user.name"></li></ul>'),
+    "loop record": component(state, '<ul><li $each="row of $rows" $key="$row.id" $value="$loop.index"></li></ul>'),
+    "loop shadows a root": component(`${state}<state name="loop" type="number" value="1"></state>`, '<ul><li $each="row of $rows" $key="$row.id" $value="$loop"></li></ul>'),
+    "key reads state": component(state, '<ul><li $each="row of $rows" $key="$ready" $value="$row.label"></li></ul>'),
+    "constrained root path": component('<state name="user" type="object({ name: string })" value="{ name: \'a\' }"></state>', '<p $value="$user.name"></p>'),
+    "member test": component(state, '<p><b $if="$rows.length">x</b></p>'),
+    "container test": component(state, '<p><b $if="$rows">x</b></p>'),
+    arithmetic: component('<state name="n" type="number" value="1"></state>', '<p $value="$n + 1"></p>'),
+    "class attribute and toggle": component(state, '<p from:class="$rows.length" class:on="$ready"></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
     it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
@@ -146,7 +146,7 @@ describe("direct-extend Vanilla generation", () => {
   it("plans the supported shapes it should", () => {
     const plan = (text: string) => blockPlan(parseComponent(text, new URL("component.html", fixtures).href));
     assert.notEqual(plan(benchmarkShape), undefined);
-    assert.notEqual(plan(component(state, '<p from:data-n="rows.length" class:on="ready and not ready"><b>{ready}</b></p>')), undefined);
+    assert.notEqual(plan(component(state, '<p from:data-n="$rows.length" class:on="$ready and not $ready"><b>{$ready}</b></p>')), undefined);
     for (const text of Object.values(notYetDirect)) {
       let parsed;
       try { parsed = parseComponent(text, new URL("component.html", fixtures).href); } catch { continue; }
@@ -159,9 +159,9 @@ describe("direct-extend expression lowering (differential)", () => {
   const pool: Value[] = [null, true, false, 0, 1, -0, Number.NaN, "", "x", "length", [], [1, "a"], [[1], []], {}, { k: 1 },
     { k: null }, { k: [2] }, { length: 2 }, { k: { k: "deep" } }];
   const expressions = [
-    "1", "'x'", "true", "null", "a", "row", "row.k", "row.length", "a.k", "a.length", "a.k.k", "a = b", "a != row.k",
-    "row.k = a", "a = null", "a and b", "a or row", "not a", "not row.k", "a ? b : row.k", "a and b ? row : 'none'",
-    "(a = b) or (row.k and not a)", "a ? (b ? 1 : 2) : row.k.k",
+    "1", "'x'", "true", "null", "$a", "$row", "$row.k", "$row.length", "$a.k", "$a.length", "$a.k.k", "$a = $b", "$a != $row.k",
+    "$row.k = $a", "$a = null", "$a and $b", "$a or $row", "not $a", "not $row.k", "$a ? $b : $row.k", "$a and $b ? $row : 'none'",
+    "($a = $b) or ($row.k and not $a)", "$a ? ($b ? 1 : 2) : $row.k.k", "$a = length",
   ];
   const roots: { name: string; type: CompactType }[] = [{ name: "a", type: "?" }, { name: "b", type: "?" }];
   for (const text of expressions) {
@@ -169,7 +169,7 @@ describe("direct-extend expression lowering (differential)", () => {
       const ast = compileExpression(text).ast;
       const lowered = lowerExpression(ast, roots, "row");
       // Item paths deeper than one step are outside the subset.
-      if (text.includes("row.k.k")) {
+      if (text.includes("$row.k.k")) {
         assert.equal(lowered, undefined);
         return;
       }
@@ -345,9 +345,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>`, `
-      <section><p>rows</p><ul $if="ready">
-        <li $each="row of rows" $key="row.id" from:data-id="row.id" class:on="row.id = selected"
-          class:off="selected != row.id"><b $value="row.label"></b></li>
+      <section><p>rows</p><ul $if="$ready">
+        <li $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:on="$row.id = $selected"
+          class:off="$selected != $row.id"><b $value="$row.label"></b></li>
       </ul></section>`);
     const reads = new Set<number>();
     await same(text, [
@@ -368,8 +368,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("keeps explicit loop-index comparisons reactive when retained rows move", async () => {
     const text = component(`
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p>rows</p><ul><li $each="row, i of rows" $key="row.id"
-        from:data-id="row.id" class:on="row.id = i"><b $value="i"></b></li></ul></section>`);
+      <section><p>rows</p><ul><li $each="row, i of $rows" $key="$row.id"
+        from:data-id="$row.id" class:on="$row.id = $i"><b $value="$i"></b></li></ul></section>`);
     const result = await same(text, [
       (host) => { host.state.rows = [{ id: 0, label: "zero" }, { id: 1, label: "one" }]; },
       (host) => { host.state.rows = host.state.rows.toReversed(); },
@@ -385,11 +385,11 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
       <state name="other" type="number" nullable></state>`, `
-      <section><p>rows</p><div $if="ready">
-        <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"
-          class:on="row.id = selected" class:other="row.id = other"><b $value="row.label"></b></li></ul>
-        <ol><li $each="row of rows" $key="row.id" class:off="selected != row.id"
-          from:title="selected" class:label="row.label = selected"><b $value="row.label"></b></li></ol>
+      <section><p>rows</p><div $if="$ready">
+        <ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"
+          class:on="$row.id = $selected" class:other="$row.id = $other"><b $value="$row.label"></b></li></ul>
+        <ol><li $each="row of $rows" $key="$row.id" class:off="$selected != $row.id"
+          from:title="$selected" class:label="$row.label = $selected"><b $value="$row.label"></b></li></ol>
       </div></section>`);
     await same(text, [
       (host) => { host.state.rows = [{ id: -0, label: "zero" }, { id: 1, label: "one" }, { id: null, label: "null" }]; },
@@ -407,9 +407,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
       <state name="current" type="list(string)" value="[]"></state>`, `
-      <section><p $value="current"></p><ul $if="ready">
-        <li $each="row of rows" $key="row.id" from:data-id="row.id" from:title="row.tags">
-          <i $value="row.tags"></i><b $value="row.tags ? 'y' : 'n'"></b><em $value="row.label"></em><s class:full="row.tags"></s>
+      <section><p $value="$current"></p><ul $if="$ready">
+        <li $each="row of $rows" $key="$row.id" from:data-id="$row.id" from:title="$row.tags">
+          <i $value="$row.tags"></i><b $value="$row.tags ? 'y' : 'n'"></b><em $value="$row.label"></em><s class:full="$row.tags"></s>
         </li>
       </ul></section>`);
     await same(text, [
@@ -429,7 +429,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p>rows</p><ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id"><b $value="row.label"></b></li></ul></section>`);
+      <section><p>rows</p><ul $if="$ready"><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><b $value="$row.label"></b></li></ul></section>`);
     const compiled = await same(text, [
       (host) => { host.state.rows = [{ id: 1, label: "a" }, { id: 2, label: "b" }]; },
       (host) => { host.state.rows[0].label = "X"; host.state.rows[1].id = 1; },
@@ -441,8 +441,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p from:title="ready" from:data-x="rows.length" from:lang="ready" class:a="ready" class:b="rows.length" class:c="ready">rows</p>
-        <ul $if="ready"><li $each="row of rows" $key="row.id" class:x="ready" from:data-id="row.id" class:y="row.label" from:title="ready"></li></ul></section>`);
+      <section><p from:title="$ready" from:data-x="$rows.length" from:lang="$ready" class:a="$ready" class:b="$rows.length" class:c="$ready">rows</p>
+        <ul $if="$ready"><li $each="row of $rows" $key="$row.id" class:x="$ready" from:data-id="$row.id" class:y="$row.label" from:title="$ready"></li></ul></section>`);
     await same(text, [
       (host) => { host.state.rows = [{ id: 1, label: "a" }]; },
       (host) => { host.state.ready = false; },

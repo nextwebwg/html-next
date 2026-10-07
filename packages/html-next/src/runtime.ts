@@ -913,6 +913,9 @@ interface HydrationRange {
 /** Weak tags reuse the existing effect ownership; row removal releases every indexed binding. */
 const indexedSelections = new WeakMap<ReactiveEffect, string>();
 
+/** The outer root a keyed selection compares with, compiled as its `$root` reference. */
+const selectedRoot = (root: CompiledExpression): string => (root.ast as Extract<ExpressionNode, { kind: "id" }>).name;
+
 /**
  * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
  * add. A root switch stops them all and starts afresh.
@@ -1340,7 +1343,7 @@ function shapeList(
     // list sorts by the value itself; the key then only carries the ascending/descending sign.
     const sortValue = (item: Value, field: string): Value =>
       item !== null && typeof item === "object" && !Array.isArray(item)
-        ? evalValue(`${flow.item}.${field}`, layer(scope, { [flow.item]: item }))
+        ? evalValue(`$${flow.item}.${field}`, layer(scope, { [flow.item]: item }))
         : item;
     result.sort((a, b) => {
       for (const key of keys) {
@@ -1637,14 +1640,14 @@ function renderEachRegion(
             (other.kind !== "attribute" || other.target !== "class" ||
               keyedEquality(other.expressionPlan.ast, flow.keyPlan!.ast, flow.item) !== root));
           if (shared) continue;
-          bindings.set(attribute.expressionPlan, compileExpression(root));
+          bindings.set(attribute.expressionPlan, compileExpression(`$${root}`));
         }
       }
       for (const child of element.children) if (child.kind === "element" && child.flow === undefined) find(child);
     };
     find(body as ElementNode);
   }
-  const roots = new Set([...bindings.values()].map((expression) => expression.source));
+  const roots = new Set([...bindings.values()].map(selectedRoot));
   const selection = bindings.size === 0 ? undefined : { key: flow.keyPlan!, scope, bindings };
   const rowContext = selection === undefined ? context
     : Object.create(context, { selection: { value: selection } }) as RuntimeRenderContext;
@@ -1932,7 +1935,7 @@ function bindElementAttributes(
         if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
         else {
           const expression = attribute.expressionPlan!.ast as Extract<ExpressionNode, { kind: "binary" }>;
-          const outerFirst = expression.left.kind === "id" && expression.left.name === root.source;
+          const outerFirst = expression.left.kind === "id" && expression.left.name === selectedRoot(root);
           // Validate each operand through the existing evaluator, retaining expression equality.
           let item: Value | typeof NONCONFORMING;
           let outer: Value | typeof NONCONFORMING;
@@ -1981,7 +1984,7 @@ function bindElementAttributes(
           setAttribute(target, attribute.name, toAttribute(value, attribute.name));
         }
       });
-      if (root !== undefined) indexedSelections.set(effect, root.source);
+      if (root !== undefined) indexedSelections.set(effect, selectedRoot(root));
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         own(() => {
           const target = rootTarget(element, invocation);

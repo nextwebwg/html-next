@@ -18,7 +18,7 @@ const bundlePath = join(temporaryDirectory, "runtime.js");
 
 const definition = `<template component="hydration-row" status="experimental" summary="Hydration benchmark.">
   <defs><prop name="label" type="string" default="Default">Label.</prop></defs>
-  <article><h2 $value="label"></h2><input .value="label"><slot></slot></article>
+  <article><h2 $value="$label"></h2><input .value="$label"><slot></slot></article>
 </template>`;
 
 function invocation(index: number): string {

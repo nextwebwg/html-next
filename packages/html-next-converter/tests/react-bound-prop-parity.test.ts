@@ -14,18 +14,18 @@ import { convertComponents } from "../src/index.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const reading = `<template component="x-reading" status="early" summary="Typed reading."><defs>
   <prop name="amount" type="number" default="5" max="6">Amount.</prop>
-</defs><output from:data-amount="amount" $value="amount"></output></template>`;
+</defs><output from:data-amount="$amount" $value="$amount"></output></template>`;
 const owner = `<template component="x-reading-owner" status="early" summary="Reading owner."><defs>
   <prop name="incoming" type="number">Source amount.</prop>
-</defs><section class:large="incoming > 3" style:color="incoming > 3 ? 'red' : 'blue'"><x-reading from:amount="incoming"></x-reading><span from:data-direct="incoming"><template $value="incoming"></template></span><em $html="incoming"></em><aside .textContent="incoming"></aside><input type="text" .value="incoming"><div .title="incoming"></div></section></template>`;
+</defs><section class:large="$incoming > 3" style:color="$incoming > 3 ? 'red' : 'blue'"><x-reading from:amount="$incoming"></x-reading><span from:data-direct="$incoming"><template $value="$incoming"></template></span><em $html="$incoming"></em><aside .textContent="$incoming"></aside><input type="text" .value="$incoming"><div .title="$incoming"></div></section></template>`;
 const modeReading = `<template component="x-mode-reading" status="early" summary="Selected reading."><defs>
   <prop name="mode" type="keyword" values="text, number" default="number">Reading mode.</prop>
   <prop name="value">Value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-</defs><output from:data-mode="mode" from:data-value="value">Reading</output></template>`;
+</defs><output from:data-mode="$mode" from:data-value="$value">Reading</output></template>`;
 const modeOwner = `<template component="x-mode-owner" status="early" summary="Selected reading owner."><defs>
   <prop name="mode" type="keyword" values="text, number" default="number">Reading mode.</prop>
   <prop name="incoming">Incoming value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-</defs><section><x-mode-reading from:value="incoming" from:mode="mode"></x-mode-reading><x-reading from:amount="incoming"></x-reading></section></template>`;
+</defs><section><x-mode-reading from:value="$incoming" from:mode="$mode"></x-mode-reading><x-reading from:amount="$incoming"></x-reading></section></template>`;
 import { stateSelectedReading as stateReading } from "./fixtures/state-selected-reading.js";
 
 async function observe(page: Page) {

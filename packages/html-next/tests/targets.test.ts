@@ -75,22 +75,22 @@ const featureSource = `<template component="x-feature" status="experimental" sum
     <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
     <state type="boolean" name="open" value="false"></state>
     <state type="string" name="query" value=""></state>
-    <computed name="count" from="items.length"></computed>
+    <computed name="count" from="$items.length"></computed>
     <event name="toggle" type="object({ open: boolean })"></event>
-    <handler name="flip"><set name="open" expr:value="not open"></set><dispatch event="toggle" expr:value="{ open: open }"></dispatch></handler>
+    <handler name="flip"><set name="open" expr:value="not $open"></set><dispatch event="toggle" expr:value="{ open: $open }"></dispatch></handler>
   </defs>
-  <section class="panel" class:compact="size = 'sm'" style:--gap="size">
-    <h2 $value="label"></h2>
+  <section class="panel" class:compact="$size = 'sm'" style:--gap="$size">
+    <h2 $value="$label"></h2>
     <input $ref="search" bind:value="query">
-    <button type="button" on:click="flip"><template $value="open"></template></button>
-    <ul $if="open">
-      <li $each="item, index of items" $key="item.id" $where="item.done" $sort="name"><span $value="item.name"></span></li>
+    <button type="button" on:click="flip"><template $value="$open"></template></button>
+    <ul $if="$open">
+      <li $each="item, index of $items" $key="$item.id" $where="$item.done" $sort="name"><span $value="$item.name"></span></li>
     </ul>
     <template $match>
-      <small $when="size = 'sm'">small</small>
+      <small $when="$size = 'sm'">small</small>
       <span $else>regular</span>
     </template>
-    <x-badge from:tone="size"><slot name="badge">none</slot></x-badge>
+    <x-badge from:tone="$size"><slot name="badge">none</slot></x-badge>
     <slot></slot>
   </section>
   <style>
@@ -109,7 +109,7 @@ describe("official target compilers", () => {
       const inline = text !== undefined;
       const definition = parseComponent(`<template component="x-row-text"><defs>
         <state name="rows" type="list(object({ id: number, label: string, note: unknown, missing?: string }))" value="[{ id: 1, label: 'Ada', note: null }, { id: 2, label: 'Bea', note: '?' }]"></state>
-        </defs><ul><li $each="row of rows"><span${inline ? "" : ' $value="row.label"'}>${text ?? ""}</span></li></ul></template>`);
+        </defs><ul><li $each="row of $rows"><span${inline ? "" : ' $value="$row.label"'}>${text ?? ""}</span></li></ul></template>`);
       const source = generateVueComponent(definition);
       if (text === "{$row.label}") assert.equal(source, valueSource, "inline paths and $value must emit identical Vue code");
       else if (!inline) valueSource = source;
@@ -228,7 +228,7 @@ describe("official target compilers", () => {
       const outputs = generated(`<template component="x-dependent"><defs>
         <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
         ${declaration}
-      </defs><input from:type="type" from:value="value"></template>`);
+      </defs><input from:type="$type" from:value="$value"></template>`);
       const vue = outputs.get("vue/XDependent.vue")!;
       const vanilla = outputs.get("vanilla/XDependent.d.ts")!;
       compileVue(vue, "XDependent.vue");
@@ -269,8 +269,8 @@ describe("official target compilers", () => {
     const outputs = generated(`<template component="x-state-dependent"><defs>
       <state name="mode" type="keyword" values="text, number" value="text"></state>
       <prop name="value">Value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-      <handler name="toggle"><set name="mode" expr:value="mode = 'text' ? 'number' : 'text'"></set></handler>
-    </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>`);
+      <handler name="toggle"><set name="mode" expr:value="$mode = 'text' ? 'number' : 'text'"></set></handler>
+    </defs><button from:data-value="$value" on:click="toggle">Toggle</button></template>`);
     const vue = outputs.get("vue/XStateDependent.vue")!;
     const vanilla = outputs.get("vanilla/XStateDependent.d.ts")!;
     compileVue(vue, "XStateDependent.vue");
@@ -284,7 +284,7 @@ describe("official target compilers", () => {
       <state name="count" type="number" value="2"></state>
       <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
       <state name="index" type="integer" value="0"></state>
-      <handler name="badNumber"><set name="count" expr:value="concat(count)"></set></handler>
+      <handler name="badNumber"><set name="count" expr:value="concat($count)"></set></handler>
       <handler name="badField"><set name="items[$index].name" expr:value="7"></set></handler>
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
@@ -308,7 +308,7 @@ describe("official target compilers", () => {
       "x-optional",
       `<prop name="label" type="string">Label.</prop><prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
-      '<p from:data-label="label" from:data-size="size" from:data-count="count"></p>',
+      '<p from:data-label="$label" from:data-size="$size" from:data-count="$count"></p>',
     )).get("vue/XOptional.vue")!;
     // Vue applies defaults before exposing resolved props, including the implicit null default.
     assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
@@ -345,7 +345,7 @@ describe("official target compilers", () => {
   it("types scalar concat output as text while preserving invalid-call results", async () => {
     const vue = generated(`<template component="x-concat-types">
       <defs><prop name="label" type="string">Label.</prop></defs>
-      <div from:aria-label="concat(label, 1)">{$label}</div>
+      <div from:aria-label="concat($label, 1)">{$label}</div>
     </template>`).get("vue/XConcatTypes.vue")!;
     const checked = vue.replace("</script>", `
 const scalar: string | undefined = concat('Label ', 1, true, null, undefined);
@@ -377,7 +377,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const outputs = generated(componentSource(
       "x-field",
       '<prop name="value" type="string">Value.</prop>',
-      '<input from:value="value">',
+      '<input from:value="$value">',
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
@@ -388,7 +388,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
-    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
+    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="$value"><slot></slot></select>')).get("vue/XChoice.vue")!;
     assert.match(select, /<select\s+data-component="x-choice"/);
     assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
@@ -400,7 +400,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "x-native-control-primitives",
       '<prop name="value" type="string">Value.</prop><prop name="selected" type="boolean">Selected.</prop>',
-      '<div><input class="property" .value="value" value="authored"><input class="attribute" from:value="value"><input type="checkbox" from:checked="selected"></div>',
+      '<div><input class="property" .value="$value" value="authored"><input class="attribute" from:value="$value"><input type="checkbox" from:checked="$selected"></div>',
     )).get("vue/XNativeControlPrimitives.vue")!;
     compileVue(vue, "XNativeControlPrimitives.vue");
     assert.match(vue, /<input\s+class="property"\s+v-bind-control="\{[\s\S]*?value: checkedProps\.value,[\s\S]*?nativeProperty: true,[\s\S]*?defaultValue: 'authored',[\s\S]*?\}"/);
@@ -413,7 +413,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
     const vue = generated(`<template component="x-row-list"><defs>` +
       '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
-      '<ul><slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"><li $value="row.name"></li></slot></ul></template>')
+      '<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"><li $value="$row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
@@ -423,7 +423,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("converts a consumer's scoped-slot template with its lexical state", () => {
     const vue = generated(`<template component="x-consumer"><defs><state name="heading" type="string" value="People"></state></defs>` +
-      `<section><x-row-list><template slot="row"><b $value="item.name"></b><i $value="heading"></i></template></x-row-list></section></template>`)
+      `<section><x-row-list><template slot="row"><b $value="$item.name"></b><i $value="$heading"></i></template></x-row-list></section></template>`)
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
@@ -435,7 +435,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "x-both",
       '<prop name="a" type="boolean" default="false">A.</prop><prop name="b" type="boolean" default="false">B.</prop>',
-      '<button from:hidden="a and b" from:title="a" from:data-b="b"></button>',
+      '<button from:hidden="$a and $b" from:title="$a" from:data-b="$b"></button>',
     )).get("vue/XBoth.vue")!;
     compileVue(vue, "XBoth.vue");
     assert.match(vue, /:hidden="checkedProps\.a && checkedProps\.b"/);
@@ -446,7 +446,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const outputs = generated(componentSource(
       "x-aria",
       '<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop>',
-      '<button from:aria-expanded="open" from:hidden="gone"></button>',
+      '<button from:aria-expanded="$open" from:hidden="$gone"></button>',
     ));
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
@@ -505,7 +505,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("reads a typed state list's items plainly while checking its keys", () => {
     const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
       `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" value="[]"></state></defs>` +
-      `<div><button $each="tab of tabs" $key="tab.id" from:id="tab.id" from:aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
+      `<div><button $each="tab of $tabs" $key="$tab.id" from:id="$tab.id" from:aria-selected="$tab.active" class:active="$tab.active"><template $value="$tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
@@ -518,7 +518,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
       `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" ></state>` +
       `<state name="issues" type="list(object({ message: string }))" value="[]"></state></defs>` +
-      `<div><span $if="hovered" from:title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
+      `<div><span $if="$hovered" from:title="$hovered.label"></span><p $if="not $issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
@@ -550,7 +550,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       const vue = generated(
         `<template component="x-row" status="experimental" summary="A target compiler fixture."${controller}>` +
         `<defs><prop name="label" type="string" default="">Row label.</prop></defs>` +
-        `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
+        `<div><h2 $value="$label"></h2><span><slot name="label"><template $value="$label"></template></slot></span></div></template>`,
       ).get("vue/XRow.vue")!;
       compileVue(vue, "XRow.vue");
       assert.match(vue, /<h2>\{\{ checkedProps\.label \}\}<\/h2>/, `${controller}: element text`);
@@ -562,7 +562,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(
       `<template component="x-choice" status="experimental" summary="A target compiler fixture.">` +
       `<defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>` +
-      `<select from:disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
+      `<select from:disabled="$disabled"><option value="">None</option><slot></slot></select></template>`,
     ).get("vue/XChoice.vue")!;
     compileVue(vue, "XChoice.vue");
     assert.match(vue, /<select[^>]*>\n\s+<option value="">None<\/option>\n\s+<slot \/>\n\s+<\/select>/);
@@ -572,7 +572,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "demo-anchor",
       `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
-      `<div from:data-edge="anchor"></div>`,
+      `<div from:data-edge="$anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
     assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
@@ -588,8 +588,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>
   </defs>
   <template $match>
-    <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
-    <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
+    <a $when="$as = 'a'" class="action" from:href="{ true: null, false: $href }[concat($disabled)]" from:data-tags="$tags" from:data-space-tags="$spaceTags" $ref="control"><slot></slot></a>
+    <button $else class="action" type="button" from:disabled="$disabled" $ref="control"><slot></slot></button>
   </template>
   <style>:host { display: inline-flex; }</style>
 </template>`);
@@ -643,17 +643,17 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
       `<prop name="as" type="keyword" values="a, b" default="a">Kind.</prop>`,
-      `<section $match from:data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
+      `<section $match from:data-as="$as"><p $when="$as = 'a'">A</p><p $else>B</p></section>`,
     )));
     assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);
     assert.throws(() => generateVueComponent(parseComponent(componentSource(
       "x-guarded",
       '<prop name="show" type="boolean" default="true">Show.</prop>',
-      `<section $if="show" from:data-show="show">Visible</section>`,
+      `<section $if="$show" from:data-show="$show">Visible</section>`,
     ))), /HT021/);
     // $html is supported through a generated, feature-specific sanitizer helper.
     const source = `<template component="demo-html" status="experimental" summary="Html.">
-      <defs><state name="markup" type="string" value="<b>x</b>"></state></defs><div $html="markup"></div></template>`;
+      <defs><state name="markup" type="string" value="<b>x</b>"></state></defs><div $html="$markup"></div></template>`;
     const artifacts = generated(source);
     assert.match(artifacts.get("vue/DemoHtml.vue")!, /from '\.\/html'/);
     assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
@@ -700,11 +700,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <state type="number" name="count" value="0"></state>
         <handler name="increment">
-          <set name="count" expr:value="count + 1"></set>
-          <set name="count" expr:value="count + 1"></set>
+          <set name="count" expr:value="$count + 1"></set>
+          <set name="count" expr:value="$count + 1"></set>
         </handler>
       </defs>
-      <button type="button" on:click="increment"><output $value="count"></output></button>
+      <button type="button" on:click="increment"><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoCounter.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -720,14 +720,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <state type="number" name="left" value="1"></state>
         <state type="number" name="right" value="10"></state>
-        <computed name="left1" from="left + 1"></computed>
-        <computed name="left2" from="left1 + 1"></computed>
-        <computed name="left3" from="left2 + 1"></computed>
-        <computed name="total" from="left3 + right"></computed>
-        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+        <computed name="left1" from="$left + 1"></computed>
+        <computed name="left2" from="$left1 + 1"></computed>
+        <computed name="left3" from="$left2 + 1"></computed>
+        <computed name="total" from="$left3 + $right"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="$left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="$right + 1"></set></handler>
       </defs>
-      <section><button on:click="increaseLeft"><output $value="left3"></output></button><button on:click="increaseRight"><output $value="total"></output></button></section>
+      <section><button on:click="increaseLeft"><output $value="$left3"></output></button><button on:click="increaseRight"><output $value="$total"></output></button></section>
     </template>`).get("vanilla/DemoSplit.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -743,14 +743,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <state type="number" name="left" value="1"></state>
         <state type="number" name="right" value="10"></state>
-        <computed name="visible" from="right + 1"></computed>
-        <computed name="unused1" from="left + 1"></computed>
-        <computed name="unused2" from="unused1 + 1"></computed>
-        <computed name="unused3" from="unused2 + 1"></computed>
-        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+        <computed name="visible" from="$right + 1"></computed>
+        <computed name="unused1" from="$left + 1"></computed>
+        <computed name="unused2" from="$unused1 + 1"></computed>
+        <computed name="unused3" from="$unused2 + 1"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="$left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="$right + 1"></set></handler>
       </defs>
-      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="visible"></output></button></section>
+      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="$visible"></output></button></section>
     </template>`).get("vanilla/DemoLive.js")!;
 
     assert.match(module, /computed2/);
@@ -765,10 +765,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-round" status="experimental" summary="Rounded direct value.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="bucket"></output></button>
+      <button on:click="advance"><output $value="$bucket"></output></button>
     </template>`).get("vanilla/DemoRound.js")!;
 
     assert.match(module, /let rendered0 = computed1/);
@@ -780,10 +780,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-mixed" status="experimental" summary="Mixed direct value.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
+      <button on:click="advance"><output $value="$position"></output><output $value="$bucket"></output></button>
     </template>`).get("vanilla/DemoMixed.js")!;
 
     assert.doesNotMatch(module, /rendered0/);
@@ -796,10 +796,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-data" status="experimental" summary="Direct data binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:data-bucket="$bucket"><output $value="$position"></output></button>
     </template>`).get("vanilla/DemoData.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -812,10 +812,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-aria" status="experimental" summary="Direct ARIA binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
+      <button on:click="advance" role="progressbar" from:aria-valuenow="$position" from:aria-valuetext="$bucket"><output $value="$position"></output></button>
     </template>`).get("vanilla/DemoAria.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -828,10 +828,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-title" status="experimental" summary="Direct HTML attribute binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" from:title="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:title="$bucket"><output $value="$position"></output></button>
     </template>`).get("vanilla/DemoTitle.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -843,10 +843,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-value" status="experimental" summary="Direct HTML property binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><input type="number" .value="bucket"><output $value="position"></output></button>
+      <button on:click="advance"><input type="number" .value="$bucket"><output $value="$position"></output></button>
     </template>`).get("vanilla/DemoValue.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -858,10 +858,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-toggle" status="experimental" summary="Direct primitive toggle.">
       <defs>
         <state type="boolean" name="open" value="false"></state>
-        <computed name="closed" from="not open"></computed>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <computed name="closed" from="not $open"></computed>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+      <button on:click="toggle" from:aria-expanded="$open" from:hidden="$closed"><input type="checkbox" .checked="$open"><output $value="$closed"></output></button>
     </template>`).get("vanilla/DemoToggle.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -876,9 +876,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-class-toggle" status="experimental" summary="Direct primitive class toggle.">
       <defs>
         <state type="boolean" name="open" value="false"></state>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" class:open="open"><output $value="open"></output></button>
+      <button on:click="toggle" class:open="$open"><output $value="$open"></output></button>
     </template>`).get("vanilla/DemoClassToggle.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -890,9 +890,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-style-counter" status="experimental" summary="Direct primitive style counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment" style:--count="count"><output $value="count"></output></button>
+      <button on:click="increment" style:--count="$count"><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoStyleCounter.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -904,9 +904,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-svg-style-counter" status="experimental" summary="Direct primitive SVG style counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
+      <button on:click="increment"><svg style:--count="$count"><text>Chart</text></svg><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoSvgStyleCounter.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -917,7 +917,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles direct text input bindings with the native dirty-value guard", async () => {
     const module = generated(`<template component="demo-bound-text" status="experimental" summary="Direct native text binding.">
       <defs><state type="string" name="draft" value="Ready"></state></defs>
-      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
+      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="$draft"></output></section>
     </template>`).get("vanilla/DemoBoundText.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -929,7 +929,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("keeps numeric two-way controls on the live runtime", () => {
     const module = generated(`<template component="demo-bound-number" status="experimental" summary="Numeric binding fallback.">
       <defs><state type="number" name="count" value="0"></state></defs>
-      <section><input type="number" bind:value="count"><output $value="count"></output></section>
+      <section><input type="number" bind:value="count"><output $value="$count"></output></section>
     </template>`).get("vanilla/DemoBoundNumber.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -938,7 +938,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles direct checkbox bindings with native checked synchronization", async () => {
     const module = generated(`<template component="demo-bound-check" status="experimental" summary="Direct native checkbox binding.">
       <defs><state type="boolean" name="done" value="false"></state></defs>
-      <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
+      <section><input type="checkbox" bind:checked="done"><output $value="$done"></output></section>
     </template>`).get("vanilla/DemoBoundCheck.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -950,7 +950,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("keeps radio two-way controls on the live runtime", () => {
     const module = generated(`<template component="demo-bound-radio" status="experimental" summary="Radio binding fallback.">
       <defs><state type="boolean" name="selected" value="false"></state></defs>
-      <section><input type="radio" bind:checked="selected"><output $value="selected"></output></section>
+      <section><input type="radio" bind:checked="selected"><output $value="$selected"></output></section>
     </template>`).get("vanilla/DemoBoundRadio.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -959,7 +959,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles direct textarea and single-select bindings", async () => {
     const module = generated(`<template component="demo-bound-choice" status="experimental" summary="Direct native choice bindings.">
       <defs><state type="string" name="choice" value="one"></state></defs>
-      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="$choice"></output></section>
     </template>`).get("vanilla/DemoBoundChoice.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -971,7 +971,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("keeps multi-select bindings on the live runtime", () => {
     const module = generated(`<template component="demo-bound-many" status="experimental" summary="Multi-select binding fallback.">
       <defs><state type="string" name="choice" value="one"></state></defs>
-      <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+      <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="$choice"></output></section>
     </template>`).get("vanilla/DemoBoundMany.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -980,7 +980,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles direct range bindings with native numeric synchronization", async () => {
     const module = generated(`<template component="demo-bound-range" status="experimental" summary="Direct native range binding.">
       <defs><state type="number" name="position" value="0"></state></defs>
-      <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
+      <section><input type="range" min="0" max="100" bind:value="position"><output $value="$position"></output></section>
     </template>`).get("vanilla/DemoBoundRange.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -991,8 +991,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles static prevent and stop handlers with native event calls", async () => {
     const module = generated(`<template component="demo-event-modifier" status="experimental" summary="Direct native event modifiers.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.prevent.stop="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.prevent.stop="increment"><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoEventModifier.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1003,8 +1003,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles static self handlers with a native target identity guard", async () => {
     const module = generated(`<template component="demo-event-self" status="experimental" summary="Direct native self modifier.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.self="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoEventSelf.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1014,8 +1014,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles static filtered handlers with native event guards", async () => {
     const module = generated(`<template component="demo-event-filter" status="experimental" summary="Direct native event filter.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoEventFilter.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1030,8 +1030,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles static capture and passive listeners with native options", async () => {
     const module = generated(`<template component="demo-event-options" status="experimental" summary="Direct native event options.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoEventOptions.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1042,8 +1042,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles static once listeners through the generated lifecycle coordinator", async () => {
     const module = generated(`<template component="demo-event-once" status="experimental" summary="Native once fallback.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoEventOnce.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1067,7 +1067,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
         <state type="number" name="count" value="0"></state>
-        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
+        <handler name="save"><set name="count" expr:value="$count + 1"></set><dispatch event="saved" expr:value="$count"></dispatch></handler>
       </defs>
       <button on:click="save">Save</button>
     </template>`).get("vanilla/DemoEventDispatch.js")!;
@@ -1096,9 +1096,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         <event name="saved" type="number"></event>
         <state type="boolean" name="enabled" value="true"></state>
         <state type="number" name="count" value="0"></state>
-        <handler name="advance"><set name="count" expr:value="count + 1" $if="enabled"></set><dispatch event="saved" expr:value="count" $if="enabled"></dispatch><set name="enabled" expr:value="not enabled"></set></handler>
+        <handler name="advance"><set name="count" expr:value="$count + 1" $if="$enabled"></set><dispatch event="saved" expr:value="$count" $if="$enabled"></dispatch><set name="enabled" expr:value="not $enabled"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="count"></output></button>
+      <button on:click="advance"><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoGuardedHandler.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1114,10 +1114,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <state type="number" name="count" value="0"></state>
         <state type="number" name="hits" value="0"></state>
-        <computed name="even" from="count % 2 = 0"></computed>
-        <handler name="advance"><set name="count" expr:value="count + 1"></set><set name="hits" expr:value="hits + 1" $if="even"></set></handler>
+        <computed name="even" from="$count % 2 = 0"></computed>
+        <handler name="advance"><set name="count" expr:value="$count + 1"></set><set name="hits" expr:value="$hits + 1" $if="$even"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="count"></output><output $value="hits"></output></button>
+      <button on:click="advance"><output $value="$count"></output><output $value="$hits"></output></button>
     </template>`).get("vanilla/DemoComputedGuard.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1129,9 +1129,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-ref-action" status="experimental" summary="Direct static ref action.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="count"></output></section>
+      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="$count"></output></section>
     </template>`).get("vanilla/DemoRefAction.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1142,8 +1142,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles dependency-free primitive `$value` beside dynamic direct output", async () => {
     const module = generated(`<template component="demo-literal-text" status="experimental" summary="Direct literal text.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoLiteralText.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1153,8 +1153,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("compiles dependency-free primitive native bindings beside dynamic direct output", async () => {
     const module = generated(`<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="$count"></output></button></section>
     </template>`).get("vanilla/DemoLiteralNative.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1173,11 +1173,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         <event name="saved" type="string"></event>
         <state type="number" name="count" value="0"></state>
         <computed name="prefix" from="'Ready'"></computed>
-        <computed name="label" from="concat(prefix, '!')"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-        <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
+        <computed name="label" from="concat($prefix, '!')"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+        <handler name="save"><dispatch event="saved" expr:value="$label"></dispatch></handler>
       </defs>
-      <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
+      <section from:data-status="$label" class:ready="$label = 'Ready!'" style:--label="$prefix"><input .value="$label"><output class="status" $value="$label"></output><button on:click="increment"><output $value="$count"></output></button><button on:click="save">Save</button></section>
     </template>`).get("vanilla/DemoStaticComputed.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1195,10 +1195,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
         <state type="number" name="count" value="0"></state>
-        <computed name="savedValue" from="count * 2"></computed>
-        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="savedValue"></dispatch></handler>
+        <computed name="savedValue" from="$count * 2"></computed>
+        <handler name="save"><set name="count" expr:value="$count + 1"></set><dispatch event="saved" expr:value="$savedValue"></dispatch></handler>
       </defs>
-      <button on:click="save">Save <output $value="savedValue"></output></button>
+      <button on:click="save">Save <output $value="$savedValue"></output></button>
     </template>`).get("vanilla/DemoComputedEventDispatch.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1212,9 +1212,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-inline-expression" status="experimental" summary="Direct inline text expression.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="count + 1"></output></button>
+      <button on:click="increment"><output $value="$count + 1"></output></button>
     </template>`).get("vanilla/DemoInlineExpression.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1226,9 +1226,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-inline-attributes" status="experimental" summary="Direct inline native expressions.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+      <section from:data-count="$count + 1" class:zero="$count = 0" style:--count="$count + 1"><button on:click="increment">Advance</button><input type="number" .value="$count + 1"></section>
     </template>`).get("vanilla/DemoInlineAttributes.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1243,7 +1243,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-static-directive" status="experimental" summary="Static directive text.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="'fixed'"></output></button>
     </template>`).get("vanilla/DemoStaticDirective.js")!;
@@ -1257,9 +1257,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-inert" status="experimental" summary="Typed direct primitive fallback.">
       <defs>
         <state name="open" type="string" value="false"></state>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" from:aria-expanded="open"><output $value="open"></output></button>
+      <button on:click="toggle" from:aria-expanded="$open"><output $value="$open"></output></button>
     </template>`).get("vanilla/DemoInert.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1267,8 +1267,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("guards direct mutable numeric state against non-finite writes", () => {
     const module = generated(`<template component="demo-typed-number" status="experimental" summary="Typed numeric state.">
-      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler></defs>
-      <button on:click="divide"><output $value="count"></output></button>
+      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="$count / 0"></set></handler></defs>
+      <button on:click="divide"><output $value="$count"></output></button>
     </template>`).get("vanilla/DemoTypedNumber.js")!;
 
     assert.match(module, /Number\.isFinite\(next0\)/);
@@ -1279,9 +1279,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <state name="query" type="string" value="first"></state>
       <state name="token" type="string" value="a"></state>
       <data name="result" src="/api/search" type="string">
-        <param name="q" from:value="query"></param>
-        <param name="token" expr:value="token"></param>
-      </data></defs><output $value="result.value"></output></template>`).get("vue/XParamModes.vue")!;
+        <param name="q" from:value="$query"></param>
+        <param name="token" expr:value="$token"></param>
+      </data></defs><output $value="$result.value"></output></template>`).get("vue/XParamModes.vue")!;
     compileVue(vue, "XParamModes.vue");
     assert.match(vue, /sources: \(\) => \[query\.value\]/);
     assert.match(vue, /parameters: \(\) => \(\{ q: query\.value, token: token\.value \}\)/);
@@ -1289,8 +1289,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("includes set value dependencies even when they are not rendered", async () => {
     const module = generated(`<template component="demo-set-input" status="experimental" summary="Set input dependency.">
-      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="count + 1"></set></handler></defs>
-      <button on:click="save"><output $value="snapshot"></output></button>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="$count + 1"></set></handler></defs>
+      <button on:click="save"><output $value="$snapshot"></output></button>
     </template>`).get("vanilla/DemoSetInput.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1301,8 +1301,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("refreshes a computed before a later set reads it", async () => {
     const module = generated(`<template component="demo-sequential-sets" status="experimental" summary="Sequential sets.">
-      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" expr:value="count + 1"></set><set name="snapshot" expr:value="double"></set></handler></defs>
-      <button on:click="advance"><output $value="snapshot"></output></button>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="$count * 2"></computed><handler name="advance"><set name="count" expr:value="$count + 1"></set><set name="snapshot" expr:value="$double"></set></handler></defs>
+      <button on:click="advance"><output $value="$snapshot"></output></button>
     </template>`).get("vanilla/DemoSequentialSets.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1314,11 +1314,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const source = `<template component="demo-initial-order" status="experimental" summary="State initialization order fallback.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="derived" from="count + 1"></computed>
-        <state name="snapshot" from:value="derived"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="derived" from="$count + 1"></computed>
+        <state name="snapshot" from:value="$derived"></state>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="snapshot"></output></button>
+      <button on:click="increment"><output $value="$snapshot"></output></button>
     </template>`;
 
     assert.throws(() => generated(source), /uses a literal `value`/);
@@ -1331,7 +1331,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         <handler name="showOne"><set name="tab" expr:value="'one'"></set></handler>
         <handler name="showTwo"><set name="tab" expr:value="'two'"></set></handler>
       </defs>
-      <section from:data-tab="tab" from:title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+      <section from:data-tab="$tab" from:title="$tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="$tab"><output $value="$tab"></output></section>
     </template>`).get("vanilla/DemoTabs.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1347,7 +1347,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         <state type="string" name="destination" value="/start"></state>
         <handler name="change"><set name="destination" expr:value="'javascript:alert(1)'"></set></handler>
       </defs>
-      <a on:click="change" from:href="destination"><output $value="destination"></output></a>
+      <a on:click="change" from:href="$destination"><output $value="$destination"></output></a>
     </template>`).get("vanilla/DemoLink.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1357,10 +1357,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-label" status="experimental" summary="Direct formatted label.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="concat('Step ', count)"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="label" from="concat('Step ', $count)"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
+      <button on:click="increment" from:aria-label="$label"><input .value="$label"><output $value="$label"></output></button>
     </template>`).get("vanilla/DemoLabel.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1372,10 +1372,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="concat(count, '/%s')"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="label" from="concat($count, '/%s')"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="label"></output></button>
+      <button on:click="increment"><output $value="$label"></output></button>
     </template>`).get("vanilla/DemoMissingFormat.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1386,9 +1386,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-svg-bound" status="experimental" summary="Bound SVG attribute.">
       <defs>
         <state type="number" name="size" value="24"></state>
-        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
+        <handler name="grow"><set name="size" expr:value="$size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg from:viewBox="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:viewBox="$size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgBound.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1398,9 +1398,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-svg-data" status="experimental" summary="Direct SVG data binding.">
       <defs>
         <state type="number" name="size" value="24"></state>
-        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
+        <handler name="grow"><set name="size" expr:value="$size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg from:data-size="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:data-size="$size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgData.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -1412,7 +1412,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-label",
       `<prop name="label" type="string" default="Ready">Label.</prop>`,
-      `<output from:data-label="label"><span $value="label"></span></output>`,
+      `<output from:data-label="$label"><span $value="$label"></span></output>`,
     )).get("vanilla/DemoLabel.js")!;
 
     assert.match(module, /html-next\/generated-runtime/);
@@ -1425,7 +1425,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-prop-value",
       `<prop name="value" type="number" default="1">Value.</prop>`,
-      `<input type="number" .value="value">`,
+      `<input type="number" .value="$value">`,
     )).get("vanilla/DemoPropValue.js")!;
 
     assert.match(module, /manageGeneratedProp\(/);
@@ -1438,7 +1438,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-prop-values",
       `<prop name="value" type="number" default="1">Value.</prop><prop name="label" type="string" default="Ready">Label.</prop>`,
-      `<section><input type="number" .value="value" from:data-label="label"></section>`,
+      `<section><input type="number" .value="$value" from:data-label="$label"></section>`,
     )).get("vanilla/DemoPropValues.js")!;
 
     assert.match(module, /@nextwebwg\/html-next\/runtime/);
@@ -1448,7 +1448,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-icon",
       `<prop name="label" type="string" default="Close">Label.</prop>`,
-      `<button from:aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path>` +
+      `<button from:aria-label="$label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path>` +
         `<foreignObject><span>html</span></foreignObject></svg></button>`,
     )).get("vanilla/DemoIcon.js")!;
 
@@ -1464,7 +1464,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-link",
       `<prop name="target" type="string" default="https://example.test">Target.</prop>`,
-      `<a from:href="target"><slot></slot></a>`,
+      `<a from:href="$target"><slot></slot></a>`,
     )).get("vanilla/DemoLink.js")!;
 
     assert.match(module, /html-next\/runtime/);
@@ -1474,7 +1474,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles a read-only primitive reactive leaf without the full runtime", async () => {
     const module = generated(`<template component="demo-derived" status="experimental" summary="Derived output.">
       <defs><state type="number" name="count" value="0"></state></defs>
-      <output $value="count + 1"></output>
+      <output $value="$count + 1"></output>
     </template>`).get("vanilla/DemoDerived.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);

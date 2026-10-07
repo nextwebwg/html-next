@@ -17,10 +17,10 @@ const source = `<template component="ssr-connected" controller="./controller.js"
   <state name="query" type="number" value="1"></state>
   <state name="text" type="string" value="'initial'"></state>
   <state name="derived" type="number" value="0"></state>
-  <data name="result" src="./data"><param name="query" from:value="query"></param></data>
+  <data name="result" src="./data"><param name="query" from:value="$query"></param></data>
   </defs><section><h2><slot name="title">Untitled</slot></h2><button $ref="button" type="button">Next</button>
-  <output $ref="count" $value="count"></output><b $value="derived"></b><input bind:value="text" value="authored">
-  <p $if="result.pending">Loading</p><div $if="result.ok" $value="result.value.label"></div><slot></slot>
+  <output $ref="count" $value="$count"></output><b $value="$derived"></b><input bind:value="text" value="authored">
+  <p $if="$result.pending">Loading</p><div $if="$result.ok" $value="$result.value.label"></div><slot></slot>
   </section></template>`;
 const authored = '<ssr-connected id="subject" step="2"><strong slot="title">Title</strong>Body</ssr-connected>';
 const controller = `export default function(host) {

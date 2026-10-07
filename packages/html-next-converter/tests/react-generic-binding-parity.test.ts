@@ -16,10 +16,10 @@ import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pi
 
 const field = `<template component="x-field" status="early" summary="Text field."><defs>
   <prop name="value" type="string" default="">Value.</prop>
-</defs><input type="text" from:value="value"></template>`;
+</defs><input type="text" from:value="$value"></template>`;
 const form = `<template component="x-form" status="early" summary="Generic binding."><defs>
   <state name="name" value="Ada"></state>
-</defs><section><x-field bind:value="name"></x-field><output bind:value="name"></output><span $value="name"></span></section>
+</defs><section><x-field bind:value="name"></x-field><output bind:value="name"></output><span $value="$name"></span></section>
 <style>:host { display: block; padding: 4px; font: 16px/24px Arial, sans-serif; }</style></template>`;
 
 async function snapshot(page: Page) {

@@ -1235,22 +1235,24 @@ function renderAttributes(
       });
       continue;
     }
-    const prop = props[attribute.expression];
+    // Only a direct `$prop` reference reaches this prop-binding path.
+    const propName = attribute.expressionPlan?.ast.kind === "id" ? attribute.expressionPlan.ast.name : "";
+    const prop = props[propName];
     if (prop === undefined) continue;
-    const directProp = directProps?.plan.props.get(attribute.expression);
-    const expression = directProp?.variable ?? `componentProps[${js(attribute.expression)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "null"} : componentProps[${js(attribute.expression)}]`;
+    const directProp = directProps?.plan.props.get(propName);
+    const expression = directProp?.variable ?? `componentProps[${js(propName)}] === undefined ? ${"default" in prop ? JSON.stringify(prop.default) : "null"} : componentProps[${js(propName)}]`;
     if (directProp !== undefined && attribute.kind === "property") {
       directProps!.bindings.push({
         element: variable,
-        prop: attribute.expression,
+        prop: propName,
         kind: "property",
         name: attribute.name,
       });
     } else if (directProp !== undefined && attribute.kind === "attribute" &&
-      (variable !== "element" || attribute.name !== `data-${kebabCase(attribute.expression)}`)) {
+      (variable !== "element" || attribute.name !== `data-${kebabCase(propName)}`)) {
       directProps!.bindings.push({
         element: variable,
-        prop: attribute.expression,
+        prop: propName,
         kind: "attribute",
         name: attribute.name,
       });

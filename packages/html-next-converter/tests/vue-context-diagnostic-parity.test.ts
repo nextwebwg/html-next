@@ -15,7 +15,7 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-context-reader" status="early" summary="Context reader."><defs>
   <context name="current" from="x-steps"></context>
-</defs><span $value="current"></span></template>`;
+</defs><span $value="$current"></span></template>`;
 
 type Diagnostic = { readonly name: string; readonly code: string | null; readonly message: string };
 
