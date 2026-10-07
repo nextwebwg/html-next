@@ -54,7 +54,8 @@ authored .html ──parse──▶ ComponentDefinition ──generateVanilla(�
   type, with shared traps. The template render is one priority-1 job on the instance's
   `ReactiveScheduler`, between controller computeds and effects, and controller effects use the
   reactivity dependency graph through `trackProperty`, `notifyPropertySet` and
-  `notifyPropertyDelete` (factored out of the live reactive traps). The factory renders initial
+  `notifyPropertyDelete`, which repeat the live reactive traps' bodies on raw targets. The traps keep
+  their own inline copies, so runtime bundles do not grow. The factory renders initial
   state at construction, calls the controller's default export on first connect, pauses on
   disconnect and re-renders everything on reconnect, as the live runtime does.
 - **Lifecycle coordinator.** Every document has one coordinator slot, shared by the live runtime and
@@ -174,13 +175,13 @@ Hydration adoption of server markup stays with the live runtime by design.
 
 | Measure | Size |
 | --- | ---: |
-| Benchmark entry through Vite with the option (unplugin test build, gzip-6, controller included) | 8,044 B (21,495 B raw) |
-| Same entry, general-runtime fallback | 38,939 B (126,392 B raw) |
-| Benchmark harness Vite entry with `--direct-extend` (ES2022 target, gzip-6) | 8,292 B (22,165 B raw) |
-| Same harness entry without the option | 39,248 B (127,066 B raw) |
-| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 7,528 B |
+| Benchmark entry through Vite with the option (unplugin test build, gzip-6, controller included) | 8,051 B (21,510 B raw) |
+| Same entry, general-runtime fallback | 39,455 B (128,132 B raw) |
+| Benchmark harness Vite entry with `--direct-extend` (ES2022 target, gzip-6) | 8,299 B (22,180 B raw) |
+| Same harness entry without the option | 39,758 B (128,806 B raw) |
+| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 7,534 B |
 | `prop-button` fixture, output without the option (gzip-9) | 2,044 B (2,045 B on `main`) |
-| Live distributable delta from the reactivity exports (gzip-9) | +32 B |
+| Live distributable and the `keyed`, `data` and `controller` fixtures, against `main` | 0 B (identical minified output) |
 
 Gates: the unplugin test fails the direct benchmark entry above 8,100 B gzip-6, and
 `measure:runtime` fails `controller-keyed` above 7,754 B gzip-9 or when the interpreter, a parser,
