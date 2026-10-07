@@ -69,6 +69,10 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         })).toBe(true);
         await page.locator("button").click();
         await expect.poll(() => page.locator("output").textContent()).toBe("5");
+        await expect.poll(() => page.locator("button").getAttribute("aria-expanded")).toBe("true");
+        expect(await page.locator("button span").textContent()).toBe("5");
+        expect(await page.locator("button").evaluate(element => element.classList.contains("active"))).toBe(true);
+        expect(await page.locator("button").evaluate(element => (element as HTMLElement).style.opacity)).toBe("0.5");
         await page.evaluate(async () => {
           const root = document.querySelector('[data-component="home-page"]')!;
           root.remove(); await new Promise(done => setTimeout(done, 0));
