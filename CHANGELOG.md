@@ -1,8 +1,14 @@
 # Changelog
 
+## 1.0.0-alpha.34
+
+- Every HTML Next package now requires Node `>=22.22.2 <23 || >=24.15 <25` (previously `>=22.13 <23 || >=24 <25`), the Node 22 and 24 releases that jsdom 30 supports. 1.0.0-alpha.33 already uses jsdom 30 for server rendering.
+- A component slotted into a slot that is closed at first render lowers when the slot opens, and a slot that closes and renders again re-inserts the lowered component rather than its raw invocation. Hidden slotted content creates no instance or bindings until a slot renders it.
+
 ## 1.0.0-alpha.33
 
-- Server rendering uses jsdom 30.0.1 (previously 27.4.0). Every HTML Next package now requires Node `>=22.22.2 <23 || >=24.15 <25` (previously `>=22.13 <23 || >=24 <25`), the Node 22 and 24 releases jsdom 30 supports.
+- Simplify the public performance documentation and package READMEs.
+- Server rendering uses jsdom 30.0.1 (previously 27.4.0). jsdom 30 declares Node `^22.22.2 || ^24.15.0`, narrower than HTML Next's `>=22.13 <23 || >=24 <25`.
 - `@nextwebwg/html-next-unplugin` depends on vue-tsc 3.3.12 (previously 3.3.11).
 - Generated React components typecheck in TypeScript 6+ projects that do not declare `*.css`, and the unplugin's generated declarations no longer import stylesheets.
 - `html-next-check`, installed with `@nextwebwg/html-next-unplugin`, checks native, Vue, React, and Svelte component graphs without writing build output. One run reports independent declaration, binding, resource, and backend errors as source links or JSON, for CI and editor adapters to run beside TypeScript.

@@ -6,7 +6,7 @@
 
 Author once. Use native DOM, Vue, React, or Svelte.
 
-[**Get started →**](https://nextwebwg.org/html-next/quick-start) · [Documentation](https://nextwebwg.org/html-next/) · [Performance](https://nextwebwg.org/html-next/performance)
+[**Get started →**](https://nextwebwg.org/html-next/quick-start) · [Documentation](https://nextwebwg.org/html-next/)
 
 [![npm](https://img.shields.io/npm/v/@nextwebwg/html-next?color=245c4f&label=npm)](https://www.npmjs.com/package/@nextwebwg/html-next)
 [![MIT license](https://img.shields.io/badge/license-MIT-245c4f)](https://github.com/nextwebwg/html-next/blob/main/LICENSE)
@@ -14,21 +14,6 @@ Author once. Use native DOM, Vue, React, or Svelte.
 </div>
 
 ---
-
-## Beats Solid, Svelte, Vue, and React in js-framework-benchmark.
-
-HTML Next takes less time overall across the nine keyed rendering workloads in two full benchmark runs.
-
-| Compared with | Less rendering time |
-| --- | ---: |
-| **Solid** | **1.5%** |
-| **Svelte** | **3.9%** |
-| **Vue** | **12.9%** |
-| **React** | **26.2%** |
-
-**8.28 kB gzip. A 23% smaller benchmark bundle than Svelte.** Both sizes include the application and its tree-shaken runtime.
-
-Measured October 7, 2026. Results use the weighted geometric mean of median total durations, summarized across two runs. HTML Next uses its native Vite build; all framework entries use production builds. [See the results, build settings, and raw measurements →](https://nextwebwg.org/html-next/performance)
 
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
 `@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
