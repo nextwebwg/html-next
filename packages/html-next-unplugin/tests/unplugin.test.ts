@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, it } from "vitest";
 import { build } from "vite";
 
@@ -269,6 +270,35 @@ describe("HTML Next unplugin", () => {
     const mixedDirect = await bundle(["list.html", "counter.html"], true);
     assert.equal(mixedDirect.text, mixedRuntime.text);
     assert.deepEqual(mixedDirect.manifest.directExtend, { applied: false, runtimeComponents: ["x-counter"] });
+  });
+
+  it("keeps the direct benchmark entry within its gzip ceiling", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-ceiling-"));
+    temporary.push(root);
+    const fixtures = new URL("../../html-next/tests/fixtures/direct-extend/", import.meta.url);
+    await writeFile(join(root, "benchmark-app.html"), await readFile(new URL("benchmark-app.html", fixtures)));
+    await writeFile(join(root, "controller.js"), await readFile(new URL("benchmark-controller.js", fixtures)));
+    await writeFile(join(root, "main.js"), `import { createBenchmarkApp } from ${JSON.stringify(componentsModule)};\ndocument.body.append(createBenchmarkApp());\n`);
+    await writeFile(join(root, "index.html"), '<!doctype html>\n<script type="module" src="./main.js"></script>\n');
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["benchmark-app.html"], root, manifestFile: false, experimentalDirectExtend: true })],
+      resolve: { alias: {
+        "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+        "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+      } },
+      build: { outDir: join(root, "dist"), modulePreload: { polyfill: false } },
+    });
+    const scripts = (await readdir(join(root, "dist/assets"))).filter((name) => name.endsWith(".js"));
+    assert.equal(scripts.length, 1);
+    const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
+    assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
+    // The M1 receipt for the js-framework-benchmark entry is 8,096 B gzip-6 (controller included), a
+    // ceiling later milestones may not raise; ratchet this down whenever the entry shrinks.
+    const gzip = gzipSync(bundle, { level: 6 }).byteLength;
+    assert.ok(gzip <= 8_150, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {
