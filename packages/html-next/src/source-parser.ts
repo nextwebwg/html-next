@@ -2,9 +2,9 @@ import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 
 import { parseComponentNodes } from "./parser.js";
 import { getDomInterface, resolveDomProperty } from "./platform.js";
-import { fail } from "./diagnostics.js";
+import { fail, recoverDiagnostic, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
 import { isIgnoredResourceMetadata } from "./resource-metadata.js";
-import type { ParsedComponentResource } from "./graph.js";
+import type { DiagnosedComponentResource, ParsedComponentResource } from "./graph.js";
 import type { ComponentDefinition } from "./template.js";
 
 // The HTML Standard parses `<select>` content in the "in body" insertion mode, so a `<slot>` or
@@ -36,6 +36,11 @@ function parseSource(sourceText: string): DefaultTreeAdapterTypes.DocumentFragme
 
 const platform = { isNativeElement: (name: string) => getDomInterface(name) !== undefined, resolveDomProperty };
 
+function nodeLocation(node: DefaultTreeAdapterTypes.ChildNode): DiagnosticLocation | undefined {
+  const location = node.sourceCodeLocation;
+  return location == null ? undefined : { line: location.startLine, column: location.startCol };
+}
+
 /** Parses one component carrier. Resources can contain several carriers. */
 export function parseComponent(sourceText: string, source = "<source>"): ComponentDefinition {
   return parseComponentNodes(parseSource(sourceText).childNodes, source, platform);
@@ -43,22 +48,43 @@ export function parseComponent(sourceText: string, source = "<source>"): Compone
 
 /** Parses all inert component carriers and resource-level dependency links in one HTML file. */
 export function parseComponentResource(sourceText: string, source: string): ParsedComponentResource {
+  return finishResource(readComponentResource(sourceText, source), source);
+}
+
+/** Check-only recovery; invalid resources are never returned as usable semantic graphs. */
+export function parseComponentResourceForCheck(sourceText: string, source: string): DiagnosedComponentResource {
+  const diagnostics: HtmlDiagnostic[] = [];
+  const resource = readComponentResource(sourceText, source, (diagnostic) => diagnostics.push(diagnostic));
+  if (diagnostics.length === 0) {
+    try { finishResource(resource, source); }
+    catch (error) { recoverDiagnostic(error, (diagnostic) => diagnostics.push(diagnostic)); }
+  }
+  return { definitions: diagnostics.length === 0 ? resource.definitions : [], dependencies: resource.dependencies, diagnostics };
+}
+
+function finishResource(resource: Pick<ParsedComponentResource, "definitions" | "dependencies">, source: string): ParsedComponentResource {
+  if (resource.definitions.length === 0) fail("HS001", "A component resource requires at least one <template component>.", source);
+  return Object.freeze({ definition: resource.definitions[0]!, ...resource });
+}
+
+function readComponentResource(sourceText: string, source: string, onDiagnostic?: (diagnostic: HtmlDiagnostic) => void): Pick<ParsedComponentResource, "definitions" | "dependencies"> {
   const definitions: ComponentDefinition[] = [];
   const dependencies: string[] = [];
   for (const node of parseSource(sourceText).childNodes) {
     if (node.nodeName === "#comment" || (node.nodeName === "#text" && "value" in node && node.value.trim() === "")) continue;
-    if ("tagName" in node && node.tagName === "template" && node.attrs.some((attr) => attr.name === "component")) {
-      definitions.push(parseComponentNodes([node], source, platform));
-    } else if ("tagName" in node && node.tagName === "link" && node.attrs.some((attr) => attr.name === "rel" && attr.value === "component")) {
-      const href = node.attrs.find((attr) => attr.name === "href")?.value;
-      if (href === undefined || href.trim() === "") fail("HL006", "A component dependency link requires a non-empty `href`.", source);
-      dependencies.push(href);
-    } else if ("tagName" in node && isIgnoredResourceMetadata(node.tagName, node.attrs)) {
-      continue;
-    } else {
-      fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source);
-    }
+    try {
+      if ("tagName" in node && node.tagName === "template" && node.attrs.some((attr) => attr.name === "component")) {
+        definitions.push(parseComponentNodes([node], source, onDiagnostic === undefined ? platform : { ...platform, onDiagnostic }));
+      } else if ("tagName" in node && node.tagName === "link" && node.attrs.some((attr) => attr.name === "rel" && attr.value === "component")) {
+        const href = node.attrs.find((attr) => attr.name === "href")?.value;
+        if (href === undefined || href.trim() === "") fail("HL006", "A component dependency link requires a non-empty `href`.", source, nodeLocation(node));
+        dependencies.push(href);
+      } else if ("tagName" in node && isIgnoredResourceMetadata(node.tagName, node.attrs)) {
+        continue;
+      } else {
+        fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source, nodeLocation(node));
+      }
+    } catch (error) { recoverDiagnostic(error, onDiagnostic); }
   }
-  if (definitions.length === 0) fail("HS001", "A component resource requires at least one <template component>.", source);
-  return Object.freeze({ definition: definitions[0]!, definitions: Object.freeze(definitions), dependencies: Object.freeze(dependencies) });
+  return { definitions: Object.freeze(definitions), dependencies: Object.freeze(dependencies) };
 }

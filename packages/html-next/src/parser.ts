@@ -1,7 +1,7 @@
 import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
-import { fail } from "./diagnostics.js";
+import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
 import { checkExpressionSemantics, compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
@@ -26,18 +26,22 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "./type-system.js";
+import { isAttributeType, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, TypeSyntaxError, type TypeNode } from "./type-system.js";
 import type { ComponentContract, ContractStatus, PropContract, PropTarget, PropValue } from "./types.js";
+
+type DiagnosticFail = typeof fail;
 
 type ChildNode = DefaultTreeAdapterTypes.ChildNode | globalThis.Node;
 type Element = DefaultTreeAdapterTypes.Element | globalThis.Element;
 type SourceAttribute = Readonly<{ name: string; value: string }>;
+const recoveredElements = new WeakSet<ElementNode>();
 
 export type ComponentSourceNode = ChildNode;
 
 export interface ComponentParserPlatform {
   readonly isNativeElement: (name: string) => boolean;
   readonly resolveDomProperty: (tagName: string, propertyName: string) => string | undefined;
+  readonly onDiagnostic?: (diagnostic: HtmlDiagnostic) => void;
   readonly warnInvalidDeclaration?: (message: string, source: string) => void;
 }
 
@@ -66,6 +70,26 @@ export function parseProjectedSlotContent(
     }
   }
   return nodes;
+}
+
+function sourceLocation(node: ChildNode | undefined): DiagnosticLocation | undefined {
+  if (node === undefined || !("sourceCodeLocation" in node) || node.sourceCodeLocation == null) return undefined;
+  return { line: node.sourceCodeLocation.startLine, column: node.sourceCodeLocation.startCol };
+}
+
+function locatedFail(node: ChildNode): DiagnosticFail {
+  const location = sourceLocation(node);
+  if (location === undefined) return fail;
+  return (code, message, source, override) => fail(code, message, source, override ?? location);
+}
+
+function recoverSource(error: unknown, node: ChildNode, source: string, report?: ComponentParserPlatform["onDiagnostic"]): void {
+  if (report !== undefined && error instanceof TypeSyntaxError) {
+    error = new HtmlDiagnosticError({ code: "HC013", message: error.message, source, ...sourceLocation(node) });
+  } else if (error instanceof HtmlDiagnosticError && (error.diagnostic.line === undefined || error.diagnostic.source === undefined)) {
+    error = new HtmlDiagnosticError({ ...sourceLocation(node), ...error.diagnostic, source: error.diagnostic.source ?? source });
+  }
+  recoverDiagnostic(error, report);
 }
 
 function isElement(node: ChildNode): node is Element {
@@ -129,7 +153,11 @@ function directElements(element: Element, name: string): Element[] {
   return matches;
 }
 
-function validateDeclarationContent(element: Element, source: string): void {
+function validateDeclarationContent(...args: Parameters<typeof validateDeclarationContentAtSource>): ReturnType<typeof validateDeclarationContentAtSource> {
+  return withDiagnosticLocation(sourceLocation(args[0]), () => validateDeclarationContentAtSource(...args));
+}
+
+function validateDeclarationContentAtSource(element: Element, source: string): void {
   for (const child of sourceChildren(element)) {
     if (!isElement(child)) continue;
     const name = sourceTag(child);
@@ -245,7 +273,11 @@ function validateCompiledExpression(
  * `from:attr="prop"` binding targets that attribute, a `.prop="prop"` binding that DOM property. A prop
  * bound in several places targets its first binding in document order; the others only render it.
  */
-function collectTargets(
+function collectTargets(...args: Parameters<typeof collectTargetsAtSource>): ReturnType<typeof collectTargetsAtSource> {
+  return withDiagnosticLocation(sourceLocation(args[0]), () => collectTargetsAtSource(...args));
+}
+
+function collectTargetsAtSource(
   root: Element,
   source: string,
   platform: ComponentParserPlatform,
@@ -277,7 +309,11 @@ function collectTargets(
   return targets;
 }
 
-function readDeclaredType(
+function readDeclaredType(...args: Parameters<typeof readDeclaredTypeAtSource>): ReturnType<typeof readDeclaredTypeAtSource> {
+  return withDiagnosticLocation(sourceLocation(args[0]), () => readDeclaredTypeAtSource(...args));
+}
+
+function readDeclaredTypeAtSource(
   element: Element,
   source: string,
   nested = false,
@@ -343,10 +379,12 @@ function readProps(
   source: string,
   requireBinding = true,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
+  onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
 ): Record<string, PropContract> {
   const elements = group === undefined ? [] : directElements(group, "prop");
   const namedTypes = new Map<string, Element>();
   for (const element of group === undefined ? [] : directElements(group, "type")) {
+    const fail: DiagnosticFail = locatedFail(element);
     const name = attr(element, "name") ?? "";
     if (!/^[a-z][a-z0-9-]*$/.test(name) || namedTypes.has(name)) {
       fail("HC013", "Named <type> declarations require distinct lowercase names.", source);
@@ -356,6 +394,7 @@ function readProps(
     fail("HC013", `Named type \`${name}\` conflicts with a built-in type.`, source);
   }
   const selectedType = (element: Element): NonNullable<PropContract["select"]> => {
+    const fail: DiagnosticFail = locatedFail(element);
     const from = attr(element, "from") ?? "";
     const selectorProp = elements.find((candidate) => attr(candidate, "name") === from);
     const selector = selectorProp ?? (group === undefined ? undefined : directElements(group, "state")
@@ -402,113 +441,120 @@ function readProps(
     return leftName < rightName ? -1 : leftName > rightName ? 1 : 0;
   });
   for (const element of elements) {
-    const name = attr(element, "name");
-    if (name === undefined || name === "") {
-      fail("HC010", "A <prop> requires a `name` attribute.", source);
-    }
-    if (!isIdentifier(name)) {
-      fail("HC010", `Invalid prop name \`${name}\`.`, source);
-    }
-    const typeAttribute = attr(element, "type");
-    const inline = directElements(element, "type");
-    if (inline.length > 1 || (inline.length === 1 && typeAttribute !== undefined)) {
-      fail("HC013", `Prop \`${name}\` must declare one type, inline or by attribute.`, source);
-    }
-    if ((typeAttribute === undefined || typeAttribute === "") && inline.length === 0) {
-      fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
-    }
-    const normalizedName = name.toLowerCase();
-    const priorName = normalizedNames[normalizedName];
-    if (priorName !== undefined) {
-      fail("HC011", `Props \`${priorName}\` and \`${name}\` collide after lowercase normalization.`, source);
-    }
-    normalizedNames[normalizedName] = name;
-    let target = targets[name];
-    if (target === undefined && requireBinding) {
-      fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
-    }
-    target ??= { attribute: name.toLowerCase() };
-    const selected = inline[0] ?? namedTypes.get(typeAttribute ?? "");
-    if (inline[0] !== undefined && attr(inline[0], "name") !== undefined) {
-      fail("HC013", "An inline <type> has no name; put named types directly under <defs>.", source);
-    }
-    const select = selected === undefined ? undefined : selectedType(selected);
-    const type = select === undefined ? readDeclaredType(element, source, false, warnInvalidDeclaration)
-      : { kind: "selected", from: select.from, options: select.options } as const;
-    const required = attr(element, "required") !== undefined;
-    const values = parseValuesConstraint(type, attr(element, "values"));
-    if (attr(element, "values") !== undefined && values === undefined) {
-      const message = `Prop \`${name}\` has a values constraint that does not conform to its type; the constraint is ignored.`;
-      if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
-      warnInvalidDeclaration(message, source);
-    }
-    const { bounds, invalid } = parseValueBounds(type, {
-      min: attr(element, "min"), max: attr(element, "max"),
-      minLength: attr(element, "minlength"), maxLength: attr(element, "maxlength"),
-      pattern: attr(element, "pattern"),
-    });
-    for (const key of invalid) {
-      const message = `Prop \`${name}\` has a ${key} constraint that does not conform to its type; the constraint is ignored.`;
-      if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
-      warnInvalidDeclaration(message, source);
-    }
-    const description = textContent(element).trim();
-    if (description === "") {
-      fail("HC003", `\`props.${name}.description\` must be a non-empty string.`, source);
-    }
-    if (!isAttributeType(type)) {
-      fail(
-        "HC017",
-        `Prop \`${name}\` cannot be written as an HTML attribute; function, unknown, and trusted content types have no text form.`,
-        source,
-      );
-    }
-    const defaultValue = attr(element, "default");
-    if (required && defaultValue !== undefined) {
-      fail("HC019", `Required prop \`${name}\` cannot also declare a default.`, source);
-    }
-    const spec: {
-      type: PropContract["type"];
-      values?: readonly (string | number | boolean)[];
-      select?: NonNullable<PropContract["select"]>;
-      pattern?: string;
-      min?: number | string;
-      max?: number | string;
-      minLength?: number;
-      maxLength?: number;
-      required: boolean;
-      default?: PropValue;
-      target: PropTarget;
-      description: string;
-    } = { type, required, target, description };
-    if (values !== undefined) spec.values = values;
-    if (select !== undefined) spec.select = select;
-    Object.assign(spec, bounds);
-    if (defaultValue !== undefined) {
-      let defaultType = type;
-      if (select !== undefined) {
-        const selector = elements.find((candidate) => attr(candidate, "name") === select.from);
-        if (selector === undefined) {
-          fail("HC015", `Prop \`${name}\` needs a prop-selected type before it can declare its own default.`, source);
-        }
-        const selectorDefault = attr(selector, "default");
-        if (selectorDefault === undefined) {
-          fail("HC015", `Prop \`${name}\` needs a selector default before it can declare its own default.`, source);
-        }
-        const selected = parseTypedValue(selectorDefault, parseTypeAttribute(attr(selector, "type")!));
-        if (!selected.ok) fail("HC015", `Default for selecting prop \`${select.from}\` is invalid.`, source);
-        defaultType = select.options.find((option) => option.value === selected.value)!.type;
+    try {
+      const fail: DiagnosticFail = locatedFail(element);
+      const name = attr(element, "name");
+      if (name === undefined || name === "") {
+        fail("HC010", "A <prop> requires a `name` attribute.", source);
       }
-      const parsed = parseTypedValue(defaultValue, defaultType);
-      if (!parsed.ok || !matchesPropBounds(parsed.value, defaultType, bounds) || !matchesPropValues(parsed.value, values)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
-      spec.default = parsed.value as PropValue;
-    }
-    props[name] = spec;
+      if (!isIdentifier(name)) {
+        fail("HC010", `Invalid prop name \`${name}\`.`, source);
+      }
+      const typeAttribute = attr(element, "type");
+      const inline = directElements(element, "type");
+      if (inline.length > 1 || (inline.length === 1 && typeAttribute !== undefined)) {
+        fail("HC013", `Prop \`${name}\` must declare one type, inline or by attribute.`, source);
+      }
+      if ((typeAttribute === undefined || typeAttribute === "") && inline.length === 0) {
+        fail("HC013", `Prop \`${name}\` requires a \`type\` attribute.`, source);
+      }
+      const normalizedName = name.toLowerCase();
+      const priorName = normalizedNames[normalizedName];
+      if (priorName !== undefined) {
+        fail("HC011", `Props \`${priorName}\` and \`${name}\` collide after lowercase normalization.`, source);
+      }
+      normalizedNames[normalizedName] = name;
+      let target = targets[name];
+      if (target === undefined && requireBinding) {
+        fail("HC018", `Prop \`${name}\` is declared but never bound in the markup.`, source);
+      }
+      target ??= { attribute: name.toLowerCase() };
+      const selected = inline[0] ?? namedTypes.get(typeAttribute ?? "");
+      if (inline[0] !== undefined && attr(inline[0], "name") !== undefined) {
+        fail("HC013", "An inline <type> has no name; put named types directly under <defs>.", source);
+      }
+      const select = selected === undefined ? undefined : selectedType(selected);
+      const type = select === undefined ? readDeclaredType(element, source, false, warnInvalidDeclaration)
+        : { kind: "selected", from: select.from, options: select.options } as const;
+      const required = attr(element, "required") !== undefined;
+      const values = parseValuesConstraint(type, attr(element, "values"));
+      if (attr(element, "values") !== undefined && values === undefined) {
+        const message = `Prop \`${name}\` has a values constraint that does not conform to its type; the constraint is ignored.`;
+        if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+        warnInvalidDeclaration(message, source);
+      }
+      const { bounds, invalid } = parseValueBounds(type, {
+        min: attr(element, "min"), max: attr(element, "max"),
+        minLength: attr(element, "minlength"), maxLength: attr(element, "maxlength"),
+        pattern: attr(element, "pattern"),
+      });
+      for (const key of invalid) {
+        const message = `Prop \`${name}\` has a ${key} constraint that does not conform to its type; the constraint is ignored.`;
+        if (warnInvalidDeclaration === undefined) fail("HC013", message, source);
+        warnInvalidDeclaration(message, source);
+      }
+      const description = textContent(element).trim();
+      if (description === "") {
+        fail("HC003", `\`props.${name}.description\` must be a non-empty string.`, source);
+      }
+      if (!isAttributeType(type)) {
+        fail(
+          "HC017",
+          `Prop \`${name}\` cannot be written as an HTML attribute; function, unknown, and trusted content types have no text form.`,
+          source,
+        );
+      }
+      const defaultValue = attr(element, "default");
+      if (required && defaultValue !== undefined) {
+        fail("HC019", `Required prop \`${name}\` cannot also declare a default.`, source);
+      }
+      const spec: {
+        type: PropContract["type"];
+        values?: readonly (string | number | boolean)[];
+        select?: NonNullable<PropContract["select"]>;
+        pattern?: string;
+        min?: number | string;
+        max?: number | string;
+        minLength?: number;
+        maxLength?: number;
+        required: boolean;
+        default?: PropValue;
+        target: PropTarget;
+        description: string;
+      } = { type, required, target, description };
+      if (values !== undefined) spec.values = values;
+      if (select !== undefined) spec.select = select;
+      Object.assign(spec, bounds);
+      if (defaultValue !== undefined) {
+        let defaultType = type;
+        if (select !== undefined) {
+          const selector = elements.find((candidate) => attr(candidate, "name") === select.from);
+          if (selector === undefined) {
+            fail("HC015", `Prop \`${name}\` needs a prop-selected type before it can declare its own default.`, source);
+          }
+          const selectorDefault = attr(selector, "default");
+          if (selectorDefault === undefined) {
+            fail("HC015", `Prop \`${name}\` needs a selector default before it can declare its own default.`, source);
+          }
+          const selected = parseTypedValue(selectorDefault, parseTypeAttribute(attr(selector, "type")!));
+          if (!selected.ok) fail("HC015", `Default for selecting prop \`${select.from}\` is invalid.`, source);
+          defaultType = select.options.find((option) => option.value === selected.value)!.type;
+        }
+        const parsed = parseTypedValue(defaultValue, defaultType);
+        if (!parsed.ok || !matchesPropBounds(parsed.value, defaultType, bounds) || !matchesPropValues(parsed.value, values)) fail("HC015", `Default for prop \`${name}\` does not satisfy its type.`, source);
+        spec.default = parsed.value as PropValue;
+      }
+      props[name] = spec;
+    } catch (error) { recoverSource(error, element, source, onDiagnostic); }
   }
   return props;
 }
 
-function readContract(
+function readContract(...args: Parameters<typeof readContractAtSource>): ReturnType<typeof readContractAtSource> {
+  return withDiagnosticLocation(sourceLocation(args[0]), () => readContractAtSource(...args));
+}
+
+function readContractAtSource(
   wrapper: Element,
   group: Element | undefined,
   nativeElement: string,
@@ -517,6 +563,7 @@ function readContract(
   source: string,
   requireBinding: boolean,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
+  onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
 ): ComponentContract {
   const tag = attr(wrapper, "component") ?? "";
   if (tag.trim() === "") fail("HC003", "`component` must be a non-empty string.", source);
@@ -542,7 +589,7 @@ function readContract(
     ...(status === undefined ? {} : { status: status as ContractStatus }),
     ...(summary === undefined ? {} : { summary }),
     nativeElement,
-    props: readProps(group, targets, source, requireBinding, warnInvalidDeclaration),
+    props: readProps(group, targets, source, requireBinding, warnInvalidDeclaration, onDiagnostic),
   };
 }
 
@@ -556,7 +603,11 @@ function compileDeclarationExpression(value: string, source: string) {
   }
 }
 
-function readHandlerSteps(
+function readHandlerSteps(...args: Parameters<typeof readHandlerStepsAtSource>): ReturnType<typeof readHandlerStepsAtSource> {
+  return withDiagnosticLocation(sourceLocation(args[0]), () => readHandlerStepsAtSource(...args));
+}
+
+function readHandlerStepsAtSource(
   handler: Element,
   scope: ParseScope,
   source: string,
@@ -675,12 +726,20 @@ function readDeclarations(
   contract: ComponentContract,
   source: string,
   warnInvalidDeclaration?: ComponentParserPlatform["warnInvalidDeclaration"],
+  onDiagnostic?: ComponentParserPlatform["onDiagnostic"],
 ): { declarations: ComponentDeclaration[]; scope: ParseScope } {
   const declarations: ComponentDeclaration[] = [];
   const roots = new Set(Object.keys(contract.props));
   const writableRoots = new Set<string>();
   const handlers = new Set<string>();
   if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers } };
+  if (onDiagnostic !== undefined) {
+    for (const prop of directElements(group, "prop")) {
+      const name = attr(prop, "name");
+      if (name !== undefined && isIdentifier(name)) roots.add(name);
+    }
+  }
+  const invalid = onDiagnostic === undefined ? undefined : new Set<Element>();
   const elements: Element[] = [];
   const stateTypes = new Map<string, TypeNode>();
   const eventTypes = new Map<string, TypeNode>();
@@ -689,193 +748,203 @@ function readDeclarations(
   for (const node of sourceChildren(group)) {
     if (!isElement(node)) continue;
     const element = node;
-    elements.push(element);
-    const kind = sourceTag(element);
-    if (!/^(?:prop|type|state|computed|data|context|handler|event)$/.test(kind)) {
-      fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
-    }
-    if (kind === "type") continue;
-    const name = attr(element, "name") ?? "";
-    if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
-    if (kind === "event") {
-      if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
-      eventNames.add(name);
-      const eventType = attr(element, "type") ?? "object";
-      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
-        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
-        : normalizeType(parseTypeAttribute(eventType));
-      eventTypes.set(name, shape);
-      continue;
-    }
-    const localName = kind === "context" ? attr(element, "as") ?? name : name;
-    if (kind === "context" && !isIdentifier(localName)) {
-      fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
-    }
-    if (kind !== "handler" && !isIdentifier(localName)) {
-      fail("HC013", `Declaration \`${localName}\` is not a valid expression identifier.`, source);
-    }
-    if (names.has(localName)) {
-      fail("HC020", `Declaration \`${localName}\` collides in the flat component scope.`, source);
-    }
-    names.add(localName);
-    roots.add(localName);
-    if (kind === "state") writableRoots.add(name);
-    else if (kind === "handler") handlers.add(name);
-    if (kind === "state" && attr(element, "type") !== undefined) {
-      const stateType = attr(element, "type")!;
-      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
-        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
-        : normalizeType(parseTypeAttribute(stateType));
-      stateTypes.set(name, shape);
+    try {
+      const fail: DiagnosticFail = locatedFail(element);
+      elements.push(element);
+      const kind = sourceTag(element);
+      if (!/^(?:prop|type|state|computed|data|context|handler|event)$/.test(kind)) {
+        fail("HC021", `<${kind}> is not a recognized definition declaration.`, source);
+      }
+      if (kind === "type") continue;
+      const name = attr(element, "name") ?? "";
+      if (name === "") fail("HC010", `A <${kind}> requires a \`name\` attribute.`, source);
+      if (kind === "event") {
+        if (eventNames.has(name)) fail("HC020", `Event \`${name}\` is declared more than once.`, source);
+        eventNames.add(name);
+        const eventType = attr(element, "type") ?? "object";
+        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
+          ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
+          : normalizeType(parseTypeAttribute(eventType));
+        eventTypes.set(name, shape);
+        continue;
+      }
+      const localName = kind === "context" ? attr(element, "as") ?? name : name;
+      if (kind === "context" && !isIdentifier(localName)) {
+        fail("HC013", `<context name="${name}"> has an invalid local name.`, source);
+      }
+      if (kind !== "handler" && !isIdentifier(localName)) {
+        fail("HC013", `Declaration \`${localName}\` is not a valid expression identifier.`, source);
+      }
+      if (names.has(localName)) {
+        fail("HC020", `Declaration \`${localName}\` collides in the flat component scope.`, source);
+      }
+      names.add(localName);
+      roots.add(localName);
+      if (kind === "state") writableRoots.add(name);
+      else if (kind === "handler") handlers.add(name);
+      if (kind === "state" && attr(element, "type") !== undefined) {
+        const stateType = attr(element, "type")!;
+        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined
+          ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration))
+          : normalizeType(parseTypeAttribute(stateType));
+        stateTypes.set(name, shape);
+      }
+    } catch (error) {
+      recoverSource(error, element, source, onDiagnostic);
+      invalid?.add(element);
     }
   }
 
   const scope = { roots, writableRoots, handlers };
   for (const element of elements) {
-    const kind = sourceTag(element);
-    if (kind === "prop" || kind === "type") continue;
-    const name = attr(element, "name")!;
+    if (invalid?.has(element)) continue;
+    try {
+      const fail: DiagnosticFail = locatedFail(element);
+      const kind = sourceTag(element);
+      if (kind === "prop" || kind === "type") continue;
+      const name = attr(element, "name")!;
 
-    if (kind === "context") {
-      const from = attr(element, "from");
-      if (from === undefined || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(from)) {
-        fail("HC013", `<context name="${name}"> requires a component tag in \`from\`.`, source);
+      if (kind === "context") {
+        const from = attr(element, "from");
+        if (from === undefined || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(from)) {
+          fail("HC013", `<context name="${name}"> requires a component tag in \`from\`.`, source);
+        }
+        const as = attr(element, "as");
+        declarations.push({ kind, name, from, ...(as === undefined ? {} : { as }) });
+        continue;
       }
-      const as = attr(element, "as");
-      declarations.push({ kind, name, from, ...(as === undefined ? {} : { as }) });
-      continue;
-    }
 
-    if (kind === "state") {
-      if (attr(element, ":value") !== undefined || attr(element, "from:value") !== undefined) {
-        fail("HC013", `<state name="${name}"> uses a literal \`value\`; use <computed from> for a derived value.`, source);
-      }
-      const literal = attr(element, "value");
-      const declaration: {
-        kind: "state";
-        name: string;
-        type?: string;
-        shape?: TypeNode;
-        value?: string;
-        expression?: CompiledExpression;
-      } = {
-        kind,
-        name,
-      };
-      if (attr(element, "context") !== undefined) {
-        fail("HC013", `<state name="${name}"> does not use a \`context\` attribute; descendant <context> declarations can read any named ancestor state.`, source);
-      }
-      // A declared type states what the state holds, as a prop's does.
-      const stateType = attr(element, "type");
-      if (stateType !== undefined) {
-        if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined) {
-          declaration.shape = normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration));
-        } else parseTypeAttribute(stateType);
-        declaration.type = stateType;
-      } else if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined) {
-        fail("HC013", `<state name="${name}"> needs a type for its nested fields or values.`, source);
-      }
-      let initial: unknown = literal;
-      if (literal !== undefined && stateType !== undefined) {
-        const parsed = parseTypedValue(literal, declaration.shape ?? parseTypeExpression(stateType), "$", "html");
-        if (!parsed.ok) fail("HC013", `<state name="${name}"> has a value that does not satisfy its type.`, source);
-        initial = parsed.value;
-      }
-      const expression = literal === undefined
-        ? undefined
-        : compileScopedExpression(JSON.stringify(initial), scope, source);
-      if (literal !== undefined) declaration.value = literal;
-      if (expression !== undefined) declaration.expression = expression;
-      declarations.push(declaration);
-      continue;
-    }
-    if (kind === "computed") {
-      const expressionSource = attr(element, "from");
-      if (expressionSource === undefined || expressionSource === "") {
-        fail("HC013", `<computed name="${name}"> requires a \`from\` expression.`, source);
-      }
-      declarations.push({
-        kind,
-        name,
-        expression: compileScopedExpression(expressionSource, scope, source),
-      });
-      continue;
-    }
-    if (kind === "data") {
-      const dataSource = attr(element, "src");
-      const dataType = attr(element, "type");
-      const dataDebounce = attr(element, "debounce");
-      const dataPoll = attr(element, "poll");
-      // Validate here so an unreadable time value is a diagnostic, not a silently ignored delay.
-      for (const [timing, text] of [["debounce", dataDebounce], ["poll", dataPoll]] as const) {
-        if (text !== undefined && parseDuration(text) === undefined) {
-          fail("HC024", `Data source \`${name}\` has an unreadable \`${timing}\` time \`${text}\`.`, source);
+      if (kind === "state") {
+        if (attr(element, ":value") !== undefined || attr(element, "from:value") !== undefined) {
+          fail("HC013", `<state name="${name}"> uses a literal \`value\`; use <computed from> for a derived value.`, source);
         }
-      }
-      if (dataType !== undefined) {
-        try { parseTypeExpression(dataType); }
-        catch { fail("HC024", `Data source \`${name}\` declares an unreadable type \`${dataType}\`.`, source); }
-      }
-      const parameters = [];
-      const parameterNames = new Set<string>();
-      for (const parameter of directElements(element, "param")) {
-        const parameterName = attr(parameter, "name") ?? "";
-        const from = attr(parameter, "from:value");
-        const expr = attr(parameter, "expr:value");
-        if (!NAME_RE.test(parameterName) || (from === undefined) === (expr === undefined)) {
-          fail("HC024", "A data <param> requires a valid `name` and exactly one of `from:value` or `expr:value`.", source);
+        const literal = attr(element, "value");
+        const declaration: {
+          kind: "state";
+          name: string;
+          type?: string;
+          shape?: TypeNode;
+          value?: string;
+          expression?: CompiledExpression;
+        } = {
+          kind,
+          name,
+        };
+        if (attr(element, "context") !== undefined) {
+          fail("HC013", `<state name="${name}"> does not use a \`context\` attribute; descendant <context> declarations can read any named ancestor state.`, source);
         }
-        if (parameterNames.has(parameterName)) {
-          fail("HC024", `Data source \`${name}\` repeats a parameter name.`, source);
+        // A declared type states what the state holds, as a prop's does.
+        const stateType = attr(element, "type");
+        if (stateType !== undefined) {
+          if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined || attr(element, "nullable") !== undefined) {
+            declaration.shape = normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration));
+          } else parseTypeAttribute(stateType);
+          declaration.type = stateType;
+        } else if (directElements(element, "prop").length > 0 || attr(element, "values") !== undefined) {
+          fail("HC013", `<state name="${name}"> needs a type for its nested fields or values.`, source);
         }
-        parameterNames.add(parameterName);
-        parameters.push({
-          name: parameterName,
-          mode: from === undefined ? "expr" as const : "from" as const,
-          expression: compileScopedExpression(from ?? expr!, scope, source),
+        let initial: unknown = literal;
+        if (literal !== undefined && stateType !== undefined) {
+          const parsed = parseTypedValue(literal, declaration.shape ?? parseTypeExpression(stateType), "$", "html");
+          if (!parsed.ok) fail("HC013", `<state name="${name}"> has a value that does not satisfy its type.`, source);
+          initial = parsed.value;
+        }
+        const expression = literal === undefined
+          ? undefined
+          : compileScopedExpression(JSON.stringify(initial), scope, source);
+        if (literal !== undefined) declaration.value = literal;
+        if (expression !== undefined) declaration.expression = expression;
+        declarations.push(declaration);
+        continue;
+      }
+      if (kind === "computed") {
+        const expressionSource = attr(element, "from");
+        if (expressionSource === undefined || expressionSource === "") {
+          fail("HC013", `<computed name="${name}"> requires a \`from\` expression.`, source);
+        }
+        declarations.push({
+          kind,
+          name,
+          expression: compileScopedExpression(expressionSource, scope, source),
         });
+        continue;
       }
-      const declaration: {
-        kind: "data";
-        name: string;
-        source?: string;
-        type?: string;
-        debounce?: string;
-        poll?: string;
-        parameters: typeof parameters;
-      } = {
-        kind,
-        name,
-        parameters,
-      };
-      if (dataSource !== undefined) declaration.source = dataSource;
-      if (dataType !== undefined) declaration.type = dataType;
-      if (dataDebounce !== undefined) declaration.debounce = dataDebounce;
-      if (dataPoll !== undefined) declaration.poll = dataPoll;
-      declarations.push(declaration);
-      continue;
-    }
-    if (kind === "event") {
-      const eventType = attr(element, "type") ?? "object";
-      const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
-        ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration)) : undefined;
-      if (shape === undefined) parseTypeAttribute(eventType);
+      if (kind === "data") {
+        const dataSource = attr(element, "src");
+        const dataType = attr(element, "type");
+        const dataDebounce = attr(element, "debounce");
+        const dataPoll = attr(element, "poll");
+        // Validate here so an unreadable time value is a diagnostic, not a silently ignored delay.
+        for (const [timing, text] of [["debounce", dataDebounce], ["poll", dataPoll]] as const) {
+          if (text !== undefined && parseDuration(text) === undefined) {
+            fail("HC024", `Data source \`${name}\` has an unreadable \`${timing}\` time \`${text}\`.`, source);
+          }
+        }
+        if (dataType !== undefined) {
+          try { parseTypeExpression(dataType); }
+          catch { fail("HC024", `Data source \`${name}\` declares an unreadable type \`${dataType}\`.`, source); }
+        }
+        const parameters = [];
+        const parameterNames = new Set<string>();
+        for (const parameter of directElements(element, "param")) {
+          const parameterName = attr(parameter, "name") ?? "";
+          const from = attr(parameter, "from:value");
+          const expr = attr(parameter, "expr:value");
+          if (!NAME_RE.test(parameterName) || (from === undefined) === (expr === undefined)) {
+            fail("HC024", "A data <param> requires a valid `name` and exactly one of `from:value` or `expr:value`.", source);
+          }
+          if (parameterNames.has(parameterName)) {
+            fail("HC024", `Data source \`${name}\` repeats a parameter name.`, source);
+          }
+          parameterNames.add(parameterName);
+          parameters.push({
+            name: parameterName,
+            mode: from === undefined ? "expr" as const : "from" as const,
+            expression: compileScopedExpression(from ?? expr!, scope, source),
+          });
+        }
+        const declaration: {
+          kind: "data";
+          name: string;
+          source?: string;
+          type?: string;
+          debounce?: string;
+          poll?: string;
+          parameters: typeof parameters;
+        } = {
+          kind,
+          name,
+          parameters,
+        };
+        if (dataSource !== undefined) declaration.source = dataSource;
+        if (dataType !== undefined) declaration.type = dataType;
+        if (dataDebounce !== undefined) declaration.debounce = dataDebounce;
+        if (dataPoll !== undefined) declaration.poll = dataPoll;
+        declarations.push(declaration);
+        continue;
+      }
+      if (kind === "event") {
+        const eventType = attr(element, "type") ?? "object";
+        const shape = directElements(element, "prop").length > 0 || attr(element, "values") !== undefined
+          ? normalizeType(readDeclaredType(element, source, true, warnInvalidDeclaration)) : undefined;
+        if (shape === undefined) parseTypeAttribute(eventType);
+        declarations.push({
+          kind,
+          name,
+          type: eventType,
+          ...(shape === undefined ? {} : { shape }),
+          bubbles: attr(element, "bubbles") !== "false",
+          composed: attr(element, "composed") !== "false",
+          cancelable: attr(element, "cancelable") === "true",
+        });
+        continue;
+      }
       declarations.push({
-        kind,
+        kind: "handler",
         name,
-        type: eventType,
-        ...(shape === undefined ? {} : { shape }),
-        bubbles: attr(element, "bubbles") !== "false",
-        composed: attr(element, "composed") !== "false",
-        cancelable: attr(element, "cancelable") === "true",
+        steps: readHandlerSteps(element, { ...scope, roots: new Set([...roots, "$$event"]) }, source, stateTypes, eventTypes),
       });
-      continue;
-    }
-    declarations.push({
-      kind: "handler",
-      name,
-      steps: readHandlerSteps(element, { ...scope, roots: new Set([...roots, "$$event"]) }, source, stateTypes, eventTypes),
-    });
+    } catch (error) { recoverSource(error, element, source, onDiagnostic); }
   }
   for (const declaration of declarations) {
     if (declaration.kind !== "handler") continue;
@@ -1138,7 +1207,19 @@ function extractFlow(
   return undefined;
 }
 
-function parseElement(
+function parseElement(...args: Parameters<typeof parseElementAtSource>): ReturnType<typeof parseElementAtSource> {
+  try {
+    return withDiagnosticLocation(sourceLocation(args[0]), () => parseElementAtSource(...args));
+  } catch (error) {
+    recoverSource(error, args[0], args[3], args[5].onDiagnostic);
+    // Check-only placeholder. A resource with diagnostics never reaches a backend.
+    const recovered: ElementNode = { kind: "element", name: "div", attributes: [], children: [] };
+    recoveredElements.add(recovered);
+    return recovered;
+  }
+}
+
+function parseElementAtSource(
   element: Element,
   contract: ComponentContract,
   scope: ParseScope,
@@ -1334,7 +1415,7 @@ function parseElement(
     fail("HT006", "A content-replacing property binding cannot coexist with children.", source);
   }
 
-  if (flow?.kind === "match") {
+  if (flow?.kind === "match" && (platform.onDiagnostic === undefined || !children.some((child) => child.kind === "element" && recoveredElements.has(child)))) {
     let remainingArms = 0;
     for (const child of children) {
       if (child.kind === "element") remainingArms += 1;
@@ -1375,7 +1456,11 @@ function parseElement(
   return parsed;
 }
 
-export function parseComponentNodes(
+export function parseComponentNodes(...args: Parameters<typeof parseComponentNodesAtSource>): ComponentDefinition {
+  return withDiagnosticLocation(sourceLocation(args[0].find(isElement)), () => parseComponentNodesAtSource(...args));
+}
+
+function parseComponentNodesAtSource(
   childNodes: readonly ChildNode[],
   source: string,
   platform: ComponentParserPlatform,
@@ -1465,9 +1550,19 @@ export function parseComponentNodes(
     source,
     legacyProps,
     platform.warnInvalidDeclaration,
+    platform.onDiagnostic,
   );
 
-  const { declarations, scope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration);
+  const { declarations, scope: declarationScope } = readDeclarations(legacyProps ? undefined : declarationGroup, contract, source, platform.warnInvalidDeclaration, platform.onDiagnostic);
+  let scope = declarationScope;
+  if (legacyProps && platform.onDiagnostic !== undefined && declarationGroup !== undefined) {
+    const roots = new Set(scope.roots);
+    for (const prop of directElements(declarationGroup, "prop")) {
+      const name = attr(prop, "name");
+      if (name !== undefined && isIdentifier(name)) roots.add(name);
+    }
+    scope = { ...scope, roots };
+  }
   const slotState = {
     defaults: 0,
     names: new Set<string>(),

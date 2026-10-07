@@ -36,6 +36,10 @@ converter and unplugin adapt it to other build workflows.
 All four packages share one version and publish together. Shared policy and verification live at the
 repository root.
 
+Use [`html-next-check`](./packages/html-next-unplugin/README.md#check-components-in-ci) for
+compiler diagnostics without build output, alongside TypeScript or your framework's typechecker.
+The command supports native, Vue, React, and Svelte targets and JSON output for tooling.
+
 | Package | Role | Current scope |
 | --- | --- | --- |
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |

@@ -276,18 +276,28 @@ The result uses Svelte and native DOM roots. Generated components import the hel
 
 ::: framework-html-next
 
-Use your project's usual tools to check application code. A JavaScript app needs no additional typecheck setup.
+Run `html-next-check` to check components without building. It reports invalid declarations, constraints, and component links with their file and line. Pass the same entries as your Vite configuration:
+
+```json title="package.json"
+{
+  "scripts": {
+    "check": "html-next-check src/app.html"
+  }
+}
+```
+
+Check controllers and other application code with your project's usual tools, such as `tsc --noEmit`.
 
 :::
 
 ::: framework-vue
 
-Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Generate them before a standalone typecheck:
+Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Check components with `html-next-check`, then generate declarations before a standalone typecheck:
 
 ```json title="package.json"
 {
   "scripts": {
-    "typecheck": "html-next-sync && vue-tsc --noEmit"
+    "typecheck": "html-next-check --target vue src/counter.html && html-next-sync && vue-tsc --noEmit"
   }
 }
 ```
@@ -298,12 +308,12 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 ::: framework-react
 
-Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Generate them before a standalone typecheck:
+Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Check components with `html-next-check`, then generate declarations before a standalone typecheck:
 
 ```json title="package.json"
 {
   "scripts": {
-    "typecheck": "html-next-sync && tsc --noEmit"
+    "typecheck": "html-next-check --target react src/counter.html && html-next-sync && tsc --noEmit"
   }
 }
 ```
@@ -314,12 +324,12 @@ If a component needs declarations before its first import, add `entries: ["src/c
 
 ::: framework-svelte
 
-Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Generate them before a standalone typecheck:
+Enable `allowArbitraryExtensions` in your TypeScript configuration. The adapter writes adjacent `.d.html.ts` declarations for local imports. Check components with `html-next-check`, then generate declarations before a standalone typecheck:
 
 ```json title="package.json"
 {
   "scripts": {
-    "typecheck": "html-next-sync && svelte-check"
+    "typecheck": "html-next-check --target svelte src/counter.html && html-next-sync && svelte-check"
   }
 }
 ```
