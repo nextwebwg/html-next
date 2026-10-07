@@ -58,7 +58,15 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium firefox webkit
+      # Playwright's CDN has taken from seconds to 8 minutes for one browser; cache them per version.
+      - id: playwright
+        run: echo "version=$(pnpm --filter @nextwebwg/html-next exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Every launch is headless, which uses Chromium's headless shell rather than the full browser.
+      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps --only-shell chromium firefox webkit
       - run: ${{ matrix.command }}
 
   performance:
