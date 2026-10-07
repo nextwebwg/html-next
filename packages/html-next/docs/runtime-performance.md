@@ -98,7 +98,7 @@ yet a release gate.
 ### October 2026 owner decisions
 
 The owner decided the following on 2026-10-06 for the live runtime. Decisions for compiled output
-are in [the compiled direct path](./compiled-direct-path.md#owner-decisions-2026-10-06).
+are in [compiled components](./compiled-direct-path.md#owner-decisions-2026-10-06).
 
 - **Row evaluation.** Row bindings may be evaluated in one fused update per row, keys may be
   memoized, and an equality selector may re-evaluate only the rows an outer scalar change (such as

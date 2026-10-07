@@ -79,11 +79,12 @@ function moduleBytes(result: BuildResult): Readonly<Record<string, number>> {
   );
 }
 
-async function generatedFixture(name: string, targetGzip: number, directExtend = false): Promise<GeneratedMeasurement> {
+async function generatedFixture(name: string, targetGzip: number): Promise<GeneratedMeasurement> {
   const sourceURL = new URL(`../benchmarks/fixtures/${name}.html`, import.meta.url);
   const source = await readFile(sourceURL, "utf8");
   const definition = parseComponent(source, sourceURL.href);
-  const module = generateComponent(definition, { directExtend })
+  // Each fixture is its own closed graph, as a build compiles it: nothing reads its state as context.
+  const module = generateComponent(definition, { noContextReaders: true })
     .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)?.content;
   if (module === undefined) throw new Error(`The ${name} fixture produced no Vanilla module.`);
   const result = await bundle({
@@ -114,16 +115,29 @@ async function generatedFixture(name: string, targetGzip: number, directExtend =
   };
 }
 
-const staticGenerated = await generatedFixture("static-card", 2_500);
-const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
-const propGenerated = await generatedFixture("prop-button", 5_000);
-const computedGenerated = await generatedFixture("computed-counter", 5_000);
-const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
-const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
-const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
+// Every component compiles through the one block compiler, with live's semantics. The smaller
+// emitters these four fixtures once used (0.3–2 KB) did not match live: no slot markers, no host,
+// inspection or hydration, and their own prop validity messages. Exact output carries the compiled
+// root's handle, host and scheduler (~6.6 KB) and, with props, the live prop boundary and validity
+// with each prop's type compiled to its own checks (~4.4 KB more, from ~12 KB through the type system).
+// A component with a slot also carries live's slot rules (+~250 B): a consumer's <template slot> renders
+// only while its outlet renders, host.slots lists what it renders, and a component projected into a
+// slot is created only once a slot places it.
+const staticGenerated = await generatedFixture("static-card", 6_950);
+const reactiveGenerated = await generatedFixture("reactive-counter", 6_950);
+const propGenerated = await generatedFixture("prop-button", 11_400);
+// A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
+const computedGenerated = await generatedFixture("computed-counter", 7_250);
+// These compiled through the general runtime (~39 KB) until every component compiled directly.
+const keyedGenerated = await generatedFixture("keyed-list", 7_700);
+const dataGenerated = await generatedFixture("data-read", 7_550);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
-// Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 7_754, true);
+// Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
+// for the controller host's prop channel (`host.props` and prop writes) that every prop component
+// uses, 25 B for a host root that follows a root `$match` switch, as live's does, and 50 B for the
+// node methods through which keyed lists also hold rows of several nodes.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_150);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];

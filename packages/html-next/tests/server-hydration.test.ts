@@ -61,6 +61,8 @@ const definitions = [
     <template $match><article $when="open"><button type="button" on:click="toggle">Close</button><slot></slot></article>
     <div $else><button type="button" on:click="toggle">Open</button><slot></slot></div></template></template>`,
   `<template component="ssr-table"><table><tbody><tr><td>Cell <slot></slot> end</td></tr></tbody></table></template>`,
+  `<template component="ssr-classed"><defs><state name="count" type="number" value="0"></state></defs>
+    <section class="card own" style="color: red" title="own"><output $value="count"></output></section></template>`,
   `<template component="ssr-scoped"><defs>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
@@ -88,6 +90,7 @@ const cases = [
   { name: "shared object state after nested writes", html: '<ssr-alias id="subject"></ssr-alias>', state: {} },
   { name: "state-selected native roots", html: '<ssr-match id="subject">Content</ssr-match>', state: { open: true } },
   { name: "slot ranges inside tables", html: '<ssr-table id="subject">Projected</ssr-table>', state: {} },
+  { name: "a root's consumer class, style and attribute overrides", html: '<ssr-classed id="subject" class="mine" style="margin: 1px" title="theirs"></ssr-classed>', state: { count: 3 } },
   { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
 ] as const;

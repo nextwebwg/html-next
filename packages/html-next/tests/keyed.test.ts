@@ -185,7 +185,7 @@ describe("KeyedList", () => {
     patches.length = 0;
     keyed.update(value, new Map([[value, 2]]), NESTED);
     assert.deepEqual(patches, []);
-    keyed.each(4);
+    keyed.each(4, none);
     assert.deepEqual(patches, [[1, 4], [2, 4], [3, 4]]);
   });
 

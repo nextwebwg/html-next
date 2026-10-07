@@ -41,6 +41,8 @@ interface ManagedState {
   interacted: boolean;
   readonly value: () => unknown;
   readonly derive?: () => Validity;
+  /** Validates `constraint`; the public API supplies `validate`, and without it an (empty) constraint is met. */
+  check?: (value: unknown, constraint: Constraint) => Validity;
   readonly internals?: ElementInternalsValidity;
   readonly cleanup: Array<() => void>;
 }
@@ -227,7 +229,7 @@ function derive(el: Element, state: ManagedState): Validity {
     nativeBridgeMessages.delete(el);
     return validityFromNative(el.validity, el.validationMessage);
   }
-  return validate(state.value(), state.constraint);
+  return state.check?.(state.value(), state.constraint) ?? VALID;
 }
 
 function check(el: Element, markInteracted: boolean, dispatch: boolean): boolean {
@@ -315,7 +317,10 @@ function installFacade(el: Element): void {
         el.checkValidity();
         return current(el);
       }
-      return validateElement(el, states.get(el)?.constraint ?? {});
+      // `validateElement(el, {})` for an unmanaged element: an empty constraint is always met.
+      if (states.get(el) === undefined) manageValidity(el, {}, {});
+      check(el, true, true);
+      return current(el);
     },
   };
   Object.defineProperties(target, descriptors);
@@ -326,6 +331,20 @@ export function manageElementValidity(
   el: Element,
   constraint: Constraint = {},
   options: ManageValidityOptions = {},
+): () => void {
+  return manageValidity(el, constraint, options, validate);
+}
+
+/** @internal `manageElementValidity(el, {}, { derive })`, without bundling constraint validation. */
+export function manageDerivedValidity(el: Element, derive: () => Validity): () => void {
+  return manageValidity(el, {}, { derive });
+}
+
+function manageValidity(
+  el: Element,
+  constraint: Constraint,
+  options: ManageValidityOptions,
+  check?: (value: unknown, constraint: Constraint) => Validity,
 ): () => void {
   unmanageElementValidity(el);
   if (
@@ -346,6 +365,7 @@ export function manageElementValidity(
     value: options.value ?? (() => readValueUnmanaged(el)),
     ...(options.derive === undefined ? {} : { derive: options.derive }),
     ...(options.internals === undefined ? {} : { internals: options.internals }),
+    ...(check === undefined ? {} : { check }),
     cleanup: [],
   };
   states.set(el, state);
@@ -396,6 +416,7 @@ export function validateElement(el: Element, constraint?: Constraint): Validity 
     state = states.get(el)!;
   } else if (constraint !== undefined) {
     state.constraint = constraint;
+    state.check = validate;
   }
   check(el, true, true);
   return current(el);

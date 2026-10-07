@@ -251,10 +251,15 @@ export class ReactiveScheduler {
    * sortable round; already-queued computeds may continue in dependency order.
    */
   #deferConsumersBehindComputeds(effects: ReactiveEffect[], start: number): void {
-    if (!this.#pending.some((effect) => effect.computed !== undefined)) return;
+    const computed = this.#pending.some((effect) => effect.computed !== undefined);
+    // Work an effect queued at a lower priority (a template binding a list update reached) runs
+    // before the rest of this round's higher-priority owners, so controller effects see it done.
+    let lowest = Infinity;
+    for (const effect of this.#pending) if (effect.priority < lowest) lowest = effect.priority;
+    if (!computed && effects.every((effect, index) => index < start || effect.priority <= lowest)) return;
     for (let index = effects.length - 1; index >= start; index -= 1) {
       const effect = effects[index]!;
-      if (effect.computed !== undefined) continue;
+      if (effect.computed !== undefined || !computed && effect.priority <= lowest) continue;
       effects.splice(index, 1);
       this.#pending.push(effect);
     }

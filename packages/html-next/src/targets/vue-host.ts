@@ -7,6 +7,7 @@
 import { formatVue } from "./vue-format.js";
 import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
+import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
 export const VUE_HOST_PATH = "vue/host.ts";
@@ -105,37 +106,7 @@ export interface Readable<T> {
   readonly value: T;
 }
 
-interface ConnectionHub {
-  readonly observer: MutationObserver;
-  readonly checks: Set<() => void>;
-}
-
-const connectionHubs = new WeakMap<Document, ConnectionHub>();
-
-/** One native observer per document tracks externally detached controller roots. */
-function observeConnection(element: Element, check: () => void): () => void {
-  const document = element.ownerDocument;
-  let hub = connectionHubs.get(document);
-  if (hub === undefined) {
-    const Observer = document.defaultView?.MutationObserver;
-    if (Observer === undefined) throw new TypeError("Controller connection tracking requires MutationObserver.");
-    const checks = new Set<() => void>();
-    const observer = new Observer(() => { for (const current of checks) current(); });
-    observer.observe(document, { childList: true, subtree: true });
-    hub = { observer, checks };
-    connectionHubs.set(document, hub);
-  }
-  hub.checks.add(check);
-  return () => {
-    hub.checks.delete(check);
-    if (hub.checks.size === 0) {
-      hub.observer.disconnect();
-      connectionHubs.delete(document);
-    }
-  };
-}
-
-/** Keep native focus on the corresponding control when a root-level $match replaces its element. */
+${NATIVE_CONNECTION_SOURCE}/** Keep native focus on the corresponding control when a root-level $match replaces its element. */
 export function preserveRootFocus(root: Readable<Element | null>): void {
   const focusable = "a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]";
   let previous: Element | null = null;

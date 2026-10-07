@@ -1,5 +1,6 @@
 import type { GeneratedArtifact } from "../generate.js";
 import { nativeControlModule } from "./react-control.js";
+import { OPTION_WATCH_SOURCE } from "./shared-generated.js";
 
 export const CONTROL_CAPTURE_CONTEXT = "\0html-next:control-capture";
 
@@ -38,18 +39,17 @@ export function controlDefaults(element: Element, defaults: BoundDefaults): Boun
   return { ...defaults, options };
 }
 
+${OPTION_WATCH_SOURCE}
 /** DOM observation supplies option-list changes that don't change the bound state. */
 export function observeBoundOptions(element: Element, sync: () => void): () => void {
   if (!(element instanceof HTMLSelectElement)) return () => {};
   let previous = Array.from(element.options, (option) => [option, option.value] as const);
-  const observer = new MutationObserver(() => {
+  return watchOptions(element, () => {
     const next = Array.from(element.options, (option) => [option, option.value] as const);
     if (next.length === previous.length && next.every(([option, value], index) => previous[index]?.[0] === option && previous[index]?.[1] === value)) return;
     previous = next;
     sync();
   });
-  observer.observe(element, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['value'] });
-  return () => observer.disconnect();
 }
 `;
 
