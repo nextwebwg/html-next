@@ -38,6 +38,46 @@ each copy, and rewrites the remaining selectors through the CSS Object Model
 (`src/component-styles.ts`). Build tools run the same steps over postcss
 (`src/component-styles-build.ts`).
 
+## Delivery and hydration
+
+Compilation transforms owned component source once. Validation never scans application
+stylesheets, observes stylesheet mutations, copies rules into a companion, or patches CSSOM methods.
+An application can explicitly call `rewriteValiditySelectors(css)` on selected shared CSS before
+delivering it. Do not apply that source transform again to compiled CSS.
+
+The live runtime marks each emitted style with its component tag and the names its state selectors
+test. Preserve these markers in server output. Hydration reuses a marked style or stylesheet link
+already in the document head, without reading its CSS rules or transforming/injecting another copy.
+The document's definition registry continues to prevent installation on subsequent lowering passes.
+
+A bundling/SSR integration can list several tags on one carrier and merge their state-name records:
+
+```html
+<link rel="stylesheet" href="/assets/components.css"
+      data-html-next-component-styles="x-card x-dialog"
+      data-html-next-style-states='{"x-card":["selected"],"x-dialog":["open"]}'>
+```
+
+`data-html-next-component-styles` is a whitespace-separated list of component tags whose CSS has
+already been compiled into that carrier. `data-html-next-style-states` is a JSON object mapping
+each tag to an array of the declared mutable/computed state names tested by its CSS. A component with no state
+selectors has an empty array; an omitted record is also treated as empty. Preserve the compiler's
+records when combining sheets. These are tooling metadata, supplied by the integration that owns
+CSS delivery. An unmarked sheet does not assert ownership and cannot suppress injection.
+
+Node's `renderComponents()` returns `styleOwnership` alongside `html` and `css`. Use its keys for
+the carrier's component tag list and its JSON representation for the state metadata attribute.
+When combining several render results, combine their CSS in application order and merge the
+ownership records. Deliver each component version once.
+
+The delivery integration owns link loading and stylesheet order. Publish the compiled CSS before
+the corresponding markup can paint. Native builds import extracted CSS and register definitions
+with empty CSS, so those definitions never ask the runtime to inject another copy. The build plugin
+delivers the generated, scoped CSS artifact.
+
+See [the measured delivery experiments](style-delivery-performance.md) for traces, containment
+results, and early/late loading comparisons.
+
 ## Vue
 
 Converted components use `<style scoped>`. `:host` and `:host-state()` become attribute selectors

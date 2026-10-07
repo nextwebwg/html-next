@@ -6,9 +6,14 @@ import {
   createComputed,
   createEffect,
   createSignal,
+  notifyPropertyDelete,
+  notifyPropertySet,
   type ReactiveEffect,
   ReactiveScope,
+  readItems,
+  readKey,
   registerReactiveAlias,
+  trackProperty,
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
@@ -638,13 +643,14 @@ describe("reactive scope", () => {
     assert.equal(runs, 400);
   });
 
-  it("binds an unread object exactly as set would, wrapping it on first read", () => {
+  it("stores an object plain and gives JavaScript its canonical proxy", () => {
     const record = { n: 1 };
     const scope = new ReactiveScope();
-    scope.setUnread("record", record);
+    scope.set("record", record);
+    assert.equal(scope.read("record"), record);
     const seen: unknown[] = [];
     createEffect(scope.scheduler, () => { seen.push((scope.get("record") as typeof record).n); });
-    // The first read wraps the record into the same canonical proxy that `set` would store.
+    // Every scope hands JavaScript the same canonical proxy for the record.
     const proxy = scope.get("record") as typeof record;
     assert.equal(new ReactiveScope([["record", record]]).get("record"), proxy);
     proxy.n = 2;
@@ -653,13 +659,13 @@ describe("reactive scope", () => {
     scope.set("record", proxy);
     scope.scheduler.flush();
     const next = { n: 3 };
-    scope.setUnread("record", next);
+    scope.set("record", next);
     scope.scheduler.flush();
-    scope.setUnread("record", { n: 4 });
+    scope.set("record", { n: 4 });
     scope.set("record", new ReactiveScope([["other", next]]).get("other")!);
     scope.scheduler.flush();
     const frozen = Object.freeze({ n: 5 });
-    scope.setUnread("record", frozen);
+    scope.set("record", frozen);
     scope.scheduler.flush();
     assert.equal(scope.get("record"), frozen);
     assert.deepEqual(seen, [1, 2, 3, 3, 5]);
@@ -704,8 +710,9 @@ describe("reactive proxies", () => {
     const outer = new ReactiveScope([["record", foreign]]);
     const outerRecord = outer.get("record") as { value: number };
     const nestedRecord = nested.get("record") as { value: number };
-    // Object.isFrozen's trap installed the nested wrapper before the outer wrapper was cached.
-    assert.notEqual(outerRecord, nestedRecord);
+    // Object.isFrozen's trap stores the record during wrapping; storage is plain, so the nested
+    // write cannot publish a second wrapper and both scopes get the one canonical proxy.
+    assert.equal(outerRecord, nestedRecord);
     const outerSeen: number[] = [];
     const nestedSeen: number[] = [];
     const outerReader = createEffect(outer.scheduler, () => { outerSeen.push(outerRecord.value); });
@@ -719,6 +726,30 @@ describe("reactive proxies", () => {
     assert.deepEqual(outerSeen, [1, 2, 3]);
     assert.deepEqual(nestedSeen, [1, 2, 3]);
     outerReader.stop(); nestedReader.stop();
+  });
+
+  it("tracks plain reads against writes through the object's proxy", () => {
+    const row = { label: "a" };
+    const rows: { label: string }[] = [row];
+    const scope = new ReactiveScope([["rows", rows]]);
+    const seen: string[] = [];
+    createEffect(scope.scheduler, () => {
+      seen.push(readItems(scope.read("rows") as Value[]).map((item) => readKey(item as object, "label")).join());
+    });
+    const proxy = scope.get("rows") as typeof rows;
+    proxy[0]!.label = "b";
+    scope.scheduler.flush();
+    proxy.push({ label: "c" });
+    scope.scheduler.flush();
+    // One object at two indices: a write through either path reaches both reads.
+    proxy[1] = proxy[0]!;
+    scope.scheduler.flush();
+    proxy[1]!.label = "d";
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "b", "b,c", "b,b", "d,d"]);
+    // Storage never holds a proxy.
+    assert.equal(scope.read("rows"), rows);
+    assert.equal(rows[1], row);
   });
 
   it("shares property subscriptions across scopes and registered writable aliases", () => {
@@ -813,5 +844,31 @@ describe("reactive proxies", () => {
     assert.deepEqual(snapshots.at(-1), ["a", undefined, undefined, "z"]);
     assert.deepEqual(lengths, [4, 1, 4]);
     symbolReader.stop(); iterator.stop(); lengthReader.stop();
+  });
+
+  it("lets raw-target owners share property dependencies with reactive proxies", () => {
+    // Compiled controller facades track and notify raw targets directly, through the same registry.
+    const scope = new ReactiveScope([["rows", ["a", "b"]]]);
+    const rows = scope.get("rows") as Value[];
+    const raw = ["x"];
+    const scheduler = scope.scheduler;
+    const seen: unknown[] = [];
+    const reader = createEffect(scheduler, () => { seen.push((rows as Value[]).length); });
+    const rawReader = createEffect(scheduler, () => { trackProperty(raw, "0"); seen.push(raw[0]); });
+    const target = rows as unknown as { [key: string]: Value };
+    target[2] = "c";
+    scheduler.flush();
+    raw[0] = "y";
+    notifyPropertySet(raw, "0", "x", "y", 1);
+    scheduler.flush();
+    notifyPropertySet(raw, "0", "y", "y", 1);
+    scheduler.flush();
+    delete raw[0];
+    notifyPropertyDelete(raw, "0", true);
+    scheduler.flush();
+    notifyPropertyDelete(raw, "0", false);
+    scheduler.flush();
+    assert.deepEqual(seen, [2, "x", 3, "y", undefined]);
+    reader.stop(); rawReader.stop();
   });
 });

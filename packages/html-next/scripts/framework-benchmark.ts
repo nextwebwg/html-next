@@ -1,6 +1,7 @@
 /**
  * Keyed rendering comparison on the pinned js-framework-benchmark fork; see docs/framework-benchmark.md.
  * Subcommands: setup [--force] | measure | compare (the verify:frameworks gate) | smoke.
+ * `--direct-extend` (measure, compare, smoke) builds the Vite entries with `experimentalDirectExtend`.
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -68,9 +69,9 @@ const version = (JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 const [command = "", ...rest] = process.argv.slice(2);
 const allowed: Record<string, readonly string[]> = {
   setup: ["force"],
-  measure: ["frameworks", "benchmarks", "count", "reference", "record"],
-  compare: ["base", "count", "output"],
-  smoke: ["removals"],
+  measure: ["frameworks", "benchmarks", "count", "reference", "record", "direct-extend"],
+  compare: ["base", "count", "output", "direct-extend"],
+  smoke: ["removals", "direct-extend"],
 };
 if (allowed[command] === undefined) throw new Error(`Usage: framework-benchmark.ts ${Object.keys(allowed).join("|")} [options]`);
 // Accepts `--name=value` and space-separated lists such as `--benchmarks 01_ 09_`.
@@ -88,6 +89,8 @@ for (const arg of rest) {
   options.set(match[1]!, current = match[2] === undefined ? [] : [match[2]]);
 }
 const one = (name: string): string | undefined => options.get(name)?.[0];
+const directExtend = options.has("direct-extend");
+if (options.get("direct-extend")?.length) throw new Error("--direct-extend takes no value.");
 const count = options.has("count") ? Number(one("count")) : undefined;
 if (count !== undefined && !(Number.isInteger(count) && count > 0)) throw new Error("--count must be a positive integer.");
 
@@ -100,9 +103,14 @@ const marker = (directory: string): string => join(work, directory, ".html-next-
 const pinnedTrees = (): string[] => git(["rev-parse", ...STEPS.map(([directory]) => `${PIN}:${directory}`)], work).split("\n");
 const isSetUp = (directory: string, tree: string): boolean => existsSync(marker(directory)) && readFileSync(marker(directory), "utf8") === tree;
 
+// The fork's Playwright browser packages download browsers on install and prune the shared
+// ms-playwright cache, deleting the repository's own browsers. The runner always receives this
+// repository's Chromium through --chromeBinary, so the fork never needs browsers of its own.
+const forkEnv = { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1", PUPPETEER_SKIP_DOWNLOAD: "1" };
+
 function run(file: string, args: readonly string[], cwd: string): void {
   console.error(`$ ${file} ${args.join(" ")}   [${cwd}]`);
-  if (spawnSync(file, args, { cwd, stdio: "inherit" }).status !== 0) throw new Error(`${file} ${args.join(" ")} failed in ${cwd}.`);
+  if (spawnSync(file, args, { cwd, stdio: "inherit", env: forkEnv }).status !== 0) throw new Error(`${file} ${args.join(" ")} failed in ${cwd}.`);
 }
 
 function setup(force: boolean): void {
@@ -186,7 +194,13 @@ async function environment() {
   };
 }
 
-interface Bundle { readonly sha256: string; readonly raw: number; readonly gzip: number; readonly revision?: string }
+/** What the build's manifest recorded for `experimentalDirectExtend`; "unsupported" when the revision predates the option. */
+type DirectExtend = { readonly applied: boolean; readonly runtimeComponents: readonly string[] } | "unsupported";
+interface Bundle {
+  readonly sha256: string; readonly raw: number; readonly gzip: number; readonly revision?: string;
+  /** Present on Vite entries built with `--direct-extend`. */
+  readonly directExtend?: DirectExtend;
+}
 
 /** SHA-256 of the shipped JavaScript in file order, its raw bytes, and the sum of each file's gzip (level 6) bytes. */
 function receipt(path: string): Bundle {
@@ -201,7 +215,8 @@ function receipt(path: string): Bundle {
   };
 }
 
-type HtmlNextVite = (options: { readonly entries: readonly string[] }) => PluginOption;
+// Revisions before the option ignore `experimentalDirectExtend`; their manifest then has no `directExtend`.
+type HtmlNextVite = (options: { readonly entries: readonly string[]; readonly experimentalDirectExtend: boolean }) => PluginOption;
 const plugins = new Map<string, Promise<HtmlNextVite>>();
 
 /**
@@ -259,7 +274,7 @@ async function buildEntry(name: string, mode: Mode, tree = root): Promise<Bundle
     writeFileSync(join(destination, "main.js"), 'import { createBenchmarkApp } from "virtual:html-next/components";\n\ndocument.body.append(createBenchmarkApp());\n');
     await viteBuild({
       root: destination, base: "./", configFile: false, logLevel: "error",
-      plugins: [(await vitePlugin(tree))({ entries: ["benchmark-app.html"] })],
+      plugins: [(await vitePlugin(tree))({ entries: ["benchmark-app.html"], experimentalDirectExtend: directExtend })],
       resolve: {
         alias: {
           "@nextwebwg/html-next/runtime": join(source, "runtime.ts"),
@@ -269,7 +284,18 @@ async function buildEntry(name: string, mode: Mode, tree = root): Promise<Bundle
       build: { target: "es2022" },
     });
   }
-  const bundle = receipt(join(destination, mode === "live" ? "browser-loader.bundle.js" : "dist/assets"));
+  let bundle = receipt(join(destination, mode === "live" ? "browser-loader.bundle.js" : "dist/assets"));
+  if (mode === "vite" && directExtend) {
+    const manifest = join(destination, "dist/html-next.manifest.json");
+    const recorded = existsSync(manifest)
+      ? (JSON.parse(readFileSync(manifest, "utf8")) as { directExtend?: DirectExtend }).directExtend
+      : undefined;
+    bundle = { ...bundle, directExtend: recorded ?? "unsupported" };
+    // The working tree must build what the option promises; a base revision is recorded as it built.
+    if (tree === root && (recorded === undefined || recorded === "unsupported" || !recorded.applied)) {
+      throw new Error(`--direct-extend did not apply to ${name}: ${JSON.stringify(bundle.directExtend)}.`);
+    }
+  }
   const metadata = JSON.parse(readFileSync(join(authored, "package.json"), "utf8")) as {
     name: string; "js-framework-benchmark": { frameworkVersion: string; customURL?: string };
   };
@@ -375,7 +401,7 @@ async function measure(): Promise<void> {
   const summary = {
     complete: true, runner_success: true, standard_samples: standard, cpu_samples: count ?? 15,
     protocol: full ? "full_standard" : "reduced",
-    measuredAt, frameworks, benchmarks: ids, environment: env, bundles,
+    measuredAt, frameworks, benchmarks: ids, direct_extend: directExtend, environment: env, bundles,
     vite_gzip_bytes: bundles[VITE]?.gzip, live_gzip_bytes: bundles[LIVE]?.gzip,
     ...summarize(medians),
   };
@@ -437,7 +463,7 @@ async function compare(): Promise<void> {
   }));
   const report = {
     status: combineStatus(Object.values(modes).map((result) => result.status)),
-    baselineRevision: base.revision, candidateRevision: env.htmlNext.commit, candidateDirty: env.htmlNext.dirty,
+    baselineRevision: base.revision, candidateRevision: env.htmlNext.commit, candidateDirty: env.htmlNext.dirty, directExtend,
     measuredAt: new Date().toISOString(), protocol: (count ?? 15) === 15 ? "full_standard" : "reduced", cpuSamples: count ?? 15,
     environment: env, modes, sweeps,
   };
@@ -470,7 +496,9 @@ async function smokeEntry(browser: Browser, name: string, removals: number): Pro
   await page.goto(`http://localhost:${PORT}/frameworks/keyed/${name}${metadata["js-framework-benchmark"].customURL ?? ""}/index.html`);
   const markup: string[] = [];
   const checkpoint = async (): Promise<void> => {
-    markup.push(await page.evaluate(() => document.querySelector('[data-component="benchmark-app"]')!.innerHTML));
+    // Rows may omit per-item markers (element-as-boundary, owner decision 2a), so they are not compared.
+    markup.push(await page.evaluate(() =>
+      document.querySelector('[data-component="benchmark-app"]')!.innerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, "")));
   };
   const rows = page.locator("#tbody tr");
   const waitRows = (expected: number) => page.waitForFunction((n) => document.querySelectorAll("#tbody tr").length === n, expected);
@@ -546,7 +574,8 @@ async function smoke(): Promise<void> {
       const live = await smokeEntry(browser, LIVE, removals);
       const differs = live.findIndex((markup, index) => markup !== vite[index]);
       assert.equal(differs, -1, `${VITE} and ${LIVE} render different component markup at checkpoint ${differs + 1}.`);
-      console.log(`PASS ${VITE} and ${LIVE} render identical component markup at all ${live.length} checkpoints`);
+      const build = directExtend ? "direct-extend" : "general-runtime fallback";
+      console.log(`PASS ${VITE} (${build}) and ${LIVE} render identical component markup at all ${live.length} checkpoints`);
     } finally {
       await browser.close();
     }

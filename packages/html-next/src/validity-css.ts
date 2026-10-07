@@ -5,6 +5,8 @@ const VALIDITY = /\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|--[\w-]+\
 /**
  * Add the internal state mirrors that let authors use the proposed `:valid` and `:invalid`
  * surface before browsers expose those pseudo-classes on arbitrary elements. Only selectors change.
+ * Transform owned source once, before delivery. Callers must explicitly select any shared/page CSS;
+ * validation never discovers, copies, or patches connected stylesheets.
  */
 export function rewriteValiditySelectors(css: string): string {
   return css.replace(VALIDITY, (match, name: string | undefined) => name === undefined ? match : `:is(:${name}, [data-${name}])`);

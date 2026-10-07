@@ -14,6 +14,7 @@ import {
   dimensionType,
   evaluate,
   type CompiledExpression,
+  type ExpressionNode,
   evaluateCompiled,
   toAttribute,
   toText,
@@ -23,11 +24,14 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
+import { keyedEquality, visitSelected } from "./selection.js";
 import {
   createComputed,
   createEffect,
   createSignal,
   ReactiveScope,
+  readItems,
+  readKey,
   registerReactiveAlias,
   untracked,
   type ReactiveEffect,
@@ -77,7 +81,7 @@ import { manageElementValidity, setElementValidity, validityState, type Generali
 
 interface LiveDefinition {
   readonly wrapper?: Element;
-  readonly style: HTMLStyleElement | undefined;
+  readonly style: HTMLStyleElement | HTMLLinkElement | undefined;
   readonly definition: ComponentDefinition;
 }
 
@@ -262,13 +266,37 @@ function registryFor(root: Document): DocumentRegistry {
   return registry;
 }
 
-/** The props and state each definition's `:host-state()` rules test, recorded when its styles compile. */
+/** The state names each definition's `:host-state()` rules test, recorded when its styles compile. */
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
-function compileStyles(css: string, definition: ComponentDefinition, document: Document): string {
-  const compiled = compileComponentStyles(css, definition, document);
+/** Only explicitly owned style nodes participate in reuse; application CSS is never inspected. */
+function installComponentStyles(
+  definition: ComponentDefinition,
+  document: Document,
+  carrier?: HTMLStyleElement,
+  styleCompiler?: (css: string, definition: ComponentDefinition) => CompiledComponentStyles,
+): HTMLStyleElement | HTMLLinkElement | undefined {
+  const tag = definition.contract.tag;
+  const existing = document.head.querySelector<HTMLStyleElement | HTMLLinkElement>(
+    `style[data-html-next-component-styles~="${tag}"],link[rel="stylesheet"][data-html-next-component-styles~="${tag}"]`,
+  );
+  if (existing !== null) {
+    const names = JSON.parse(existing.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
+    stateNamesByDefinition.set(definition, names[tag] ?? []);
+    return existing;
+  }
+  if (definition.css === "" && carrier === undefined) return undefined;
+  const style = carrier ?? document.createElement("style");
+  const compiled = styleCompiler === undefined
+    ? compileComponentStyles(definition.css, definition, document)
+    : styleCompiler(definition.css, definition);
   stateNamesByDefinition.set(definition, compiled.stateNames);
-  return compiled.css;
+  style.textContent = compiled.css;
+  style.setAttribute("data-html-next-component-styles", tag);
+  // Hydration needs this metadata without parsing or transforming the server's CSS again.
+  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: compiled.stateNames }));
+  document.head.append(style);
+  return style;
 }
 
 function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
@@ -346,11 +374,7 @@ export function installComponentGraph(
     if (node.shadowedByCustomElement) continue;
     const tag = node.definition.contract.tag;
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
-    const style = node.definition.css === "" ? undefined : root.createElement("style");
-    if (style !== undefined) {
-      style.textContent = compileStyles(node.definition.css, node.definition, root);
-      root.head.append(style);
-    }
+    const style = installComponentStyles(node.definition, root);
     registerDefinition(registry, tag, {
       definition: node.definition,
       style,
@@ -761,16 +785,16 @@ const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly C
  * The value at a dependency path. A path names both a list index and a record key as a segment
  * (`items.0`, `byId.42`), so each segment is read the way the value in hand reads it.
  */
-function readPath(path: string, scope: Scope): Value {
+function readPath(path: string, scope: ReactiveScope): Value {
   const [root, ...keys] = path.split(".");
-  let value = scope.get(root!);
+  let value = scope.read(root!);
   for (const key of keys) {
     if (Array.isArray(value)) {
-      value = key === "length" ? value.length : /^\d+$/.test(key) ? value[Number(key)] : undefined;
+      value = key === "length" || /^\d+$/.test(key) ? readKey(value, key === "length" ? key : Number(key)) : undefined;
     } else if (typeof value === "string" && key === "length") {
       value = value.length;
     } else if (typeof value === "object" && value !== null) {
-      value = (value as { readonly [key: string]: Value })[key];
+      value = readKey(value, key);
     } else {
       return ABSENT;
     }
@@ -886,6 +910,9 @@ interface HydrationRange {
   readonly content: readonly Node[];
 }
 
+/** Weak tags reuse the existing effect ownership; row removal releases every indexed binding. */
+const indexedSelections = new WeakMap<ReactiveEffect, string>();
+
 /**
  * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
  * add. A root switch stops them all and starts afresh.
@@ -923,6 +950,13 @@ class RenderOwned {
     this.effects.delete(effect);
   }
 
+  select(root: string): void {
+    for (const entry of this.#entries) {
+      if (entry instanceof RenderOwned) entry.select(root);
+      else if (indexedSelections.get(entry) === root) entry.schedule();
+    }
+  }
+
   stop(): void {
     if (this.#stopped) return;
     this.#stopped = true;
@@ -954,6 +988,11 @@ interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
+  readonly selection?: {
+    readonly key: CompiledExpression;
+    readonly scope: ReactiveScope;
+    readonly bindings: ReadonlyMap<CompiledExpression, CompiledExpression>;
+  };
   root?: Element;
   readonly projectedNodes: readonly Node[];
   readonly projectedSlotNames: WeakMap<Node, string>;
@@ -1288,7 +1327,8 @@ function shapeList(
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
 ): Value[] {
-  let result = items.slice();
+  // Rows stay plain: tracked like the proxy's reads, but no row ever needs its own proxy.
+  let result = readItems(items);
   if (flow.where !== undefined) {
     const where = flow.where;
     result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
@@ -1555,18 +1595,6 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
   return stable;
 }
 
-/** A row's scope. Its loop record gets a proxy only if something reads it. */
-function rowScope(
-  parent: ReactiveScope,
-  locals: Record<string, Value>,
-  types: Readonly<Record<string, TypeNode | undefined>>,
-  loop: Record<string, Value> | undefined,
-): ReactiveScope {
-  const local = typedLayer(parent, locals, types);
-  if (loop !== undefined) local.setUnread("loop", loop);
-  return local;
-}
-
 function renderEachRegion(
   node: ElementNode | SlotNode,
   scope: ReactiveScope,
@@ -1594,9 +1622,32 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
-  // An item or index named `loop` shadows the record, so it then stays an ordinary local.
-  const unreadLoop = flow.item !== "loop" && flow.index !== "loop";
   const { flow: _flow, ...body } = node;
+  const bindings = new Map<CompiledExpression, CompiledExpression>();
+  if (flow.keyPlan !== undefined && node.kind === "element") {
+    const find = (element: ElementNode): void => {
+      for (const attribute of element.attributes) {
+        if (attribute.kind !== "attribute" || attribute.target !== "class" || attribute.expressionPlan === undefined) continue;
+        const root = keyedEquality(attribute.expressionPlan.ast, flow.keyPlan!.ast, flow.item);
+        if (root !== undefined && root !== flow.index) {
+          // Keep one scheduler group when another binding on this element reads the same root;
+          // otherwise routing only the class effect would change authored attribute creation order.
+          const shared = element.attributes.some((other) => other.kind !== "literal" &&
+            other.expressionPlan?.dependencies.some((path) => path === root || path.startsWith(`${root}.`)) === true &&
+            (other.kind !== "attribute" || other.target !== "class" ||
+              keyedEquality(other.expressionPlan.ast, flow.keyPlan!.ast, flow.item) !== root));
+          if (shared) continue;
+          bindings.set(attribute.expressionPlan, compileExpression(root));
+        }
+      }
+      for (const child of element.children) if (child.kind === "element" && child.flow === undefined) find(child);
+    };
+    find(body as ElementNode);
+  }
+  const roots = new Set([...bindings.values()].map((expression) => expression.source));
+  const selection = bindings.size === 0 ? undefined : { key: flow.keyPlan!, scope, bindings };
+  const rowContext = selection === undefined ? context
+    : Object.create(context, { selection: { value: selection } }) as RuntimeRenderContext;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
@@ -1609,21 +1660,23 @@ function renderEachRegion(
     let retained = 0;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
-      const locals: Record<string, Value> = unreadLoop ? { [flow.item]: item } : { [flow.item]: item, loop };
+      const locals: Record<string, Value> = {
+        [flow.item]: item,
+        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+      };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local = typedLayer(scope, locals, { [flow.item]: itemType });
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const owned = renderOwned(context.owned);
-        const blockContext = ownedContext(context, owned);
+        const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, blockContext)
@@ -1646,8 +1699,7 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        if (unreadLoop) block.scope.setUnread("loop", loop);
-        else block.scope.set("loop", locals.loop!);
+        block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
       ordered?.push(block);
@@ -1676,6 +1728,20 @@ function renderEachRegion(
     blocks = next;
     syncContainingSelect(end);
   });
+  for (const root of roots) {
+    let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
+    ownEffect(context, scope, () => {
+      const value = scope.read(root);
+      const type = scope.typeOfDeclaredPath?.(root);
+      // Routing does not evaluate a row binding or emit its diagnostics while the list is empty.
+      const next = type !== undefined && value !== undefined && value !== ABSENT &&
+        !conformsAtReference(value, type) ? NONCONFORMING : value;
+      if (previous === NONCONFORMING || next === NONCONFORMING) {
+        for (const block of blocks.values()) block.owned.select(root);
+      } else visitSelected(blocks, previous, next, (block) => block.owned.select(root));
+      previous = next;
+    }, 0);
+  }
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
 
@@ -1851,14 +1917,35 @@ function bindElementAttributes(
   context: RuntimeRenderContext,
   invocation?: InvocationBinding,
 ): void {
-  const own = (run: () => void | (() => void), priority?: number): void => {
+  const own = (run: () => void | (() => void), priority?: number): ReactiveEffect => {
     const effect = ownEffect(context, scope, run, priority);
     invocation?.effects.push(effect);
+    return effect;
   };
   for (const attribute of node.attributes) {
     if (attribute.kind === "attribute") {
-      own(() => {
-        const value = evalConforming(attribute.expression, scope, context.definition);
+      const selection = invocation === undefined && attribute.target === "class" &&
+        scope.parent === context.selection?.scope ? context.selection : undefined;
+      const root = attribute.expressionPlan === undefined ? undefined : selection?.bindings.get(attribute.expressionPlan);
+      const effect = own(() => {
+        let value: Value | typeof NONCONFORMING;
+        if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
+        else {
+          const expression = attribute.expressionPlan!.ast as Extract<ExpressionNode, { kind: "binary" }>;
+          const outerFirst = expression.left.kind === "id" && expression.left.name === root.source;
+          // Validate each operand through the existing evaluator, retaining expression equality.
+          let item: Value | typeof NONCONFORMING;
+          let outer: Value | typeof NONCONFORMING;
+          if (outerFirst) {
+            outer = untracked(() => evalConforming(root, scope, context.definition));
+            item = evalConforming(selection.key, scope, context.definition);
+          } else {
+            item = evalConforming(selection.key, scope, context.definition);
+            outer = untracked(() => evalConforming(root, scope, context.definition));
+          }
+          value = item === NONCONFORMING || outer === NONCONFORMING ? NONCONFORMING
+            : expression.op === "=" ? item === outer : item !== outer;
+        }
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
         if (value === NONCONFORMING) return;
@@ -1894,6 +1981,7 @@ function bindElementAttributes(
           setAttribute(target, attribute.name, toAttribute(value, attribute.name));
         }
       });
+      if (root !== undefined) indexedSelections.set(effect, root.source);
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         own(() => {
           const target = rootTarget(element, invocation);
@@ -3324,10 +3412,9 @@ function lowerScopes(
   }
 
   for (const live of definitions) {
-    if (live.style !== undefined) {
-      live.style.textContent = compileStyles(live.style.textContent ?? "", live.definition, live.wrapper!.ownerDocument);
-      live.wrapper!.ownerDocument.head.append(live.style);
-    }
+    const style = installComponentStyles(live.definition, live.wrapper!.ownerDocument,
+      live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined);
+    registry.definitions.set(live.definition.contract.tag, { ...live, style });
     live.wrapper!.remove();
   }
 
@@ -3527,18 +3614,8 @@ export function registerComponentDefinitions(
     }
     registerDefinition(registry, definition.contract.tag, {
       definition,
-      style: undefined,
+      style: installComponentStyles(definition, root, undefined, styleCompiler),
     });
-    if (definition.css !== "") {
-      const style = root.createElement("style");
-      if (styleCompiler === undefined) style.textContent = compileStyles(definition.css, definition, root);
-      else {
-        const compiled = styleCompiler(definition.css, definition);
-        stateNamesByDefinition.set(definition, compiled.stateNames);
-        style.textContent = compiled.css;
-      }
-      root.head.append(style);
-    }
   }
 }
 

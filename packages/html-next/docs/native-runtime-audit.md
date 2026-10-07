@@ -88,7 +88,7 @@ contains all of them for arbitrary later graphs.
 | Native form participation | Native `<form>`, form ownership, successful controls, constraint validation, and submission | Preserve component-rendered controls as ordinary DOM controls | Request enhancement is available from `@nextwebwg/html-next/forms`; the component runtime does not import or re-export it. |
 | Declared type enforcement | Attributes, native scalar conversion and constraint validation | Parse and serialize structural types explicitly authored by a component contract | Type enforcement remains at prop, event, and other declared contract boundaries. HTML formats such as email, URL, date, color, identifier, and token syntax use native-control constraints or an opt-in validation adapter rather than being universal contract terminals. External response validation is available through `DataResource.adapt`; opt-in validation utilities remain package APIs but are not installed by the browser runtime. Those historical boundary corrections cut 20,854 minified raw bytes and 6,147 gzip bytes from their comparison baseline. |
 | Dynamic HTML content | `<template>` fragment parsing, DOM traversal, Trusted Types-compatible sinks | Allow/block policy for `$html` content | Owner-approved for the current baseline: retain the `sanitize.ts` adapter (1,133 minified raw bytes), with its separate `sanitizer-default.ts` policy (2,907 bytes) across engines. Definition validation now imports this module's URL-attribute and executable-scheme policy instead of carrying a second copy. Standard `setHTML()` exists in the tested Chromium and Firefox builds but not WebKit. Its safe default also removes the fixture's ordinary image and form, which the current policy preserves. Revisit when every target engine exposes equivalent policy control. |
-| Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style elements | Live-source selector transformation and portable generated-target scoping | The live runtime requires native `@scope` (Chrome 118+, Safari 17.4+, Firefox 146+) and uses a scope-only compiler path. Generated targets retain provenance-attribute scoping for older engines. Native validity selectors retain their browser meaning; the component transformer no longer expands them to private mirrored attributes. |
+| Component styling | CSS parser/CSSOM, selectors, cascade, `@scope`, native style/link elements | Compilation of owned source and explicit delivery metadata | Component compilation emits bounded `@scope` rules and rewrites validity selectors once. Validation never scans or patches application CSS. Owned style/link markers let hydration reuse server-delivered CSS, including bundles containing several components, while restoring state-selector metadata without parsing CSS again. Native rendering already coalesces same-task installations; measured containment variants did not remove forced style/layout passes. See [style delivery measurements](style-delivery-performance.md). |
 | Controllers | Native ESM, `EventTarget`, selectors, form collections, and cleanup callbacks | The uniform `ComponentHost` state/effect facade and lifecycle attachment | Controller modules load through native `import()`. The isolated controller capability fixture costs 37,973 bytes gzip because the native build includes the general runtime. The intended build shape is one graph-scoped host implementation shared by the application or library output. It keeps the full controller-facing contract while pruning implementation machinery the graph does not require. |
 | Resource graphs and import maps | `URL`, `fetch()`, CORS, CSP, native module loading, and application import-map markup | HTML component dependency graph, duplicate-tag checks, import-map snapshot resolution, and application-selected live-scope enforcement | Same-origin roots remain inside the application origin. Cross-origin roots require an application-owned mapping; relative definition and controller entry edges cannot escape its mapped prefix, and component redirects are checked before registration. A polyfill cannot enforce the controller final-target rule because native `import()` has no pre-execution redirect hook; that check requires browser integration. Controller transitive imports remain ordinary ESM. Browsers expose no equivalent component-resource resolver, so the remaining authority layer is necessary. |
 | Hydration and adoption | Existing DOM identity, selectors, control state, focus, and selection APIs | Matching server-lowered roots to definitions and attaching only authored behavior | Cross-browser tests preserve node identity and live form-control state. `pnpm measure:hydration` reports server-DOM adoption and fresh lowering separately while asserting identity, edit, focus, and selection preservation on every sample. A parent never binds a template-component invocation: its bound values stay that invocation's attributes until the component lowers, and its listeners, refs, and properties attach to the component's root when it does, in either adoption order, then re-run on each new root. |
@@ -135,6 +135,7 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Keyed list | 38,079 | Shared general-runtime support |
 | Declared read | 38,034 | Shared general-runtime support |
 | Controller lifecycle | 37,973 | Shared general-runtime support |
+| Controller keyed list, `directExtend` | 7,517 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
 They are not separate per-component runtimes. An application or library build combines the complete
@@ -147,6 +148,63 @@ MutationObserver coordinator reports connection changes; the runtime renders `$i
 regions and reconnects the same instance state. Framework adapters give structural ownership to
 their framework renderer instead. The attachment path preserves this distinction, with Chromium,
 Firefox, and WebKit tests covering native keyed updates, branch changes, and reconnect behavior.
+
+## Direct-extend generated components (experimental)
+
+`GenerationOptions.directExtend` (the unplugin's `experimentalDirectExtend`) compiles components
+with a controller, declared state, `$if` and keyed `$each` to straight-line DOM code instead of the
+general-runtime fallback. The direct path is meant to cover every feature the live runtime supports;
+until it covers one, a component using it keeps the fallback unchanged, and the unplugin keeps a
+whole graph on the fallback when any component in it needs the general runtime. The
+generated module imports only the `generated-runtime` helpers its features use; the interpreter,
+parsers, type system and formatter never reach it, and `measure:runtime` fails if they do. The
+[compiled direct path](./compiled-direct-path.md) describes its architecture, coverage plan and
+byte budgets.
+
+| Need | Native mechanism composed | Remaining gap filled by code |
+| --- | --- | --- |
+| Build row and branch DOM | `createElement`/`setAttribute` once into a prototype, then `cloneNode(true)`; no HTML or Trusted Types sink | `buildTemplate()` spec walker |
+| Find binding sites | `firstChild`/`nextSibling` getters | Paths computed at compile time |
+| `$value` text | `Text.data` on the element's sole Text child; `textContent` for `""` and foreign content | `writeText()`: one guard; writes only when the converted text changed |
+| Attributes, classes | `setAttribute`/`removeAttribute`, `classList.toggle(name, force)` | The interpreter's own `toAttribute`/`toText`/`truthy` conversions |
+| Insertion | Native `insertBefore` for each fresh row, in forward order | Finding each fresh run and its retained insertion reference; fragment grouping is removed after paired screening |
+| Bulk removal | `replaceChildren(start, end)` when the region owns its parent, else `Range.deleteContents()` or `remove()` | Adjacency grouping; foreign nodes split groups |
+| Moves | `moveBefore` with an `insertBefore` fallback, as the live runtime | Swapped ends, then the longest increasing run of retained positions |
+| Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
+| Change notification | None native | Controller effects use the reactivity dependency graph; templates use root bits and written raw objects |
+| Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
+| Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
+
+### Indexed equality selection
+
+The platform's `Map` already indexes keyed rows, and `classList.toggle(name, force)` applies the
+selected state. The remaining gap is routing a changed outer value to the affected bindings.
+For `class:danger="row.id = selected"` with `$key="row.id"`, the existing row map can find both
+the previous and next selected rows. Reuse that map rather than allocate a second index. Keep the
+expression's strict equality semantics: `Map` uses SameValueZero for lookup, but `NaN = NaN`
+still evaluates to false. Other comparands retain ordinary reactive evaluation.
+When an ordinary binding on the same element reads that outer root, retain the ordinary scheduler
+group so attribute creation keeps authored order.
+
+The platform has no keyed reconciliation and no reactive binding of template parts; DOM Parts and
+Template Instantiation have not shipped. These helpers are the smallest layer that binds cloned DOM
+to declared state while keeping the controller contract. If `ChildNodePart`/`AttributePart` ship, the
+compile-time site walks map onto them.
+
+The coordinator fast path keeps today's light-DOM scope exactly and retains no root the document no
+longer holds: registered roots' lifecycle records are held through `WeakRef`s, pruned by a
+`FinalizationRegistry`. Indexing the record rather than the element keeps a live root indexed when
+a root `$match` switches it to another element, since the live runtime moves the record. The
+marker walk only acts on a root whose connection no longer matches its record and that the batch's
+added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM scope). With at most
+32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more
+fall back to the walk, which keeps mutation-order sequencing. Above 32 roots the walk runs.
+
+Only direct-extend output imports the indexed coordinator (`src/generated-lifecycle-index.ts`), so
+other generated output bundles exactly the coordinator it did before. Both occupy the one
+coordinator slot a document has: whichever installs first serves every root registered in that
+document, so two coordinators never disagree. When another coordinator installed first, direct-extend
+roots get the exact walk without the fast path.
 
 ## Review sequence
 
