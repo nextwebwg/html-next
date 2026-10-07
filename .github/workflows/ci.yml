@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ponytail: Vitest's hash shards measured 3-11 minutes; add a shard when one nears the limit.
+        # Parity shards are balanced by measured spec time (vitest.targets.config.ts), about 8.5 minutes each.
         include:
           - { suite: runtime and consumers, command: pnpm test:browser && pnpm test:consumer }
           - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
@@ -58,7 +58,15 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium firefox webkit
+      # Playwright's CDN has taken from seconds to 8 minutes for one browser; cache them per version.
+      - id: playwright
+        run: echo "version=$(pnpm --filter @nextwebwg/html-next exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Every launch is headless, which uses Chromium's headless shell rather than the full browser.
+      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps --only-shell chromium firefox webkit
       - run: ${{ matrix.command }}
 
   performance:
@@ -80,67 +88,6 @@ jobs:
         env:
           PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: pnpm verify:performance --base="$PERFORMANCE_BASE"
-
-  framework-changes:
-    name: Detect runtime and compiler changes
-    runs-on: ubuntu-latest
-    outputs:
-      runtime: ${{ steps.diff.outputs.runtime }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - id: diff
-        env:
-          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          if git diff --quiet "$PERFORMANCE_BASE" HEAD -- packages/html-next/src packages/html-next-unplugin/src; then
-            echo "runtime=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "runtime=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  # Not yet in Required: the paired rendering gate's noise on hosted runners is unknown.
-  frameworks:
-    name: Framework rendering against main
-    needs: framework-changes
-    if: needs.framework-changes.outputs.runtime == 'true'
-    runs-on: ubuntu-latest
-    # Up to three sweeps of four entries (Vite-compiled and live, candidate and base; an estimated 18
-    # minutes each on an M4 Pro, twice the measured 9-minute two-entry sweep) plus a cold setup, at up
-    # to 2.5x on hosted runners; tighten this from the first CI runs' per-sweep timing.
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: npm install --global --ignore-scripts --force corepack@0.34.0
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium
-      # The pinned Puppeteer runner keeps Chrome's sandbox, which needs unprivileged user namespaces.
-      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - id: benchmark-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/html-next/.benchmark/js-framework-benchmark
-          # The script holds the fork pin and the control lockfile hashes.
-          key: js-framework-benchmark-${{ runner.os }}-${{ hashFiles('packages/html-next/scripts/framework-benchmark.ts') }}
-      - run: pnpm setup:frameworks
-      # Saved before the gate: the combined action only saves after a successful job.
-      - if: steps.benchmark-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/html-next/.benchmark/js-framework-benchmark
-          key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
-      - name: Compare the Vite-compiled and live entries on the nine keyed workloads
-        env:
-          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: pnpm verify:frameworks --base="$PERFORMANCE_BASE"
 
   required:
     name: Required

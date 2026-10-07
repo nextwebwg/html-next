@@ -183,9 +183,9 @@ Any further performance experiment starts from this retained state and keeps mea
    - A graph that mixes older direct components that have a lifecycle (such as `prop-button`) with
      direct-extend components bundles both coordinators: +184 B gzip-9. This is planned for M3.
    - The indexed fast path is skipped when another coordinator installs first. This costs speed only.
-8. **CI gate.** Make "Framework rendering against main" Required only after its noise is
-   characterized on hosted runners. It should probably run with `--direct-extend` once that is the
-   default.
+8. **Nightly gate.** The "Framework rendering" workflow runs nightly, because a full comparison exceeds
+   the 15-minute CI budget. Treat it as a gate only after its noise is characterized on hosted runners.
+   It should probably run with `--direct-extend` once that is the default.
 
 ## Working method
 
