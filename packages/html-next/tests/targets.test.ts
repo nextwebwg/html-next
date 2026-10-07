@@ -453,9 +453,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     // Vue writes a boolean on an ARIA attribute as "true" or "false", and removes a false boolean attribute.
     assert.match(vue, /:aria-expanded="checkedProps\.open \?\? undefined"/);
     assert.match(vue, /:hidden="checkedProps\.gone \?\? undefined"/);
-    const vanilla = outputs.get("vanilla/XAria.js")!;
-    assert.match(vanilla, /setAttribute\("aria-expanded", String\(value\d+\)\)/);
-    assert.match(vanilla, /setAttribute\("hidden", ""\)/);
+    // Vanilla writes them as the live runtime does (tests/vanilla-blocks.test.ts compares the DOM).
+    assert.match(outputs.get("vanilla/XAria.js")!, /toAttribute\(x\d+, "aria-expanded"\)/);
   });
 
   it("parses generated Vanilla source", async () => {
@@ -1444,14 +1443,14 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps multi-prop native property bindings on the full runtime path", () => {
+  it("compiles multi-prop native property bindings directly", () => {
     const module = generated(componentSource(
       "demo-prop-values",
       `<prop name="value" type="number" default="1">Value.</prop><prop name="label" type="string" default="Ready">Label.</prop>`,
       `<section><input type="number" .value="value" from:data-label="label"></section>`,
     )).get("vanilla/DemoPropValues.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
   });
 
   it("creates vanilla SVG subtrees in the SVG namespace", async () => {

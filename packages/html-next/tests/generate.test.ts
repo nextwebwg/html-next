@@ -73,7 +73,8 @@ describe("generateComponent", () => {
     const vanilla = artifacts.find((artifact) => artifact.path === "vanilla/XBounded.js")!.content;
     assert.match(vanilla, /"min":1,"max":10/);
     assert.match(vanilla, /"minLength":2,"maxLength":8/);
-    assert.match(vanilla, /html-next\/runtime/);
+    // Compiled directly; tests/vanilla-blocks.test.ts holds its validity to the live runtime's.
+    assert.doesNotMatch(vanilla, /html-next\/runtime/);
   });
 
   it("keeps the primitive native and makes owned values win over native spreads", async () => {

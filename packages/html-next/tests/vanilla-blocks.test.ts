@@ -21,7 +21,7 @@ const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
 
 function vanilla(text: string, directExtend: boolean): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
-  const named = definition.controller === undefined ? definition : { ...definition, controller: "./controller.js" };
+  const named = definition.controller === undefined ? definition : { ...definition, controller: `./${definition.controller.split("/").at(-1)}` };
   return generateComponent(named, { directExtend }).find((artifact) => artifact.path.endsWith(".js"))!.content;
 }
 
@@ -32,18 +32,21 @@ function vanilla(text: string, directExtend: boolean): string {
 function reference(text: string): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
   const controlled = definition.controller !== undefined;
-  const named = controlled ? { ...definition, controller: "./controller.js" } : definition;
+  const named = controlled ? { ...definition, controller: `./${definition.controller!.split("/").at(-1)}` } : definition;
   const root = definition.template.name;
   return [
     'import { manageComponentLifecycle, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
-    ...controlled ? ['import * as controller from "./controller.js";'] : [],
+    'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
+    ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
     // Registered as a live document registers it, with its styles and their `:host-state()` names.
     `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
     "registerComponentDefinitions([definition]);",
-    "export function createReference() {",
+    "export function createReference(options = {}) {",
+    "  const { attributes = {}, children = [], slots = {}, ...props } = options;",
     root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
+    "  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));",
     `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
-    `  manageComponentLifecycle(element, definition, ${controlled ? "{ controller }" : "{}"});`,
+    `  manageComponentLifecycle(element, definition, { props${controlled ? ", controller" : ""} });`,
     "  return element;",
     "}",
   ].join("\n");
@@ -115,7 +118,6 @@ describe("direct-extend Vanilla generation", () => {
 
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
-    props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
     "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
     slot: component(state, "<p><slot></slot></p>"),
@@ -261,11 +263,26 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     readonly errors: string[];
     readonly events: string[];
   }
-  type Step = (host: any) => void;
+  /** A step drives the controller's host, or the root and its framework prop channel. */
+  type Step = (host: any, update: (props: Record<string, unknown>) => void) => void;
+
+  /** The rendered DOM with each element's attributes sorted: their order is not a contract. */
+  const canonical = (element: Element): string => {
+    const copy = element.cloneNode(true) as Element;
+    for (const node of [copy, ...copy.querySelectorAll("*")]) {
+      const attributes = Array.from(node.attributes, (attribute) => [attribute.name, attribute.value] as const)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+      for (const [name] of attributes) node.removeAttribute(name);
+      for (const [name, value] of attributes) node.setAttribute(name, value);
+    }
+    return copy.outerHTML;
+  };
 
   /** Builds `text` on one path, runs `steps` with a render and a snapshot after each, and reconnects. */
-  async function run(text: string, directExtend: boolean, steps: readonly Step[]): Promise<Run> {
-    const { text: code } = await bundle(directExtend ? vanilla(text, true) : reference(text));
+  async function run(text: string, directExtend: boolean, steps: readonly Step[], options?: Record<string, unknown>): Promise<Run> {
+    const { text: code } = await bundle(directExtend
+      ? `${vanilla(text, true)}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`
+      : reference(text));
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
       if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
@@ -283,13 +300,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }));
     const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// ${directExtend}`).toString("base64")}`);
     const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-    const factory = Object.values(module).find((value) => typeof value === "function") as () => Element;
-    const element = factory();
+    const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as (options?: Record<string, unknown>) => Element;
+    const update = (props: Record<string, unknown>): void => (module.update as (element: Element, props: Record<string, unknown>) => void)(element, props);
+    const element = factory(options);
     const snapshots: string[] = [];
     const identities: string[] = [];
     let previous = new Map<string, Element>();
     const record = (): void => {
-      snapshots.push(element.outerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
+      snapshots.push(canonical(element).replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
       const rows = new Map(Array.from(element.querySelectorAll("[data-id]"), (row) => [row.getAttribute("data-id")!, row]));
       identities.push([...rows].map(([id, row]) => `${id}:${previous.get(id) === row ? "same" : "new"}`).join(","));
       previous = rows;
@@ -300,7 +318,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     // A component without a controller is driven through its DOM.
     const host = log.hosts[0] ?? { root: element };
     for (const step of steps) {
-      step(host);
+      step(host, update);
       await flush();
       record();
     }
@@ -314,13 +332,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     return { snapshots, identities, warnings, errors, events: log.events };
   }
 
-  async function same(text: string, steps: readonly Step[]): Promise<Run> {
+  async function same(text: string, steps: readonly Step[], options?: Record<string, unknown>): Promise<Run> {
     // The compared module must be the direct one: a fallback would compare the general runtime with itself.
     assert.doesNotMatch(vanilla(text, true), /@nextwebwg\/html-next\/runtime/, "compiles directly");
-    const live = await run(text, false, steps);
+    const live = await run(text, false, steps, options);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    const compiled = await run(text, true, steps);
+    const compiled = await run(text, true, steps, options);
     if (process.env.DBG !== undefined) (await import("node:fs")).writeFileSync(process.env.DBG, JSON.stringify({ live: live.errors, compiled: compiled.errors, lw: live.warnings, cw: compiled.warnings }, null, 1));
     for (let index = 0; index < live.snapshots.length; index += 1) {
       assert.equal(compiled.snapshots[index], live.snapshots[index], `snapshot ${index}`);
@@ -690,6 +708,97 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.tone = ""; host.state.selected = 0; },
       (host) => { host.state.ready = false; },
     ]);
+  });
+
+  const propsShape = (defs: string, body: string): string =>
+    `<template component="x-shape" controller="./props-controller.js" status="early" summary="Shape.">
+    <defs>${defs}</defs>${body}</template>`;
+  const scalarProps = `
+    <prop name="variant" type="keyword" values="solid, subtle, outline" default="subtle">Emphasis.</prop>
+    <prop name="label" type="string">Label.</prop>
+    <prop name="count" type="integer" default="2">Count.</prop>
+    <prop name="ratio" type="number">Ratio.</prop>
+    <prop name="open" type="boolean" default="false">Open.</prop>
+    <state name="note" type="string" value="n"></state>
+    <computed name="doubled" from="count * 2"></computed>
+    <computed name="summary" from="concat(variant, ':', default(label, note))"></computed>`;
+  const scalarBody = `
+    <section class:open="open" from:data-tone="variant"><p>{label} {count} {ratio}</p><b $value="summary"></b>
+      <i $if="open">{doubled}</i><ul><li $each="n of [1, 2, 3]" $key="n" from:data-id="n"><b $if="n <= count">{n}</b></li></ul></section>`;
+
+  it("accepts, renders and reflects props like the general runtime", async () => {
+    await same(propsShape(scalarProps, scalarBody), [
+      (_host, update) => { update({ variant: "solid", count: 3 }); },
+      (_host, update) => { update({ label: "Hi", open: true, ratio: 0.5 }); },
+      // Invalid inputs are refused and leave the value; null clears and undefined returns the default.
+      (_host, update) => { update({ count: "4", variant: "loud", ratio: Number.NaN }); },
+      (_host, update) => { update({ label: null, count: undefined }); },
+      (_host, update) => { update({ open: false, unknown: 1 }); },
+    ], { variant: "outline", label: "Start", ratio: 1.5 });
+  });
+
+  it("refuses invalid initial props and reports the root's validity like the general runtime", async () => {
+    await same(propsShape(`${scalarProps}<prop name="name" type="string" required>Name.</prop>`, scalarBody), [
+      (_host, update) => { update({ name: "set" }); },
+      (_host, update) => { update({ name: "", count: 1.5 }); },
+      (_host, update) => { update({ name: undefined }); },
+    ], { variant: "huge", count: "x", attributes: { "data-label": "From attribute", id: "x" } });
+  });
+
+  it("writes a root's bound data-* prop as template output", async () => {
+    await same(propsShape(`
+      <prop name="variant" type="keyword" values="solid, subtle" default="subtle">Emphasis.</prop>
+      <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>`, `
+      <section from:data-variant="variant"><p>{size}</p></section>`), [
+      (_host, update) => { update({ variant: "solid", size: "sm" }); },
+      (_host, update) => { update({ variant: "bad", size: "bad" }); },
+      (_host, update) => { update({ variant: undefined, size: undefined }); },
+    ], { size: "sm" });
+  });
+
+  it("reads structured props through their declared types", async () => {
+    await same(propsShape(`
+      <prop name="items" type="list(object({ id: integer, label: string }))" default="[]">Items.</prop>
+      <prop name="config" type="object({ title: string, limit?: integer })">Config.</prop>`, `
+      <section><h2>{config.title}</h2><ol><li $each="item of items" $key="item.id" from:data-id="item.id"><b $if="item.id <= default(config.limit, 9)">{item.label}</b></li></ol></section>`), [
+      (_host, update) => { update({ items: [{ id: 1, label: "a" }, { id: 2, label: "b" }], config: { title: "T", limit: 1 } }); },
+      (_host, update) => { update({ items: [{ id: 2, label: "B" }, { id: 3, label: "c" }], config: { title: "U" } }); },
+      (_host, update) => { update({ items: [{ id: "x" }], config: { title: 1 } }); },
+    ], { items: [{ id: 1, label: "a" }], config: { title: "Start" } });
+  });
+
+  it("checks prop bounds and writes boolean and property bindings like the general runtime", async () => {
+    await same(propsShape(`
+      <prop name="amount" type="number" min="1" max="10">Amount.</prop>
+      <prop name="label" type="string" minlength="2" maxlength="8" pattern="[a-z]+">Label.</prop>
+      <prop name="open" type="boolean" default="false">Open.</prop>
+      <prop name="gone" type="boolean" default="false">Gone.</prop>`, `
+      <section from:aria-expanded="open" from:hidden="gone"><input type="number" .value="amount" from:data-label="label"></section>`), [
+      (_host, update) => { update({ amount: 11, label: "a" }); },
+      (_host, update) => { update({ amount: 0, label: "toolongvalue", open: true, gone: true }); },
+      (_host, update) => { update({ amount: 5, label: "UPPER" }); },
+      (_host, update) => { update({ amount: 5, label: "fine", open: false, gone: false }); },
+    ], { amount: 3, label: "ok" });
+  });
+
+  it("types a select prop by its selector's current value", async () => {
+    const select = (from: string) => propsShape(`
+      ${from}
+      <type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type>
+      <prop name="value" type="input-value">Value.</prop>`, `
+      <section from:data-value="value"><p>{value}</p><b $if="value = 3">three</b></section>`);
+    // A required selector can be cleared, which chooses nothing: then the value must be null.
+    await same(select('<prop name="mode" type="keyword" values="text, number" required>Mode.</prop>'), [
+      (_host, update) => { update({ mode: "number" }); },
+      (_host, update) => { update({ value: 3 }); },
+      (_host, update) => { update({ value: "four", mode: "text" }); },
+      (_host, update) => { update({ mode: null }); },
+      (_host, update) => { update({ mode: undefined, value: undefined }); },
+    ], { mode: "text", value: "start" });
+    await same(select('<prop name="mode" type="keyword" values="text, number" default="number">Mode.</prop>'), [
+      (_host, update) => { update({ value: "x" }); },
+      (_host, update) => { update({ value: 9, mode: "text" }); },
+    ], { mode: "number", value: "7" });
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

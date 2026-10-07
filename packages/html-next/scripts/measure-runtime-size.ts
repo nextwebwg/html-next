@@ -122,8 +122,9 @@ const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFI
 const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
 const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
-// Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_050, true);
+// Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
+// for the controller host's prop channel (`host.props` and prop writes) that every prop component uses.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_075, true);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];

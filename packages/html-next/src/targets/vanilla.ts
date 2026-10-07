@@ -1746,9 +1746,10 @@ export function generateVanilla(
   ].join("\n");
 
   if (blocks !== undefined) {
-    // The root's literal attributes merge with the invocation's exactly as above.
+    // The root's literal attributes merge with the invocation's exactly as above; the blocks render its bindings.
     const rootLines: string[] = [];
-    renderAttributes(template, "element", rootLines, contract.props, { value: 0 }, "  ", undefined, undefined, true);
+    const literals = { ...template, attributes: template.attributes.filter((attribute) => attribute.kind === "literal") };
+    renderAttributes(literals, "element", rootLines, contract.props, { value: 0 }, "  ", undefined, undefined, true);
     return { module: emitBlocks(blocks, definition, version, rootLines), declaration };
   }
   return { module: `${lines.join("\n")}\n`, declaration };

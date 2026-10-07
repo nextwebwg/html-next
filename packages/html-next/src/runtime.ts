@@ -26,6 +26,7 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
+import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
 import { keyedEquality, visitSelected } from "./selection.js";
 import {
   createComputed,
@@ -403,16 +404,6 @@ export function installComponentGraph(
   return installed;
 }
 
-function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue | undefined {
-  if (input === null) return null;
-  // Bare boolean attributes retain HTML presence semantics. Explicit values
-  // are invocation strings and must still pass through the declared type.
-  const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
-  if (type === null) return candidate as PropValue;
-  const parsed = parseTypedValue(candidate, type, "$", source);
-  return parsed.ok ? parsed.value as PropValue : undefined;
-}
-
 function propValidity(instance: RuntimeInstance): Validity {
   return validateComponentProps(instance.definition.contract,
     (name) => {
@@ -427,18 +418,6 @@ function rootPropValidity(instance: RuntimeInstance): Validity {
   if (instance.delegates.length === 0) return propValidity(instance);
   const errors = [instance, ...instance.delegates].flatMap((entry) => propValidity(entry).errors);
   return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
-}
-
-function reflectedPropValue(value: unknown, type: PropType | null): string {
-  if (type !== null && parseTypedValue(value, type, "$", "value").ok) {
-    return serializeTypedValue(value, type);
-  }
-  return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
-}
-
-function assignedPropValue(_name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value | undefined {
-  if (input !== undefined) return invocationValue(prop, input, "value", false, type) as Value | undefined;
-  return (prop.default === undefined ? null : prop.default) as Value;
 }
 
 function propAttributeNames(
@@ -3563,7 +3542,8 @@ function attachRuntimeComponent(
 
   const attached = runtimeInstance(element);
   if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
-  updateComponentProps(element, options.props ?? {});
+  // The options' props are the instance's initial input; a reconnect keeps whatever they became since.
+  if (instance === undefined) updateComponentProps(element, options.props ?? {});
   connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
@@ -3619,14 +3599,14 @@ function applyComponentProps(
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) {
-      const accepted = assignedPropValue(name, prop, input);
+      const accepted = assignedPropValue(prop, input) as Value | undefined;
       if (accepted !== undefined) next[name] = accepted;
     }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select !== undefined) {
-      const accepted = assignedPropValue(name, prop, input, selectedPropType(contract, prop, next));
+      const accepted = assignedPropValue(prop, input, selectedPropType(contract, prop, next)) as Value | undefined;
       if (accepted !== undefined) next[name] = accepted;
     }
   }

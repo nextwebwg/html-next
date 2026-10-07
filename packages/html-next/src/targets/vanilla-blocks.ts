@@ -27,7 +27,9 @@ import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
 import { iteratedRefNames, rootArms, type ComponentDefinition, type ElementNode, type Flow, type TemplateNode } from "../template.js";
 import type { WritablePath } from "../expression.js";
-import { declarationTypeNode, formatType, parseTypedValue, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, normalizeType, parseTypedValue, typeAtKey, type TypeNode } from "../type-system.js";
+import { kebabCase } from "../names.js";
+import { runtimeProps } from "./shared.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
@@ -181,6 +183,9 @@ export interface BlockPlan {
   readonly handlers: readonly HandlerPlan[];
   /** Each computed root's index and lowered expression. */
   readonly computeds: readonly { readonly index: number; readonly source: string }[];
+  /** How many roots are `<state>`, and how many the controller's host shows; props' roots follow them. */
+  readonly states: number;
+  readonly shown: number;
 }
 
 /** A feature the direct path does not cover yet; the component keeps the general-runtime fallback. */
@@ -647,7 +652,15 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       checked: (!conforming || controlled.has(declaration.name)) && node !== undefined,
     });
   }
-  return [...states, ...computeds];
+  // Props follow, read-only: an accepted value always satisfies its type, so reads need no check.
+  const props: Root[] = Object.entries(definition.contract.props).map(([name, prop]) => {
+    // A select prop's type follows its selector, so every read checks it against the current choice.
+    if (prop.select !== undefined) return { name, type: "?", initial: "null", checked: true };
+    const type = compactType(normalizeType(prop.type));
+    if (type === undefined) notYetDirect();
+    return { name, type, initial: "null" };
+  });
+  return [...states, ...computeds, ...props];
 }
 
 
@@ -753,26 +766,46 @@ class Planner {
       const index = this.roots.findIndex((root) => root.name === name);
       if (index < 0) notYetDirect();
       const root = this.roots[index]!;
+      const key = JSON.stringify(`expression:${plan.source}:${path}`);
+      const select = this.definition.contract.props[name!]?.select;
+      /** The check of a read: a select prop's against the type its selector's current value chooses. */
+      const check = (read: string): string => {
+        if (select === undefined) {
+          const type = compactType(declared);
+          if (type === undefined) notYetDirect();
+          return `checkReference(S, ${read}, ${compactSource(type)}, ${key}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`;
+        }
+        const from = this.roots.findIndex((candidate) => candidate.name === select.from);
+        if (from < 0) notYetDirect();
+        reads = merge(reads, { bits: rootBit(from), nested: false, item: false, contents: false, fails: true, ...from >= 29 ? { overflow: [from] } : {} });
+        const choice = (type: TypeNode | undefined): string => {
+          for (const step of steps) type = type === undefined ? undefined : typeAtKey(type, step);
+          if (type === undefined) return "0, \"\"";
+          const compact = compactType(type);
+          if (compact === undefined) notYetDirect();
+          return `${compactSource(compact)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(type)}.`)}`;
+        };
+        // The last choice is the one no option matches, or a null selector: the null type.
+        const options = [...select.options.map((option) => `[${JSON.stringify(option.value)}, ${choice(normalizeType(option.type))}]`),
+          `[null, ${choice({ kind: "terminal", name: "null" })}]`];
+        return `checkSelected(S, ${read}, v[${from}], [${options.join(", ")}], ${key})`;
+      };
       // A local that shadows a root is still checked against the root's declared type, as live does.
       const shadow = scope.aliases.findLast((candidate) => candidate.name === name);
       if (shadow !== undefined) {
-        const type = compactType(declared);
-        if (type === undefined) notYetDirect();
         const local = aliasSource(scope, shadow);
         const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
-        checks.push(`checkReference(S, ${scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`}, ${compactSource(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+        checks.push(check(scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`));
         reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
         continue;
       }
       // A state root's own value is checked on every write, unless its initial value may not conform.
       if (steps.length === 0 && root.checked !== true) continue;
-      const type = compactType(declared);
-      if (type === undefined) notYetDirect();
       const base = root.computed === undefined ? `v[${index}]` : `g(${index})`;
       const declaredRead = scope.record === undefined
         ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
         : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
-      checks.push(`checkReference(S, ${declaredRead}, ${compactSource(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+      checks.push(check(declaredRead));
       const rootReads: Reads = root.computed === undefined
         ? { bits: rootBit(index), nested: steps.length > 0, item: false, contents: false, fails: true, ...index >= 29 ? { overflow: [index] } : {} }
         : this.computedLowered(index);
@@ -1123,8 +1156,7 @@ class Planner {
  */
 export function blockPlan(definition: ComponentDefinition): BlockPlan | undefined {
   try {
-    if (Object.keys(definition.contract.props).length > 0 ||
-      (definition.slots?.length ?? 0) > 0 || definition.root?.kind === "component" ||
+    if ((definition.slots?.length ?? 0) > 0 || definition.root?.kind === "component" ||
       rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
 
     const roots = compileRoots(definition);
@@ -1140,8 +1172,10 @@ export function blockPlan(definition: ComponentDefinition): BlockPlan | undefine
         expression: { ...none(`hoststate`, `hostState(${JSON.stringify(states)}, [${values.map((value) => value.source).join(", ")}])`), ...reads },
       });
     }
+    const props = Object.keys(definition.contract.props).length;
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
-      computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]) };
+      computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
+      states: roots.length - props - roots.filter((item) => item.computed !== undefined).length, shown: roots.length - props };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
     throw error;
@@ -1561,13 +1595,15 @@ export function emitBlocks(
       ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
-  const instance = plan.handlers.length > 0 ||
+  const propNames = Object.keys(contract.props);
+  const instance = propNames.length > 0 || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
-    ...(instance ? ["  const I = {};"] : []),
+    ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
     `  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${
       plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
+    ...(propNames.length > 0 ? ["  manageProps(I, element);"] : []),
     ...root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...root.selects.map((select) => `  R.c${select}();`),
     ...root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
@@ -1582,8 +1618,8 @@ export function emitBlocks(
     "}",
   );
   const factory = [
-    `export function create${contract.name}(options = {}) {`,
-    "  const { attributes = {} } = options;",
+    `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}) {`,
+    propNames.length === 0 ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
     definition.template.name === "svg"
       ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");'
       : `  const element = document.createElement(${JSON.stringify(definition.template.name)});`,
@@ -1595,6 +1631,9 @@ export function emitBlocks(
     `  element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
     ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
     `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+    // Props are accepted first: initial state may read them.
+    ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(propNames.filter((name) =>
+      definition.template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === `data-${kebabCase(name)}`)))});`]),
     ...plan.initializers,
     ...(plan.computeds.length === 0 ? [] : [
       "  const X = { e: 0, g: (j) => g(j), w: new Set() };",
@@ -1625,8 +1664,9 @@ export function emitBlocks(
     const type = declarationTypeNode(declaration.type, declaration.shape);
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${JSON.stringify(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
-  const stateSpec = `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: [${plan.roots.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
-    plan.computeds.length === 0 ? "" : `, k: ${plan.computeds[0]!.index}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
+  const shown = plan.roots.slice(0, plan.shown);
+  const stateSpec = `const S = { n: ${JSON.stringify(shown.map((item) => item.name))}, t: [${shown.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
+    plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""} };`;
   const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
@@ -1636,7 +1676,7 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState"]
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 
@@ -1652,6 +1692,8 @@ export function emitBlocks(
     // A fresh row's first patch has nothing written yet.
     ...(blocks.some((block) => block.row) ? ["const E = new Map();"] : []),
     stateSpec,
+    ...(propNames.length === 0 ? [] : [`const D = { props: ${JSON.stringify(Object.fromEntries(Object.entries(runtimeProps(definition))
+      .map(([name, prop]) => { const { target: _target, ...read } = prop as Record<string, unknown>; return [name, read]; })))} };`]),
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
     ...(definition.controller === undefined ? [] : ["const C = (host) => controller.default(host);"]),
     "",

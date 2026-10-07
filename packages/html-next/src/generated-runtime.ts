@@ -22,6 +22,12 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
+import { selectedPropType } from "./contract.js";
+import { kebabCase } from "./names.js";
+import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
+import type { ComponentContract, PropContract, PropType } from "./types.js";
+import { validateComponentProps } from "./validate.js";
+import { manageElementValidity, setElementValidity, validityState } from "./validity.js";
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
@@ -330,6 +336,199 @@ export function updateGeneratedProps(element: Element, props: Readonly<Record<st
   generatedPropUpdaters.get(element)?.(props);
 }
 
+interface PropInput { readonly value: unknown; readonly source: "html" | "value"; readonly present: boolean }
+
+/** `host.props[name]`, as the live host gives it. */
+interface GeneratedPropHandle {
+  readonly value: unknown;
+  readonly inputValue: unknown;
+  readonly validity: ReturnType<typeof validityState>;
+  validate(): ReturnType<typeof validityState>;
+}
+
+/** A compiled instance's props, as the live runtime keeps an instance's. */
+export interface GeneratedPropRecord {
+  readonly D: Pick<ComponentContract, "props">;
+  /** The state and computed names; each prop's root follows them, in the contract's order. */
+  readonly n: readonly string[];
+  readonly v: unknown[];
+  /** The latest input of each prop, and the props an input made explicit. */
+  readonly i: Record<string, PropInput>;
+  readonly x: Set<string>;
+  /** Props the root template binds as `data-<name>` itself, so that attribute is its output. */
+  readonly b: readonly string[];
+  /** The props' validity, as the root reports it. */
+  readonly y: () => ReturnType<typeof validateComponentProps>;
+  /** `host.props`. */
+  readonly h: Readonly<Record<string, GeneratedPropHandle>>;
+}
+
+/**
+ * Accepts a compiled component's props from its factory, as the live runtime accepts a factory's:
+ * explicit inputs are recorded as `data-<name>` first, then every prop the root's attributes or the
+ * factory supplies is parsed through its type, and an input that does not parse leaves the default.
+ * Fills each prop's root in `v`; `manageProps` takes over once the instance is attached.
+ */
+export function acceptProps(
+  element: Element, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
+  input: Readonly<Record<string, unknown>>, bound: readonly string[],
+): GeneratedPropRecord {
+  const props = D.props;
+  const names = Object.keys(props);
+  for (const name of names) {
+    const prop = props[name]!;
+    const value = input[name];
+    if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
+    element.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(value, selectedPropType(D as ComponentContract, prop, input)));
+  }
+  // The root's `data-<name>` attributes are read back as HTML input, and the factory's values win.
+  const incoming: Record<string, PropInput> = Object.create(null);
+  for (const attribute of Array.from(element.attributes)) {
+    const name = names.find((candidate) => attribute.name === `data-${kebabCase(candidate)}` || attribute.name === `data-${candidate.toLowerCase()}`);
+    if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
+  }
+  for (const name of names) if (input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
+  const accepted: Record<string, unknown> = {};
+  const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
+  for (const pass of [false, true]) {
+    for (const name of names) {
+      const prop = props[name]!;
+      const item = incoming[name];
+      if (item === undefined || (prop.select !== undefined) !== pass) continue;
+      // A selector that is state chooses with its initial value.
+      const from = prop.select?.from;
+      accepted[name] = invocationValue(prop, item.value, item.source, false, selectedPropType(D as ComponentContract, prop,
+        from === undefined || props[from] !== undefined ? accepted : { [from]: v[at(from)] }));
+    }
+  }
+  for (const name of names) {
+    const prop = props[name]!;
+    v[at(name)] = accepted[name] !== undefined ? accepted[name] : prop.default === undefined ? null : prop.default;
+  }
+  const inputs: Record<string, PropInput> = Object.create(null);
+  for (const name of names) inputs[name] = incoming[name] ?? { value: null, source: "value", present: false };
+  const record: GeneratedPropRecord = {
+    D, n, v, i: inputs, b: bound,
+    x: new Set(names.filter((name) => incoming[name] !== undefined && incoming[name]!.value !== null)),
+    // Reads every prop's input and value, as live's validity does, so an effect reading it tracks them all.
+    y: () => validateComponentProps(D as ComponentContract,
+      (name) => {
+        trackProperty(inputs, name);
+        if (inputs[name]?.present) return inputs[name]!.value;
+        trackProperty(record, name);
+        return v[at(name)];
+      },
+      (name) => (trackProperty(record, name), v[at(name)]),
+      (name) => inputs[name]?.source ?? "value"),
+    h: Object.freeze(Object.fromEntries(names.map((name) => {
+      const validity = (): ReturnType<typeof validityState> => {
+        const errors = record.y().errors.filter((error) => error.path === name);
+        return validityState(errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors });
+      };
+      return [name, Object.freeze({
+        get value() { trackProperty(record, name); return v[at(name)]; },
+        get inputValue() { trackProperty(inputs, name); return inputs[name]!.value; },
+        get validity() { return validity(); },
+        validate: validity,
+      })];
+    }))),
+  };
+  return record;
+}
+
+/**
+ * The live runtime's prop boundary for an attached compiled instance: on first connect the root
+ * takes its validity and bound props their reflection; a reconnect reflects every explicit or bound
+ * prop again; and the framework channel (`updateGeneratedProps`) applies inputs as
+ * `updateComponentProps` does, recording the raw input and re-rendering what an accepted value changed.
+ */
+export function manageProps(instance: GeneratedInstance, element: Element): void {
+  const record = instance.B!;
+  const { D, n, v, i: inputs, x: explicit, b: bound } = record;
+  const props = D.props;
+  const names = Object.keys(props);
+  const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
+  const changed = new Set<string>();
+  let connected = false;
+  let installed = false;
+  const selected = (prop: PropContract, values: Readonly<Record<string, unknown>>): PropType | null =>
+    selectedPropType(D as ComponentContract, prop, values);
+  const reflect = (name: string): void => {
+    const prop = props[name]!;
+    if (!bound.includes(name) && !explicit.has(name)) return;
+    const value = v[at(name)];
+    // Null is "no value" at the attribute boundary: it removes the attribute.
+    const text = value === undefined || value === ABSENT || value === null ? null
+      : reflectedPropValue(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
+    if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
+    else element.setAttribute(`data-${kebabCase(name)}`, text);
+  };
+  const job = new ReactiveEffect(instance.q, () => {
+    if (!connected) return;
+    for (const name of changed) reflect(name);
+    changed.clear();
+    setElementValidity(element, record.y());
+  }, 2);
+  instance.o.push({
+    pause: () => { connected = false; },
+    resume: () => {
+      connected = true;
+      changed.clear();
+      if (installed) {
+        for (const name of names) reflect(name);
+        setElementValidity(element, record.y());
+        return;
+      }
+      installed = true;
+      manageElementValidity(element, {}, { derive: record.y });
+      for (const name of bound) reflect(name);
+      job.schedule();
+    },
+    stop: () => job.stop(),
+  });
+  generatedPropUpdaters.set(element, (input) => {
+    const next: Record<string, unknown> = {};
+    for (const name of names) {
+      next[name] = v[at(name)];
+      const from = props[name]!.select?.from;
+      if (from !== undefined && props[from] === undefined) next[from] = v[at(from)];
+    }
+    for (const pass of [false, true]) {
+      for (const [name, value] of Object.entries(input)) {
+        const prop = props[name];
+        if (prop === undefined || (prop.select !== undefined) !== pass) continue;
+        const accepted = assignedPropValue(prop, value, selected(prop, next));
+        if (accepted !== undefined) next[name] = accepted;
+      }
+    }
+    for (const [name, value] of Object.entries(input)) {
+      const prop = props[name];
+      if (prop === undefined) continue;
+      const previous = inputs[name];
+      inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+      notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      // A bound data-* attribute is template output; only its binding writes it.
+      const attribute = `data-${kebabCase(name)}`;
+      if (value === undefined || value === null) {
+        explicit.delete(name);
+        if (!bound.includes(name)) element.removeAttribute(attribute);
+      } else {
+        explicit.add(name);
+        if (!bound.includes(name)) element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
+      }
+      const index = at(name);
+      const current = v[index];
+      if (!Object.is(current, next[name])) {
+        instance.w(index, next[name]);
+        notifyPropertySet(record, name, current, next[name], undefined);
+        changed.add(name);
+        for (const other of names) if (props[other]!.select?.from === name) changed.add(other);
+      }
+    }
+    job.schedule();
+  });
+}
+
 /**
  * A prototype for cloning: `[tag, [name, value, ...], ...children]`, where an empty tag is a
  * fragment, a string is text, 0 is an empty Text a `$value` writes, 1 is a `$if` anchor pair and
@@ -608,7 +807,7 @@ export interface GeneratedStateSpec {
   readonly f: string;
   /** The component tag, which inspection and serialization report. */
   readonly g: string;
-  /** How many of the names are writable `<state>`; the rest are read-only computeds. */
+  /** How many of the names are writable `<state>`; the rest are read-only computeds. Props' roots follow them all. */
   readonly k?: number;
   /** Declared events, which `host.dispatch` checks and flags as the live host does. */
   readonly d?: Readonly<Record<string, GeneratedEventDeclaration>>;
@@ -653,6 +852,10 @@ export interface GeneratedInstance {
   readonly c: () => boolean;
   /** A facade over a raw object, for writes into an outer local's data. */
   readonly p: (value: object) => unknown;
+  /** Writes a root's value and schedules its render, as a prop update does. */
+  readonly w: (index: number, value: unknown) => void;
+  /** The instance's props, set before attaching so `host.props` can read them. */
+  readonly B?: GeneratedPropRecord;
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */
@@ -764,6 +967,18 @@ export function checkReference(spec: GeneratedStateSpec, value: unknown, type: C
   return false;
 }
 
+/**
+ * Checks a select prop's reference against the type its selector's value chooses; the last option
+ * stands for no match (and a null selector), whose type is null.
+ */
+export function checkSelected(
+  spec: GeneratedStateSpec, value: unknown, selector: unknown,
+  options: readonly (readonly [choice: unknown, type: CompactType, message: string])[], key: string,
+): boolean {
+  const [, type, message] = options.find(([choice], index) => index === options.length - 1 || selector !== null && choice === selector)!;
+  return checkReference(spec, value, type, key, message);
+}
+
 /** Warns HR007 once per component and key, as the live runtime's authored warnings do. */
 export function warnOnce(spec: GeneratedStateSpec, key: string, message: string): void {
   let reported = reportedWarnings.get(spec);
@@ -818,6 +1033,18 @@ export function attachGeneratedController(
     render(changed);
   }, 1);
   if (channel !== undefined) channel.n = (index, previous, next) => notifyPropertySet(roots, names[index]!, previous, next, undefined);
+  /** Stores a root's new value, marks it changed and schedules the render. */
+  const assign = (index: number, next: unknown): void => {
+    if (channel !== undefined) channel.e += 1;
+    values[index] = next;
+    // Roots from index 29 share one bit; the written map says which of them changed.
+    if (index < 29) dirty |= 1 << index;
+    else {
+      dirty |= 1 << 29;
+      if (connected) objects.set(index, 1);
+    }
+    job.schedule();
+  };
   const warn = (path: string, message: string): void => warnOnce(spec, `controller:${path}`, message);
   const readOnly = (path: string): void => warn(path, `Destination \`${path}\` is read-only.`);
   const mismatch = (path: string): void => warn(path, `State \`${path}\` does not satisfy its declared type.`);
@@ -921,15 +1148,7 @@ export function attachGeneratedController(
         const previous = values[index];
         const next = raw(value);
         if (!Object.is(previous, next)) {
-          if (channel !== undefined) channel.e += 1;
-          values[index] = next;
-          // Roots from index 29 share one bit; the written map says which of them changed.
-          if (index < 29) dirty |= 1 << index;
-          else {
-            dirty |= 1 << 29;
-            if (connected) objects.set(index, 1);
-          }
-          job.schedule();
+          assign(index, next);
           notifyPropertySet(roots, key, previous, next, undefined);
         }
       }
@@ -965,7 +1184,7 @@ export function attachGeneratedController(
       });
       return () => { stopped = true; stop(); };
     },
-    props: Object.freeze(Object.create(null) as object),
+    props: handle.B?.h ?? Object.freeze(Object.create(null) as object),
     refs: new Proxy({}, {
       get: (_target, key) => typeof key !== "string" ? undefined : spec.z === undefined ? recorded[key] : spec.z(recorded, key),
       has: (_target, key) => typeof key === "string" && recorded[key] !== undefined,
@@ -988,7 +1207,7 @@ export function attachGeneratedController(
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
   });
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, "") });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
