@@ -49,6 +49,8 @@ interface ManagedComponentLifecycle {
   disconnect: undefined | (() => void);
   /** What the instance exposes to the runtime (state, values, host); read by inspection (M3). */
   readonly h?: unknown;
+  /** The generated coordinator's weak reference to the root. */
+  w?: WeakRef<Element>;
 }
 
 interface LifecycleCoordinator {
@@ -109,8 +111,9 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
   const installed = state.lifecycle;
   if (installed !== undefined) return installed;
   let size = 0;
-  /** Registered roots that are connected and were in the document's light tree when last synchronized. */
-  const connected = new Set<Element>();
+  /** Every registered root, held weakly: the coordinator retains nothing the document dropped (006). */
+  const roots = new Set<WeakRef<Element>>();
+  const collected = new FinalizationRegistry<WeakRef<Element>>((reference) => roots.delete(reference));
   const synchronize = (element: Element): void => {
     const record = (element as RuntimeElement)[lifecycleKey];
     if (record === undefined) return;
@@ -120,10 +123,6 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       record.disconnect();
       record.disconnect = undefined;
     }
-    const current = (element as RuntimeElement)[lifecycleKey];
-    // Hosts without getRootNode (minimal test DOMs) simply stay on the full walk.
-    if (current?.disconnect !== undefined && element.getRootNode?.() === root) connected.add(element);
-    else connected.delete(element);
   };
   /** Whether the walk below reaches `element` from this batch: the same light-DOM scope. */
   const reaches = (mutations: readonly MutationRecord[], element: Element): boolean => {
@@ -136,18 +135,22 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
     return mutations.some((mutation) => within(mutation.removedNodes) || within(mutation.addedNodes));
   };
   const stopObservation = subscribeDocumentMutations(root, (mutations) => {
-    // ponytail: with every registered root connected and indexed (at most 32), only roots that
-    // left the document can need work; two or more keep the walk's mutation-order sequencing.
-    if (connected.size === size && size <= 32) {
-      let left: Element | undefined;
+    // ponytail: the walk only acts on a root whose connection no longer matches its record and that
+    // the batch reaches. Up to 32 roots, find those directly: one is synchronized here, two or more
+    // keep the walk's mutation-order sequencing. Above 32 roots the walk runs (M3: index by subtree).
+    if (roots.size <= 32) {
+      let next: Element | undefined;
       let several = false;
-      for (const element of connected) {
-        if (element.isConnected) continue;
-        if (left !== undefined) { several = true; break; }
-        left = element;
+      for (const reference of roots) {
+        const element = reference.deref();
+        const record = element && (element as RuntimeElement)[lifecycleKey];
+        if (record !== undefined && element!.isConnected !== (record.disconnect !== undefined) && reaches(mutations, element!)) {
+          if (next !== undefined) { several = true; break; }
+          next = element;
+        }
       }
       if (!several) {
-        if (left !== undefined && reaches(mutations, left)) synchronize(left);
+        if (next !== undefined) synchronize(next);
         return;
       }
     }
@@ -174,7 +177,10 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       if (previous === record) return;
       previous?.disconnect?.();
       if (previous === undefined) size += 1;
+      else roots.delete(previous.w!);
       target[lifecycleKey] = record;
+      collected.register(element, record.w = new WeakRef(element));
+      roots.add(record.w);
       synchronize(element);
     },
     remove(element, record) {
@@ -182,7 +188,7 @@ function coordinatorFor(root: Document): LifecycleCoordinator {
       if (target[lifecycleKey] !== record) return;
       record.disconnect?.();
       delete target[lifecycleKey];
-      connected.delete(element);
+      roots.delete(record.w!);
       size -= 1;
       if (size === 0) {
         stopObservation();

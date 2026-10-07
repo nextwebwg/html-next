@@ -168,7 +168,7 @@ parsers, type system and formatter never reach it, and `measure:runtime` fails i
 | Moves | `moveBefore` with an `insertBefore` fallback, as the live runtime | Swapped ends, then the longest increasing run of retained positions |
 | Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
 | Change notification | None native | Controller effects use the reactivity dependency graph; templates use root bits and written raw objects |
-| Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()` | A scope-exact fast path that skips the per-node marker walk |
+| Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
 | Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
 
 The platform has no keyed reconciliation and no reactive binding of template parts; DOM Parts and
@@ -176,11 +176,12 @@ Template Instantiation have not shipped. These helpers are the smallest layer th
 to declared state while keeping the controller contract. If `ChildNodePart`/`AttributePart` ship, the
 compile-time site walks map onto them.
 
-The coordinator fast path keeps today's light-DOM scope exactly. It applies only while every
-registered root is connected in the document's light tree and at most 32 are registered. A root that
-left the document is synchronized only when the batch's added or removed nodes reach it the way the
-marker walk would (`contains` and `querySelectorAll` share light-DOM scope); two or more departures
-fall back to the walk, which keeps mutation-order sequencing.
+The coordinator fast path keeps today's light-DOM scope exactly and retains no root the document no
+longer holds: registered roots are held through `WeakRef`s, pruned by a `FinalizationRegistry`. The
+marker walk only acts on a root whose connection no longer matches its record and that the batch's
+added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM scope). With at most
+32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more
+fall back to the walk, which keeps mutation-order sequencing. Above 32 roots the walk runs.
 
 ## Review sequence
 

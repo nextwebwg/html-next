@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
@@ -16,6 +18,9 @@ import {
   type GeneratedStateSpec,
 } from "../src/generated-runtime.js";
 import { NESTED, raw } from "../src/keyed.js";
+
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
 
 let window: JSDOM["window"];
 let document: Document;
@@ -170,6 +175,72 @@ describe("generated lifecycle coordinator", () => {
     host.remove();
     await flush();
     assert.deepEqual(log, ["+inner", "+moved"]);
+  });
+
+  it("retains no root that moved into a shadow tree and was removed there", async () => {
+    const keep = document.createElement("div");
+    keep.setAttribute("data-component", "x-keep");
+    document.body.append(keep);
+    managed(keep, [], "keep");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const collected = await (async () => {
+      const moved = document.createElement("div");
+      moved.setAttribute("data-component", "x-moved");
+      document.body.append(moved);
+      managed(moved, [], "moved");
+      await flush();
+      shadow.append(moved);
+      await flush();
+      moved.remove();
+      return new WeakRef(moved);
+    })();
+    document.body.append(document.createElement("p"));
+    await flush();
+    for (let attempt = 0; attempt < 10 && collected.deref() !== undefined; attempt += 1) {
+      await flush();
+      gc();
+    }
+    assert.equal(collected.deref(), undefined);
+  });
+
+  it("keeps the fast path after other roots unmount, remount or never connect", async () => {
+    const log: string[] = [];
+    const root = (name: string): Element => {
+      const element = document.createElement("div");
+      element.setAttribute("data-component", `x-${name}`);
+      return element;
+    };
+    const a = root("a");
+    const b = root("b");
+    document.body.append(a, b);
+    managed(a, log, "a");
+    managed(b, log, "b");
+    managed(root("pending"), log, "pending");
+    b.remove();
+    await flush();
+    document.body.append(b);
+    await flush();
+    b.remove();
+    await flush();
+    const list = document.createElement("ul");
+    a.append(list);
+    await flush();
+    const query = vi.spyOn(window.Element.prototype, "querySelectorAll");
+    for (let index = 0; index < 50; index += 1) list.append(Object.assign(document.createElement("li"), { innerHTML: "<b>x</b>" }));
+    await flush();
+    list.replaceChildren();
+    await flush();
+    assert.equal(query.mock.calls.length, 0);
+    // A parked root still connects and disconnects exactly as the walk would.
+    const wrapper = document.createElement("section");
+    wrapper.append(b);
+    document.body.append(wrapper);
+    await flush();
+    wrapper.remove();
+    await flush();
+    assert.deepEqual(log, ["+a", "+b", "-b", "+b", "-b", "+b", "-b"]);
   });
 
   it("connects roots added in one batch in mutation order", async () => {
