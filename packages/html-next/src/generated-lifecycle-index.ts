@@ -3,11 +3,18 @@
  * so a mutation batch that reaches no registered root costs no subtree query. Only direct-extend
  * output imports it, so other generated output never pays for it. It occupies the one document
  * slot every coordinator shares: whichever installs first serves every root in that document (older
- * generated and live roots too), so two coordinators never disagree. When another one installed
- * first, it serves direct-extend roots as well (exact walk, no fast path).
+ * generated and live roots too), so two coordinators never disagree. It indexes lifecycle records,
+ * not elements, so a live root whose record moves to a replacement element stays indexed. When
+ * another one installed first, it serves direct-extend roots as well (exact walk, no fast path).
  */
 
-import { documentState, lifecycleKey, subscribeDocumentMutations, type RuntimeElement } from "./generated-lifecycle.js";
+import {
+  documentState,
+  lifecycleKey,
+  subscribeDocumentMutations,
+  type ManagedComponentLifecycle,
+  type RuntimeElement,
+} from "./generated-lifecycle.js";
 
 // ponytail: `synchronize` and the walk repeat the generated coordinator's; sharing them as top-level
 // helpers grows other generated output (7 B gzip on prop-button). A direct-extend graph that also
@@ -16,9 +23,13 @@ function indexedCoordinatorFor(root: Document) {
   const state = documentState(root);
   const installed = state.lifecycle;
   if (installed !== undefined) return installed;
-  /** Every registered root, held weakly: the coordinator retains nothing the document dropped (006). */
-  const roots = new Set<WeakRef<Element>>();
-  const collected = new FinalizationRegistry<WeakRef<Element>>((reference) => roots.delete(reference));
+  /**
+   * Every registered root's record, held weakly: the coordinator retains nothing the document
+   * dropped (006). Records, not elements, so a root the live runtime switches to another element
+   * (`attachRoot` moves the record and its `element`) stays indexed.
+   */
+  const roots = new Set<WeakRef<ManagedComponentLifecycle>>();
+  const collected = new FinalizationRegistry<WeakRef<ManagedComponentLifecycle>>((reference) => roots.delete(reference));
   const synchronize = (element: Element): void => {
     const record = (element as RuntimeElement)[lifecycleKey];
     if (record === undefined) return;
@@ -47,9 +58,9 @@ function indexedCoordinatorFor(root: Document) {
       let next: Element | undefined;
       let several = false;
       for (const reference of roots) {
-        const element = reference.deref();
-        const record = element && (element as RuntimeElement)[lifecycleKey];
-        if (record !== undefined && element!.isConnected !== (record.disconnect !== undefined) && reaches(mutations, element!)) {
+        const record = reference.deref();
+        const element = record?.element;
+        if (element !== undefined && element.isConnected !== (record!.disconnect !== undefined) && reaches(mutations, element)) {
           if (next !== undefined) { several = true; break; }
           next = element;
         }
@@ -81,9 +92,10 @@ function indexedCoordinatorFor(root: Document) {
       const previous = target[lifecycleKey];
       if (previous === record) return;
       previous?.disconnect?.();
-      roots.delete(previous?.w as WeakRef<Element>);
+      roots.delete(previous?.w as WeakRef<ManagedComponentLifecycle>);
       target[lifecycleKey] = record;
-      collected.register(element, record.w = new WeakRef(element));
+      record.element = element;
+      collected.register(record, record.w = new WeakRef(record));
       roots.add(record.w);
       synchronize(element);
     },

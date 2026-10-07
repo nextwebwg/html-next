@@ -19,6 +19,8 @@ import {
 } from "../src/generated-runtime.js";
 import { manageIndexedLifecycle } from "../src/generated-lifecycle-index.js";
 import { NESTED, raw } from "../src/keyed.js";
+import { manageComponentLifecycle, updateComponentProps } from "../src/runtime.js";
+import { parseComponent } from "../src/source-parser.js";
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -295,6 +297,39 @@ describe("generated lifecycle coordinator", () => {
     assert.deepEqual(log, ["+older", "+direct", "-direct", "-older"]);
     // The direct root still holds the document's one coordinator.
     assert.equal(lifecycle(), installed);
+  });
+
+  it("follows a live root whose record moves to a replacement element", async () => {
+    // The live runtime reads DOM interfaces as globals.
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (/^[A-Z]/.test(key) && !(key in globalThis)) vi.stubGlobal(key, window[key as keyof typeof window]);
+    }
+    const log: string[] = [];
+    const direct = document.createElement("div");
+    direct.setAttribute("data-component", "x-direct");
+    document.body.append(direct);
+    managed(direct, log, "direct");
+    const definition = parseComponent(`<template component="x-action" status="early" summary="Button or link.">
+  <defs><prop name="as" type="keyword" values="button, a" default="button">Native root.</prop></defs>
+  <template $match>
+    <a $when="as = 'a'" href="/next"><slot></slot></a>
+    <button $else type="button"><slot></slot></button>
+  </template>
+</template>`, "https://example.test/x-action.html");
+    const button = document.createElement("button");
+    button.setAttribute("data-component", "x-action");
+    manageComponentLifecycle(button, definition, { props: {} });
+    document.body.append(button);
+    await flush();
+    updateComponentProps(button, { as: "a" });
+    await flush();
+    const link = document.querySelector("a[data-component]")!;
+    const record = (link as unknown as Record<symbol, { disconnect?: unknown }>)[Symbol.for("@nextwebwg/html-next.lifecycle.v1")];
+    assert.notEqual(record?.disconnect, undefined);
+    link.remove();
+    await flush();
+    assert.equal(record?.disconnect, undefined);
+    assert.deepEqual(log, ["+direct"]);
   });
 
   it("connects roots added in one batch in mutation order", async () => {

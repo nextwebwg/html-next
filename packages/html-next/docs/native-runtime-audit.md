@@ -181,7 +181,9 @@ to declared state while keeping the controller contract. If `ChildNodePart`/`Att
 compile-time site walks map onto them.
 
 The coordinator fast path keeps today's light-DOM scope exactly and retains no root the document no
-longer holds: registered roots are held through `WeakRef`s, pruned by a `FinalizationRegistry`. The
+longer holds: registered roots' lifecycle records are held through `WeakRef`s, pruned by a
+`FinalizationRegistry`. Indexing the record rather than the element keeps a live root indexed when
+a root `$match` switches it to another element, since the live runtime moves the record. The
 marker walk only acts on a root whose connection no longer matches its record and that the batch's
 added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM scope). With at most
 32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more

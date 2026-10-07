@@ -61,8 +61,9 @@ authored .html ──parse──▶ ComponentDefinition ──generateVanilla(�
   all generated output; whichever installs first serves every root in that document, so two
   coordinators never disagree. Older generated output installs the plain coordinator
   (`src/generated-lifecycle.ts`). Direct-extend output installs the indexed one
-  (`src/generated-lifecycle-index.ts`), which holds registered roots through `WeakRef`s pruned by a
-  `FinalizationRegistry`. With up to 32 roots it synchronizes a single changed root without walking
+  (`src/generated-lifecycle-index.ts`), which holds registered roots' lifecycle records through
+  `WeakRef`s pruned by a `FinalizationRegistry`; a live root that a root `$match` switches to another
+  element stays indexed, because the live runtime moves its record. With up to 32 roots it synchronizes a single changed root without walking
   the mutated subtrees; otherwise it runs the same walk, with the same light-DOM scope. Only
   direct-extend output imports it, so other generated output does not grow. When another coordinator
   installed first, direct-extend roots get the exact walk without the fast path.

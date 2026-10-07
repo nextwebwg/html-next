@@ -5,8 +5,10 @@ export interface ManagedComponentLifecycle {
   disconnect: undefined | (() => void);
   /** What the instance exposes to the runtime (state, values, host); read by inspection (M3). */
   readonly h?: unknown;
-  /** The generated coordinator's weak reference to the root. */
-  w?: WeakRef<Element>;
+  /** The element carrying the record; the live runtime moves it on a root switch. */
+  element?: Element;
+  /** The indexed coordinator's weak reference to this record. */
+  w?: WeakRef<ManagedComponentLifecycle>;
 }
 
 export interface LifecycleCoordinator {
