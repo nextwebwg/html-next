@@ -425,7 +425,7 @@ export function invoke(
     }
   }, 2, instance.c());
   instance.o.push(effect);
-  stops.push(() => effect.stop());
+  stops.push(() => release(instance, effect));
   return child;
 }
 
@@ -482,7 +482,7 @@ export function listenRoot(
     return () => target.removeEventListener(type, wrapped, { capture });
   }, 2, instance.c());
   instance.o.push(effect);
-  return () => effect.stop();
+  return () => release(instance, effect);
 }
 
 /**
@@ -1097,6 +1097,8 @@ export interface GeneratedInstance {
   L?: (element: Element, connect: () => () => void, handle: unknown) => void;
   /** Components whose root is this one's, which inspection and serialization report with it. */
   D?: GeneratedInstance[];
+  /** How many of its owners were released since the list was last compacted. */
+  x?: number;
   /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
   readonly J?: Projection;
   readonly Y?: Readonly<Record<string, readonly Element[]>>;
@@ -1201,6 +1203,21 @@ export function setState(instance: GeneratedInstance, path: readonly (string | n
 }
 
 /**
+ * Stops an owner a removed row or region held, and lets the instance drop it: released owners are
+ * compacted out once they are half the list, so creating and removing rows retains nothing.
+ */
+function release(instance: GeneratedInstance, effect: ReactiveEffect): void {
+  effect.stop();
+  const owners = instance.o;
+  instance.x = (instance.x ?? 0) + 1;
+  if (instance.x * 2 < owners.length) return;
+  instance.x = 0;
+  let kept = 0;
+  for (const owner of owners) if (!(owner as Partial<ReactiveEffect>).stopped) owners[kept++] = owner;
+  owners.length = kept;
+}
+
+/**
  * Listens while the root is connected, as a live template listener effect does. A `once`
  * listener is spent by its first event and never re-armed by a reconnect.
  */
@@ -1219,7 +1236,7 @@ export function listen(
     return () => target.removeEventListener(type, wrapped, { capture });
   }, 2, instance.c());
   instance.o.push(effect);
-  return () => effect.stop();
+  return () => release(instance, effect);
 }
 
 /** The changed-roots bits plus the raw objects written since the last render (see `DirtyObjects`). */

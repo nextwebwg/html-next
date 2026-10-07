@@ -1044,6 +1044,35 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("retains nothing from rows it removed: their listeners and invoked components", async () => {
+    const compiled = graph([parent(`
+      <section><ul><li $each="n of rows" $key="n" from:data-id="n" on:click="bump"><x-badge from:count="n" on:click="bump">{n}</x-badge></li></ul></section>`), badge]);
+    const { text: code } = await bundle(compiled.entry, false, compiled.modules);
+    const { window } = new JSDOM("<!doctype html><body></body>");
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
+      try { vi.stubGlobal(key, (window as unknown as Record<string, unknown>)[key]); } catch { /* read-only global */ }
+    }
+    vi.stubGlobal("directExtendLog", { hosts: [], events: [] });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// retention`).toString("base64")}`) as Record<string, unknown>;
+    const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as () => Element;
+    const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const root = factory();
+    window.document.body.append(root);
+    await flush();
+    const handle = (root as unknown as Record<symbol, { h: { o: unknown[] } }>)[Symbol.for("@nextwebwg/html-next.lifecycle.v1")]!.h;
+    const host = (globalThis as any).directExtendLog.hosts[0];
+    const baseline = handle.o.length;
+    for (let round = 0; round < 40; round += 1) {
+      host.state.rows = Array.from({ length: 10 }, (_, index) => round * 10 + index);
+      await flush();
+      host.state.rows = [];
+      await flush();
+    }
+    // Each round created and removed ten rows' listeners and component-following effects.
+    assert.ok(handle.o.length <= baseline + 2 * 10 * 3, `${handle.o.length} owners after 40 rounds (${baseline} at start)`);
+  });
+
   it("observes each document once however many compiled roots it holds", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
