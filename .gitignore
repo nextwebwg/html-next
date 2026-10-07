@@ -4,3 +4,4 @@ coverage/
 .threadlabs/
 *.tgz
 .DS_Store
+packages/html-next/.benchmark/
