@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -500,7 +500,10 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         throw error;
       }
       if (/@nextwebwg\//.test(content)) throw new FrameworkConversionError(options.target, source, tag);
-      const component: GeneratedArtifact = { path: componentPath, content };
+      // TypeScript 6+ rejects a stylesheet import unless the program declares `*.css`.
+      const component: GeneratedArtifact = reactConversion !== undefined && reactConversion.css !== ""
+        ? { path: componentPath, content: `/// <reference path="${posix.relative(posix.dirname(componentPath), "react/styles.d.ts")}" />\n${content}` }
+        : { path: componentPath, content };
       claim(component, "component", source);
       if (reactConversion !== undefined) {
         for (const helper of reactConversion.helpers) neededHelpers.add(helper);

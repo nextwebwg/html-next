@@ -278,7 +278,7 @@ class FrameworkCompiler {
       target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "react-jsx",
       strict: true, skipLibCheck: true, allowJs: true, checkJs: false, allowImportingTsExtensions: true,
       declaration: true, emitDeclarationOnly: true, noEmitOnError: this.options.target !== "svelte",
-      rootDir: cache, outDir: output, types: [],
+      rootDir: cache, outDir: output, types: [], noUncheckedSideEffectImports: false,
     }, files }), "utf8");
     const binary = this.options.target === "vue" ? require.resolve("vue-tsc/bin/vue-tsc.js") : require.resolve("typescript/bin/tsc");
     try {
@@ -291,6 +291,14 @@ class FrameworkCompiler {
     catch (error) {
       const result = error as { stdout?: string; stderr?: string };
       throw new Error(`HTML Next ${this.options.target} declaration generation failed:\n${result.stdout ?? ""}${result.stderr ?? ""}`, { cause: error });
+    }
+    // Declarations need no stylesheet imports, and TypeScript 6+ rejects unresolved ones by default.
+    for (const file of await readdir(output, { recursive: true })) {
+      if (!/\.d\.[cm]?ts$/.test(file)) continue;
+      const path = resolve(output, file);
+      const content = await readFile(path, "utf8");
+      const stripped = content.replace(/^import\s+["'][^"']+\.css["'];?\r?\n/gm, "");
+      if (stripped !== content) await writeFile(path, stripped, "utf8");
     }
     await writeFile(metadata, fingerprint, "utf8");
     return declarationEntry;

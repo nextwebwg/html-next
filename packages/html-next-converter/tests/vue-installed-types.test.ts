@@ -31,7 +31,7 @@ it("infers selected props from an independently installed Vue library's declarat
     </defs><input from:type="type" from:value="value" from:disabled="disabled"></template>`);
     await convertComponents({ target: "vue", mode: "library", root: source, outDirectory: pkg, entries: ["input.html"] });
     const compilerOptions = { strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], allowImportingTsExtensions: true };
-    await writeFile(join(pkg, "tsconfig.json"), JSON.stringify({ compilerOptions: { ...compilerOptions, declaration: true, emitDeclarationOnly: true, outDir: "types" }, include: ["vue/**/*.vue", "vue/**/*.ts"] }));
+    await writeFile(join(pkg, "tsconfig.json"), JSON.stringify({ compilerOptions: { ...compilerOptions, declaration: true, emitDeclarationOnly: true, rootDir: "vue", outDir: "types" }, include: ["vue/**/*.vue", "vue/**/*.ts"] }));
     const check = (cwd: string) => run(process.execPath, [checker, "-p", join(cwd, "tsconfig.json")], { cwd });
     try { await check(pkg); } catch (error) { assert.fail((error as { stdout: string }).stdout); }
     // The published library exposes compiled JavaScript modules, not .vue source imports.
