@@ -93,8 +93,7 @@ with every entry's and control's gzip bytes; raw results stay local. To read a s
 `gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
 and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
 [field reference](./framework-benchmark.md#ledger)). The CI job runs the comparison but is not yet
-Required. The results below predate the Vite
-entry: their "compiled-native" figures are an esbuild bundle of the native generator's output.
+Required.
 
 ### October 2026 owner decisions
 
@@ -126,6 +125,9 @@ are in [the compiled direct path](./compiled-direct-path.md#owner-decisions-2026
   best), never from the original baseline.
 
 ## Keyed component rendering: confirmed October 2026 results
+
+These results predate the Vite entry: their "compiled-native" figures are an esbuild bundle of the
+native generator's output.
 
 Four retained runtime changes removed the dominant dependency-tracking and controller-identity costs and reduced list-clearing work. Through experiment 005, live rendering's weighted time ratio against Solid fell from 4.591× to 1.465×. The target of beating all four framework controls remains unmet: live rendering was still 1.089× React, 1.272× Vue, and 1.424× Svelte. Ordinary compiled-native output was measured separately and reached 1.444× Solid. These are results for one keyed component and its nine workloads, not a general framework ranking.
 
