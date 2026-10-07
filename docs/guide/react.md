@@ -15,7 +15,7 @@ In a Vite project with its usual React plugin already configured:
 npm install --save-dev @nextwebwg/html-next-unplugin
 ```
 
-Use Node 22 or 24 and Vite 8. The current target is React 19.3.
+Use Node 22.22.2+ or 24.15+ and Vite 8. The current target is React 19.3.
 
 ## Configure Vite
 

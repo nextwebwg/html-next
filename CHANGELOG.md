@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.33
+
+- Server rendering uses jsdom 30.0.1 (previously 27.4.0). Every HTML Next package now requires Node `>=22.22.2 <23 || >=24.15 <25` (previously `>=22.13 <23 || >=24 <25`), the Node 22 and 24 releases jsdom 30 supports.
+
 ## 1.0.0-alpha.31
 
 - Browser adoption retains parent refs, reactive bindings, declared child props, and events on nested components rendered as native roots, whether the nested component is adopted before or after its parent. Bindings and refs follow child root replacement without replacing projected content.

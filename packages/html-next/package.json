@@ -69,7 +69,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {
-    "node": ">=22.13 <23 || >=24 <25"
+    "node": ">=22.22.2 <23 || >=24.15 <25"
   },
   "scripts": {
     "audit:native": "tsx scripts/audit-native-features.ts",
