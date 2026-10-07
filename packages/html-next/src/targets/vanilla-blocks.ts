@@ -173,6 +173,8 @@ interface Block {
   needsParent?: boolean;
   /** Components the block invokes, each where a placeholder holds its place. */
   readonly invocations: Invocation[];
+  /** A row of several nodes (`<template $each>`), delimited by item markers. */
+  ranged?: boolean;
 }
 
 /**
@@ -894,7 +896,8 @@ class Planner {
     this.blocks.push(block);
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
-      if (row) notYetDirect();
+      // A `<template $each>` row is several nodes, between item markers as live renders them.
+      if (row) block.ranged = true;
       const spec: unknown[] = ["", []];
       spec.push(...this.children(block, element, element.children, [], 0, scope, svg));
       (block as { spec: unknown }).spec = spec;
@@ -1138,7 +1141,6 @@ class Planner {
       const recording = this.recording(scope);
       return { test: lowerDecision(recording), recorded: recording.record };
     };
-    if (node.name === "template" && flow.kind !== "match" && flow.kind !== "if" && flow.kind !== "with") notYetDirect();
     const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
       const { test, recorded } = decide((decisionScope) => truthiness(this.checked(plan(flow.testPlan, flow.test), decisionScope), decisionScope.record));
@@ -1194,7 +1196,6 @@ class Planner {
         arms: armBlocks, test, recorded, matched });
       return 1;
     }
-    if (node.name === "template") notYetDirect();
     const listPlan = plan(flow.listPlan, flow.list);
     const list = this.checked(listPlan, scope);
     const listType = declaredExpressionType(listPlan, scope.types);
@@ -1483,7 +1484,7 @@ export function emitBlocks(
         const child = region.block.id;
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
         const positional = region.positional === true || region.key?.positional === true;
-        const type = region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList";
+        const type = `${region.block.ranged === true ? "Ranged" : ""}${region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList"}`;
         entries.push(`L${index}: new ${type}(${start}, ${start}.nextSibling, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`);
       }
     });
@@ -1790,7 +1791,9 @@ export function emitBlocks(
         `  const m${block.id} = (o, j, l${block.needsParent === true ? ", u" : ""}) => {`,
         `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
         ...lines.map((line) => `    ${line}`),
-        `    const r = { k: undefined, i: o, n, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
+        // A ranged row's nodes sit between item markers, which the list moves them by.
+        ...block.ranged === true ? ['    const s = document.createComment("html-next:item-start"), t = document.createComment("html-next:item-end");', "    n.prepend(s);", "    n.append(t);"] : [],
+        `    const r = { k: undefined, i: o, n${block.ranged === true ? ": s, t" : ""}, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
         `    p${block.id}(r, -1, E);`,
         ...block.selects.map((select) => `    r.c${select}();`),
@@ -2007,7 +2010,8 @@ export function emitBlocks(
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
-    "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough"]
+    "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

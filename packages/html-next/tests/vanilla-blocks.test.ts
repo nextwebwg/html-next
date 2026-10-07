@@ -1129,6 +1129,29 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], { title: "T", attributes: { id: "p", class: "mine" }, children: ["body"] });
   });
 
+  it("renders rows of several nodes like the general runtime", async () => {
+    const rows = `
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>`;
+    const steps: Step[] = [
+      (host) => { host.state.rows = [1, 2, 3, 4].map((id) => ({ id, label: `r${id}` })); },
+      (host) => { const list = host.state.rows; const first = list[0]; list[0] = list[3]; list[3] = first; },
+      (host) => { host.state.selected = 2; host.state.rows[1].label = "x"; },
+      (host) => { host.state.rows = host.state.rows.filter((row: { id: number }) => row.id !== 2).concat([{ id: 9, label: "n" }]); },
+      (host) => { host.state.rows = [...host.state.rows].reverse(); },
+      (host) => { host.state.rows = []; },
+      (host) => { host.state.rows = [{ id: 5, label: "five" }]; },
+    ];
+    for (const body of [
+      `<section><p></p><dl><template $each="row of rows" $key="row.id"><dt from:data-id="row.id">{row.label}</dt><dd $if="row.id = selected">sel</dd>text</template></dl></section>`,
+      `<section><p></p><dl><template $each="row of rows"><dt from:data-id="row.id">{row.label}</dt><dd>{loop.index}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of rows" $key="row.id"><dt from:data-id="row.id">{i}</dt><dd>{loop.count}</dd></template></dl></section>`,
+    ]) {
+      await same(component(rows, body), steps);
+    }
+  });
+
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>

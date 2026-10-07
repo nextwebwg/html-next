@@ -33,7 +33,7 @@ import { manageElementValidity, setElementValidity, unmanageElementValidity, val
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
-export { dispose, IndexedList, KeyedList, PositionalList } from "./keyed.js";
+export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
 
 export interface GeneratedEvent {

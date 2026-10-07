@@ -27,8 +27,10 @@ export interface KeyedRow {
   k: unknown;
   /** Raw item. */
   i: unknown;
-  /** Row element. */
-  n: Element;
+  /** Row element, or a ranged row's start marker. */
+  n: Element | Comment;
+  /** A ranged row's end marker. */
+  t?: Comment;
   /** Reconcile epoch mark. */
   x: number;
   /** Old position, valid while `x` holds the current epoch. */
@@ -132,6 +134,17 @@ export class KeyedList<R extends KeyedRow> {
   /** Records a patched row's position; only rows that read it keep one (`PositionalList`). */
   place(_row: R, _index: number, _count: number): void {}
 
+  /** Puts a row's nodes before `reference`, moving a retained row (`moving`) where the browser can. */
+  put(parent: Node, row: R, reference: Node, moving: boolean): void {
+    if (moving) move(parent, row.n, reference);
+    else parent.insertBefore(row.n, reference);
+  }
+
+  /** Removes a row's nodes. */
+  drop(row: R): void {
+    row.n.remove();
+  }
+
   /** Patches every row with `changed`: an outer value its bindings read changed. */
   each(changed: number, dirty: DirtyObjects): void {
     for (const row of this.r) this.p(row, changed, dirty);
@@ -218,11 +231,11 @@ export class KeyedList<R extends KeyedRow> {
 
     // 3a. Swapped ends, in recorded order; an adjacent pair is one move.
     for (let index = 0; index < swaps.length; index += 2) {
-      const first = swaps[index]!.n;
-      const second = swaps[index + 1]!.n;
-      const afterFirst = first.nextSibling!;
-      move(parent, first, second.nextSibling!);
-      if (afterFirst !== second) move(parent, second, afterFirst);
+      const first = swaps[index]!;
+      const second = swaps[index + 1]!;
+      const afterFirst = (first.t ?? first.n).nextSibling!;
+      this.put(parent, first, (second.t ?? second.n).nextSibling!, true);
+      if (afterFirst !== second.n) this.put(parent, second, afterFirst, true);
     }
 
     // 3b. Remove unclaimed rows in adjacent groups. Foreign nodes and retained rows split groups.
@@ -232,14 +245,14 @@ export class KeyedList<R extends KeyedRow> {
       let first: R | undefined;
       let last: R | undefined;
       const cut = (): void => {
-        if (first === last) first!.n.remove();
+        if (first === last) this.drop(first!);
         // The whole parent is this region and the group is every node in it.
-        else if (first!.n.previousSibling === start && last!.n.nextSibling === end &&
+        else if (first!.n.previousSibling === start && (last!.t ?? last!.n).nextSibling === end &&
           start.previousSibling === null && end.nextSibling === null) parent.replaceChildren(start, end);
         else {
           const range = parent.ownerDocument!.createRange();
           range.setStartBefore(first!.n);
-          range.setEndAfter(last!.n);
+          range.setEndAfter((last!.t ?? last!.n));
           range.deleteContents();
         }
         first = undefined;
@@ -252,7 +265,7 @@ export class KeyedList<R extends KeyedRow> {
         }
         if (!all) map.delete(row.k);
         dispose(row);
-        if (first !== undefined && last!.n.nextSibling !== row.n) cut();
+        if (first !== undefined && (last!.t ?? last!.n).nextSibling !== row.n) cut();
         first ??= row;
         last = row;
       }
@@ -285,13 +298,13 @@ export class KeyedList<R extends KeyedRow> {
       if (previous[index]! < 0) {
         let run = index;
         while (run > 0 && previous[run - 1]! < 0) run -= 1;
-        for (let item = run; item <= index; item += 1) parent.insertBefore(rows[newStart + item]!.n, reference);
+        for (let item = run; item <= index; item += 1) this.put(parent, rows[newStart + item]!, reference, false);
         index = run;
         reference = rows[newStart + run]!.n;
         continue;
       }
       const row = rows[newStart + index]!;
-      if (stable !== undefined && stable[index] !== 1) move(parent, row.n, reference);
+      if (stable !== undefined && stable[index] !== 1) this.put(parent, row, reference, true);
       reference = row.n;
     }
     this.r = rows;
@@ -350,7 +363,7 @@ export class IndexedList<R extends KeyedRow> extends KeyedList<R> {
     }
     while (rows.length > count) {
       const row = rows.pop()!;
-      row.n.remove();
+      this.drop(row);
       dispose(row);
     }
     const parent = this.e.parentNode!;
@@ -359,8 +372,48 @@ export class IndexedList<R extends KeyedRow> extends KeyedList<R> {
       if (item === undefined) fail("HB001", `\`${this.alias}\` is not declared in scope.`);
       const row = this.mk(item, index, count, this.u);
       rows.push(row);
-      parent.insertBefore(row.n, this.e);
+      this.put(parent, row, this.e, false);
     }
   }
 
+}
+
+/**
+ * Rows of several nodes (`<template $each>`) between item markers, as live renders them: the list
+ * puts, moves and removes each row's whole range. A fresh row's nodes wait in their fragment.
+ */
+function putRange(parent: Node, row: KeyedRow, reference: Node, moving: boolean): void {
+  const holder = row.n.parentNode;
+  if (holder !== null && holder.nodeType === 11) {
+    parent.insertBefore(holder, reference);
+    return;
+  }
+  for (let node: Node = row.n, next: Node | null; ; node = next!) {
+    next = node.nextSibling;
+    if (moving) move(parent, node, reference);
+    else parent.insertBefore(node, reference);
+    if (node === row.t) break;
+  }
+}
+
+function dropRange(row: KeyedRow): void {
+  const range = row.n.ownerDocument.createRange();
+  range.setStartBefore(row.n);
+  range.setEndAfter(row.t!);
+  range.deleteContents();
+}
+
+export class RangedKeyedList<R extends KeyedRow> extends KeyedList<R> {
+  override put(parent: Node, row: R, reference: Node, moving: boolean): void { putRange(parent, row, reference, moving); }
+  override drop(row: R): void { dropRange(row); }
+}
+
+export class RangedPositionalList<R extends KeyedRow> extends PositionalList<R> {
+  override put(parent: Node, row: R, reference: Node, moving: boolean): void { putRange(parent, row, reference, moving); }
+  override drop(row: R): void { dropRange(row); }
+}
+
+export class RangedIndexedList<R extends KeyedRow> extends IndexedList<R> {
+  override put(parent: Node, row: R, reference: Node, moving: boolean): void { putRange(parent, row, reference, moving); }
+  override drop(row: R): void { dropRange(row); }
 }
