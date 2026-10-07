@@ -53,7 +53,7 @@ function reference(text: string, invoked: readonly string[] = []): string {
     `registerComponentDefinitions([definition${others.map((other) => `, { ...${serializedDefinition(other)}, css: ${JSON.stringify(other.css)} }`).join("")}]);`,
     // A live document is observed, so an invocation a region renders later lowers too. A root lowered
     // from its invocation gets its controller as the browser loader gives one: once per host, on connect.
-    ...others.length > 0 ? [definition.root?.kind === "component" && controlled ? [
+    ...others.length > 0 ? [controlled ? [
       "const initialized = new WeakSet();",
       "observeDocument(document, { onConnect(element, connected) {",
       `  if (connected.contract.tag !== ${JSON.stringify(definition.contract.tag)}) return;`,
@@ -67,8 +67,9 @@ function reference(text: string, invoked: readonly string[] = []): string {
     ].join("\n") : "observeDocument(document);"] : [],
     "export function createReference(options = {}) {",
     "  const { attributes = {}, children = [], slots = {}, ...props } = options;",
-    // A root delegated to another component is lowered from its invocation, as a live document lowers it.
-    ...definition.root?.kind === "component" ? [
+    // A graph (and a root delegated to another component) is lowered from its invocation, as a live
+    // document lowers it.
+    ...others.length > 0 ? [
       `  const invocation = document.createElement(${JSON.stringify(definition.contract.tag)});`,
       "  for (const [name, value] of Object.entries(attributes)) invocation.setAttribute(name, String(value));",
       "  for (const [name, value] of Object.entries(props)) if (value !== undefined && value !== null && value !== false) invocation.setAttribute(name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value === true ? \"\" : typeof value === \"string\" ? value : JSON.stringify(value));",
@@ -333,6 +334,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   type Options = Record<string, unknown> | ((document: Document) => Record<string, unknown>);
 
   async function run(text: string | readonly string[], directExtend: boolean, steps: readonly Step[], options?: Options): Promise<Run> {
+    // Each run starts from the real globals, so its window's are the only ones stubbed in.
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     const [root, ...invoked] = typeof text === "string" ? [text] : text;
     const compiled = directExtend ? graph([root!, ...invoked]) : undefined;
     const { text: code } = await bundle(compiled !== undefined
@@ -1300,6 +1304,28 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ];
     await same(component(rows, `<section $with="rows[0] as first" from:data-n="rows.length"><p>{default(first.label, 'none')}</p><b $if="first">has</b></section>`), steps);
     await same(component(rows, `<section $match class="m"><p $when="rows.length = 0">empty</p><p $when="selected">{selected}</p><ul $else><li $each="row of rows" $key="row.id" from:data-id="row.id">{row.label}</li></ul></section>`), steps);
+  });
+
+  it("gives a scoped slot's props by name, and leaves other names to the consumer, like live", async () => {
+    const alternate = `<template component="x-alternate" status="early" summary="Alternate.">
+      <defs><prop name="alternate" type="boolean" default="false">Alternate.</prop>
+        <state name="first" type="string" value="First"></state><state name="second" type="string" value="Second"></state></defs>
+      <template $match><section $when="alternate"><slot name="item" from:first="first"></slot></section>
+        <article $else><slot name="item" from:second="second"></slot></article></template></template>`;
+    await same([parent(`
+      <section><x-alternate from:alternate="flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i></template></x-alternate></section>`,
+      `<state name="first" type="string" value="mine"></state><state name="second" type="string" value="own"></state>`), alternate], [
+      (_host, update) => { update({ flag: true }); },
+      (host) => { if (host.state === undefined) (globalThis as any).directExtendLog.events.push("no host"); else { host.state.first = "changed"; host.state.second = "own2"; } },
+      (_host, update) => { update({ flag: false }); },
+    ]);
+    await same([parent(`
+      <section><x-alternate from:alternate="flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i> <u>{label}</u></template></x-alternate></section>`,
+      `<state name="first" type="string" value="mine"></state>`), alternate], [
+      // The section arm gives no \`second\`, which the consumer does not declare: HB001 leaves the old arm, inert.
+      (_host, update) => { update({ flag: true }); },
+      (host) => { host.state.first = "changed"; host.state.label = "L2"; },
+    ]);
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

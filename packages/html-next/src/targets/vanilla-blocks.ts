@@ -153,6 +153,7 @@ interface Region {
   readonly fallback?: boolean;
   /** A scoped slot's props: the values a consumer's template reads, by its names. */
   readonly props?: readonly Lowered[];
+  readonly propNames?: readonly string[];
 }
 
 interface Block {
@@ -244,11 +245,12 @@ export interface BlockPlan {
   readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
 }
 
-/** A feature the direct path does not cover yet; the component keeps the general-runtime fallback. */
-class NotYetDirect extends Error {}
+/** A state's initial value that is not a plain literal, which the factory then evaluates instead. */
+class NotLiteral extends Error {}
 
-function notYetDirect(): never {
-  throw new NotYetDirect();
+/** What the parser already rules out; reaching it is a compiler defect, reported at build time. */
+function unreachable(what: string): never {
+  throw new Error(`HTML Next compiler invariant: ${what}`);
 }
 
 /** A build-time stand-in for a check function, written into the module as `source`. */
@@ -265,7 +267,7 @@ const FORMAT_CHECKS: Readonly<Record<string, string>> = {
 const nullAccepted = (node: TypeNode): boolean => parseTypedValue(null, node, "$", "value").ok;
 
 /** The compact form of a declared type; kinds without a structure of their own check through a predicate. */
-export function compactType(node: TypeNode): CompactType | undefined {
+export function compactType(node: TypeNode): CompactType {
   switch (node.kind) {
     case "terminal": {
       const names: Readonly<Record<string, CompactType>> = {
@@ -282,28 +284,22 @@ export function compactType(node: TypeNode): CompactType | undefined {
     }
     case "keyword": return ["k", node.value];
     case "list": {
-      const item = compactType(node.item);
-      return item === undefined ? undefined : ["l", item];
+      return ["l", compactType(node.item)];
     }
     case "record": {
-      const value = compactType(node.value);
-      return value === undefined ? undefined : ["r", value];
+      return ["r", compactType(node.value)];
     }
     case "object": {
       const fields: unknown[] = [];
       for (const field of node.fields) {
-        const type = compactType(field.type);
-        if (type === undefined) return undefined;
-        fields.push(field.name, type);
+        fields.push(field.name, compactType(field.type));
       }
       return node.open ? ["o", fields, 1] : ["o", fields];
     }
     case "union": {
       const members: CompactType[] = [];
       for (const member of node.members) {
-        const type = compactType(member);
-        if (type === undefined) return undefined;
-        members.push(type);
+        members.push(compactType(member));
       }
       return ["u", ...members];
     }
@@ -311,7 +307,6 @@ export function compactType(node: TypeNode): CompactType | undefined {
       // A reference checks only the base; a null write checks the constraints too, so a base
       // that accepts null carries whether the whole type does.
       const base = compactType(node.base);
-      if (base === undefined) return undefined;
       return acceptsNullCompact(base) ? ["c", base, nullAccepted(node)] : base;
     }
     default:
@@ -354,24 +349,24 @@ function valueSource(value: unknown): string {
     .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
 }
 
-/** The value of a literal initial-state expression; anything else is not direct yet. */
+/** The value of a literal initial-state expression; anything else is evaluated by the factory. */
 function literalValue(node: ExpressionNode): unknown {
   if (node.kind === "literal") {
     const value = node.value;
     if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") return value;
-    notYetDirect();
+    throw new NotLiteral();
   }
   if (node.kind === "array") return node.items.map(literalValue);
   if (node.kind === "object") {
     const value: Record<string, unknown> = {};
     for (const pair of node.pairs) {
-      // ponytail: the interpreter assigns `__proto__` through its setter; leave that to it.
-      if (pair.key === "__proto__") notYetDirect();
+      // ponytail: the interpreter assigns `__proto__` through its setter; the factory evaluates it so.
+      if (pair.key === "__proto__") throw new NotLiteral();
       value[pair.key] = literalValue(pair.value);
     }
     return value;
   }
-  notYetDirect();
+  throw new NotLiteral();
 }
 
 /** A local name: a row's item, index or `loop` record, or a `$with`/`$match` alias. */
@@ -442,12 +437,20 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   switch (node.kind) {
     case "literal": {
       const value = node.value;
-      if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") notYetDirect();
+      if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") unreachable("an expression's literal is null, a string, a boolean or a number");
       return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
       // The innermost local of that name: an item, an index or a `loop` record, which follow positions.
       const entry = scope.aliases.findLast((candidate) => candidate.name === node.name);
+      if (entry !== undefined && entry.field !== undefined) {
+        // A scoped slot's prop, by name; one this rendering's slot does not give is the consumer's own.
+        const outer = lower(node, { ...scope, aliases: scope.aliases.filter((alias) => alias !== entry) });
+        const holder = aliasSource(scope, entry);
+        const name = JSON.stringify(node.name);
+        return { ...outer, ...none(key, read(scope, `(${name} in ${holder} ? ${holder}[${name}] : ${outer.source})`)),
+          bits: outer.bits, nested: outer.nested, item: true, deep: true, fails: outer.fails };
+      }
       if (entry !== undefined) {
         const source = read(scope, aliasSource(scope, entry));
         return entry.kind === "index" ? { ...none(key, source), item: true, positional: true }
@@ -455,7 +458,8 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       }
       if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
       const index = scope.roots.findIndex((root) => root.name === node.name);
-      if (index < 0) notYetDirect();
+      // Only a consumer's scoped-slot template defers names; one nothing provides fails when read, as live's does.
+      if (index < 0) return none(key, `undeclared(${JSON.stringify(node.name)})`);
       const root = scope.roots[index]!;
       if (scope.initializing !== undefined && (index >= scope.initializing || root.computed !== undefined)) return none(key, "null");
       if (root.computed !== undefined) {
@@ -671,7 +675,7 @@ function outerOf(value: Lowered): number {
 function literalInitial(node: ExpressionNode): { readonly value: unknown } | undefined {
   try { return { value: literalValue(node) }; }
   catch (error) {
-    if (error instanceof NotYetDirect) return undefined;
+    if (error instanceof NotLiteral) return undefined;
     throw error;
   }
 }
@@ -715,11 +719,10 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       contexts.push({ name: declaration.as ?? declaration.name, type: "?", initial: "null", context: { from: declaration.from, name: declaration.name } });
       continue;
     }
-    if (declaration.kind !== "state" && declaration.kind !== "computed") notYetDirect();
+    if (declaration.kind !== "state" && declaration.kind !== "computed") unreachable(`a ${declaration.kind} declaration is compiled`);
     const node = declarationTypeNode(declaration.type, declaration.shape);
     // An untyped root says nothing about its value, so it may also hold undefined.
     const type = node === undefined ? "?" : compactType(node);
-    if (type === undefined) notYetDirect();
     const undefinable = node === undefined || parseTypedValue(undefined, node, "$", "value").ok;
     if (declaration.kind === "computed") {
       computeds.push({ name: declaration.name, type, initial: "undefined", computed: declaration.expression, checked: node !== undefined });
@@ -742,7 +745,6 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     // A select prop's type follows its selector, so every read checks it against the current choice.
     if (prop.select !== undefined) return { name, type: "?", initial: "null", checked: true };
     const type = compactType(normalizeType(prop.type));
-    if (type === undefined) notYetDirect();
     return { name, type, initial: "null" };
   });
   return [...states, ...computeds, ...contexts, ...props, ...reads];
@@ -796,7 +798,7 @@ class Planner {
     const known = this.handlers.get(name);
     if (known !== undefined) return known;
     const declaration = (this.definition.declarations ?? []).find((candidate) => candidate.kind === "handler" && candidate.name === name);
-    if (declaration?.kind !== "handler") notYetDirect();
+    if (declaration?.kind !== "handler") unreachable(`an event names the declared handler \`${name}\``);
     const scope: Scope = { ...this.scope, event: true };
     const lines: string[] = [];
     const events = this.definition.declarations ?? [];
@@ -852,7 +854,7 @@ class Planner {
       if (declared === undefined) continue;
       const [name, ...steps] = path.split(".");
       const index = this.roots.findIndex((root) => root.name === name);
-      if (index < 0) notYetDirect();
+      if (index < 0) unreachable(`declared reference \`${path}\` reads a root`);
       const root = this.roots[index]!;
       const key = JSON.stringify(`expression:${plan.source}:${path}`);
       const select = this.definition.contract.props[name!]?.select;
@@ -860,17 +862,15 @@ class Planner {
       const check = (read: string): string => {
         if (select === undefined) {
           const type = compactType(declared);
-          if (type === undefined) notYetDirect();
-          return `checkReference(S, ${read}, ${compactSource(type)}, ${key}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`;
+                return `checkReference(S, ${read}, ${compactSource(type)}, ${key}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`;
         }
         const from = this.roots.findIndex((candidate) => candidate.name === select.from);
-        if (from < 0) notYetDirect();
+        if (from < 0) unreachable(`a select prop's selector \`${select.from}\` is a root`);
         reads = merge(reads, { bits: rootBit(from), nested: false, item: false, contents: false, fails: true, ...from >= 29 ? { overflow: [from] } : {} });
         const choice = (type: TypeNode | undefined): string => {
           for (const step of steps) type = type === undefined ? undefined : typeAtKey(type, step);
           if (type === undefined) return "0, \"\"";
           const compact = compactType(type);
-          if (compact === undefined) notYetDirect();
           return `${compactSource(compact)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(type)}.`)}`;
         };
         // The last choice is the one no option matches, or a null selector: the null type.
@@ -881,7 +881,8 @@ class Planner {
       // A local that shadows a root is still checked against the root's declared type, as live does.
       const shadow = scope.aliases.findLast((candidate) => candidate.name === name);
       if (shadow !== undefined) {
-        const local = aliasSource(scope, shadow);
+        // A scoped slot's prop reads by name, falling back to the consumer's own (see `lower`).
+        const local = shadow.field === undefined ? aliasSource(scope, shadow) : lower({ kind: "id", name: name! }, { ...scope, record: undefined }).source;
         const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
         checks.push(check(scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`));
         reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
@@ -961,7 +962,7 @@ class Planner {
   }
 
   element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] | 5 {
-    if (EXCLUDED.has(node.name)) notYetDirect();
+    if (EXCLUDED.has(node.name)) unreachable("a <template> without a flow renders as its content");
     // A component the graph compiles renders through its factory; any other custom element is an
     // element, as an unregistered one is to live lowering.
     // A root that is another component's invocation delegates to it: they share its root.
@@ -986,12 +987,12 @@ class Planner {
     const selectValue = (name: string): boolean => node.name === "select" && name === "value";
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
-      if (attribute.expressionPlan === undefined) notYetDirect();
       const exact = attribute.kind === "property" || attribute.kind === "directive" && attribute.name === "html" ||
         attribute.kind === "attribute" && attribute.twoWay === true ||
         classOverwrites && attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
       const bindingScope = exact ? this.recording(scope) : scope;
-      const expression = this.checked(attribute.expressionPlan, bindingScope);
+      const plan = attribute.expressionPlan ?? compileExpression(attribute.expression);
+      const expression = this.checked(plan, bindingScope);
       if (attribute.kind === "directive") {
         if (attribute.name === "html") html = { expression, record: bindingScope.record };
         else content = expression;
@@ -1001,16 +1002,16 @@ class Planner {
       if (attribute.kind === "property") {
         block.bindings.push({
           site, kind: "property", name: attribute.name, expression, initial: "undefined", exact: bindingScope.record, select: selectValue(attribute.name),
-          ...selectValue(attribute.name) ? { apply: this.checked(attribute.expressionPlan, { ...scope, closure: true }) } : {},
+          ...selectValue(attribute.name) ? { apply: this.checked(plan, { ...scope, closure: true }) } : {},
         });
         continue;
       }
       if (attribute.twoWay === true) {
-        if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) notYetDirect();
+        if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
         block.bindings.push({
           site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name, expression, initial: "undefined",
           exact: bindingScope.record, select: selectValue(attribute.name), path: this.writable(attribute.writablePath, scope),
-          ...selectValue(attribute.name) ? { apply: this.checked(attribute.expressionPlan, { ...scope, closure: true }) } : {},
+          ...selectValue(attribute.name) ? { apply: this.checked(plan, { ...scope, closure: true }) } : {},
         });
         continue;
       }
@@ -1076,7 +1077,7 @@ class Planner {
       } else if (prop !== undefined && attribute.kind === "attribute") {
         // A two-way prop applies as a value, and its control on the component's root writes back.
         if (attribute.twoWay === true) {
-          if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) notYetDirect();
+          if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
           controls.push(this.writable(attribute.writablePath, scope));
         }
         // Re-applied exactly when what it read changes, as its live effect re-runs.
@@ -1146,7 +1147,7 @@ class Planner {
       const types: TypeScope = { get: () => undefined };
       declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, undefined])));
       const content = this.block({ kind: "element", name: "template", attributes: [], children: node.children }, false,
-        { ...inner, types, aliases: [...inner.aliases, ...props.map((name, at) => ({ name, level: inner.level, kind: "item" as const, field: `s[${at}]` }))] },
+        { ...inner, types, aliases: [...inner.aliases, ...props.map((name) => ({ name, level: inner.level, kind: "item" as const, field: `s` }))] },
         false, svg, false);
       block.scopes.push({ site: this.site(block, [...path, index]), block: content });
       return [["template", ["slot", slot]]];
@@ -1177,7 +1178,8 @@ class Planner {
       const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
       const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
-      block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0, ...props === undefined ? {} : { props } });
+      block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0,
+        ...props === undefined ? {} : { props, propNames: node.props!.map((prop) => prop.name) } });
       return 4;
     }
     if (node.kind === "text") {
@@ -1351,8 +1353,7 @@ class Planner {
  * Plans a component for direct-extend emission, or returns undefined when it uses a feature the
  * subset does not cover yet (the caller keeps the general-runtime fallback).
  */
-export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>): BlockPlan | undefined {
-  try {
+export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>): BlockPlan {
     const arms = rootArms(definition.template);
     // A real element's `$match` keeps the element and switches its content, as live's `elementMatchRoot`.
     const flow = arms === undefined ? definition.template.flow : undefined;
@@ -1409,10 +1410,6 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
       aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
       ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
-  } catch (error) {
-    if (error instanceof NotYetDirect) return undefined;
-    throw error;
-  }
 }
 
 interface Trie {
@@ -1803,14 +1800,19 @@ export function emitBlocks(
         lines.push(
           `  if (r.f${index} === undefined) {`,
           `    r.f${index} = 1;`,
-          `    const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, [${props.map((prop) => convertible(prop)).join(", ")}].map((y) => y === NONCONFORMING ? undefined : y), d);`,
+          // A prop that does not conform is not given, as live leaves it unset.
+          `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = y; }`).join(" ")}`,
+          `    const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
           `    else if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); }`,
           `  } else if (${rendering} !== undefined) {`,
           `    if (${guard(props.reduce((mask, prop) => mask | maskOf(prop), 0) | NESTED)}) {`,
           `      const t = ${rendering}[1].s;`,
           `      let w = c & ${NESTED};`,
-          ...props.map((prop, at) => `      { const y = ${convertible(prop)}; if (y !== NONCONFORMING && !Object.is(t[${at}], y)) { t[${at}] = y; w = 1; } }`),
+          ...props.map((prop, at) => {
+            const key = JSON.stringify(region.propNames![at]);
+            return `      { const y = ${convertible(prop)}; if (y !== NONCONFORMING && !(${key} in t && Object.is(t[${key}], y))) { t[${key}] = y; w = 1; } }`;
+          }),
           `      if (w) ${rendering}[0].p(${rendering}[1], ${NESTED}, d);`,
           "    }",
           `  } else if (${body} !== undefined) p${child}(${body}, c, d);`,
@@ -2008,6 +2010,8 @@ export function emitBlocks(
       "  let R;",
       // The arm decision runs first, as live's priority-0 root switch does; a switch renders the new arm whole.
       "  const p = (c, d) => {",
+      // A switch whose new arm failed leaves the old one inert, as live's (it does not try again).
+      "    if (R === null) return;",
       "    if (R === undefined) { R = M[a](element, d); return; }",
       `    if (${guard(maskOf(select))}) {`,
       `      const t = ${select.source};`,
@@ -2017,6 +2021,7 @@ export function emitBlocks(
       "        const previous = I.e, next = armElement(previous, A[a], A[t]);",
       ...propNames.length > 0 ? ["        I.B.b = Q[t];"] : [],
       "        a = t;",
+      "        R = null;",
       "        R = M[t](next, d);",
       "        replaceRoot(I, previous, next);",
       "        return;",
@@ -2211,7 +2216,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl", "undeclared"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
@@ -2288,7 +2293,7 @@ export function lowerExpression(
       aliases: alias === undefined ? [] : [{ name: alias, level: 0, kind: "item" }],
     }).source;
   } catch (error) {
-    if (error instanceof NotYetDirect) return undefined;
+    if (error instanceof NotLiteral) return undefined;
     throw error;
   }
 }

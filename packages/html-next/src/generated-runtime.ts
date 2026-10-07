@@ -1290,11 +1290,11 @@ export function project(
 }
 
 /** A rendering of a consumer's scoped-slot template: its nodes, and the slot's prop values it reads. */
-export interface ScopedRecord { readonly n: Node; readonly s: unknown[]; z?: (() => void)[] }
+export interface ScopedRecord { readonly n: Node; readonly s: Record<string, unknown>; z?: (() => void)[] }
 
 /** A consumer's compiled scoped-slot template: makes a rendering, patches one, and holds the live ones. */
 export interface ScopedTemplate {
-  readonly m: (dirty: Map<unknown, 1 | 2>, props: unknown[]) => ScopedRecord;
+  readonly m: (dirty: Map<unknown, 1 | 2>, props: Record<string, unknown>) => ScopedRecord;
   readonly p: (record: ScopedRecord, changed: number, dirty: Map<unknown, 1 | 2>) => void;
   readonly l: Set<ScopedRecord>;
 }
@@ -1315,7 +1315,7 @@ export function scopedTemplate(carrier: Element, template: ScopedTemplate): Scop
  */
 export function fillSlot(
   start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
-  props?: unknown[], dirty?: Map<unknown, 1 | 2>,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
 ): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const doc = start.ownerDocument!;
   const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
@@ -1492,6 +1492,11 @@ export function checkSelected(
 ): boolean {
   const [, type, message] = options.find(([choice], index) => index === options.length - 1 || selector !== null && choice === selector)!;
   return checkReference(spec, value, type, key, message);
+}
+
+/** A name nothing in scope provides, read in a consumer's scoped-slot template: HB001, as live's evaluation fails. */
+export function undeclared(name: string): never {
+  fail("HB001", `\`${name}\` is not declared in scope.`);
 }
 
 /** Warns HR007 once per component and key, as the live runtime's authored warnings do. */
