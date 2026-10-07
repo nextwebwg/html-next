@@ -640,6 +640,8 @@ export function attachGeneratedController(
   };
   /** Marks a written object (1) and the objects on its last path (2), then schedules a render. */
   const written = (facade: Facade): void => {
+    // A reconnect renders everything, so nothing written while disconnected needs keeping.
+    if (!connected) return;
     objects.set(facade.r, 1);
     for (let parent = facade.u; parent !== undefined; parent = parent.u) {
       if (!objects.has(parent.r)) objects.set(parent.r, 2);
@@ -663,8 +665,14 @@ export function attachGeneratedController(
       facade.n = first;
       facades.set(target, facade);
     }
-    facade.u = parent;
-    facade.k = key;
+    // The last path that reached it, unless that path runs through it (cyclic data): chains stay
+    // acyclic, so walking one always ends.
+    let above = parent;
+    while (above !== undefined && above !== facade) above = above.u;
+    if (above === undefined) {
+      facade.u = parent;
+      facade.k = key;
+    }
     return facade.p;
   };
   const traps: ThisType<Facade> & ProxyHandler<object> = {
@@ -806,6 +814,7 @@ export function attachGeneratedController(
       finish?.();
     }
     connected = false;
+    objects.clear();
     for (const entry of entries) entry.pause();
   }, { S: spec, v: values, H: host });
 }

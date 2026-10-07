@@ -238,6 +238,54 @@ describe("generated controller host", () => {
     warn.mockRestore();
   });
 
+  it("terminates writes through cyclic data and parent back-pointers", async () => {
+    const root = document.createElement("div");
+    const sizes: number[] = [];
+    let host: any;
+    attachGeneratedController(root, spec(["items"], [["l", "?"]]), [[]], (_changed, dirty) => { sizes.push(dirty.size); },
+      { default: (value: unknown) => { host = value; } });
+    document.body.append(root);
+    await flush();
+    const node: Record<string, unknown> = { name: "a" };
+    node.self = node;
+    host.state.items = [{ meta: node }];
+    host.state.items[0].meta.self.name = "b";
+    const parent: Record<string, unknown> = { children: [] };
+    const child = { parent };
+    (parent.children as unknown[]).push(child);
+    host.state.items = [child];
+    host.state.items[0].parent.children[0].parent.name = "p";
+    await flush();
+    assert.equal(node.name, "b");
+    assert.equal(parent.name, "p");
+    // The written object and every object on the path that last reached it: child, its children array, parent.
+    assert.ok(sizes.at(-1)! >= 3);
+  });
+
+  it("records no written objects while disconnected; a reconnect renders everything", async () => {
+    const root = document.createElement("div");
+    const renders: Array<[number, number]> = [];
+    let host: any;
+    attachGeneratedController(root, spec(["rows"], [["l", ["o", ["id", "n", "label", "s"]]]]), [[]],
+      (changed, dirty) => { renders.push([changed, dirty.size]); },
+      // The controller's cleanup writes while the root is still connected, just before it disconnects.
+      { default: (value: unknown) => { host = value; return () => { host.state.rows[0].label = "z"; }; } });
+    document.body.append(root);
+    await flush();
+    host.state.rows = [{ id: 0, label: "a" }];
+    await flush();
+    root.remove();
+    await flush();
+    for (let index = 0; index < 50; index += 1) {
+      host.state.rows = [{ id: index, label: "a" }];
+      host.state.rows[0].label = "b";
+    }
+    await flush();
+    document.body.append(root);
+    await flush();
+    assert.deepEqual(renders, [[-1, 0], [1, 0], [-1, 0]]);
+  });
+
   it("follows the live lifecycle: controller once, connect callbacks on every connect, cleanup once", async () => {
     const root = document.createElement("div");
     const log: string[] = [];
