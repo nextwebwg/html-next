@@ -7,6 +7,9 @@ export default function initialize(host) {
     note(`props ${Object.entries(host.props).map(([name, prop]) =>
       `${name}=${JSON.stringify(prop.value)}/${JSON.stringify(prop.inputValue)}/${prop.validity.valid}${prop.validity.errors.map((error) => `:${error.reason}`).join("")}`).join(" ")}`);
   });
+  // A root switch replaces the root: effects that read it re-run, and root listeners move with it.
+  host.effect(() => { note(`root ${host.root.localName} ${host.element === host.root}`); });
+  host.on("click", (event) => { note(`click ${event.currentTarget.localName} ${event.target.localName}`); });
   host.on("connect", () => {
     note(`connect ${host.root.getAttribute("data-valid") !== null} ${host.root.getAttribute("aria-invalid")} ${host.root.validity?.valid}`);
   });

@@ -212,9 +212,10 @@ describe("HTML Next unplugin", () => {
     const dispatch = await bundle("dispatch.html", "createXDispatch");
     assert.match(dispatch, /function dispatchGeneratedEvent/);
     assert.doesNotMatch(dispatch, /function manageComponentLifecycle/);
+    // A root `$match` compiles directly too: its root switch, without the general runtime.
     const polymorphic = await bundle("polymorphic.html", "createXPolymorphic");
-    assert.match(polymorphic, /function componentRootIndex/);
-    assert.match(polymorphic, /function manageComponentLifecycle/);
+    assert.match(polymorphic, /function replaceRoot/);
+    assert.doesNotMatch(polymorphic, /function manageComponentLifecycle|function componentRootIndex/);
   });
 
   it("compiles controller components directly with experimentalDirectExtend", async () => {
@@ -295,13 +296,13 @@ describe("HTML Next unplugin", () => {
     assert.equal(scripts.length, 1);
     const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
     assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
-    // The js-framework-benchmark entry is 8,532 B gzip-6 (controller included). Default-on direct
+    // The js-framework-benchmark entry is 8,557 B gzip-6 (controller included). Default-on direct
     // output added what every direct component may need: the compiled-root handle, declared
     // dispatch, computeds, SVG prototypes, row disposal and positions, unchecked control writes, the live scheduler's
-    // priority order (owner-approved, 2026-10-07), more than 29 state roots, and the host's prop channel.
-    // Ratchet this down whenever it shrinks.
+    // priority order (owner-approved, 2026-10-07), more than 29 state roots, the host's prop channel, and a
+    // host root that follows a root switch. Ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_550, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_575, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

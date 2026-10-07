@@ -269,8 +269,11 @@ interface CompiledHandle {
 }
 
 /** The compiled handle of a generated root, which the live runtime's instance map never holds. */
+const replacedKey = Symbol.for("@nextwebwg/html-next.replaced.v1");
+
 function compiledHandle(element: Element): CompiledHandle | undefined {
-  const handle = (element as RuntimeElement)[lifecycleKey]?.h as Partial<CompiledHandle> | undefined;
+  // A root switch leaves the element a caller kept pointing at its instance.
+  const handle = ((element as RuntimeElement)[lifecycleKey]?.h ?? (element as Element & { [replacedKey]?: unknown })[replacedKey]) as Partial<CompiledHandle> | undefined;
   return handle?.H === undefined ? undefined : handle as CompiledHandle;
 }
 
@@ -2100,8 +2103,11 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
+  // An adopted root already holds its literals merged with its invocation's attributes, which win
+  // (class and style combine), so only a literal it lacks is written.
+  const adoptedRoot = adopted && node === context.rootNode;
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+    if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name))) element.setAttribute(attribute.name, attribute.value);
   }
   // Serialized live control values use HTML's default-value attributes until hydration. Once
   // adopted, the authored template regains ownership of reset defaults; the captured live value

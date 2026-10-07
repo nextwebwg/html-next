@@ -18,7 +18,7 @@ import {
   type ExpressionNode,
   type Scope as TypeScope,
 } from "../expression.js";
-import type { CompactType } from "../generated-runtime.js";
+import type { ArmRoot, CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { foreignContent } from "parse5";
@@ -190,6 +190,8 @@ export interface BlockPlan {
   /** How many roots are `<state>`, and how many the controller's host shows; props' roots follow them. */
   readonly states: number;
   readonly shown: number;
+  /** A root `$match`: one root block per arm, and the arm index its tests choose. */
+  readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
 }
 
 /** A feature the direct path does not cover yet; the component keeps the general-runtime fallback. */
@@ -1189,26 +1191,44 @@ class Planner {
  */
 export function blockPlan(definition: ComponentDefinition): BlockPlan | undefined {
   try {
-    if (definition.root?.kind === "component" ||
-      rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
+    const arms = rootArms(definition.template);
+    if (definition.root?.kind === "component" || arms === undefined && definition.template.flow !== undefined) return undefined;
 
     const roots = compileRoots(definition);
     const planner = new Planner(roots, definition);
-    const root = planner.block(definition.template, false, planner.scope, true, false);
+    // A root `$match` renders the arm its tests choose (read with `evalValue`, unchecked), each its own root.
+    const nodes = (arms ?? [definition.template]).map((arm) => { const { flow: _flow, ...body } = arm; return body; });
+    const armBlocks = nodes.map((node) => planner.block(node, false, planner.scope, true, false));
+    const root = armBlocks[0]!;
+    let select: Lowered | undefined;
+    if (arms !== undefined) {
+      let reads: Reads = none("", "");
+      let source = "";
+      for (const [index, arm] of arms.entries()) {
+        if (arm.flow?.kind !== "when") { source += `${index}`; break; }
+        const test = truthiness(lower((arm.flow.testPlan ?? compileExpression(arm.flow.test)).ast, planner.scope));
+        reads = merge(reads, converted(test));
+        source += `${test.source} ? ${index} : `;
+      }
+      select = { ...reads as Lowered, source: `(${source})` };
+    }
     // `:host-state()` rules test `data-<tag>-state`, kept in step with the props and state they name.
     const states = compileComponentStylesForBuild(definition.css, definition).stateNames;
     if (states.length > 0) {
       const values = states.map((name) => lower({ kind: "id", name }, planner.scope));
       const reads = values.reduce<Reads>((all, value) => merge(all, value), none("", ""));
-      root.bindings.push({
-        site: planner.site(root, []), kind: "hoststate", name: stateAttribute(definition.contract.tag), initial: "undefined",
-        expression: { ...none(`hoststate`, `hostState(${JSON.stringify(states)}, [${values.map((value) => value.source).join(", ")}])`), ...reads },
-      });
+      for (const block of armBlocks) {
+        block.bindings.push({
+          site: planner.site(block, []), kind: "hoststate", name: stateAttribute(definition.contract.tag), initial: "undefined",
+          expression: { ...none(`hoststate`, `hostState(${JSON.stringify(states)}, [${values.map((value) => value.source).join(", ")}])`), ...reads },
+        });
+      }
     }
     const props = Object.keys(definition.contract.props).length;
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
-      states: roots.length - props - roots.filter((item) => item.computed !== undefined).length, shown: roots.length - props };
+      states: roots.length - props - roots.filter((item) => item.computed !== undefined).length, shown: roots.length - props,
+      ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
     throw error;
@@ -1595,7 +1615,9 @@ export function emitBlocks(
     const effects = `${event.modifiers.includes("prevent") ? "event.preventDefault(); " : ""}${event.modifiers.includes("stop") ? "event.stopPropagation(); " : ""}`;
     return `listen(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")})`;
   };
+  const armIds = new Set(plan.arms?.blocks.map((block) => block.id) ?? []);
   for (const block of blocks.slice(1)) {
+    if (armIds.has(block.id)) continue;
     const lines: string[] = [];
     const sites = walk("n", block.sites, lines, "t");
     const entries = fields(block, sites);
@@ -1632,13 +1654,64 @@ export function emitBlocks(
       "  };",
     );
   }
+  const propNames = Object.keys(contract.props);
+  const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+  /** Whether the props' `data-<name>` the root's template binds itself, which is then its output. */
+  const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
+    node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === `data-${kebabCase(name)}`));
+  if (plan.arms !== undefined) {
+    // Each arm's root block is made on an element: the factory's, or the one a switch creates.
+    for (const block of plan.arms.blocks) {
+      const lines: string[] = [];
+      const sites = walk("n", block.sites, lines, "t");
+      body.push(
+        `  const m${block.id} = (n, d) => {`,
+        ...(block.spec as unknown[]).length > 2 ? [`    n.append((P${block.id} ??= ${prototype(block)}).cloneNode(true));`] : [],
+        ...lines.map((line) => `    ${line}`),
+        `    const r = { n${fields(block, sites).map((entry) => `, ${entry}`).join("")} };`,
+        ...ownership(block, sites, "r", "    "),
+        `    p${block.id}(r, -1, d);`,
+        ...block.selects.map((select) => `    r.c${select}();`),
+        "    return r;",
+        "  };",
+        `  const p${block.id} = (r, c, d) => {`,
+        ...patch(block).map((line) => `  ${line}`),
+        "  };",
+      );
+    }
+    const select = plan.arms.select;
+    const ids = plan.arms.blocks.map((block) => block.id);
+    body.push(
+      `  const M = [${ids.map((id) => `m${id}`).join(", ")}], N = [${ids.map((id) => `p${id}`).join(", ")}];`,
+      "  let R;",
+      // The arm decision runs first, as live's priority-0 root switch does; a switch renders the new arm whole.
+      "  const p = (c, d) => {",
+      "    if (R === undefined) { R = M[a](element, d); return; }",
+      `    if (${guard(maskOf(select))}) {`,
+      `      const t = ${select.source};`,
+      "      if (t !== a) {",
+      "        dispose(R);",
+      "        for (const key in I.r) delete I.r[key];",
+      "        const previous = I.e, next = armElement(previous, A[a], A[t]);",
+      ...propNames.length > 0 ? ["        I.B.b = Q[t];"] : [],
+      "        a = t;",
+      "        R = M[t](next, d);",
+      "        replaceRoot(I, previous, next);",
+      "        return;",
+      "      }",
+      "    }",
+      "    N[a](R, c, d);",
+      ...selected.map((root) => `    s${root} = v[${root}];`),
+      "  };",
+    );
+  }
   const root = plan.root;
-  const rootChildren = (root.spec as unknown[]).length > 2;
+  const rootChildren = plan.arms === undefined && (root.spec as unknown[]).length > 2;
   const rootWalk: string[] = [];
   const rootSites = walk("element", root.sites, rootWalk, "t");
   const rootEntries = fields(root, rootSites);
   if (root.bindings.some((binding) => root.sites[binding.site]!.length === 0)) rootEntries.unshift("n: element");
-  body.push(
+  if (plan.arms === undefined) body.push(
     "  const p0 = (r, c, d) => {",
     ...patch(root).map((line) => `  ${line}`),
     ...selected.map((root) => `    s${root} = v[${root}];`),
@@ -1651,21 +1724,19 @@ export function emitBlocks(
       ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
-  const propNames = Object.keys(contract.props);
-  const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
-  const instance = propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const instance = plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
     ...(slotted ? ["  const J = project(I, children, slots);"] : []),
-    `  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${
+    `  attachGeneratedController(element, S, v, ${plan.arms === undefined ? "(c, d) => p0(R, c, d)" : "p"}, ${definition.controller === undefined ? "undefined" : "C"}${
       plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
-    ...(propNames.length > 0 ? ["  manageProps(I, element);"] : []),
-    ...root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
-    ...root.selects.map((select) => `  R.c${select}();`),
-    ...root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
-    ...root.bindings.some((binding) => binding.kind === "control") ? [
+    ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
+    ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
+    ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
+    ...plan.arms !== undefined ? [] : root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
+    ...plan.arms === undefined && root.bindings.some((binding) => binding.kind === "control") ? [
       "  {",
       // A destination function reads the root record as `r`, as listeners in other blocks do.
       "    const r = R;",
@@ -1675,23 +1746,44 @@ export function emitBlocks(
     "  return element;",
     "}",
   );
+  /** Creates the root with the factory's attributes, then the template's literals, then its marker. */
+  function element(name: string, literals: readonly string[], indent = "  ", declare = "const "): string[] {
+    return [
+      name === "svg"
+        ? `${indent}${declare}element = document.createElementNS("http://www.w3.org/2000/svg", "svg");`
+        : `${indent}${declare}element = document.createElement(${JSON.stringify(name)});`,
+      `${indent}for (const [name, value] of Object.entries(attributes)) {`,
+      `${indent}  if (value === null || value === undefined || value === false) continue;`,
+      `${indent}  element.setAttribute(name, value === true ? "" : String(value));`,
+      `${indent}}`,
+      ...literals,
+      `${indent}element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
+    ];
+  }
+  /** An arm's literals merged with the factory's attributes, as the root's are: the factory's win; class and style combine. */
+  function armLiterals(node: ElementNode): string[] {
+    return node.attributes.flatMap((attribute) => {
+      if (attribute.kind !== "literal") return [];
+      const name = JSON.stringify(attribute.name);
+      const value = JSON.stringify(attribute.value);
+      return [attribute.name === "class" || attribute.name === "style"
+        ? `  element.setAttribute(${name}, [${value}, element.getAttribute(${name})].filter(Boolean).join(${JSON.stringify(attribute.name === "class" ? " " : "; ")}));`
+        : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
+    });
+  }
   const factory = [
     `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}) {`,
     propNames.length === 0 && !slotted ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
-    definition.template.name === "svg"
-      ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");'
-      : `  const element = document.createElement(${JSON.stringify(definition.template.name)});`,
-    "  for (const [name, value] of Object.entries(attributes)) {",
-    "    if (value === null || value === undefined || value === false) continue;",
-    "    element.setAttribute(name, value === true ? \"\" : String(value));",
-    "  }",
-    ...rootLines,
-    `  element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
-    ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
-    `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-    // Props are accepted first: initial state may read them.
-    ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(propNames.filter((name) =>
-      definition.template.attributes.some((attribute) => attribute.kind === "attribute" && attribute.name === `data-${kebabCase(name)}`)))});`]),
+    ...plan.arms === undefined ? [
+      ...element(definition.template.name, rootLines),
+      ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
+      `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(boundProps(definition.template))});`]),
+    ] : [
+      // The props choose the arm, as live's factory chooses it, before the root exists.
+      `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+      ...(propNames.length === 0 ? [] : ["  acceptProps(undefined, D, S.n, v, componentProps, []);"]),
+    ],
     ...plan.initializers,
     ...(plan.computeds.length === 0 ? [] : [
       "  const X = { e: 0, g: (j) => g(j), w: new Set() };",
@@ -1713,6 +1805,16 @@ export function emitBlocks(
     ]),
     ...plan.handlers.map((handler) => [`  const ${handler.name} = (e) => {`, ...handler.lines, "  };"].join("\n")),
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
+    ...plan.arms === undefined ? [] : [
+      `  let a = ${plan.arms.select.source};`,
+      "  let element;",
+      ...plan.arms.nodes.flatMap((node, index) => [
+        index === 0 ? "  if (a === 0) {" : index === plan.arms!.nodes.length - 1 ? "  } else {" : `  } else if (a === ${index}) {`,
+        ...element(node.name, armLiterals(node), "  ", "").map((line) => `  ${line}`),
+      ]),
+      "  }",
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, Q[a]);`]),
+    ],
     ...body,
   ];
   const source = factory.join("\n");
@@ -1734,11 +1836,13 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot"]
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
-  const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
+  // A root without children, and an arm without them, build no prototype.
+  const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
+  const specs = blocks.flatMap((block) => built(block) ? [`const T${block.id} = ${JSON.stringify(block.spec)};`] : []);
 
-  const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);
+  const prototypes = blocks.filter(built).map((block) => `P${block.id}`);
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
     `import { ${helpers.join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
@@ -1750,6 +1854,10 @@ export function emitBlocks(
     // A fresh row's first patch has nothing written yet.
     ...(blocks.some((block) => block.row) ? ["const E = new Map();"] : []),
     stateSpec,
+    ...(plan.arms === undefined ? [] : [
+      `const A = ${JSON.stringify(plan.arms.nodes.map((node) => armRoot(node, definition)))};`,
+      ...(propNames.length === 0 ? [] : [`const Q = ${JSON.stringify(plan.arms.nodes.map(boundProps))};`]),
+    ]),
     ...(propNames.length === 0 ? [] : [`const D = { props: ${JSON.stringify(Object.fromEntries(Object.entries(runtimeProps(definition))
       .map(([name, prop]) => { const { target: _target, ...read } = prop as Record<string, unknown>; return [name, read]; })))} };`]),
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
@@ -1758,6 +1866,29 @@ export function emitBlocks(
     source,
     "",
   ].join("\n");
+}
+
+/**
+ * What a root `$match` arm writes on its root, as live's root switch reads it: its literals, class
+ * tokens and style (shared with the consumer), and the attributes its bindings, props and state own.
+ */
+function armRoot(node: ElementNode, definition: ComponentDefinition): ArmRoot {
+  const literals: Record<string, string> = {};
+  const classes: string[] = [];
+  const styles: string[] = [];
+  let style = "";
+  const written = [stateAttribute(definition.contract.tag), ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`)];
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "literal" && attribute.name === "class") classes.push(...attribute.value.split(/\s+/));
+    else if (attribute.kind === "attribute" && attribute.target === "class") classes.push(attribute.name);
+    else if (attribute.kind === "literal" && attribute.name === "style") style += `;${attribute.value}`;
+    else if (attribute.kind === "attribute" && attribute.target === "style") styles.push(attribute.name);
+    else if (attribute.kind === "literal") literals[attribute.name] = attribute.value;
+    else if (attribute.kind === "attribute") written.push(attribute.name);
+    // A reflecting property writes its attribute: `.disabled` writes `disabled`.
+    else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
+  }
+  return [node.name, literals, classes, style, styles, written];
 }
 
 /** @internal The lowered source of an expression (roots are `v[i]`, the item `o`), or undefined. */

@@ -35,7 +35,7 @@ function reference(text: string): string {
   const named = controlled ? { ...definition, controller: `./${definition.controller!.split("/").at(-1)}` } : definition;
   const root = definition.template.name;
   return [
-    'import { manageComponentLifecycle, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
+    'import { componentRootIndex, manageComponentLifecycle, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
     ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
     // Registered as a live document registers it, with its styles and their `:host-state()` names.
@@ -43,8 +43,17 @@ function reference(text: string): string {
     "registerComponentDefinitions([definition]);",
     "export function createReference(options = {}) {",
     "  const { attributes = {}, children = [], slots = {}, ...props } = options;",
-    root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
+    // A root `$match` starts on the arm the props choose, as the general runtime's factories chose it.
+    root === "template" ? "  const arm = definition.template.children[componentRootIndex(definition, props)], element = document.createElement(arm.name);"
+      : root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
     "  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));",
+    // Then the root's literals, as generated factories merge them: class and style combine, else the factory's win.
+    `  const node = ${root === "template" ? "arm" : "definition.template"};`,
+    "  for (const attribute of node.attributes) {",
+    "    if (attribute.kind !== \"literal\") continue;",
+    "    if (attribute.name === \"class\" || attribute.name === \"style\") element.setAttribute(attribute.name, [attribute.value, element.getAttribute(attribute.name)].filter(Boolean).join(attribute.name === \"class\" ? \" \" : \"; \"));",
+    "    else if (!element.hasAttribute(attribute.name)) element.setAttribute(attribute.name, attribute.value);",
+    "  }",
     `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
     // A factory's children and named slots, as the general runtime's factories projected them.
     "  const projected = [];",
@@ -122,7 +131,6 @@ describe("direct-extend Vanilla generation", () => {
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
-    "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
@@ -874,6 +882,57 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.which = "default"; },
       (host) => { host.state.which = ""; },
     ], projection);
+  });
+
+  const armsShape = propsShape(`
+    <prop name="as" type="keyword" values="div, section, article" default="div">Element.</prop>
+    <prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
+    <state name="count" type="integer" value="1"></state>`, `
+    <template $match>
+      <section $when="as = 'section'" class="card own" style="color: red" from:data-tone="tone" class:hot="count > 1"><h2>{tone}</h2><slot></slot></section>
+      <article $when="as = 'article' and count < 3" role="article" title="own"><button>{count}</button><slot></slot></article>
+      <div $else tabindex="-1"><slot></slot><b>{count}</b></div>
+    </template>`);
+
+  it("switches a root $match arm like the general runtime", async () => {
+    const options = (document: Document): Record<string, unknown> => {
+      const child = document.createElement("i");
+      child.textContent = "kept";
+      return { as: "section", attributes: { class: "mine", style: "margin: 1px", id: "x", title: "theirs" }, children: [child] };
+    };
+    await same(armsShape, [
+      (_host, update) => { update({ as: "article", tone: "warn" }); },
+      (host) => { host.state.count = 5; },
+      (_host, update) => { update({ as: "section" }); },
+      (host, update) => { host.state.count = 2; update({ as: undefined }); },
+      (_host, update) => { update({ as: "nope" }); },
+      (host) => { host.root.click(); host.root.querySelector("i").click(); },
+      (_host, update) => { update({ as: "article" }); },
+      (host) => { host.root.querySelector("button").click(); host.root.querySelector("button").focus(); },
+      // Focus stays on the control in the same position among the new root's focusable elements.
+      (_host, update) => { update({ as: "section" }); },
+      (host) => { globalThis.directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); host.root.focus(); },
+      (host, update) => { update({ as: "div" }); host.root.click(); },
+      (host) => { globalThis.directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); },
+    ], options);
+  });
+
+  it("switches a link-or-button root with its refs and list props like the general runtime", async () => {
+    await same(propsShape(`
+      <prop name="as" type="keyword" values="button, a" default="button">Native root.</prop>
+      <prop name="href" type="string">Link.</prop>
+      <prop name="disabled" type="boolean" default="false">Off.</prop>
+      <prop name="tags" type="keyword#">Comma-separated tags.</prop>
+      <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>`, `
+      <template $match>
+        <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
+        <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
+      </template>`), [
+      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] }); },
+      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ disabled: true }); },
+      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "button" }); },
+      (host) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName} ${host.refs.control === host.root}`); },
+    ], (document) => ({ children: ["Go"] }));
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

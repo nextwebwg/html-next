@@ -174,6 +174,26 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     assert.equal(adopted.outerHTML, element.outerHTML);
   });
 
+  it("keeps a root's consumer attributes, merged with its literals, through live hydration", async () => {
+    const card = parseComponent(`<template component="x-plain" status="early" summary="Plain.">
+      <defs><state name="n" type="integer" value="1"></state></defs>
+      <section class="card own" style="color: red" title="own"><b>{n}</b></section></template>`, "file:///plain.html");
+    const { runtime, document } = await load(card);
+    const element = runtime.factory({ attributes: { class: "mine", style: "margin: 1px", title: "theirs" } });
+    const container = document.createElement("main");
+    container.append(element);
+    document.body.append(container);
+    await flush();
+    assert.equal(element.getAttribute("class"), "card own mine");
+    const server = document.createElement("main");
+    server.innerHTML = runtime.serializeRenderedForm(container);
+    document.body.append(server);
+    runtime.registerComponentDefinitions([card]);
+    runtime.lowerDocument(document);
+    await flush();
+    assert.equal(server.firstElementChild!.outerHTML, element.outerHTML);
+  });
+
   it("gives an adopted control its bound value unless the user edited it before hydration", async () => {
     const control = parseComponent(`<template component="x-control" status="early" summary="Control.">
       <defs><state name="title" type="string" value="Bound"></state><state name="on" type="boolean" value="true"></state>

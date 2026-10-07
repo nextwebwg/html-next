@@ -630,8 +630,10 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
     const vanilla = outputs.get("vanilla/XAction.js")!;
     await transform(vanilla, { loader: "js", format: "esm" });
-    assert.match(vanilla, /import \{ componentRootIndex, manageComponentLifecycle \}/);
-    assert.match(vanilla, /const root = componentRootIndex\(definition, componentProps\);\n  let element;\n  if \(root === 0\) \{\n    element = document\.createElement\("a"\);/);
+    // Compiled directly: the props choose the arm before the root exists, and a switch replaces it
+    // (tests/vanilla-blocks.test.ts holds both to the live runtime).
+    assert.doesNotMatch(vanilla, /html-next\/runtime/);
+    assert.match(vanilla, /let a = \(.*\);\n  let element;\n  if \(a === 0\) \{\n    element = document\.createElement\("a"\);/);
     assert.match(vanilla, /\} else \{\n    element = document\.createElement\("button"\);/);
     assert.match(outputs.get("vanilla/XAction.d.ts")!, /interface XActionElement extends HTMLElement/);
     assert.match(outputs.get("docs/x-action.md")!, /Native element: `<a>` or `<button>`/);

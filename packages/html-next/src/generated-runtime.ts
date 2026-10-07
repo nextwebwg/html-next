@@ -3,6 +3,7 @@
 import { fail } from "./diagnostics.js";
 import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
+import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
@@ -28,7 +29,7 @@ import { kebabCase } from "./names.js";
 import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
 import type { ComponentContract, PropContract, PropType } from "./types.js";
 import { validateComponentProps } from "./validate.js";
-import { manageElementValidity, setElementValidity, validityState } from "./validity.js";
+import { manageElementValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
@@ -332,6 +333,71 @@ export function manageGeneratedProp(
   return () => { stopLifecycle(); validity?.stop(); };
 }
 
+/** What a root `$match` arm writes on its root: its literals, class tokens, style and output attributes. */
+export type ArmRoot = readonly [
+  tag: string, literals: Readonly<Record<string, string>>, classes: readonly string[], style: string,
+  styles: readonly string[], written: readonly string[],
+];
+
+// ponytail: a focusability approximation for restoring focus across a root switch, as live's.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]";
+const replacedKey = Symbol.for("@nextwebwg/html-next.replaced.v1");
+
+/**
+ * The next arm's root, as live's root switch renders it: the arm's literals, then every attribute
+ * of the old root its arm did not write, which is the invocation's, a factory's or page code's.
+ * Class tokens and style properties are shared, so only the old arm's own are dropped.
+ */
+export function armElement(previous: Element, from: ArmRoot, to: ArmRoot): Element {
+  const [, literals, classes, style, styles, written] = from;
+  const ownStyle = previous.ownerDocument.createElement("div").style;
+  ownStyle.cssText = style;
+  for (const property of styles) ownStyle.setProperty(property, "initial");
+  const ownStyles = new Set(Array.from(ownStyle));
+  const next = to[0] === "svg" ? previous.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg") : previous.ownerDocument.createElement(to[0]);
+  for (const [name, value] of Object.entries(to[1])) next.setAttribute(name, value);
+  for (const attribute of Array.from(previous.attributes)) {
+    let value: string | undefined;
+    if (attribute.name === "class") {
+      value = attribute.value.split(/\s+/).filter((token) => token !== "" && !classes.includes(token)).join(" ");
+    } else if (attribute.name === "style") {
+      const declared = (previous as HTMLElement).style;
+      value = Array.from(declared).filter((property) => !ownStyles.has(property)).map((property) =>
+        `${property}: ${declared.getPropertyValue(property)}${declared.getPropertyPriority(property) === "" ? "" : " !important"}`).join("; ");
+    } else if (!written.includes(attribute.name) && literals[attribute.name] !== attribute.value) value = attribute.value;
+    if (value === undefined || value === "" && (attribute.name === "class" || attribute.name === "style")) continue;
+    const own = attribute.name === "class" || attribute.name === "style" ? next.getAttribute(attribute.name) : null;
+    next.setAttribute(attribute.name, own === null || own === "" ? value : `${own}${attribute.name === "class" ? " " : "; "}${value}`);
+  }
+  return next;
+}
+
+/**
+ * Puts a new root in the old one's place, as live's root switch does: the lifecycle record moves to
+ * it (the old element still reaches the instance), the host's root follows, the props move, and
+ * focus stays on the root, on moved projected content, or on the same position's control.
+ */
+export function replaceRoot(instance: GeneratedInstance, previous: Element, next: Element): void {
+  const active = previous.ownerDocument.activeElement;
+  const position = active !== null && active !== previous && previous.contains(active)
+    ? Array.from(previous.querySelectorAll(FOCUSABLE)).indexOf(active) : -1;
+  previous.replaceWith(next);
+  const record = (previous as RuntimeElement)[lifecycleKey];
+  if (record !== undefined) {
+    delete (previous as RuntimeElement)[lifecycleKey];
+    (next as RuntimeElement)[lifecycleKey] = record;
+    record.element = next;
+  }
+  (previous as Element & { [replacedKey]?: unknown })[replacedKey] = instance;
+  instance.e = next;
+  notifyPropertySet(instance, "e", previous, next, undefined);
+  instance.B?.m?.(previous, next);
+  const target = active === previous ? next
+    : active?.isConnected === true && next.contains(active) ? active
+    : position >= 0 ? next.querySelectorAll(FOCUSABLE)[position] : undefined;
+  (target as HTMLElement | undefined)?.focus?.({ preventScroll: true });
+}
+
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
 export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
   generatedPropUpdaters.get(element)?.(props);
@@ -356,8 +422,10 @@ export interface GeneratedPropRecord {
   /** The latest input of each prop, and the props an input made explicit. */
   readonly i: Record<string, PropInput>;
   readonly x: Set<string>;
-  /** Props the root template binds as `data-<name>` itself, so that attribute is its output. */
-  readonly b: readonly string[];
+  /** Props the root template binds as `data-<name>` itself, so that attribute is its output; a root switch changes them. */
+  b: readonly string[];
+  /** Moves the prop boundary to a new root, set by `manageProps`. */
+  m?: (previous: Element, next: Element) => void;
   /** The props' validity, as the root reports it. */
   readonly y: () => ReturnType<typeof validateComponentProps>;
   /** `host.props`. */
@@ -371,12 +439,13 @@ export interface GeneratedPropRecord {
  * Fills each prop's root in `v`; `manageProps` takes over once the instance is attached.
  */
 export function acceptProps(
-  element: Element, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
+  element: Element | undefined, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
   input: Readonly<Record<string, unknown>>, bound: readonly string[],
 ): GeneratedPropRecord {
   const props = D.props;
   const names = Object.keys(props);
-  for (const name of names) {
+  // Without a root (a root `$match` choosing its arm), only the factory's values are parsed.
+  if (element !== undefined) for (const name of names) {
     const prop = props[name]!;
     const value = input[name];
     if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
@@ -384,7 +453,7 @@ export function acceptProps(
   }
   // The root's `data-<name>` attributes are read back as HTML input, and the factory's values win.
   const incoming: Record<string, PropInput> = Object.create(null);
-  for (const attribute of Array.from(element.attributes)) {
+  for (const attribute of Array.from(element?.attributes ?? [])) {
     const name = names.find((candidate) => attribute.name === `data-${kebabCase(candidate)}` || attribute.name === `data-${candidate.toLowerCase()}`);
     if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
   }
@@ -443,9 +512,9 @@ export function acceptProps(
  * prop again; and the framework channel (`updateGeneratedProps`) applies inputs as
  * `updateComponentProps` does, recording the raw input and re-rendering what an accepted value changed.
  */
-export function manageProps(instance: GeneratedInstance, element: Element): void {
+export function manageProps(instance: GeneratedInstance): void {
   const record = instance.B!;
-  const { D, n, v, i: inputs, x: explicit, b: bound } = record;
+  const { D, n, v, i: inputs, x: explicit } = record;
   const props = D.props;
   const names = Object.keys(props);
   const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
@@ -456,7 +525,8 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
     selectedPropType(D as ComponentContract, prop, values);
   const reflect = (name: string): void => {
     const prop = props[name]!;
-    if (!bound.includes(name) && !explicit.has(name)) return;
+    const element = instance.e;
+    if (!record.b.includes(name) && !explicit.has(name)) return;
     const value = v[at(name)];
     // Null is "no value" at the attribute boundary: it removes the attribute.
     const text = value === undefined || value === ABSENT || value === null ? null
@@ -468,7 +538,7 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
     if (!connected) return;
     for (const name of changed) reflect(name);
     changed.clear();
-    setElementValidity(element, record.y());
+    setElementValidity(instance.e, record.y());
   }, 2);
   instance.o.push({
     pause: () => { connected = false; },
@@ -477,17 +547,27 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
       changed.clear();
       if (installed) {
         for (const name of names) reflect(name);
-        setElementValidity(element, record.y());
+        setElementValidity(instance.e, record.y());
         return;
       }
       installed = true;
-      manageElementValidity(element, {}, { derive: record.y });
-      for (const name of bound) reflect(name);
+      manageElementValidity(instance.e, {}, { derive: record.y });
+      for (const name of record.b) reflect(name);
       job.schedule();
     },
     stop: () => job.stop(),
   });
-  generatedPropUpdaters.set(element, (input) => {
+  // A root switch moves validity to the new root, and the props reflect there again.
+  record.m = (previous, next) => {
+    generatedPropUpdaters.set(next, update);
+    if (!installed) return;
+    unmanageElementValidity(previous);
+    manageElementValidity(next, {}, { derive: record.y });
+    for (const name of names) reflect(name);
+    job.schedule();
+  };
+  const update = (input: Readonly<Record<string, unknown>>): void => {
+    const element = instance.e;
     const next: Record<string, unknown> = {};
     for (const name of names) {
       next[name] = v[at(name)];
@@ -512,10 +592,10 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
       const attribute = `data-${kebabCase(name)}`;
       if (value === undefined || value === null) {
         explicit.delete(name);
-        if (!bound.includes(name)) element.removeAttribute(attribute);
+        if (!record.b.includes(name)) element.removeAttribute(attribute);
       } else {
         explicit.add(name);
-        if (!bound.includes(name)) element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
+        if (!record.b.includes(name)) element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
       }
       const index = at(name);
       const current = v[index];
@@ -527,7 +607,8 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
       }
     }
     job.schedule();
-  });
+  };
+  generatedPropUpdaters.set(instance.e, update);
 }
 
 /**
@@ -857,6 +938,8 @@ export interface GeneratedInstance {
   readonly w: (index: number, value: unknown) => void;
   /** The instance's props, set before attaching so `host.props` can read them. */
   readonly B?: GeneratedPropRecord;
+  /** The root element, which a root `$match` replaces. */
+  e: Element;
   /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
   readonly J?: Projection;
   readonly Y?: Readonly<Record<string, readonly Element[]>>;
@@ -1224,8 +1307,9 @@ export function attachGeneratedController(
   // The live host reads refs from an ordinary object, so inherited names answer as they do there.
   const recorded: Record<string, unknown> = {};
   const host = Object.freeze({
-    get root() { return root; },
-    get element() { return root; },
+    // A root switch replaces the element, so the root is read where it is now, and tracked.
+    get root(): Element { trackProperty(handle, "e"); return handle.e; },
+    get element(): Element { trackProperty(handle, "e"); return handle.e; },
     state,
     data,
     on(type: string, callback: (event: Event) => void | (() => void)) {
@@ -1234,8 +1318,9 @@ export function attachGeneratedController(
         if (type === "connect") return untracked(() => callback(new Event(type))) as void | (() => void);
         if (type === "disconnect") return () => { if (!stopped) untracked(() => callback(new Event(type))); };
         const listener = (event: Event): void => { callback(event); };
-        root.addEventListener(type, listener);
-        return () => root.removeEventListener(type, listener);
+        const target: Element = host.root;
+        target.addEventListener(type, listener);
+        return () => target.removeEventListener(type, listener);
       });
       return () => { stopped = true; stop(); };
     },
@@ -1260,10 +1345,10 @@ export function attachGeneratedController(
       entries.push(effect);
       return () => effect.stop();
     },
-    dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
+    dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
