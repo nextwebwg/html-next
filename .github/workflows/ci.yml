@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ponytail: Vitest's hash shards measured 3-11 minutes; add a shard when one nears the limit.
+        # Parity shards are balanced by measured spec time (vitest.targets.config.ts), about 8.5 minutes each.
         include:
           - { suite: runtime and consumers, command: pnpm test:browser && pnpm test:consumer }
           - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
