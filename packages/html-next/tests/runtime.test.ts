@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
+import { renderComponents } from "../src/server.js";
 import { parseComponent } from "../src/source-parser.js";
 
 
@@ -40,6 +41,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
       outfile: runtimeOnlyBundlePath,
       platform: "browser",
       target: ["es2022"],
+      // Test-only export shares the runtime's actual class; no production ABI is added.
+      plugins: [{ name: "observe-runtime-effect-ownership", setup(builder) {
+        builder.onLoad({ filter: /[/\\]runtime\.ts$/ }, async args => ({
+          contents: `${await readFile(args.path, "utf8")}\nexport { ReactiveEffect as TestReactiveEffect } from "./reactivity.js";\n`,
+          loader: "ts",
+          resolveDir: dirname(args.path),
+        }));
+      } }],
     });
     await build({
       entryPoints: [runtimeUrl.pathname],
@@ -62,6 +71,691 @@ describe.skipIf(!enabled)("browser runtime", () => {
   });
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} releases removed row owners and stops descendants created by later branches`, async () => {
+      const definition = parseComponent(`<template component="row-owner-release"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }]"></state>
+        <state name="shown" type="boolean" value="false"></state>
+        <state name="n" type="number" value="0"></state>
+        <state name="calls" type="number" value="0"></state>
+        <handler name="activate"><set name="calls" expr:value="calls + 1"></set></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $if="shown" on:click="activate" $value="n"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", error => pageErrors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const prototype = runtime.TestReactiveEffect.prototype;
+          const originalPause = prototype.pause;
+          const originalResume = prototype.resume;
+          let stoppedPauses = 0;
+          let stoppedResumes = 0;
+          // Observe lifecycle visits directly; a stopped effect's execute() is deliberately a no-op.
+          prototype.pause = function() { if (this.stopped) stoppedPauses += 1; return originalPause.call(this); };
+          prototype.resume = function() { if (this.stopped) stoppedResumes += 1; return originalResume.call(this); };
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          try {
+            // The row originally captures only the $if effect. Its child effects arrive later.
+            host.state.shown = true;
+            await settle();
+            const removed = root.querySelector("span")!;
+            host.state.rows = [];
+            await settle();
+            host.state.n = 9;
+            await settle();
+            removed.click();
+            await settle();
+            const removedState = [removed.textContent, host.state.calls];
+            for (let index = 0; index < 12; index += 1) {
+              host.state.rows = [{ id: index * 2 + 10 }, { id: index * 2 + 11 }];
+              await settle();
+              host.state.rows = [];
+              await settle();
+            }
+            host.state.rows = [{ id: 42 }, { id: 43 }];
+            await settle();
+            const first = root.querySelector("li");
+            host.state.rows = [{ id: 43 }, { id: 42 }];
+            await settle();
+            const retained = root.querySelectorAll("li")[1] === first;
+            const survivor = root.querySelector("span")!;
+            survivor.click();
+            await settle();
+            root.remove();
+            await settle();
+            host.state.n = 20;
+            await settle();
+            survivor.click();
+            await settle();
+            const detachedState = [survivor.textContent, host.state.calls];
+            document.body.append(root);
+            await settle();
+            // Reconnecting a conditional region renders its body again; the keyed li survives.
+            const reconnected = root.querySelector("span")!;
+            reconnected.click();
+            await settle();
+            const reconnectedState = [reconnected.textContent, host.state.calls, runtime.getComponentHost(root) === host];
+            stop();
+            stop();
+            return { removedState, retained, detachedState, reconnectedState, stoppedPauses, stoppedResumes };
+          } finally {
+            stop();
+            prototype.pause = originalPause;
+            prototype.resume = originalResume;
+          }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removedState: ["0", 0], retained: true, detachedState: ["9", 1],
+          reconnectedState: ["20", 2, true], stoppedPauses: 0, stoppedResumes: 0 });
+        assert.deepEqual(pageErrors, []);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} releases later descendants when an outer conditional region disappears`, async () => {
+      const definition = parseComponent(`<template component="nested-owner-release"><defs>
+        <state name="outer" type="boolean" value="true"></state>
+        <state name="inner" type="boolean" value="false"></state>
+        <state name="rows" type="list(number)" value="[1]"></state>
+        <state name="n" type="number" value="0"></state>
+        </defs><section><div $if="outer"><ul $if="inner"><li $each="row of rows" $value="n"></li></ul></div></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          try {
+            host.state.inner = true;
+            await settle();
+            host.state.rows = [1, 2];
+            await settle();
+            const oldRows = Array.from(root.querySelectorAll("li"));
+            host.state.outer = false;
+            await settle();
+            host.state.n = 7;
+            host.state.rows = [1, 2, 3];
+            await settle();
+            const removed = oldRows.map(row => row.textContent);
+            host.state.outer = true;
+            await settle();
+            return { removed, restored: Array.from(root.querySelectorAll("li"), row => row.textContent) };
+          } finally { stop(); }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removed: ["0", "0"], restored: ["7", "7", "7"] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} clones keyed native rows and preserves bindings, events, identity and guards`, async () => {
+      const definition = parseComponent(`<template component="native-clone-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="selected" type="number" value="2"></state>
+        <computed name="snapshot" from="rows"></computed>
+        <event name="activate" type="number"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event.detail"></dispatch></handler>
+        </defs><section><ul><li class="clone-row literal" $each="row of rows" $key="row.id"
+        from:data-id="row.id" from:aria-selected="row.id = selected" class:chosen="row.id = selected"
+        style:opacity="row.id = selected ? '1' : '0.5'">
+        <a class="activate" on:click.prevent="activate"><span class="mixed">Label: {row.label} / {selected}</span></a>
+        <span class="leaf" $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const originalClone = Node.prototype.cloneNode;
+          let rowClones = 0;
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.matches("li.clone-row")) rowClones += 1;
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+            const host = runtime.getComponentHost(root);
+            const events: number[] = [];
+            host.on("activate", (event: CustomEvent<number>) => events.push(event.detail));
+            const originals = Array.from(root.querySelectorAll("li"));
+            const mixedText = originals[0]!.querySelector(".mixed")!.firstChild;
+            const initial = originals.map(row => [row.getAttribute("data-id"), row.classList.contains("chosen"),
+              row.getAttribute("aria-selected"), (row as HTMLElement).style.opacity, row.querySelector(".mixed")!.textContent,
+              row.querySelector(".leaf")!.textContent]);
+            const clonesAfterMount = rowClones;
+            host.state.rows[0].label = "A2";
+            host.state.selected = 1;
+            await Promise.resolve();
+            const updated = [originals[0]!.querySelector(".mixed")!.textContent, originals[0]!.querySelector(".leaf")!.textContent,
+              originals[0]!.classList.contains("chosen"), originals[1]!.classList.contains("chosen"),
+              originals[0]!.querySelector(".mixed")!.firstChild === mixedText];
+            host.state.rows[0].label = 99;
+            host.state.snapshot[0].label = "readonly";
+            await Promise.resolve();
+            const guarded = [host.state.rows[0].label, originals[0]!.querySelector(".leaf")!.textContent];
+            const firstLink = originals[0]!.querySelector("a")!;
+            const prevented = !firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+            host.state.rows = [host.state.rows[2], host.state.rows[0], host.state.rows[1]];
+            await Promise.resolve();
+            const reordered = Array.from(root.querySelectorAll("li"));
+            const retained = reordered[0] === originals[2] && reordered[1] === originals[0] && reordered[2] === originals[1];
+            const removedLink = reordered[2]!.querySelector("a")!;
+            host.state.rows = host.state.rows.filter((row: any) => row.id !== 2);
+            await Promise.resolve();
+            removedLink.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            host.state.rows = host.state.rows.concat([{ id: 4, label: "D" }]);
+            await Promise.resolve();
+            const clonesAfterAppend = rowClones;
+            root.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            host.state.selected = 4;
+            host.state.rows[0].label = "C2";
+            document.body.append(root);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            const finalRows = Array.from(root.querySelectorAll("li"));
+            return { initial, clonesAfterMount, updated, guarded, prevented, retained, clonesAfterAppend,
+              finalClones: rowClones, events, final: finalRows.map(row => [row.getAttribute("data-id"),
+                row.querySelector(".mixed")!.textContent, row.querySelector(".leaf")!.textContent, row.classList.contains("chosen")]),
+              identityAfterReconnect: finalRows[0] === originals[2] && finalRows[1] === originals[0] };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: [["1", false, "false", "0.5", "Label: A / 2", "A"], ["2", true, "true", "1", "Label: B / 2", "B"],
+            ["3", false, "false", "0.5", "Label: C / 2", "C"]],
+          clonesAfterMount: 3, updated: ["Label: A2 / 1", "A2", true, false, true], guarded: ["A2", "A2"],
+          prevented: true, retained: true, clonesAfterAppend: 4, finalClones: 4, events: [1, 1],
+          final: [["3", "Label: C2 / 4", "C2", false], ["1", "Label: A2 / 4", "A2", false], ["4", "Label: D / 4", "D", true]],
+          identityAfterReconnect: true,
+        });
+        assert.equal(warnings.filter(warning => warning.includes("does not satisfy")).length, 1);
+        assert.equal(warnings.filter(warning => warning.includes("read-only")).length, 1);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} preserves native-clone fallbacks for refs, properties, controls, flows, SVG, components and slots`, async () => {
+      const definition = parseComponent(`<template component="native-clone-fallbacks"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        <state name="text" type="string" value="start"></state><state name="shown" type="boolean" value="true"></state>
+        </defs><section>
+        <ul><li class="fallback-ref" $each="row of rows" $key="row.id" $ref="rowRefs" from:data-id="row.id"><span $value="row.label"></span></li></ul>
+        <ul><li class="fallback-property" $each="row of rows" $key="row.id" from:data-id="row.id"><span .title="row.label" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-control" $each="row of rows" $key="row.id" from:data-id="row.id"><input bind:value="text"></li></ul>
+        <ul><li class="fallback-flow" $each="row of rows" $key="row.id" from:data-id="row.id"><span $if="shown" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-svg" $each="row of rows" $key="row.id" from:data-id="row.id"><svg viewBox="0 0 10 10"><text $value="row.label"></text></svg></li></ul>
+        <ul><li class="fallback-component" $each="row of rows" $key="row.id" from:data-id="row.id"><clone-child from:label="row.label"></clone-child></li></ul>
+        <ul><li class="fallback-slot" $each="row of rows" $key="row.id" from:data-id="row.id"><slot name="sample"><span $value="row.label"></span></slot></li></ul>
+        </section></template>`);
+      const child = parseComponent(`<template component="clone-child"><defs><prop name="label" type="string">Label.</prop></defs><strong class="child" $value="label"></strong></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinitions => {
+          const runtime = (window as any).BareRuntime;
+          const [definition, child] = JSON.parse(serializedDefinitions);
+          const originalClone = Node.prototype.cloneNode;
+          const clonedFallbackRows: string[] = [];
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.localName === "li" && this.className.startsWith("fallback-")) clonedFallbackRows.push(this.className);
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.registerComponentDefinitions([child]);
+            runtime.manageComponentLifecycle(root, definition);
+            runtime.lowerDocument();
+            const host = runtime.getComponentHost(root);
+            const originals = Array.from(root.querySelectorAll("li"));
+            const input = root.querySelector("input")!;
+            input.value = "edited";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            await Promise.resolve();
+            const twoWay = host.state.text;
+            host.state.rows[0].label = "A2";
+            host.state.shown = false;
+            await Promise.resolve();
+            const hidden = root.querySelectorAll(".fallback-flow span").length;
+            host.state.shown = true;
+            host.state.rows = [host.state.rows[1], host.state.rows[0]];
+            await Promise.resolve();
+            runtime.lowerDocument();
+            const rows = Array.from(root.querySelectorAll("li"));
+            return { clonedFallbackRows, twoWay, hidden, retained: rows.every((row, index) => row === originals[index % 2 === 0 ? index + 1 : index - 1]),
+              ids: rows.map(row => row.getAttribute("data-id")), refCount: host.refs.rowRefs.length,
+              property: Array.from(root.querySelectorAll(".fallback-property span"), element => element.getAttribute("title")),
+              inputs: Array.from(root.querySelectorAll("input"), element => element.value),
+              flow: Array.from(root.querySelectorAll(".fallback-flow span"), element => element.textContent),
+              svg: Array.from(root.querySelectorAll(".fallback-svg text"), element => [element.namespaceURI, element.textContent]),
+              children: Array.from(root.querySelectorAll(".fallback-component .child"), element => element.textContent),
+              slots: Array.from(root.querySelectorAll(".fallback-slot span"), element => element.textContent) };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify([definition, child]));
+        assert.deepEqual(actual, { clonedFallbackRows: [], twoWay: "edited", hidden: 0, retained: true,
+          ids: ["2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1"], refCount: 2,
+          property: ["B", "A2"], inputs: ["edited", "edited"], flow: ["B", "A2"],
+          svg: [["http://www.w3.org/2000/svg", "B"], ["http://www.w3.org/2000/svg", "A2"]],
+          children: ["B", "A2"], slots: ["B", "A2"] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} removes owned block groups while preserving foreign siblings and cleanup`, async () => {
+      const definition = parseComponent(`<template component="owned-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>
+        <event name="activate" type="event"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><button on:click="activate" $value="row.label"></button></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const anchors = [list.firstChild!, list.lastChild!];
+          const rows = Array.from(list.querySelectorAll("li"));
+          const removedButton = rows[0]!.querySelector("button")!;
+          const removedValue = host.state.rows[0];
+          const retained = rows[3]!;
+          const events: number[] = [];
+          host.on("activate", (event: CustomEvent) => events.push(Number(event.detail.target.parentElement.getAttribute("data-id"))));
+          const before = document.createElement("i");
+          const between = document.createElement("i");
+          const after = document.createElement("i");
+          list.prepend(before);
+          rows[1]!.nextSibling!.after(between);
+          list.append(after);
+          removedButton.click();
+          host.state.rows = host.state.rows.filter((row: any) => row.id === 4)
+            .concat([{ id: 6, label: "F" }]);
+          await Promise.resolve();
+          const mixed = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id"));
+          const identity = list.querySelector("li") === retained;
+          removedButton.click();
+          removedValue.label = "stale";
+          await Promise.resolve();
+          const stoppedContent = removedButton.textContent === "A";
+          retained.querySelector("button")!.click();
+          host.state.rows = [];
+          await Promise.resolve();
+          const foreignKept = [before, between, after].every(node => node.parentNode === list);
+          before.remove(); between.remove(); after.remove();
+          host.state.rows = [{ id: 7, label: "G" }, { id: 8, label: "H" }, { id: 9, label: "I" }];
+          await Promise.resolve();
+          const bulkButton = list.querySelector("button")!;
+          host.state.rows = [];
+          await Promise.resolve();
+          bulkButton.click();
+          const sameAnchors = list.childNodes.length === 2 && list.firstChild === anchors[0] && list.lastChild === anchors[1];
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 10, label: "J" }];
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          removedButton.click(); bulkButton.click();
+          const reconnected = Array.from(list.querySelectorAll("li"), row => row.textContent);
+          list.querySelector("button")!.click();
+          return { mixed, identity, stoppedContent, foreignKept, sameAnchors, reconnected, events };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { mixed: ["4", "6"], identity: true, stoppedContent: true,
+          foreignKept: true, sameAnchors: true, reconnected: ["J"], events: [1, 4, 10] });
+        assert.equal(warnings.length, 0);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} reruns a keyed list exactly for index, length and order changes`, async () => {
+      const definition = parseComponent(`<template component="list-rerun-count"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          // Each list run evaluates every row key once, so key reads count runs times rows.
+          let reads = 0;
+          const row = (id: number, label: string) => ({ get id() { reads += 1; return id; }, label });
+          const step = async (change: () => void) => {
+            reads = 0;
+            change();
+            await Promise.resolve();
+            return [reads, Array.from(root.querySelectorAll("span"), span => span.textContent).join("")];
+          };
+          return [
+            await step(() => { host.state.rows = [row(1, "a"), row(2, "b"), row(3, "c")]; }),
+            // Storage stays plain, so writing a row's proxy over the row itself is no change.
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => {
+              const first = host.state.rows[0];
+              host.state.rows[0] = host.state.rows[2];
+              host.state.rows[2] = first;
+            }),
+            await step(() => { host.state.rows.push(row(4, "d")); }),
+            await step(() => { host.state.rows.length = 2; }),
+            await step(() => { host.state.rows[1].label = "z"; }),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [[3, "abc"], [0, "abc"], [0, "abc"], [3, "cba"], [4, "cbad"], [2, "cb"], [0, "cz"]]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} updates a list and another component's index reader in subscription order`, async () => {
+      const list = parseComponent(`<template component="order-list"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $value="row"></li></ul></section></template>`);
+      const first = parseComponent(`<template component="order-first"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><output $value="rows[0]"></output></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="list"></section><section id="first"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async ([listDefinition, firstDefinition]) => {
+          const runtime = (window as any).BareRuntime;
+          const listRoot = document.querySelector("#list")!;
+          const firstRoot = document.querySelector("#first")!;
+          runtime.manageComponentLifecycle(listRoot, JSON.parse(listDefinition!));
+          runtime.manageComponentLifecycle(firstRoot, JSON.parse(firstDefinition!));
+          const listHost = runtime.getComponentHost(listRoot);
+          const firstHost = runtime.getComponentHost(firstRoot);
+          // The list reads every index before the other component, in its own scheduler, reads index 0.
+          listHost.state.rows = [1, 2, 3];
+          await new Promise(resolve => setTimeout(resolve, 0));
+          firstHost.state.rows = listHost.state.rows;
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const records: MutationRecord[] = [];
+          new MutationObserver(batch => { records.push(...batch); })
+            .observe(document.body, { childList: true, characterData: true, subtree: true });
+          // Each component flushes in its own microtask; the first one queued renders first.
+          const step = async (change: () => void) => {
+            change();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const order: string[] = [];
+            for (const record of records.splice(0)) {
+              const target = record.target as Node;
+              const id = (target instanceof Element ? target : target.parentElement)!.closest("section[id]")!.id;
+              if (order.at(-1) !== id) order.push(id);
+            }
+            return order;
+          };
+          return [
+            await step(() => { listHost.state.rows[0] = 9; }),
+            await step(() => { listHost.state.rows.reverse(); }),
+            [listRoot.textContent, firstRoot.textContent],
+          ];
+        }, [JSON.stringify(list), JSON.stringify(first)]);
+        assert.deepEqual(actual, [["list", "first"], ["list", "first"], ["329", "3"]]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} renews each loop record on every list run`, async () => {
+      const definition = parseComponent(`<template component="loop-record-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-index="loop.index" from:data-edge="loop.first ? 'first' : loop.last ? 'last' : ''">
+        <span $value="loop.count"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const read = () => Array.from(list.querySelectorAll("li"), row =>
+            [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
+          const initial = read();
+          // An equal-keyed replacement reruns the list without changing any row's loop fields. Each
+          // run still gives every row a new loop record, so loop readers rerun and write again.
+          const observer = new MutationObserver(() => undefined);
+          observer.observe(list, { attributes: true, subtree: true });
+          host.state.rows[1] = { id: 2 };
+          await Promise.resolve();
+          const indexWrites = observer.takeRecords().filter(record => record.attributeName === "data-index").length;
+          observer.disconnect();
+          host.state.rows = [host.state.rows[2], host.state.rows[0]];
+          await Promise.resolve();
+          return { initial, indexWrites, reordered: read() };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: ["0 first 3", "1  3", "2 last 3"],
+          indexWrites: 3,
+          reordered: ["0 first 2", "1 last 2"],
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} moves the same keyed blocks across reorders and after a duplicate-key failure`, async () => {
+      const definition = parseComponent(`<template component="keyed-move-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const rows = (ids: number[]) => ids.map(id => ({ id }));
+          // Reports the resulting order and which retained rows the reconcile moved.
+          const update = async (ids: number[]) => {
+            const before = new Map<Node, string | null>(Array.from(list.querySelectorAll("li"), row => [row, row.getAttribute("data-id")]));
+            const moved: string[] = [];
+            const observer = new MutationObserver(records => {
+              for (const record of records) {
+                for (const node of record.addedNodes) if (before.has(node)) moved.push(before.get(node)!);
+              }
+            });
+            observer.observe(list, { childList: true });
+            host.state.rows = rows(ids);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            observer.disconnect();
+            const order = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id")).join("");
+            const kept = Array.from(list.querySelectorAll("li")).filter(row => before.has(row)).length;
+            return [order, moved.join(""), kept];
+          };
+          return [
+            await update([1, 2, 3, 4, 5, 6]),
+            await update([1, 5, 3, 4, 2, 6]),
+            await update([6, 5, 1, 1]),
+            await update([2, 3, 4, 5, 6, 1]),
+            await update([4, 7, 5, 6, 2]),
+            await update([8, 9]),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [
+          ["123456", "", 0],
+          // The reverse pass moves the blocks outside the longest already-ordered run, last first.
+          ["153426", "25", 6],
+          ["153426", "", 6],
+          // The failed run left the previous order's positions intact.
+          ["234561", "152", 6],
+          ["47562", "2", 4],
+          ["89", "", 0],
+        ]);
+        assert.deepEqual(errors.map(message => message.includes("HR004")), [true]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
+      const definition = parseComponent(`<template component="reversed-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const describe = (node: Node): string => node instanceof Element
+            ? `li:${node.getAttribute("data-id")}` : node instanceof Comment ? node.data.replace("html-next:", "") : node.nodeName;
+          // A foreign move puts block 1's start after block 2's end. Adjacency still joins blocks 1
+          // and 2 into one stale group, but the group's first start now follows its last end.
+          const [first, second] = Array.from(list.querySelectorAll("li"));
+          second!.nextSibling!.after(first!.previousSibling!);
+          list.append(document.createElement("i"));
+          host.state.rows = host.state.rows.filter((row: any) => row.id > 2);
+          await Promise.resolve();
+          return Array.from(list.childNodes, describe);
+        }, JSON.stringify(definition));
+        // Each block is removed through its own start-to-end walk, as before the group bulk path.
+        assert.deepEqual(actual, ["each-start", "li:1", "item-end"]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} canonicalizes writable controller aliases without losing destination guards`, async () => {
+      const definition = parseComponent(`<template component="controller-alias-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="left" type="object({ value: number })" value="{ value: 1 }"></state>
+        <state name="right" type="object({ value: string })" value="{ value: 'old' }"></state>
+        <state name="alias" type="object({ id: number, label: string })" value="{ id: 0, label: 'unused' }"></state>
+        <computed name="locked" type="object({ id: number, label: string })" from="rows[0]"></computed>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const crossPath = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          host.state.right = host.state.left;
+          host.state.right.value = "right-text";
+          await Promise.resolve();
+          return { right: host.state.right.value, left: host.state.left.value };
+        }, JSON.stringify(definition));
+        // This fails before repeated writes on the old implementation: the source guard rejects
+        // a value that is valid at the destination, and every assignment adds another wrapper.
+        assert.deepEqual(crossPath, { right: "right-text", left: "right-text" });
+        assert.equal(warnings.length, 0);
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const host = runtime.getComponentHost(root);
+          const originals = new Map(Array.from(root.querySelectorAll("li"), node => [node.getAttribute("data-id"), node]));
+          host.state.right.value = 7;
+          const invalidDestination = host.state.right.value;
+          host.state.alias = host.state.locked;
+          host.state.alias.label = "blocked";
+          const readonlyAlias = host.state.alias.label;
+          const readonlySource = host.state.rows[0].label;
+          for (let index = 0; index < 32; index += 1) {
+            host.state.rows = host.state.rows.filter(() => true).concat([]);
+            const first = host.state.rows[0];
+            host.state.rows[0] = host.state.rows[2];
+            host.state.rows[2] = first;
+            host.state.rows[0].label = `label-${index}`;
+            await Promise.resolve();
+          }
+          host.state.rows = host.state.rows.filter((row: any) => row.id !== 2).concat([{ id: 4, label: "new" }]);
+          host.state.rows[0].label = "final";
+          await Promise.resolve();
+          const nodes = Array.from(root.querySelectorAll("li"));
+          const retained = nodes.filter(node => node.getAttribute("data-id") !== "4")
+            .every(node => originals.get(node.getAttribute("data-id")) === node);
+          return { invalidDestination, readonlyAlias, readonlySource, retained,
+            ids: nodes.map(node => node.getAttribute("data-id")), labels: nodes.map(node => node.textContent) };
+        });
+        assert.deepEqual(actual, { invalidDestination: "right-text", readonlyAlias: "A", readonlySource: "A",
+          retained: true, ids: ["1", "3", "4"], labels: ["final", "label-30", "new"] });
+        assert.equal(warnings.length, 2);
+        assert.ok(warnings.some(message => message.includes("right.value") && message.includes("declared type")));
+        assert.ok(warnings.some(message => message.includes("locked.label") && message.includes("read-only")));
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} manages native structural bindings and reconnects the same state`, async () => {
+      const definition = parseComponent(`<template component="native-owned-list"><defs>
+        <state name="shown" type="boolean" value="true"></state>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        </defs><section><ul $if="shown"><li $each="row of rows" $key="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The ordinary native factory emits a static skeleton before lifecycle attachment.
+        await page.setContent('<section id="case"><ul><li></li></ul></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async (serializedDefinition) => {
+          const definition = JSON.parse(serializedDefinition);
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector('#case')!;
+          const stop = runtime.manageComponentLifecycle(root, definition);
+          const host = runtime.getComponentHost(root);
+          const snapshot = () => Array.from(root.querySelectorAll('li'), row => row.textContent);
+          const initial = snapshot();
+          const first = root.querySelector('li');
+          host.state.rows = [{ id: 2, label: 'B' }, { id: 1, label: 'A' }];
+          await Promise.resolve();
+          const reordered = snapshot();
+          const retained = root.querySelectorAll('li')[1] === first;
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 3, label: 'C' }];
+          await Promise.resolve();
+          const detached = snapshot();
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const reconnected = snapshot();
+          const sameHost = runtime.getComponentHost(root) === host;
+          host.state.shown = false;
+          await Promise.resolve();
+          const hidden = root.querySelector('ul') === null;
+          host.state.shown = true;
+          await Promise.resolve();
+          const restored = snapshot();
+          stop();
+          return { initial, reordered, retained, detached, reconnected, sameHost, hidden, restored };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { initial: ['A', 'B'], reordered: ['B', 'A'], retained: true,
+          detached: ['B', 'A'], reconnected: ['C'], sameHost: true, hidden: true, restored: ['C'] });
+      } finally { await browser.close(); }
+    });
+
     it(`${engine} targets local refs across repeated instances and collection changes`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -1086,6 +1780,58 @@ describe.skipIf(!enabled)("browser runtime", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    for (const delivery of ["inline", "bundled-link"] as const) {
+      it(`${name} reuses server-delivered ${delivery} component styles without compiling again`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const first = `<template component="x-styled-ssr" status="early" summary="Style hydration.">` +
+            `<defs><state name="active" type="boolean" value="false"></state></defs>` +
+            `<article></article><style>:host { color: rgb(10, 20, 30) }` +
+            `:host-state([active]) { color: rgb(40, 50, 60) }</style></template>`;
+          const second = `<template component="x-other-ssr" status="early" summary="Second bundled component.">` +
+            `<aside></aside><style>:host { padding: 7px }</style></template>`;
+          const definitions = first + second;
+          const rendered = await renderComponents(`<x-styled-ssr></x-styled-ssr><x-other-ssr></x-other-ssr>`, {
+            definitions: [parseComponent(first), parseComponent(second)],
+          });
+          const serverHTML = await page.evaluate(({ delivery, rendered }) => {
+            const carrier = delivery === "inline" ? document.createElement("style") : document.createElement("link");
+            if (carrier instanceof HTMLLinkElement) {
+              carrier.rel = "stylesheet";
+              carrier.href = "data:text/css," + encodeURIComponent(rendered.css);
+            } else carrier.textContent = rendered.css;
+            carrier.setAttribute("data-html-next-component-styles", Object.keys(rendered.styleOwnership).join(" "));
+            carrier.setAttribute("data-html-next-style-states", JSON.stringify(rendered.styleOwnership));
+            return { styles: carrier.outerHTML, roots: rendered.html };
+          }, { delivery, rendered });
+          // A fresh document/runtime consumes the server's bundled CSS and native roots.
+          await page.setContent(serverHTML.styles + definitions + serverHTML.roots);
+          await page.addScriptTag({ path: bundlePath });
+          const result = await page.evaluate(`(async () => {
+            const styles = [...document.head.querySelectorAll('style,link[rel=stylesheet]')];
+            let compilations = 0;
+            const replace = CSSStyleSheet.prototype.replaceSync;
+            CSSStyleSheet.prototype.replaceSync = function (...args) { compilations++; return replace.apply(this, args); };
+            window.HtmlRuntime.lowerDocument();
+            window.HtmlRuntime.lowerDocument();
+            const root = document.querySelector('article');
+            const before = getComputedStyle(root).color;
+            window.HtmlRuntime.getComponentHost(root).state.active = true;
+            await new Promise(resolve => setTimeout(resolve, 0));
+            CSSStyleSheet.prototype.replaceSync = replace;
+            return { compilations, styles: document.head.querySelectorAll('style,link[rel=stylesheet]').length,
+              reused: styles.every(style => style.isConnected), before, after: getComputedStyle(root).color,
+              otherPadding: getComputedStyle(document.querySelector('aside')).paddingTop };
+          })()`);
+          assert.deepEqual(result, { compilations: 0, styles: 1, reused: true,
+            before: "rgb(10, 20, 30)", after: "rgb(40, 50, 60)", otherPadding: "7px" });
+        } finally {
+          await browser.close();
+        }
+      });
+    }
+
     it(`${name} can leave application-owned roots out of document observation`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -1837,6 +2583,133 @@ describe.skipIf(!enabled)("browser runtime", () => {
           events: ["connect:first:./dynamic.js", "dispose:first", "connect:first:./dynamic.js",
             "connect:second:./dynamic.js", "dispose:first", "dispose:second"],
           errors: [], styles: 1, stopped: "demo-dynamic",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} disconnects removed light-DOM roots in tree order from small and large connection sets`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-order" status="early" summary="Removal order fixture."><button><slot></slot></button></template>' +
+          '<main><section id="one"></section><section id="two"></section></main><aside id="many"></aside>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const events = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(element) {
+              events.push("connect:" + element.id);
+              return () => events.push("dispose:" + element.id);
+            },
+          });
+          const add = async (parent, id, before) => {
+            const element = document.createElement("demo-order");
+            element.id = id;
+            if (before === undefined) parent.append(element);
+            else parent.insertBefore(element, before);
+            await tick();
+            return document.getElementById(id);
+          };
+          const one = document.querySelector("#one");
+          const two = document.querySelector("#two");
+          // Connection order differs from tree order in each section.
+          const b = await add(one, "b");
+          await add(one, "a", b);
+          const d = await add(two, "d");
+          await add(two, "c", d);
+          // A moved root stays connected; a removed subtree without roots disposes nothing.
+          const moved = document.querySelector("#a");
+          moved.remove();
+          one.append(moved);
+          document.querySelector("main").append(document.createElement("p"));
+          await tick();
+          const small = events.splice(0);
+          document.querySelector("main").replaceChildren();
+          await tick();
+          const removedSmall = events.splice(0);
+          const many = document.querySelector("#many");
+          const tail = await add(many, "z");
+          for (let index = 0; index < 18; index += 1) await add(many, "m" + index, tail);
+          events.splice(0);
+          const late = document.createElement("div");
+          many.prepend(late);
+          await add(late, "y");
+          await add(late, "x", document.querySelector("#y"));
+          events.splice(0);
+          late.remove();
+          many.replaceChildren(...Array.from(many.children).filter(element => element.id !== "m3" && element.id !== "z"));
+          await tick();
+          const removedLarge = events.splice(0);
+          stop();
+          return { small, removedSmall, removedLarge };
+        })()`);
+        assert.deepEqual(result, {
+          small: ["connect:b", "connect:a", "connect:d", "connect:c"],
+          removedSmall: ["dispose:b", "dispose:a", "dispose:c", "dispose:d"],
+          removedLarge: ["dispose:x", "dispose:y", "dispose:m3", "dispose:z"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} discovers what a foreign script puts on or into a freshly rendered list row`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-cell" status="early" summary="Row content fixture."><b><slot></slot></b></template>' +
+          '<template component="demo-rows" status="early" summary="Row list fixture."><defs>' +
+          '<state name="rows" type="list(number)" value="[1]"></state></defs>' +
+          '<ul><li $each="row of rows" $key="row" from:data-id="row"><span $value="row"></span></li></ul></template>' +
+          '<demo-rows id="rows"></demo-rows>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onError(error) { errors.push(error.diagnostic?.code ?? error.message); },
+          });
+          await tick();
+          const root = document.querySelector("#rows");
+          const host = window.HtmlRuntime.getComponentHost(root);
+          const cell = text => {
+            const element = document.createElement("demo-cell");
+            element.textContent = text;
+            return element;
+          };
+          // The list renders in one microtask and observation runs in a later one, so these
+          // foreign changes land on fresh rows before observation first sees them.
+          host.state.rows = [1, 2];
+          await Promise.resolve();
+          root.querySelectorAll("li")[1].append(cell("inserted"));
+          await tick();
+          const inserted = errors.length;
+          host.state.rows = [1, 2, 3];
+          await Promise.resolve();
+          root.querySelectorAll("li")[2].setAttribute("data-component", "demo-cell");
+          await tick();
+          const marked = errors.splice(0);
+          root.querySelector("li").append(cell("later"));
+          await tick();
+          const lowered = Array.from(root.querySelectorAll("li"), row => [row.getAttribute("data-id"),
+            Array.from(row.querySelectorAll("b"), element => element.textContent).join(",")]);
+          stop();
+          return { inserted, marked, lowered, errors };
+        })()`);
+        assert.deepEqual(result, {
+          inserted: 0,
+          // Discovery treats the marked row as server markup to hydrate. The row is not that
+          // component's markup, so hydration reports it.
+          marked: ["HR005"],
+          lowered: [["1", "later"], ["2", "inserted"], ["3", ""]],
+          errors: [],
         });
       } finally {
         await browser.close();
@@ -3367,6 +4240,84 @@ describe.skipIf(!enabled)("browser runtime", () => {
           tone: ["cool", "cool"],
           host: true,
         });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} applies a delegate's invocation bindings before its parent's on their shared root`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-in" status="early" summary="Native root."><button type="button"><slot></slot></button></template>` +
+          `<template component="x-mid" status="early" summary="Delegates its root.">` +
+            `<defs><state name="pressed" type="boolean" value="false"></state><handler name="press"><set name="pressed" expr:value="true"></set></handler></defs>` +
+            `<x-in from:title="'inner'" on:click.prevent="press"><slot></slot></x-in>` +
+          `</template>` +
+          `<template component="x-out" status="early" summary="Binds the delegating invocation.">` +
+            `<defs><state name="prevented" type="boolean" value="false"></state><handler name="read"><set name="prevented" expr:value="$$event.defaultPrevented"></set></handler></defs>` +
+            `<section><x-mid from:title="'outer'" on:click="read">Go</x-mid><output $value="prevented"></output></section>` +
+          `</template>` +
+          `<x-out id="out"></x-out>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.lowerDocument();
+          await settle();
+          const button = document.querySelector('#out button');
+          const title = button.title;
+          button.click();
+          await settle();
+          return { title, prevented: document.querySelector('#out output').textContent };
+        })()`);
+        // The outer invocation's value wins, and the inner listener runs before the outer one.
+        assert.deepEqual(result, { title: "outer", prevented: "true" });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} attaches a parent's bindings to a component whose definition arrives after the parent renders`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-p" status="early" summary="Renders a later component.">` +
+            `<defs><state name="n" type="number" value="1"></state><handler name="inc"><set name="n" expr:value="n + 1"></set></handler></defs>` +
+            `<main><x-k $ref="k" from:title="n" on:click="inc"></x-k><output $value="n"></output></main>` +
+          `</template>` +
+          `<x-p id="p"></x-p>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          const stop = window.HtmlRuntime.observeDocument(document);
+          await settle();
+          const pending = document.querySelector('#p x-k') !== null;
+          const definition = document.createElement('template');
+          definition.setAttribute('component', 'x-k');
+          definition.setAttribute('status', 'early');
+          definition.setAttribute('summary', 'Defined later.');
+          definition.innerHTML = '<button type="button">K</button>';
+          document.body.append(definition);
+          await settle();
+          const button = document.querySelector('#p button');
+          button.click();
+          await settle();
+          const host = window.HtmlRuntime.getComponentHost(document.querySelector('#p'));
+          const outcome = { pending, output: document.querySelector('#p output').textContent, title: button.title, ref: host.refs.k === button };
+          stop();
+          return outcome;
+        })()`);
+        assert.deepEqual(result, { pending: true, output: "2", title: "2", ref: true });
         assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();

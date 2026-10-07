@@ -32,8 +32,23 @@ jobs:
       - run: pnpm verify:pr
 
   browser:
-    name: Browser and compatibility
+    name: Browser ${{ matrix.suite }}
     runs-on: ubuntu-latest
+    # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
+    # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Parity shards are balanced by measured spec time (vitest.targets.config.ts), about 8.5 minutes each.
+        include:
+          - { suite: runtime and consumers, command: pnpm test:browser && pnpm test:consumer }
+          - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
+          - { suite: framework parity 2/6, command: pnpm test:targets --shard=2/6 }
+          - { suite: framework parity 3/6, command: pnpm test:targets --shard=3/6 }
+          - { suite: framework parity 4/6, command: pnpm test:targets --shard=4/6 }
+          - { suite: framework parity 5/6, command: pnpm test:targets --shard=5/6 }
+          - { suite: framework parity 6/6, command: pnpm test:targets --shard=6/6 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -43,8 +58,16 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm verify:compatibility
+      # Playwright's CDN has taken from seconds to 8 minutes for one browser; cache them per version.
+      - id: playwright
+        run: echo "version=$(pnpm --filter @nextwebwg/html-next exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Every launch is headless, which uses Chromium's headless shell rather than the full browser.
+      - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps --only-shell chromium firefox webkit
+      - run: ${{ matrix.command }}
 
   performance:
     name: Reactive performance against main

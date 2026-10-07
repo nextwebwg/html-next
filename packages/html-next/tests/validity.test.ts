@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
+import { rewriteValiditySelectors } from "../src/validity-css.js";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const sourceDirectory = new URL("../src/", import.meta.url).pathname;
@@ -24,7 +25,7 @@ describe.skipIf(!enabled)("browser validity", () => {
       outfile: bundlePath,
       platform: "browser",
       stdin: {
-        contents: `export * from "./validity.ts"; export { validate } from "./validate.ts";`,
+        contents: `export * from "./validity.ts"; export { validate } from "./validate.ts"; export { rewriteValiditySelectors } from "./validity-css.ts";`,
         loader: "ts",
         resolveDir: sourceDirectory,
         sourcefile: "validity-test-entry.ts",
@@ -42,6 +43,44 @@ describe.skipIf(!enabled)("browser validity", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name}: validation leaves application stylesheets and CSSOM methods alone`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<style>#field { color: rgb(10, 20, 30) } #field:invalid { outline: 1px solid red }</style>` +
+          `<style>#field { color: rgb(40, 50, 60) }</style><div id="field"></div>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const V = (window as unknown as { V: typeof import("../src/validity.js") }).V;
+          const field = document.getElementById("field")!;
+          const methods = [CSSStyleSheet.prototype.insertRule, CSSStyleSheet.prototype.deleteRule,
+            CSSStyleSheet.prototype.replace, CSSStyleSheet.prototype.replaceSync];
+          let reads = 0;
+          const descriptor = Object.getOwnPropertyDescriptor(CSSStyleSheet.prototype, "cssRules")!;
+          Object.defineProperty(CSSStyleSheet.prototype, "cssRules", { ...descriptor, get() {
+            reads += 1;
+            return descriptor.get!.call(this);
+          } });
+          V.manageElementValidity(field, { required: true }, { value: () => "" });
+          V.setElementValidity(field, { valid: false, errors: [{ reason: "valueMissing", message: "Required" }] });
+          const later = document.createElement("style");
+          later.textContent = "#field:invalid { padding-top: 7px }";
+          document.head.append(later);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          Object.defineProperty(CSSStyleSheet.prototype, "cssRules", descriptor);
+          return { reads, styles: document.head.querySelectorAll("style").length,
+            color: getComputedStyle(field).color, padding: getComputedStyle(field).paddingTop,
+            invalid: field.hasAttribute("data-invalid"),
+            methodsUnchanged: methods.every((method, index) => method === [CSSStyleSheet.prototype.insertRule,
+              CSSStyleSheet.prototype.deleteRule, CSSStyleSheet.prototype.replace, CSSStyleSheet.prototype.replaceSync][index]) };
+        });
+        assert.deepEqual(result, { reads: 0, styles: 3, color: "rgb(40, 50, 60)", padding: "0px",
+          invalid: true, methodsUnchanged: true });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name}: matches browser-supported constraints and covers generalized values`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -119,7 +158,7 @@ describe.skipIf(!enabled)("browser validity", () => {
       try {
         const page = await browser.newPage();
         await page.setContent(
-          `<style>#field:invalid { outline: 2px solid red } #field:user-invalid { color: rgb(255, 0, 0) }</style>` +
+          `<style>${rewriteValiditySelectors("#field:invalid { outline: 2px solid red } #field:user-invalid { color: rgb(255, 0, 0) }")}</style>` +
           `<form id="form"><div id="field" tabindex="0"></div><button>Send</button></form>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -276,7 +315,7 @@ describe.skipIf(!enabled)("browser validity", () => {
       }
     });
 
-    it(`${name}: mirrors dynamic and constructed validity CSS`, async () => {
+    it(`${name}: supports explicitly transformed dynamic and constructed validity CSS`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -284,18 +323,18 @@ describe.skipIf(!enabled)("browser validity", () => {
         await page.addScriptTag({ path: bundlePath });
         await page.evaluate("globalThis.__name = (value) => value");
         const result = await page.evaluate(async () => {
-          const V = (window as unknown as { V: typeof import("../src/validity.js") }).V;
+          const V = (window as unknown as { V: typeof import("../src/validation.js") }).V;
           const field = document.getElementById("field")!;
           V.manageElementValidity(field, { required: true }, { value: () => "" });
           const style = document.createElement("style");
-          style.textContent = `@media (min-width: 0px) { #field:not(:valid) { border-top: 3px solid rgb(1, 2, 3) } }`;
+          style.textContent = V.rewriteValiditySelectors(`@media (min-width: 0px) { #field:not(:valid) { border-top: 3px solid rgb(1, 2, 3) } }`);
           document.head.append(style);
           await new Promise((resolve) => setTimeout(resolve, 0));
           const dynamic = getComputedStyle(field).borderTopWidth;
 
           const sheet = new CSSStyleSheet();
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-          sheet.replaceSync(`#field:invalid { padding-top: 7px }`);
+          sheet.replaceSync(V.rewriteValiditySelectors(`#field:invalid { padding-top: 7px }`));
           await new Promise((resolve) => setTimeout(resolve, 0));
           return { dynamic, constructed: getComputedStyle(field).paddingTop };
         });

@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.29",
+  "version": "1.0.0-alpha.32",
   "description": "Reference runtime and tools for HTML Next: Declarative HTML Components, validity on any element, and HTML Forms request construction.",
   "license": "MIT",
   "keywords": [
@@ -81,9 +81,13 @@
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
     "measure:hydration": "tsx scripts/measure-hydration.ts",
+    "measure:list-memory": "tsx scripts/measure-list-memory.ts",
     "measure:performance": "tsx scripts/measure-performance.ts",
     "measure:reactivity": "tsx scripts/measure-reactivity-matrix.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
+    "setup:frameworks": "tsx scripts/framework-benchmark.ts setup",
+    "measure:frameworks": "tsx scripts/framework-benchmark.ts measure",
+    "smoke:frameworks": "tsx scripts/framework-benchmark.ts smoke",
     "prepack": "pnpm check:release && pnpm build",
     "release:dry-run": "npm pack --dry-run --json",
     "report:performance": "tsx scripts/measure-performance.ts --html",
@@ -93,6 +97,7 @@
     "test:targets": "vitest run --config ../../vitest.targets.config.ts",
     "typecheck": "tsc -p tsconfig.json",
     "verify:performance": "tsx scripts/check-reactivity-performance.ts",
+    "verify:frameworks": "tsx scripts/framework-benchmark.ts compare",
     "report:reactivity:suite": "tsx scripts/report-reactive-suite.ts"
   },
   "dependencies": {

@@ -15,6 +15,7 @@ interface Dependency {
 
 interface ReactiveCell extends Dependency {
   computed?: ReactiveComputed<Value>;
+  /** Always plain; JavaScript readers get its proxy from `get`. */
   value: Value;
 }
 
@@ -38,7 +39,69 @@ export function untracked<T>(read: () => T): T {
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
+/** The plain object behind each reactive proxy and writable alias. */
+const plainTargets = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
+
+/** Keep a writable controller facade from becoming another layer of reactive identity. */
+export function registerReactiveAlias(alias: object, value: object): void {
+  const plain = toPlain(value);
+  const canonical = proxyCache.get(plain);
+  if (canonical === undefined) return;
+  proxyCache.set(alias, canonical);
+  plainTargets.set(alias, plain);
+}
+
+/**
+ * Reactive storage holds plain objects, never proxies. JavaScript reads through a proxy, which
+ * tracks each property it reads; the expression engine reads the plain objects with `readKey`,
+ * which tracks the same (object, key) dependencies, so a write through either reaches both.
+ */
+export function toPlain<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  return (plainTargets.get(value) as T | undefined) ?? value;
+}
+
+/** The dependency for one property of a plain object, created on its first tracked read. */
+function propertyDependency(target: object, key: PropertyKey): Dependency {
+  let properties = objectSubscribers.get(target);
+  if (properties === undefined) {
+    properties = new Map();
+    objectSubscribers.set(target, properties);
+  }
+  let subscribers = properties.get(key);
+  if (subscribers === undefined) {
+    subscribers = { first: undefined, last: undefined };
+    properties.set(key, subscribers);
+  }
+  return subscribers;
+}
+
+/**
+ * A property read for the expression engine: tracked like a proxy read, but the object stays plain
+ * and so does the result. Only records and lists take this path. Anything else (a class instance,
+ * whose accessors must see the proxy as `this`) reads through its proxy.
+ */
+export function readKey(object: object, key: string | number): Value | undefined {
+  const prototype = Object.getPrototypeOf(object);
+  if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
+    return toPlain((wrap(object as Value) as Record<PropertyKey, Value>)[key]);
+  }
+  if (activeEffect !== undefined && !Object.isFrozen(object)) {
+    activeEffect.track(propertyDependency(object, typeof key === "number" ? String(key) : key));
+  }
+  const value = (object as Record<PropertyKey, Value | undefined>)[key];
+  return value !== null && typeof value === "object" ? toPlain(value) : value;
+}
+
+/** A list's items for the expression engine, tracking its length and each index it reads. */
+export function readItems(list: readonly Value[]): Value[] {
+  const plain = toPlain(list);
+  const length = readKey(plain, "length") as number;
+  const items: Value[] = [];
+  for (let index = 0; index < length; index += 1) items.push(readKey(plain, index)!);
+  return items;
+}
 
 function unsubscribe(subscription: Subscription): void {
   const { dependency, previousSubscriber, nextSubscriber } = subscription;
@@ -202,10 +265,14 @@ export class ReactiveEffect {
   readonly id = nextEffectId++;
   dependencies: Subscription | undefined = undefined;
   stopped = false;
+  /** Internal ownership registration; pause keeps it, permanent stop releases it. */
+  registration: { release(effect: ReactiveEffect): void } | undefined = undefined;
   paused = false;
   queued = false;
   #cleanup: Cleanup = undefined;
   #dependencyTail: Subscription | undefined = undefined;
+  #tracked: Set<Dependency> | undefined = undefined;
+  #inserted = false;
 
   constructor(
     readonly scheduler: ReactiveScheduler,
@@ -217,6 +284,7 @@ export class ReactiveEffect {
   execute(): void {
     if (this.stopped || this.paused) return;
     this.#dependencyTail = undefined;
+    this.#inserted = false;
     if (this.#cleanup !== undefined) {
       const cleanup = this.#cleanup;
       this.#cleanup = undefined;
@@ -230,6 +298,7 @@ export class ReactiveEffect {
       if (cleanup !== undefined) this.#cleanup = cleanup;
     } finally {
       activeEffect = previous;
+      this.#tracked = undefined;
       const tail = this.#dependencyTail as Subscription | undefined;
       let subscription = tail === undefined ? this.dependencies : tail.nextDependency;
       if (tail === undefined) this.dependencies = undefined;
@@ -247,12 +316,35 @@ export class ReactiveEffect {
       this.#dependencyTail === undefined
         ? this.dependencies
         : this.#dependencyTail.nextDependency;
-    if (next?.dependency === dependency) {
+    const reusable = next?.dependency === dependency;
+    // Before any insertion, the unique old order proves this next link has not been consumed.
+    if (reusable && !this.#inserted) {
       this.#dependencyTail = next;
+      this.#tracked?.add(dependency);
       return;
     }
-    for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
-      if (current?.dependency === dependency) return;
+    if (this.#tracked !== undefined) {
+      if (this.#tracked.has(dependency)) return;
+    } else {
+      let inspected = 0;
+      for (let current = this.dependencies; current !== next; current = current?.nextDependency) {
+        if (current?.dependency === dependency) return;
+        // Keep small effects allocation-free; one wider miss indexes the consumed prefix once.
+        if (++inspected === 8) {
+          const tracked = new Set<Dependency>();
+          for (let used = this.dependencies; used !== next; used = used!.nextDependency) {
+            tracked.add(used!.dependency);
+          }
+          this.#tracked = tracked;
+          if (tracked.has(dependency)) return;
+          break;
+        }
+      }
+    }
+    this.#tracked?.add(dependency);
+    if (reusable) {
+      this.#dependencyTail = next;
+      return;
     }
     const subscription: Subscription = {
       dependency,
@@ -264,6 +356,7 @@ export class ReactiveEffect {
     if (this.#dependencyTail === undefined) this.dependencies = subscription;
     else this.#dependencyTail.nextDependency = subscription;
     this.#dependencyTail = subscription;
+    this.#inserted = true;
     const first = dependency.first;
     // Computeds lead the subscriber list so invalidation can dirty the derived graph before an
     // ordinary effect observes it. Priority-zero data effects still use normal scheduler ordering.
@@ -288,8 +381,9 @@ export class ReactiveEffect {
     if (this.stopped || this.paused) return;
     this.paused = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    cleanup?.();
   }
 
   resume(): void {
@@ -302,8 +396,12 @@ export class ReactiveEffect {
     if (this.stopped) return;
     this.stopped = true;
     this.#unsubscribe();
-    this.#cleanup?.();
+    const cleanup = this.#cleanup;
     this.#cleanup = undefined;
+    const registration = this.registration;
+    this.registration = undefined;
+    try { cleanup?.(); }
+    finally { registration?.release(this); }
   }
 
   #unsubscribe(): void {
@@ -315,6 +413,7 @@ export class ReactiveEffect {
     }
     this.dependencies = undefined;
     this.#dependencyTail = undefined;
+    this.#tracked = undefined;
   }
 }
 
@@ -521,24 +620,41 @@ export class ReactiveScope implements Scope {
     return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
 
+  /** The value as JavaScript sees it: an object comes back as its proxy. */
   get(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
     activeEffect?.track(cell);
+    return wrap(cell.value);
+  }
+
+  /** The plain value, for the expression engine; see `readKey`. */
+  read(name: string): Value | undefined {
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.read(name);
+    activeEffect?.track(cell);
     return cell.value;
   }
 
+  readKey(object: object, key: string | number): Value | undefined {
+    return readKey(object, key);
+  }
+
+  reveal(value: Value): Value {
+    return wrap(value);
+  }
+
   set(name: string, value: Value): void {
-    const wrapped = this.#wrap(value);
+    const plain = toPlain(value);
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: wrapped, first: undefined, last: undefined };
+      cell = { value: plain, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
       return;
     }
-    if (Object.is(cell.value, wrapped)) return;
-    cell.value = wrapped;
+    if (Object.is(cell.value, plain)) return;
+    cell.value = plain;
     trigger(cell);
   }
 
@@ -561,13 +677,16 @@ export class ReactiveScope implements Scope {
     }
     const computed = new ReactiveComputed(
       this.scheduler,
-      () => this.#wrap(compute()),
+      () => toPlain(compute()),
       cell,
     );
     cell.computed = computed;
     // Most scopes contain only writable values. Install the extra computed lookup only on scopes
     // that need it so ordinary state reads retain the minimal hot path.
-    if (!Object.hasOwn(this, "get")) this.get = this.#getWithComputed;
+    if (!Object.hasOwn(this, "get")) {
+      this.get = this.#getWithComputed;
+      this.read = this.#readWithComputed;
+    }
     return computed;
   }
 
@@ -589,65 +708,124 @@ export class ReactiveScope implements Scope {
   #getWithComputed(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
+    if (cell.computed !== undefined) return wrap(cell.computed.get());
+    activeEffect?.track(cell);
+    return wrap(cell.value);
+  }
+
+  #readWithComputed(name: string): Value | undefined {
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.read(name);
     if (cell.computed !== undefined) return cell.computed.get();
     activeEffect?.track(cell);
     return cell.value;
   }
+}
 
-  #wrap(value: Value): Value {
-    if (value === null || typeof value !== "object") return value;
-    const cached = proxyCache.get(value);
-    if (cached !== undefined) return cached as Value;
-    if (isNativeEvent(value) || Object.isFrozen(value)) return value;
-    const proxy = new Proxy(value, {
-      get: (target, key, receiver) => {
-        if (activeEffect !== undefined) {
-          let properties = objectSubscribers.get(target);
-          if (properties === undefined) {
-            properties = new Map();
-            objectSubscribers.set(target, properties);
-          }
-          let subscribers = properties.get(key);
-          if (subscribers === undefined) {
-            subscribers = { first: undefined, last: undefined };
-            properties.set(key, subscribers);
-          }
-          activeEffect.track(subscribers);
+/**
+ * The traps every reactive proxy shares. They keep no per-proxy or per-scope state: dependencies
+ * live in the weak target registries, so one handler serves every proxy.
+ */
+const reactiveHandler: ProxyHandler<object> = {
+  get(target, key, receiver) {
+    if (activeEffect !== undefined) activeEffect.track(propertyDependency(target, key));
+    return wrap(Reflect.get(target, key, receiver) as Value);
+  },
+  set(target, key, next, receiver) {
+    const previousLength = Array.isArray(target) ? target.length : undefined;
+    const previous = toPlain(Reflect.get(target, key, receiver));
+    const plain = toPlain(next as Value);
+    const result = Reflect.set(target, key, plain, receiver);
+    if (!Object.is(previous, plain)) trigger(objectSubscribers.get(target)?.get(key));
+    // Defining an array index can extend length before push writes that same length again.
+    if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+      trigger(objectSubscribers.get(target)?.get("length"));
+    }
+    // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+    if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+      const length = (target as Value[]).length;
+      for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+        if (typeof property !== "string") continue;
+        const index = Number(property);
+        if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+          trigger(subscribers);
         }
-        return this.#wrap(Reflect.get(target, key, receiver) as Value);
-      },
-      set: (target, key, next, receiver) => {
-        const previousLength = Array.isArray(target) ? target.length : undefined;
-        const previous = Reflect.get(target, key, receiver);
-        const wrapped = this.#wrap(next as Value);
-        const result = Reflect.set(target, key, wrapped, receiver);
-        if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
-        // Defining an array index can extend length before push writes that same length again.
-        if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
-          trigger(objectSubscribers.get(target)?.get("length"));
-        }
-        // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
-        if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
-          const length = (target as Value[]).length;
-          for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
-            if (typeof property !== "string") continue;
-            const index = Number(property);
-            if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
-              trigger(subscribers);
-            }
-          }
-        }
-        return result;
-      },
-      deleteProperty: (target, key) => {
-        const had = Reflect.has(target, key);
-        const result = Reflect.deleteProperty(target, key);
-        if (had) trigger(objectSubscribers.get(target)?.get(key));
-        return result;
-      },
-    });
-    proxyCache.set(value, proxy);
-    proxyCache.set(proxy, proxy);
-    return proxy as Value;
+      }
+    }
+    return result;
+  },
+  deleteProperty(target, key) {
+    const had = Reflect.has(target, key);
+    const result = Reflect.deleteProperty(target, key);
+    if (had) trigger(objectSubscribers.get(target)?.get(key));
+    return result;
+  },
+};
+
+// ponytail: the three functions below repeat the traps' bodies for compiled controller facades,
+// which track and notify raw targets through the same registry. The traps keep their own inline
+// copies because calling these from them grows every runtime bundle (~30 B gzip); only
+// generated-runtime imports these, so other bundles shake them out.
+
+/** Records that the running effect read `target[key]`; the raw target is the dependency's identity. */
+export function trackProperty(target: object, key: PropertyKey): void {
+  if (activeEffect === undefined) return;
+  let properties = objectSubscribers.get(target);
+  if (properties === undefined) {
+    properties = new Map();
+    objectSubscribers.set(target, properties);
   }
+  let subscribers = properties.get(key);
+  if (subscribers === undefined) {
+    subscribers = { first: undefined, last: undefined };
+    properties.set(key, subscribers);
+  }
+  activeEffect.track(subscribers);
+}
+
+/**
+ * Notifies the readers a property write affects, after the write. `previousLength` is the array's
+ * length before it, or undefined for other targets.
+ */
+export function notifyPropertySet(
+  target: object,
+  key: PropertyKey,
+  previous: unknown,
+  next: unknown,
+  previousLength: number | undefined,
+): void {
+  if (!Object.is(previous, next)) trigger(objectSubscribers.get(target)?.get(key));
+  // Defining an array index can extend length before push writes that same length again.
+  if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+    trigger(objectSubscribers.get(target)?.get("length"));
+  }
+  // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+  if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+    const length = (target as Value[]).length;
+    for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+      if (typeof property !== "string") continue;
+      const index = Number(property);
+      if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+        trigger(subscribers);
+      }
+    }
+  }
+}
+
+/** Notifies the readers of a deleted property; `had` is whether it existed before the delete. */
+export function notifyPropertyDelete(target: object, key: PropertyKey, had: boolean): void {
+  if (had) trigger(objectSubscribers.get(target)?.get(key));
+}
+
+/** The canonical reactive proxy for a mutable object; primitives, frozen values and events stay as they are. */
+function wrap(value: Value): Value {
+  if (value === null || typeof value !== "object") return value;
+  const cached = proxyCache.get(value);
+  if (cached !== undefined) return cached as Value;
+  // Already a proxy: storage is plain, so this is rare enough for a second lookup.
+  if (plainTargets.has(value) || isNativeEvent(value) || Object.isFrozen(value)) return value;
+  const proxy = new Proxy(value, reactiveHandler);
+  proxyCache.set(value, proxy);
+  plainTargets.set(proxy, value);
+  return proxy as Value;
 }

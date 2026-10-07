@@ -21,6 +21,7 @@ import { getDomInterface, resolveDomProperty } from "../platform.js";
 import { kebabCase } from "../names.js";
 import { dependentPropTypeSource, selectorGenerics, serializedDefinition } from "./shared.js";
 import { targetComponent } from "./backend.js";
+import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
 
 function js(value: string): string {
   return JSON.stringify(value);
@@ -1275,6 +1276,7 @@ export function generateVanilla(
   definition: ComponentDefinition,
   version: string,
   noContextReaders = false,
+  directExtend = false,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -1328,7 +1330,8 @@ export function generateVanilla(
     directRendered.every((variable) => variable !== undefined);
   const directProps = direct === undefined ? directPropPlan(definition) : undefined;
   const directPropSingle = directProps !== undefined && directProps.props.size === 1;
-  const needsRuntime = direct === undefined && directProps === undefined && (
+  const blocks = directExtend && direct === undefined && directProps === undefined ? blockPlan(definition) : undefined;
+  const needsRuntime = direct === undefined && directProps === undefined && blocks === undefined && (
     arms !== undefined || props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
   );
   const generatedRuntimeImports = [
@@ -1730,5 +1733,11 @@ export function generateVanilla(
     "",
   ].join("\n");
 
+  if (blocks !== undefined) {
+    // The root's literal attributes merge with the invocation's exactly as above.
+    const rootLines: string[] = [];
+    renderAttributes(template, "element", rootLines, contract.props, { value: 0 }, "  ", undefined, undefined, true);
+    return { module: emitBlocks(blocks, definition, version, rootLines), declaration };
+  }
   return { module: `${lines.join("\n")}\n`, declaration };
 }
