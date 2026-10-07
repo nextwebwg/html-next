@@ -1880,7 +1880,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="icon-close" status="early" summary="SVG namespace fixture.">' +
           '<button type="button"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">' +
-          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="\'$userSpaceOnUse\'"></linearGradient>' +
+          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="\'userSpaceOnUse\'"></linearGradient>' +
           '<foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button></template>' +
           '<main><icon-close></icon-close></main>',
         );
@@ -1927,7 +1927,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
           '<li class="row"><x-chip from:label="$tone"></x-chip><slot></slot></li></template>' +
           '<template component="x-bar" status="early" summary="Bar.">' +
-          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'$t\', $index)">' +
+          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'t\', $index)">' +
           '<b>projected</b></x-row></ul></main></template>' +
           '<x-bar></x-bar>',
         );
@@ -2125,7 +2125,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<state type="number" name="count" value="1"></state>' +
           '<data name="feed" src="https://api.example/feed" type="object({ label: string })"></data>' +
           '<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler></defs>' +
-          '<x-frame from:heading="concat(\'$count \', $count)">' +
+          '<x-frame from:heading="concat(\'count \', $count)">' +
           '<span slot="body"><button type="button" class="bump" on:click="bump"></button>' +
           '<i class="own" $value="$count"></i>' +
           '<output class="feed" $value="$feed.value.label"></output></span></x-frame></template>' +
@@ -2266,7 +2266,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><state type="number" name="count" value="1"></state>' +
           '<handler name="bump"><set name="count" expr:value="$count + 1"></set></handler></defs>' +
           '<main><button type="button" class="bump" on:click="bump"></button>' +
-          '<x-child from:label="concat(\'$count \', $count)"></x-child></main></template>' +
+          '<x-child from:label="concat(\'count \', $count)"></x-child></main></template>' +
           '<x-parent></x-parent>',
         );
         await page.addScriptTag({ path: bundlePath });

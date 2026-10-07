@@ -1376,7 +1376,7 @@ void [scoped, staticNode];`);
     const root = await mkdtemp(join(tmpdir(), "html-next-react-invalid-scoped-slot-"));
     temporary.push(root);
     await mkdir(join(root, "components"), { recursive: true });
-    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><div><slot name="row" from:item="\'$Ada\'"><span>Fallback</span></slot></div></template>');
+    await writeFile(join(root, "components/rows.html"), '<template component="x-rows" status="early" summary="Rows."><div><slot name="row" from:item="\'Ada\'"><span>Fallback</span></slot></div></template>');
     await writeFile(join(root, "components/app.html"), '<link rel="component" href="./rows.html"><template component="x-app" status="early" summary="App."><main><x-rows><span slot="row">Invalid</span></x-rows></main></template>');
     const outDirectory = join(root, "out");
     const manifest = await convertComponents({ mode: "library", target: "react", root, outDirectory, entries: ["components/**"] });
