@@ -32,8 +32,23 @@ jobs:
       - run: pnpm verify:pr
 
   browser:
-    name: Browser and compatibility
+    name: Browser ${{ matrix.suite }}
     runs-on: ubuntu-latest
+    # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
+    # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # ponytail: Vitest's hash shards measured 3-11 minutes; add a shard when one nears the limit.
+        include:
+          - { suite: runtime and consumers, command: pnpm test:browser && pnpm test:consumer }
+          - { suite: framework parity 1/6, command: pnpm test:targets --shard=1/6 }
+          - { suite: framework parity 2/6, command: pnpm test:targets --shard=2/6 }
+          - { suite: framework parity 3/6, command: pnpm test:targets --shard=3/6 }
+          - { suite: framework parity 4/6, command: pnpm test:targets --shard=4/6 }
+          - { suite: framework parity 5/6, command: pnpm test:targets --shard=5/6 }
+          - { suite: framework parity 6/6, command: pnpm test:targets --shard=6/6 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -44,7 +59,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nextwebwg/html-next exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm verify:compatibility
+      - run: ${{ matrix.command }}
 
   performance:
     name: Reactive performance against main
