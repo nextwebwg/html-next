@@ -2,6 +2,10 @@
 
 ## 1.0.0-beta.1
 
+- First beta. The packages are unchanged from 1.0.0-alpha.32 apart from their version, and continue to publish under npm `latest`.
+
+## 1.0.0-alpha.32
+
 ### Changed
 
 - Validation leaves application stylesheets untouched: it no longer reads connected or adopted stylesheets, observes stylesheet changes, copies rules, or patches CSSOM methods. `installValidityStyles` is removed. Component styles still transform validity selectors when compiled; call `rewriteValiditySelectors` on any shared application CSS that uses them.
@@ -16,6 +20,10 @@
 
 - Selecting a keyed row updates only the previously and newly selected rows when a class binding compares the loop key for equality, in the live runtime and compiled output.
 - Live list rendering keeps less bookkeeping per row and per list: proxies share one trap handler, keyed blocks keep their own positions, and removed nodes are checked against connected component roots without walking each removed subtree.
+
+### Documentation
+
+- The package READMEs introduce HTML Next more directly and summarize its js-framework-benchmark results, with the full receipts in the guide.
 
 ## 1.0.0-alpha.31
 

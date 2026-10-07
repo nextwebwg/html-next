@@ -11,6 +11,14 @@ pager: false
 
 Build reactive components in HTML. Keep markup, state, and styles together, then use the same component natively, in Vue, in React, or in Svelte.
 
+## Beats Solid, Svelte, Vue, and React in js-framework-benchmark. {#performance}
+
+HTML Next takes **1.5% less rendering time than Solid, 3.9% less than Svelte, 12.9% less than Vue, and 26.2% less than React** across the nine keyed workloads. Two full runs put HTML Next ahead of all four.
+
+**8.28 kB gzip. A 23% smaller benchmark bundle than Svelte.** Both sizes include the application and its tree-shaken runtime.
+
+[Explore the results and methodology →](/html-next/performance)
+
 ## What is HTML Next?
 
 HTML Next is a component format and JavaScript tools for building reactive interfaces with HTML. A definition brings markup, state, events, slots, and scoped styles together in one file. Use it natively in an HTML page or with Vite, or import it into Vue, React, and Svelte through their adapters.
