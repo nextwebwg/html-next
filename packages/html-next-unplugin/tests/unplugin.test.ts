@@ -554,6 +554,7 @@ describe("HTML Next unplugin", () => {
     await build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({
         entries: ["library.html"],
         root,
@@ -598,6 +599,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /HN008: Stable public component modules are available only in library mode/);
@@ -723,6 +725,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: ["app.html"], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /app\.html: HC013:.*values constraint.*does not conform/);
@@ -739,6 +742,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: ["app.html"], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /app\.html: HC013:.*min constraint.*does not conform/);
@@ -756,6 +760,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: ["alpha.html"], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /HN002: Compiled component invocations form a cycle/);
@@ -772,6 +777,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: ["app.html"], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
     }), /app\.html: HN001:.*x-runtime-card.*dynamic boundary/);
@@ -788,6 +794,7 @@ describe("HTML Next unplugin", () => {
     await build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({
         entries: ["app.html"],
         root,
@@ -824,6 +831,7 @@ describe("HTML Next unplugin", () => {
     await assert.rejects(() => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [htmlNext.vite({ entries: [], root })],
       build: { lib: { entry: join(root, "main.js"), formats: ["es"] } },
     }), /at least one component entry/);
@@ -843,6 +851,7 @@ describe("HTML Next unplugin", () => {
     const buildApp = () => build({
       root,
       logLevel: "silent",
+      resolve: { alias: generatedRuntimeAlias },
       plugins: [plugin],
       build: {
         minify: false,
