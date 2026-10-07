@@ -926,13 +926,15 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps numeric two-way controls on the live runtime", () => {
+  it("compiles numeric two-way controls directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-number" status="experimental" summary="Numeric binding fallback.">
       <defs><state type="number" name="count" value="0"></state></defs>
       <section><input type="number" bind:value="count"><output $value="count"></output></section>
     </template>`).get("vanilla/DemoBoundNumber.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /writeControl\(/);
+    assert.match(module, /bindControl\(I, /);
   });
 
   it("compiles direct checkbox bindings with native checked synchronization", async () => {
@@ -947,13 +949,15 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps radio two-way controls on the live runtime", () => {
+  it("compiles radio two-way controls directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-radio" status="experimental" summary="Radio binding fallback.">
       <defs><state type="boolean" name="selected" value="false"></state></defs>
       <section><input type="radio" bind:checked="selected"><output $value="selected"></output></section>
     </template>`).get("vanilla/DemoBoundRadio.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /writeControl\(/);
+    assert.match(module, /bindControl\(I, /);
   });
 
   it("compiles direct textarea and single-select bindings", async () => {
@@ -968,13 +972,15 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps multi-select bindings on the live runtime", () => {
+  it("compiles multi-select bindings directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-many" status="experimental" summary="Multi-select binding fallback.">
       <defs><state type="string" name="choice" value="one"></state></defs>
       <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
     </template>`).get("vanilla/DemoBoundMany.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /writeControl\(/);
+    assert.match(module, /bindControl\(I, /);
   });
 
   it("compiles direct range bindings with native numeric synchronization", async () => {

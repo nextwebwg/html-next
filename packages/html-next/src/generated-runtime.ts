@@ -3,10 +3,11 @@
 import { fail } from "./diagnostics.js";
 import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
-import { ABSENT, NONCONFORMING, toText, truthy, type Value } from "./expression.js";
+import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
-import { hasExecutableUrl } from "./sanitize.js";
+import { applyBoundControlValue, controlValue } from "./controls.js";
+import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   createComputed,
   createEffect,
@@ -334,7 +335,7 @@ export function updateGeneratedProps(element: Element, props: Readonly<Record<st
  * 2 is a `$each` anchor pair.
  */
 export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
-type TemplateChild = string | 0 | 1 | 2 | TemplateSpec;
+type TemplateChild = string | 0 | 1 | 2 | 3 | TemplateSpec;
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -355,7 +356,7 @@ export function buildTemplate(spec: TemplateSpec, doc: Document = document, svg?
     if (typeof child === "object") node.append(buildTemplate(child, doc, inSvg && spec[0] !== "foreignObject" ? 1 : 0));
     else if (typeof child === "string" || child === 0) node.append(doc.createTextNode(child === 0 ? "" : child));
     else {
-      const prefix = child === 2 ? "html-next:each-" : "html-next:";
+      const prefix = child === 2 ? "html-next:each-" : child === 3 ? "html-next:html-" : "html-next:";
       node.append(doc.createComment(`${prefix}start`), doc.createComment(`${prefix}end`));
     }
   }
@@ -459,6 +460,24 @@ export function writeAttribute(element: Element, name: string, value: string | n
 export function writeUrlAttribute(element: Element, name: string, value: string | null): void {
   if (value === null || hasExecutableUrl(value)) element.removeAttribute(name);
   else element.setAttribute(name, value);
+}
+
+/** A two-way binding's value into its control; an element that is not one gets the attribute. */
+export function writeControl(element: Element, name: string, value: unknown): void {
+  if (!applyBoundControlValue(element, name, value as Value)) writeUrlAttribute(element, name, toAttribute(value as Value, name));
+}
+
+/** `$html`: sanitized content replacing the element's, marked so no bundle lowers it as a component. */
+export function writeHtml(element: Element, html: string): void {
+  element.replaceChildren(sanitizeFragment(html, element.ownerDocument, markContentOnly));
+}
+
+/** `<template $html>`: sanitized content between its range marks (sanitized content holds no comments). */
+export function writeHtmlRange(start: Comment, html: string): void {
+  let end = start.nextSibling!;
+  while (end.nodeType !== 8 || (end as Comment).data !== "html-next:html-end") end = end.nextSibling!;
+  clearRegion(start, end as Comment);
+  end.before(sanitizeFragment(html, start.ownerDocument, markContentOnly));
 }
 
 /** Records a value a non-idempotent binding read, so it re-runs only when one of them changed. */
@@ -612,6 +631,37 @@ export interface GeneratedInstance {
   /** Recorded refs, read by `host.refs` and handler steps. */
   readonly r: Record<string, unknown>;
   readonly c: () => boolean;
+  /** A facade over a raw object, for writes into an outer local's data. */
+  readonly p: (value: object) => unknown;
+}
+
+/** A control's write into state is not checked against the declared type, as live's is not. */
+let trusted = false;
+
+/**
+ * A two-way binding's control listener, as live binds one while the root is connected: a select,
+ * checkbox, radio or file control reports `change`, anything else `input`; an unchecked radio
+ * writes nothing. `path` resolves the destination (an outer local's object, or a root's name first).
+ */
+export function bindControl(instance: GeneratedInstance, target: Element, path: () => readonly unknown[] | undefined): () => void {
+  const type = target instanceof HTMLSelectElement ||
+    target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type) ? "change" : "input";
+  return listen(instance, target, type, () => {
+    if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
+    const resolved = path();
+    if (resolved === undefined) return;
+    trusted = true;
+    try {
+      let object: unknown = instance.s;
+      for (let index = 0; index < resolved.length - 1; index += 1) {
+        if (object == null) return;
+        const step = resolved[index];
+        // An outer local's value arrives as an object, reached through a facade of its own.
+        object = typeof step === "object" && step !== null ? instance.p(step) : (object as Record<PropertyKey, unknown>)[step as PropertyKey];
+      }
+      if (object != null) (object as Record<PropertyKey, unknown>)[resolved.at(-1) as PropertyKey] = controlValue(target);
+    } finally { trusted = false; }
+  }, false, false, false);
 }
 
 /** A handler's `<set>`: checks the destination's declared type, then writes through the host's facades. */
@@ -804,7 +854,7 @@ export function attachGeneratedController(
       return value !== null && typeof value === "object" ? wrap(value, compactTypeAt(this.t, key), this, key) : value;
     },
     set(target, key, value) {
-      if (!conforms(value, compactTypeAt(this.t, key))) {
+      if (!trusted && !conforms(value, compactTypeAt(this.t, key))) {
         mismatch(pathOf(this, key));
         return true;
       }
@@ -846,7 +896,7 @@ export function attachGeneratedController(
     set: (_target, key, value) => {
       const index = typeof key === "string" ? names.indexOf(key) : -1;
       if (index < 0 || index >= writable) readOnly(String(key));
-      else if (!conforms(value, types[index]!)) mismatch(String(key));
+      else if (!trusted && !conforms(value, types[index]!)) mismatch(String(key));
       else {
         const previous = values[index];
         const next = raw(value);
@@ -913,7 +963,7 @@ export function attachGeneratedController(
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
   });
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, "") });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {

@@ -25,6 +25,7 @@ import { foreignContent } from "parse5";
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
 import { iteratedRefNames, rootArms, type ComponentDefinition, type ElementNode, type Flow, type TemplateNode } from "../template.js";
+import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, type TypeNode } from "../type-system.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
@@ -39,8 +40,6 @@ function svgAttributeName(name: string): string {
   foreignContent.adjustTokenSVGAttrs(token as Parameters<typeof foreignContent.adjustTokenSVGAttrs>[0]);
   return token.attrs[0]!.name;
 }
-/** Parents whose option regions the live runtime re-synchronizes. */
-const SELECTS = new Set(["select", "datalist", "optgroup"]);
 
 interface Root {
   readonly name: string;
@@ -83,7 +82,7 @@ interface Lowered {
   readonly key: string;
 }
 
-type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed";
+type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range";
 
 interface Binding {
   readonly site: number;
@@ -100,6 +99,12 @@ interface Binding {
   readonly exact?: string | undefined;
   /** Mixed text: literal strings and lowered segments, joined in order. */
   readonly parts?: readonly (string | Lowered)[];
+  /** A `<select>`'s bound value, re-applied once its options exist and whenever their regions change. */
+  readonly select?: boolean;
+  /** The select binding's value as `applySelection` evaluates it, without recording reads. */
+  readonly apply?: Lowered;
+  /** A two-way binding's destination: a function resolving its path, written by the control's listener. */
+  readonly path?: string;
 }
 
 interface Region {
@@ -139,6 +144,8 @@ interface Block {
   readonly svg: boolean;
   /** `on:` listeners: the site, the event, its handler's function name and the modifiers. */
   readonly events: { readonly site: number; readonly name: string; readonly handler: string; readonly modifiers: readonly string[] }[];
+  /** `<select>` sites whose value bindings re-apply after their option regions change. */
+  readonly selects: number[];
   /** `$ref` names recorded for a site; iterated ones (inside rows) collect into a list. */
   readonly refs: { readonly site: number; readonly name: string; readonly iterated: boolean }[];
   /** A row, or a `$with` or `$match` body: its record holds the item or alias value in `i`. */
@@ -546,8 +553,29 @@ function literalInitial(node: ExpressionNode): { readonly value: unknown } | und
   }
 }
 
+/** Roots a two-way binding writes: a control's value is stored unchecked, as live stores it. */
+function twoWayRoots(definition: ComponentDefinition): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: TemplateNode): void => {
+    if (node.kind === "text") return;
+    if (node.kind === "slot") {
+      node.fallback?.forEach(visit);
+      return;
+    }
+    for (const attribute of node.attributes) {
+      if (attribute.kind === "attribute" && attribute.twoWay === true && typeof attribute.writablePath?.[0] === "string") {
+        names.add(attribute.writablePath[0]);
+      }
+    }
+    node.children.forEach(visit);
+  };
+  visit(definition.template);
+  return names;
+}
+
 function compileRoots(definition: ComponentDefinition): Root[] {
   const declarations = definition.declarations ?? [];
+  const controlled = twoWayRoots(definition);
   const states: Root[] = [];
   const computeds: Root[] = [];
   for (const declaration of declarations) {
@@ -569,7 +597,10 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     }
     // A literal that conforms keeps every read of the root free of the reference check.
     const conforming = literal.value === null || conforms(literal.value, type);
-    states.push({ name: declaration.name, type, initial: valueSource(literal.value), checked: !conforming && node !== undefined, undefinable });
+    states.push({
+      name: declaration.name, type, initial: valueSource(literal.value), undefinable,
+      checked: (!conforming || controlled.has(declaration.name)) && node !== undefined,
+    });
   }
   const roots = [...states, ...computeds];
   if (roots.length > 30) notYetDirect();
@@ -706,6 +737,22 @@ class Planner {
     return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
   }
 
+  /**
+   * A two-way destination, resolved when the control reports as `setWritablePath` resolves it: an
+   * outer local's object, or a root's name, then each key; an index that is not a string or number
+   * writes nothing. It runs in the control's listener, where the block's own item is `r.i`.
+   */
+  writable(path: WritablePath, scope: Scope): string {
+    const closure: Scope = { ...scope, closure: true };
+    const [root, ...steps] = path;
+    const local = scope.aliases.findLast((alias) => alias.name === root);
+    const first = local === undefined ? JSON.stringify(root) : aliasSource(closure, local);
+    const keys = steps.map((step) => typeof step === "object" ? lower(step.expression, closure).source : JSON.stringify(step));
+    const dynamic = steps.some((step) => typeof step === "object");
+    return `() => { const p = [${[first, ...keys].join(", ")}]; return ${dynamic
+      ? 'p.every((k, i) => i === 0 || typeof k === "string" || typeof k === "number") ? p : undefined' : "p"}; }`;
+  }
+
   /** A fresh reads array name for an exact binding. */
   recording(scope: Scope): Scope {
     return { ...scope, record: `f${this.recordings++}` };
@@ -717,19 +764,14 @@ class Planner {
     const fragment = root || element.name === "template";
     const block: Block = {
       id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row,
-      svg: root ? element.name === "svg" : svg, events: [], refs: [], alias, level: outer.level, parent: root ? undefined : outer.block,
+      svg: root ? element.name === "svg" : svg, events: [], refs: [], selects: [], alias, level: outer.level, parent: root ? undefined : outer.block,
     };
     this.blocks.push(block);
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
       if (row) notYetDirect();
       const spec: unknown[] = ["", []];
-      let index = 0;
-      for (const child of element.children) {
-        const item = this.child(block, element, child, [index], scope, svg);
-        spec.push(item);
-        index += item === 1 || item === 2 ? 2 : 1;
-      }
+      spec.push(...this.children(block, element, element.children, [], 0, scope, svg));
       (block as { spec: unknown }).spec = spec;
       return block;
     }
@@ -765,24 +807,38 @@ class Planner {
     const classOverwrites = node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === undefined &&
       attribute.name === "class") && node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class");
     let content: Lowered | undefined;
+    let html: { readonly expression: Lowered; readonly record: string | undefined } | undefined;
+    const selectValue = (name: string): boolean => node.name === "select" && name === "value";
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
       if (attribute.expressionPlan === undefined) notYetDirect();
-      const exact = attribute.kind === "property" || classOverwrites && attribute.kind === "attribute" &&
-        (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
+      const exact = attribute.kind === "property" || attribute.kind === "directive" && attribute.name === "html" ||
+        attribute.kind === "attribute" && attribute.twoWay === true ||
+        classOverwrites && attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
       const bindingScope = exact ? this.recording(scope) : scope;
       const expression = this.checked(attribute.expressionPlan, bindingScope);
       if (attribute.kind === "directive") {
-        if (attribute.name !== "value") notYetDirect();
-        content = expression;
+        if (attribute.name === "html") html = { expression, record: bindingScope.record };
+        else content = expression;
         continue;
       }
       const site = this.site(block, path);
       if (attribute.kind === "property") {
-        block.bindings.push({ site, kind: "property", name: attribute.name, expression, initial: "undefined", exact: bindingScope.record });
+        block.bindings.push({
+          site, kind: "property", name: attribute.name, expression, initial: "undefined", exact: bindingScope.record, select: selectValue(attribute.name),
+          ...selectValue(attribute.name) ? { apply: this.checked(attribute.expressionPlan, { ...scope, closure: true }) } : {},
+        });
         continue;
       }
-      if (attribute.twoWay === true) notYetDirect();
+      if (attribute.twoWay === true) {
+        if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) notYetDirect();
+        block.bindings.push({
+          site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name, expression, initial: "undefined",
+          exact: bindingScope.record, select: selectValue(attribute.name), path: this.writable(attribute.writablePath, scope),
+          ...selectValue(attribute.name) ? { apply: this.checked(attribute.expressionPlan, { ...scope, closure: true }) } : {},
+        });
+        continue;
+      }
       if (attribute.target === "class") {
         // The root's invocation may carry the class, so its first evaluation always writes.
         const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
@@ -801,20 +857,58 @@ class Planner {
       });
     }
     const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
+    if (html !== undefined) {
+      // `$html` replaces the element's content with sanitized markup whenever what it read changes.
+      block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html.expression, initial: "undefined", exact: html.record });
+      return spec;
+    }
     if (content !== undefined) {
       // `$value` replaces the element's content, so its authored children never render.
       block.bindings.push({ site: this.site(block, path), kind: "value", name: "", expression: content, initial: "undefined" });
       spec.push(0);
       return spec;
     }
-    let index = 0;
-    for (const child of node.children) {
-      const item = this.child(block, node, child, [...path, index], scope, svg && node.name !== "foreignObject");
-      spec.push(item);
-      // A region is an anchor pair, so the next child sits two nodes on.
-      index += item === 1 || item === 2 ? 2 : 1;
+    spec.push(...this.children(block, node, node.children, path, 0, scope, svg && node.name !== "foreignObject"));
+    if (node.name === "select" && block.bindings.some((binding) => binding.site === this.site(block, path) && binding.select === true)) {
+      block.selects.push(this.site(block, path));
     }
     return spec;
+  }
+
+  /**
+   * Plans children from position `start` under `path`. A `<template>` without a flow is a fragment
+   * carrier: its children take its place (`$value` a text node, `$html` a range of its own).
+   */
+  children(block: Block, parent: ElementNode, nodes: readonly TemplateNode[], path: readonly number[], start: number, scope: Scope, svg: boolean): unknown[] {
+    const items: unknown[] = [];
+    let index = start;
+    for (const child of nodes) {
+      const planned = child.kind === "element" && child.name === "template" && child.flow === undefined
+        ? this.carrier(block, child, path, index, scope, svg)
+        : [this.child(block, parent, child, [...path, index], scope, svg)];
+      for (const item of planned) {
+        items.push(item);
+        // A region is an anchor pair, so the next child sits two nodes on.
+        index += item === 1 || item === 2 || item === 3 ? 2 : 1;
+      }
+    }
+    return items;
+  }
+
+  carrier(block: Block, node: ElementNode, path: readonly number[], index: number, scope: Scope, svg: boolean): unknown[] {
+    if (node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot")) notYetDirect();
+    const directive = node.attributes.find((attribute) => attribute.kind === "directive");
+    if (directive?.kind === "directive" && directive.expressionPlan !== undefined) {
+      const site = this.site(block, [...path, index]);
+      if (directive.name === "value") {
+        block.bindings.push({ site, kind: "text", name: "", expression: this.checked(directive.expressionPlan, scope), initial: '""' });
+        return [0];
+      }
+      const recording = this.recording(scope);
+      block.bindings.push({ site, kind: "range", name: "", expression: this.checked(directive.expressionPlan, recording), initial: "undefined", exact: recording.record });
+      return [3];
+    }
+    return this.children(block, node, node.children, path, index, scope, svg);
   }
 
   child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope, svg: boolean): unknown {
@@ -841,7 +935,6 @@ class Planner {
       const { flow: _ignored, ...plain } = node;
       return this.element(block, plain, path, scope, false, svg);
     }
-    if (SELECTS.has(parent.name)) notYetDirect();
     const { flow: _flow, ...body } = node;
     const site = this.site(block, path);
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
@@ -1061,6 +1154,28 @@ function tracks(block: Block): boolean {
   return block.bindings.some((binding) => binding.expression.contents || itemContainer(binding.expression));
 }
 
+/** The `<select>` site holding a region's site, whose bound value its changes re-apply. */
+function selectOf(block: Block, site: number): number | undefined {
+  const path = block.sites[site]!;
+  let found: number | undefined;
+  for (const select of block.selects) {
+    const prefix = block.sites[select]!;
+    if (prefix.length < path.length && prefix.every((step, index) => path[index] === step) &&
+      (found === undefined || block.sites[found]!.length < prefix.length)) found = select;
+  }
+  return found;
+}
+
+/** A select's `applySelection`: its value bindings, applied as they evaluate now. */
+function selection(block: Block, select: number, siteOf: (site: number) => string): string {
+  const writes = block.bindings.filter((binding) => binding.select === true && binding.site === select).map((binding) => {
+    const value = binding.apply!;
+    const write = binding.kind === "property" ? `${siteOf(select)}.value = x;` : `writeControl(${siteOf(select)}, "value", x);`;
+    return `{ const x = ${value.source}; ${value.fails ? `if (x !== NONCONFORMING) ` : ""}${write} }`;
+  });
+  return `() => { ${writes.join(" ")} }`;
+}
+
 /** What the regions inside a row read besides the row's own item: those changes patch every row. */
 function regionOuter(block: Block): number {
   let mask = 0;
@@ -1178,6 +1293,9 @@ export function emitBlocks(
           const name = JSON.stringify(binding.name);
           const write = binding.kind === "property" ? `${site}[${name}] = ${value};`
             : binding.kind === "class" ? `${site}.classList.toggle(${name}, ${value});`
+            : binding.kind === "control" ? `writeControl(${site}, ${name}, ${value});`
+            : binding.kind === "html" ? `writeHtml(${site}, toText(${value}));`
+            : binding.kind === "range" ? `writeHtmlRange(${site}, toText(${value}));`
             : `${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${name}, toAttribute(${value}, ${name}));`;
           lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${write}` : `      ${write}`, "    }");
           continue;
@@ -1244,6 +1362,8 @@ export function emitBlocks(
         const decide = region.recorded === undefined ? [] : [`    const ${region.recorded} = [];`];
         const changed = region.recorded === undefined ? "true"
           : `c === -1${test.bits === 0 ? "" : ` || c & ${test.bits}`} || readsChanged(r.q${index}, ${region.recorded})`;
+        const reselect = selectOf(block, region.site);
+        if (reselect !== undefined) rebuild.push(`      queueMicrotask(r.c${reselect});`);
         lines.push(
           `  if (${guard(maskOf(test))}) {`,
           ...(region.kind === "match" ? ["    let mv;"] : []),
@@ -1267,9 +1387,11 @@ export function emitBlocks(
       const full = key?.positional === true ? "true" : rekey === 0 ? undefined : `(c & ${rekey}) !== 0`;
       const apply = (value: string): string => full === undefined ? `r.L${index}.update(${value}, d, c)`
         : `if (c === -1 || ${full}) r.L${index}.set(${value}, d, true); else r.L${index}.update(${value}, d, c)`;
-      // A nonconforming list leaves the rows as they are.
-      lines.push(list.fails || full !== undefined
-        ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")}; } }`
+      // A nonconforming list leaves the rows as they are; a list inside a select re-applies its selection.
+      const reselect = selectOf(block, region.site);
+      const queue = reselect === undefined ? "" : ` queueMicrotask(r.c${reselect});`;
+      lines.push(list.fails || full !== undefined || reselect !== undefined
+        ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} } }`
         : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
         (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | regionOuter(region.block);
@@ -1296,7 +1418,10 @@ export function emitBlocks(
       if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
       if (region.kind === "each" && region.key === undefined && region.positional === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
+    // A select's `applySelection` runs once its options exist and after its option regions change.
+    for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`)};`);
     const stops = block.events.map((event) => listener(event, siteOf(event.site)));
+    for (const binding of block.bindings) if (binding.kind === "control") stops.push(`bindControl(I, ${siteOf(binding.site)}, ${binding.path})`);
     // A cleared region or removed row stops its listeners and the regions and rows below it.
     block.regions.forEach((region, index) => {
       if (![region.block, ...region.arms ?? []].some(disposable)) return;
@@ -1324,6 +1449,7 @@ export function emitBlocks(
         `    const r = { k: undefined, i: o, n, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
         `    p${block.id}(r, -1, E);`,
+        ...block.selects.map((select) => `    r.c${select}();`),
         "    return r;",
         "  };",
       );
@@ -1335,6 +1461,7 @@ export function emitBlocks(
         `    const r = { n${block.alias ? ", i: o" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
         `    p${block.id}(r, -1, d);`,
+        ...block.selects.map((select) => `    r.c${select}();`),
         "    return r;",
         "  };",
       );
@@ -1359,19 +1486,29 @@ export function emitBlocks(
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
+    ...root.selects.map((select) => `  R.c${select} = ${selection(root, select, (site) => root.sites[site]!.length === 0 ? "element" : `R.a${site}`)};`),
     ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
       ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
       ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
-  const instance = plan.handlers.length > 0 || blocks.some((block) => block.refs.length > 0 || block.events.length > 0);
+  const instance = plan.handlers.length > 0 ||
+    blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? ["  const I = {};"] : []),
     `  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${
       plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
+    ...root.selects.map((select) => `  R.c${select}();`),
     ...root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
+    ...root.bindings.some((binding) => binding.kind === "control") ? [
+      "  {",
+      // A destination function reads the root record as `r`, as listeners in other blocks do.
+      "    const r = R;",
+      ...root.bindings.filter((binding) => binding.kind === "control").map((binding) => `    bindControl(I, ${siteOf(binding.site)}, ${binding.path});`),
+      "  }",
+    ] : [],
     "  return element;",
     "}",
   );
@@ -1427,7 +1564,8 @@ export function emitBlocks(
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
     "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState",
-    "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef"]
+    "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
+    "bindControl"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 

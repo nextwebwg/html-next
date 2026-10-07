@@ -4,6 +4,7 @@ import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { applyBoundControlValue, controlValue } from "./controls.js";
 import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
@@ -39,7 +40,7 @@ import {
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
-import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
+import { hasExecutableUrl, isContentOnly, isUrlAttribute, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
@@ -150,7 +151,6 @@ interface DocumentRegistry {
   discoverySelector: string | undefined;
 }
 
-const contentOnly = new WeakSet<Element>();
 const selectValueBindings = new WeakMap<HTMLSelectElement, () => void>();
 /**
  * Invocation elements a component has already replaced. A mutation batch can still name one, and
@@ -1002,57 +1002,7 @@ function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value)
   if ((typeof key === "string" || typeof key === "number") && target != null) target[key] = value;
 }
 
-function controlValue(element: Element): Value {
-  if (element instanceof HTMLInputElement) {
-    if (element.type === "checkbox" || element.type === "radio") return element.checked;
-    if (element.type === "number" || element.type === "range") {
-      return Number.isNaN(element.valueAsNumber) ? null : element.valueAsNumber;
-    }
-    return element.value;
-  }
-  if (element instanceof HTMLSelectElement) {
-    return element.multiple
-      ? Array.from(element.selectedOptions, (option) => option.value)
-      : element.value;
-  }
-  if (element instanceof HTMLTextAreaElement) return element.value;
-  return (element as unknown as { value?: Value }).value ?? element.getAttribute("value");
-}
 
-/**
- * Writes a bound value into a native control, skipping writes the control already agrees with.
- *
- * The skip is required, not an optimization: assigning `value` resets the control's dirty value
- * flag even when the string is identical, and `minlength`/`maxlength` only constrain a dirty
- * value. Echoing the user's own input back would therefore switch off their constraints.
- */
-function applyBoundControlValue(element: Element, name: string, value: Value): boolean {
-  const lowerName = name.toLowerCase();
-  if (lowerName === "checked" && element instanceof HTMLInputElement) {
-    const next = truthy(value);
-    if (element.checked !== next) element.checked = next;
-    return true;
-  }
-  if (lowerName === "value" && element instanceof HTMLSelectElement && element.multiple) {
-    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    for (const option of Array.from(element.options)) {
-      const next = selected.has(option.value);
-      if (option.selected !== next) option.selected = next;
-    }
-    return true;
-  }
-  if (
-    lowerName === "value" &&
-    (element instanceof HTMLInputElement ||
-      element instanceof HTMLTextAreaElement ||
-      element instanceof HTMLSelectElement)
-  ) {
-    const next = value == null ? "" : String(value);
-    if (element.value !== next) element.value = next;
-    return true;
-  }
-  return false;
-}
 
 const eventDependentHandlers = new WeakMap<HandlerDeclaration, boolean>();
 
@@ -1194,7 +1144,7 @@ function applyContent(
   const value = evalConforming(directive.expression, scope, definition);
   if (value === NONCONFORMING) return;
   if (directive.name === "value") element.textContent = toText(value);
-  else element.replaceChildren(sanitizeFragment(toText(value), document, (node) => contentOnly.add(node)));
+  else element.replaceChildren(sanitizeFragment(toText(value), document, markContentOnly));
 }
 
 function compareValues(a: Value, b: Value): number {
@@ -2078,7 +2028,7 @@ function renderInstance(
         const value = evalConforming(contentDirective.expression, scope, context.definition);
         if (value === NONCONFORMING) return;
         clearRange(start, end);
-        end.before(sanitizeFragment(toText(value), document, (element) => contentOnly.add(element)));
+        end.before(sanitizeFragment(toText(value), document, markContentOnly));
       });
       return [fragment];
     }
@@ -2150,9 +2100,10 @@ function renderInstance(
   ) ? {
       value: element.value,
       // Only what the user changed is theirs to keep; an untouched control takes its bindings.
-      edited: element instanceof HTMLSelectElement
-        ? Array.from(element.options).some((option) => option.selected !== option.defaultSelected)
-        : element.value !== element.defaultValue,
+      // Only a control in value mode holds what a user typed: a checkbox's "on" or a file's path does not.
+      edited: element instanceof HTMLSelectElement ? selectionEdited(element)
+        : !(element instanceof HTMLInputElement && ["checkbox", "radio", "file", "hidden", "submit", "image", "reset", "button"].includes(element.type)) &&
+          element.value !== element.defaultValue,
       focused: element.ownerDocument.activeElement === element,
       ...(element instanceof HTMLInputElement ? { checked: element.checked, toggled: element.checked !== element.defaultChecked } : {}),
       ...(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
@@ -2284,6 +2235,17 @@ function renderInstance(
   bindEvents(element, node, scope, context, invocation);
   if (invocation !== undefined) settleInvocation(element, invocation);
   return [element];
+}
+
+/**
+ * Whether a select's selection differs from the one its defaults give it: the options marked
+ * `selected` (the last for a single select), else its first enabled option.
+ */
+function selectionEdited(select: HTMLSelectElement): boolean {
+  const options = Array.from(select.options);
+  if (select.multiple) return options.some((option) => option.selected !== option.defaultSelected);
+  const marked = options.findLastIndex((option) => option.defaultSelected);
+  return select.selectedIndex !== (marked >= 0 ? marked : options.findIndex((option) => !option.disabled));
 }
 
 function renderChildren(
@@ -3158,7 +3120,7 @@ function lowerRenderedComponents(
       if (live === undefined) continue;
       const { definition } = live;
       if (
-        contentOnly.has(element) ||
+        isContentOnly(element) ||
         supersededInvocations.has(element) ||
         alreadyLowered(element, definition.contract.tag) ||
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
@@ -3248,7 +3210,7 @@ function lowerScopes(
   for (const scope of scopes) collectWithin(scope, selector, discovered);
   const definitions: LiveDefinition[] = [];
   for (const element of discovered) {
-    if (element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element)) {
+    if (element.localName === "template" && element.hasAttribute("component") && !isContentOnly(element)) {
       definitions.push(parseDefinition(element as HTMLTemplateElement, definitions.length));
     }
   }
@@ -3273,7 +3235,7 @@ function lowerScopes(
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
-      contentOnly.has(element) ||
+      isContentOnly(element) ||
       supersededInvocations.has(element) ||
       // Already lowered here: a repeat pass must not build this component onto its own root a
       // second time. Another component still may, which is how a delegated root lowers.

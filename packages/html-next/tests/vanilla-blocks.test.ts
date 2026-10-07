@@ -99,9 +99,6 @@ describe("direct-extend Vanilla generation", () => {
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
-    "select region": component(state, '<p><select><option $if="ready">A</option></select></p>'),
-    "two-way binding": component('<state name="name" type="string" value="a"></state>', '<p><input bind:value="name"></p>'),
-    html: component(state, '<p $html="rows.length"></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
     it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
@@ -526,6 +523,47 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows.splice(1, 1); host.state.rows[0].label = "z"; note(host, "spliced"); },
       (host) => { host.state.rows[0].tags.length = 0; host.state.ready = false; },
       (host) => { host.state.rows = []; host.state.selected = null; note(host, "empty"); },
+    ]);
+  });
+
+  it("binds form controls both ways, sanitizes $html and inlines template carriers like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string, done: boolean }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="name" type="string" value="Ada"></state>
+      <state name="age" type="number" value="36"></state>
+      <state name="agree" type="boolean" value="true"></state>
+      <state name="size" type="string" value="m"></state>
+      <state name="colors" type="list(string)" value="['red']"></state>
+      <state name="markup" type="string" value="&lt;b&gt;bold&lt;/b&gt;"></state>`, `
+      <section><p>{name} {age} {agree} {size} {colors}</p>
+        <input id="name" bind:value="name"><input id="age" type="text" bind:value="age"><input id="agree" type="checkbox" bind:checked="agree">
+        <input id="small" type="radio" name="size" value="s" from:checked="size = 's'"><textarea id="bio" bind:value="name"></textarea>
+        <select id="size" bind:value="size"><option $each="row of rows" $key="row.id" from:value="row.label">{row.label}</option><option value="m">M</option></select>
+        <select id="colors" multiple bind:value="colors"><option value="red">Red</option><option value="blue">Blue</option></select>
+        <div id="html" $html="markup"></div><template $html="markup"></template><template $value="name"></template><template><i>inline</i> {age}</template>
+        <input id="first" type="checkbox" bind:checked="rows[0].done"><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><b>{row.done}</b></li></ul>
+      </section>`);
+    const control = (root: Element, id: string): any => root.querySelector(`#${id}`);
+    const note = (host: any, label: string): void => {
+      const root = host.root as Element;
+      const values = ["name", "age", "bio", "size"].map((id) => control(root, id).value);
+      const selected = Array.from(control(root, "colors").selectedOptions as HTMLOptionElement[], (option) => option.value);
+      const state = JSON.stringify([host.state.name, host.state.age, host.state.agree, host.state.size, host.state.colors, host.state.rows]);
+      (globalThis as any).directExtendLog.events.push(`${label} ${values.join("|")} ${control(root, "agree").checked} ${selected} ${state}`);
+    };
+    const type = (element: any, value: string, event = "input"): void => {
+      element.value = value;
+      element.dispatchEvent(new Event(event, { bubbles: true }));
+    };
+    await same(text, [
+      (host) => { host.state.rows = [1, 2].map((id) => ({ id, label: `l${id}`, done: false })); host.state.size = "l2"; note(host, "rows"); },
+      (host) => { type(control(host.root, "name"), "Bea"); type(control(host.root, "age"), "41"); note(host, "typed"); },
+      (host) => { control(host.root, "agree").click(); control(host.root, "first").click(); note(host, "clicked"); },
+      (host) => { type(control(host.root, "size"), "m", "change"); control(host.root, "colors").options[1].selected = true; control(host.root, "colors").dispatchEvent(new Event("change", { bubbles: true })); note(host, "selected"); },
+      (host) => { host.state.markup = "<i onclick=\"x()\">i</i><script>bad()</script>"; host.state.rows = host.state.rows.concat([{ id: 3, label: "l3", done: true }]); host.state.size = "l3"; note(host, "markup"); },
+      (host) => { type(control(host.root, "bio"), "Cy"); host.state.colors = ["blue", "red"]; note(host, "bio"); },
     ]);
   });
 
