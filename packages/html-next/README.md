@@ -1,45 +1,108 @@
-# `@nextwebwg/html-next`
+<div align="center">
 
-Reference implementation for the [Declarative HTML Components proposal](https://nextwebwg.org/declarative-components/)
-and the [HTML Forms proposal](https://nextwebwg.org/html-forms/): the validity model
-(`@nextwebwg/html-next/validation`) and native form request construction
-(`@nextwebwg/html-next/forms`). It replaces `@nextwebwg/declarative-components`. It provides three
-paths over one component language:
+# HTML Next
 
-- a complete browser distributable for dynamic component graphs;
-- an application/library compiler that emits native DOM and graph-scoped runtime support; and
-- a converter that emits Vue components with no HTML Next left in them (React is in development).
+### Universal components. Built with HTML.
 
-The live runtime supports every declarative capability. Builds analyze an application or library
-graph and share the support that graph requires; Vue conversion preserves the same observable
-contract through Vue's own reactivity.
+Author once. Use native DOM, Vue, React, or Svelte.
 
-### Runtime entry points
+[**Get started →**](https://nextwebwg.org/html-next/quick-start) · [Documentation](https://nextwebwg.org/html-next/) · [Performance](https://nextwebwg.org/html-next/performance)
 
-`@nextwebwg/html-next/runtime` is the general renderer: it registers already parsed definitions,
-lowers instances, and runs reactivity. It carries no component parser, so a build-time graph pays
-nothing for one (about 6 KB gzip on a representative app).
+[![npm](https://img.shields.io/npm/v/@nextwebwg/html-next?color=245c4f&label=npm)](https://www.npmjs.com/package/@nextwebwg/html-next)
+[![MIT license](https://img.shields.io/badge/license-MIT-245c4f)](https://github.com/nextwebwg/html-next/blob/main/LICENSE)
 
-`@nextwebwg/html-next/live` is the same runtime plus the parser that reads `<template component>`
-definitions authored in a document. The browser entry (`@nextwebwg/html-next/browser`) already installs it; import `live`
-directly when calling `lowerDocument()` or `observeDocument()` against a page that authors
-definitions in HTML. Reading a definition from a document without that parser is a stable `HR007`
-diagnostic rather than a silent no-op.
+</div>
 
-`@nextwebwg/html-next/forms` builds requests from native forms and submitters, preserving
-successful-control, validation, encoding, and cancellation semantics. It accepts native DOM objects
-and imports nothing else from this package, so a consumer that only wants HTML Forms pays only for
-that subpath.
+---
 
-See the [proposal](https://nextwebwg.org/declarative-components/) and
-[independent goal ledger](docs/delivery-goals.md).
+## Beats Solid, Svelte, Vue, and React in js-framework-benchmark.
 
-The package is experimental and is not published yet. From the repository root:
+HTML Next takes less time overall across the nine keyed rendering workloads in two full benchmark runs.
 
-```sh
-corepack pnpm build
-corepack pnpm test
+| Compared with | Less rendering time |
+| --- | ---: |
+| **Solid** | **1.5%** |
+| **Svelte** | **3.9%** |
+| **Vue** | **12.9%** |
+| **React** | **26.2%** |
+
+**8.28 kB gzip. A 23% smaller benchmark bundle than Svelte.** Both sizes include the application and its tree-shaken runtime.
+
+Measured October 7, 2026. Results use the weighted geometric mean of median total durations, summarized across two runs. HTML Next uses its native Vite build; all framework entries use production builds. [See the results, build settings, and raw measurements →](https://nextwebwg.org/html-next/performance)
+
+## Write HTML. Keep your options.
+
+HTML Next brings markup, state, events, slots, and scoped styles together in one component file. Build native DOM with Vite, load components directly in a browser, or generate Vue, React, and Svelte components.
+
+```html
+<template component="x-counter">
+  <defs>
+    <state name="count" type="number" value="0"></state>
+    <handler name="increment">
+      <set name="count" expr:value="count + 1"></set>
+    </handler>
+  </defs>
+  <button type="button" on:click="increment">
+    Count: <span $value="count"></span>
+  </button>
+</template>
 ```
 
-Release-candidate mechanics and the deliberately separate publication-policy gate are documented
-in [the release guide](docs/releasing.md).
+**One source file. Four ways to use it.** [Build your first component →](https://nextwebwg.org/html-next/quick-start)
+
+## Get started
+
+For a native Vite application:
+
+```sh
+npm install --save-dev @nextwebwg/html-next-unplugin
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import htmlNext from "@nextwebwg/html-next-unplugin/vite";
+
+export default defineConfig({
+  plugins: [htmlNext({
+    entries: ["src/app.html"],
+    experimentalDirectExtend: true,
+  })],
+});
+```
+
+The benchmark uses `experimentalDirectExtend: true`. This enables direct DOM generation for supported components; the build manifest reports where it applies. [Finish the Vite setup →](https://nextwebwg.org/html-next/usage)
+
+For the browser runtime, server rendering, or component tooling:
+
+```sh
+npm install @nextwebwg/html-next
+```
+
+| Use it your way | Start here |
+| --- | --- |
+| **Native DOM** · Build a Vite application | [Native setup](https://nextwebwg.org/html-next/usage) |
+| **No build step** · Load HTML definitions in the browser | [Browser runtime](https://nextwebwg.org/html-next/usage#browser-runtime) |
+| **Vue, React, or Svelte** · Import the same HTML component | [Vue](https://nextwebwg.org/html-next/usage/vue) · [React](https://nextwebwg.org/html-next/usage/react) · [Svelte](https://nextwebwg.org/html-next/usage/svelte) |
+| **Component libraries** · Share your HTML sources | [Publish a library](https://nextwebwg.org/html-next/ship) |
+| **Framework source** · Generate components ahead of time | [Converter](https://nextwebwg.org/html-next/convert) |
+
+## Package entry points
+
+| Import | Purpose |
+| --- | --- |
+| `@nextwebwg/html-next` | Parse, inspect, and compile component definitions. |
+| `@nextwebwg/html-next/runtime` | Render already parsed definitions without the component parser. |
+| `@nextwebwg/html-next/live` | Runtime plus parsing for definitions authored in a document. |
+| `@nextwebwg/html-next/browser` | Start the live runtime automatically. |
+| `@nextwebwg/html-next/server` | Render in Node and hydrate in the browser. |
+| `@nextwebwg/html-next/forms` | Build native form requests with validation, encoding, and cancellation. |
+| `@nextwebwg/html-next/validation` | Use the shared validity model. |
+
+Importing `forms` pulls in no component runtime. Generated native components import the helpers their features need; generated Vue, React, and Svelte components use their target framework without an HTML Next runtime dependency.
+
+## Built in the open
+
+HTML Next implements the [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and [HTML Forms](https://nextwebwg.org/html-forms/) proposals. The tools are available today as alpha releases. The proposals are at Stage 0; syntax and generated output may change.
+
+[Documentation](https://nextwebwg.org/html-next/) · [Source](https://github.com/nextwebwg/html-next) · [Report an issue](https://github.com/nextwebwg/html-next/issues) · [MIT license](https://github.com/nextwebwg/html-next/blob/main/LICENSE)
