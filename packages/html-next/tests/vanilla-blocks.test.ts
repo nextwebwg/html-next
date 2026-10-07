@@ -658,6 +658,24 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("tracks more than 29 roots exactly like the general runtime", async () => {
+    const many = Array.from({ length: 34 }, (_, index) => `<state name="s${index}" type="number" value="${index}"></state>`).join("");
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>${many}`, `
+      <section><p>{s0} {s30} {s33}</p><input .value="s31"><b $if="s32 > 40">big</b><i class:hot="s33 > 40"></i></section>`);
+    const note = (host: any, label: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${label} ${host.root.querySelector("input").value}`);
+    };
+    await same(text, [
+      (host) => { host.root.querySelector("input").value = "typed"; host.state.s30 = 1; note(host, "s30"); },
+      (host) => { host.state.s31 = 5; host.state.s32 = 50; note(host, "s31"); },
+      (host) => { host.state.s33 = 50; host.state.s0 = 9; host.root.querySelector("input").value = "again"; note(host, "s33"); },
+      (host) => { host.state.s32 = 51; note(host, "s32"); },
+    ]);
+  });
+
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>

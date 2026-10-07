@@ -30,6 +30,11 @@ import { declarationTypeNode, formatType, parseTypedValue, type TypeNode } from 
 
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
+/** Roots from index 29 on share this bit; which of them changed is in the written map (`d`). */
+const OVERFLOW = 1 << 29;
+
+/** A root's change bit. */
+const rootBit = (index: number): number => index < 29 ? 1 << index : OVERFLOW;
 
 /** Elements whose children the live runtime manages itself (scoped slot and `$match` carriers). */
 const EXCLUDED = new Set(["template"]);
@@ -78,6 +83,8 @@ interface Lowered {
   readonly fails: boolean;
   /** Reads the row's index or `loop` record. */
   readonly positional?: boolean;
+  /** Roots from index 29 on that it reads, whose changes share the overflow bit. */
+  readonly overflow?: readonly number[];
   /** Structural identity, so equal expressions in one update share an evaluation. */
   readonly key: string;
 }
@@ -394,7 +401,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const source = root.undefinable === true ? `rootValue(v[${index}], ${JSON.stringify(root.name)})` : `v[${index}]`;
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
-        ...none(key, read(scope, source)), bits: 1 << index,
+        ...none(key, read(scope, source)), bits: rootBit(index), ...index >= 29 ? { overflow: [index] } : {},
         boolean: root.type === "b" && root.initial !== "null" && root.checked !== true, deep: mayContain(root.type),
       };
     }
@@ -518,13 +525,15 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "overflow">;
 
 function merge(left: Reads, right: Reads): Reads {
   return {
     bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
     contents: left.contents || right.contents, fails: left.fails || right.fails,
     positional: left.positional === true || right.positional === true,
+    ...left.overflow === undefined && right.overflow === undefined ? {}
+      : { overflow: [...new Set([...left.overflow ?? [], ...right.overflow ?? []])] },
   };
 }
 
@@ -637,9 +646,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       checked: (!conforming || controlled.has(declaration.name)) && node !== undefined,
     });
   }
-  const roots = [...states, ...computeds];
-  if (roots.length > 30) notYetDirect();
-  return roots;
+  return [...states, ...computeds];
 }
 
 
@@ -765,8 +772,10 @@ class Planner {
         ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
         : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
       checks.push(`checkReference(S, ${declaredRead}, ${compactSource(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
-      const rootReads = root.computed === undefined ? { bits: 1 << index, nested: steps.length > 0 } : this.computedLowered(index);
-      reads = merge(reads, { bits: rootReads.bits, nested: rootReads.nested, item: false, contents: false, fails: true });
+      const rootReads: Reads = root.computed === undefined
+        ? { bits: rootBit(index), nested: steps.length > 0, item: false, contents: false, fails: true, ...index >= 29 ? { overflow: [index] } : {} }
+        : this.computedLowered(index);
+      reads = merge(reads, { ...rootReads, item: false, contents: false, fails: true });
     }
     if (checks.length === 0) return value;
     return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
@@ -1211,6 +1220,16 @@ function selection(block: Block, select: number, siteOf: (site: number) => strin
   return `() => { ${writes.join(" ")} }`;
 }
 
+/**
+ * Whether a root the expression reads was written in this batch: its bit, or for a root sharing the
+ * overflow bit, its index in the written map. Root writes notify even when restored later.
+ */
+function rootsWritten(reads: Reads): string {
+  const direct = reads.bits & ~OVERFLOW;
+  const parts = [...direct === 0 ? [] : [`c & ${direct}`], ...(reads.overflow ?? []).map((index) => `d.has(${index})`)];
+  return parts.length === 0 ? "" : ` || ${parts.join(" || ")}`;
+}
+
 /** What the regions inside a row read besides the row's own item: those changes patch every row. */
 function regionOuter(block: Block): number {
   let mask = 0;
@@ -1323,7 +1342,7 @@ export function emitBlocks(
           lines.push(`    const ${binding.exact} = [];`, `    const ${value} = ${convertible(expression)};`,
             // A full render (a reconnect) re-runs every live effect, and a root write notifies its
             // readers even when a later write in the batch restores it; nested reads compare values.
-            `    if (c === -1${expression.bits === 0 ? "" : ` || c & ${expression.bits}`} || readsChanged(${last}, ${binding.exact})) {`,
+            `    if (c === -1${rootsWritten(expression)} || readsChanged(${last}, ${binding.exact})) {`,
             `      ${last} = ${binding.exact};`);
           const name = JSON.stringify(binding.name);
           const write = binding.kind === "property" ? `${site}[${name}] = ${value};`
@@ -1395,8 +1414,8 @@ export function emitBlocks(
           `      if (${show}) { ${body} = ${make};${region.kind === "match" ? ` ${body}.s = t${index};` : ""} r.e${index}.before(${body}.n); }`,
         ];
         const decide = region.recorded === undefined ? [] : [`    const ${region.recorded} = [];`];
-        const changed = region.recorded === undefined ? "true"
-          : `c === -1${test.bits === 0 ? "" : ` || c & ${test.bits}`} || readsChanged(r.q${index}, ${region.recorded})`;
+        const changed = region.recorded === undefined ? test.overflow === undefined ? "true" : `c === -1${rootsWritten(test)}`
+          : `c === -1${rootsWritten(test)} || readsChanged(r.q${index}, ${region.recorded})`;
         const reselect = selectOf(block, region.site);
         if (reselect !== undefined) rebuild.push(`      queueMicrotask(r.c${reselect});`);
         lines.push(
@@ -1432,7 +1451,7 @@ export function emitBlocks(
         (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | regionOuter(region.block);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c, d);`);
       for (const root of selectors(region)) {
-        lines.push(`  if (c !== -1 && c & ${1 << root}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
+        lines.push(`  if (c !== -1 && c & ${rootBit(root)}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
       }
     });
     return lines;

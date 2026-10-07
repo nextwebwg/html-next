@@ -918,7 +918,12 @@ export function attachGeneratedController(
         if (!Object.is(previous, next)) {
           if (channel !== undefined) channel.e += 1;
           values[index] = next;
-          dirty |= 1 << index;
+          // Roots from index 29 share one bit; the written map says which of them changed.
+          if (index < 29) dirty |= 1 << index;
+          else {
+            dirty |= 1 << 29;
+            if (connected) objects.set(index, 1);
+          }
           job.schedule();
           notifyPropertySet(roots, key, previous, next, undefined);
         }
