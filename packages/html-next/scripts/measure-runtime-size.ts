@@ -123,7 +123,8 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 const staticGenerated = await generatedFixture("static-card", 6_700);
 const reactiveGenerated = await generatedFixture("reactive-counter", 6_950);
 const propGenerated = await generatedFixture("prop-button", 11_150);
-const computedGenerated = await generatedFixture("computed-counter", 7_100);
+// A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
+const computedGenerated = await generatedFixture("computed-counter", 7_250);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
 const dataGenerated = await generatedFixture("data-read", 7_550);

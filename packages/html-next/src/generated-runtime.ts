@@ -345,7 +345,7 @@ export function readContext(
 const readonlyViews = new WeakMap<object, Map<string, object>>();
 
 /** A read-only view for the controller, as live's host gives one: reads track, writes warn by path. */
-function readonlyView(spec: GeneratedStateSpec, value: unknown, path: string): unknown {
+export function readonlyView(spec: GeneratedStateSpec, value: unknown, path: string): unknown {
   if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
   const target = raw(value) as object;
   let views = readonlyViews.get(target);
@@ -1001,6 +1001,8 @@ export interface GeneratedStateSpec {
   readonly x?: typeof dispatchDeclared;
   /** `iteratedRef`, supplied by a module with refs inside rows. */
   readonly z?: typeof iteratedRef;
+  /** `readonlyView`, supplied by a module with computeds or contexts, which the host shows read-only. */
+  readonly r?: typeof readonlyView;
 }
 
 /** A ref the host reads: an iterated one is what the iteration still renders, in document order. */
@@ -1454,15 +1456,17 @@ export function attachGeneratedController(
   };
   const state = new Proxy({}, {
     get: (_target, key) => {
-      const index = typeof key === "string" ? names.indexOf(key) : -1;
+      // A symbol is never a name, so indexOf answers -1 for it.
+      const index = names.indexOf(key as string);
       if (index < 0) return undefined;
       trackProperty(roots, key);
       if (index < writable) return wrap(values[index], types[index]!, undefined, key);
       channel!.w.add(index);
-      return wrap(channel!.g(index), types[index]!, undefined, key);
+      // A computed or context is read-only, nested writes too, as live's host gives it.
+      return spec.r!(spec, channel!.g(index), key as string);
     },
     set: (_target, key, value) => {
-      const index = typeof key === "string" ? names.indexOf(key) : -1;
+      const index = names.indexOf(key as string);
       if (index < 0 || index >= writable) readOnly(String(key));
       else if (!trusted && !conforms(value, types[index]!)) mismatch(String(key));
       else {
@@ -1477,14 +1481,14 @@ export function attachGeneratedController(
     },
     deleteProperty: (_target, key) => (readOnly(String(key)), true),
     defineProperty: (_target, key) => (readOnly(String(key)), false),
-    has: (_target, key) => typeof key === "string" && names.includes(key),
+    has: (_target, key) => names.includes(key as string),
   });
-  const dataPath = (key: PropertyKey): string => `data.${String(key)}`;
+  const denyData = (key: PropertyKey): void => readOnly(`data.${String(key)}`);
   const data = handle.A ?? new Proxy({}, {
     get: () => undefined,
-    set: (_target, key) => (readOnly(dataPath(key)), true),
-    deleteProperty: (_target, key) => (readOnly(dataPath(key)), true),
-    defineProperty: (_target, key) => (readOnly(dataPath(key)), false),
+    set: (_target, key) => (denyData(key), true),
+    deleteProperty: (_target, key) => (denyData(key), true),
+    defineProperty: (_target, key) => (denyData(key), false),
     has: () => false,
   });
   // The live host reads refs from an ordinary object, so inherited names answer as they do there.
@@ -1509,7 +1513,7 @@ export function attachGeneratedController(
     },
     props: handle.B?.h ?? Object.freeze(Object.create(null) as object),
     refs: new Proxy({}, {
-      get: (_target, key) => typeof key !== "string" ? undefined : spec.z === undefined ? recorded[key] : spec.z(recorded, key),
+      get: (_target, key) => typeof key === "string" ? (spec.z ?? Reflect.get)(recorded, key) : undefined,
       has: (_target, key) => typeof key === "string" && recorded[key] !== undefined,
     }),
     slots: handle.Y ?? new Proxy({}, {

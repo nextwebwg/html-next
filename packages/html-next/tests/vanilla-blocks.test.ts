@@ -955,6 +955,25 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("keeps a computed's value read-only through host.state, nested writes too, like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <computed name="first" from="rows[0]"></computed>
+      <computed name="labels" from="[default(first.label, 'none')]"></computed>`, `
+      <section><p>{default(first.label, 'none')}</p><b $value="labels[0]"></b><i $value="rows.length"></i></section>`);
+    const note = (host: any, label: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${label} ${JSON.stringify(host.state.rows)} ${JSON.stringify(host.state.first)} ${JSON.stringify(host.state.labels)}`);
+    };
+    await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "a" }]; note(host, "rows"); },
+      (host) => { host.state.first.label = "z"; note(host, "nested"); },
+      (host) => { delete host.state.first.label; host.state.labels.push("x"); note(host, "delete"); },
+      (host) => { host.state.first = { id: 2, label: "b" }; note(host, "root"); },
+    ]);
+  });
+
   it("tracks more than 29 roots exactly like the general runtime", async () => {
     const many = Array.from({ length: 34 }, (_, index) => `<state name="s${index}" type="number" value="${index}"></state>`).join("");
     const text = component(`
