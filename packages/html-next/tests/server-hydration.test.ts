@@ -67,6 +67,11 @@ const definitions = [
     </defs><section><button type="button" on:click="change">Change</button><ul>
     <slot $each="row of rows" $key="row" name="row" from:item="row"><li $value="row"></li></slot>
     </ul></section></template>`,
+  `<template component="ssr-lazy-toggle"><defs><state name="open" type="boolean" value="false"></state>
+    <handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
+    <section><button type="button" on:click="toggle">More</button><div $if="open"><slot name="details"></slot></div></section></template>`,
+  `<template component="ssr-lazy-page"><defs><state name="label" type="string" value="first"></state></defs>
+    <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="label"></b></template></ssr-lazy-toggle></article></template>`,
 ].map((source) => parseComponent(source));
 
 const cases = [
@@ -84,6 +89,7 @@ const cases = [
   { name: "state-selected native roots", html: '<ssr-match id="subject">Content</ssr-match>', state: { open: true } },
   { name: "slot ranges inside tables", html: '<ssr-table id="subject">Projected</ssr-table>', state: {} },
   { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
+  { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
 ] as const;
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to browser hydration", () => {
@@ -200,5 +206,47 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
         } finally { await browser.close(); }
       });
     }
+
+    it(`${engine} keeps a closed slot's <template slot> lazy from Node output through hydration`, async () => {
+      const rendered = await renderComponents('<ssr-lazy-page id="subject"></ssr-lazy-page>',
+        { definitions, state: { "#subject": { label: "server" } } });
+      // The closed slot's template is serialized as it was, in the carrier: nothing rendered, nothing to fetch.
+      assert.ok(rendered.html.includes('<?carrier?><template><template slot="details"></template></template>'), rendered.html);
+      assert.doesNotMatch(rendered.html, /lazy\.png|<b>/);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        await page.route("https://assets.example/**", async (route) => {
+          requests.push(new URL(route.request().url()).pathname);
+          await route.fulfill({ status: 200, contentType: "image/png", body: "" });
+        });
+        await page.setContent(`<main>${rendered.html}</main>`);
+        await page.addScriptTag({ path: bundle });
+        const read = (): Promise<unknown> => page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            getComponentHost(element: Element): { slots: Record<string, readonly Element[]> } | undefined;
+          } }).HtmlRuntime;
+          const toggle = runtime.getComponentHost(document.querySelector('[data-component~="ssr-lazy-toggle"]')!)!;
+          return { detail: document.querySelector("b")?.textContent ?? null, img: document.querySelectorAll("img").length,
+            templates: document.querySelectorAll("main template").length, details: toggle.slots.details!.map((element) => element.localName) };
+        });
+        await page.evaluate((definitionJSON) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            registerComponentDefinitions(definitions: unknown[]): void; lowerDocument(): number;
+          } }).HtmlRuntime;
+          runtime.registerComponentDefinitions(JSON.parse(definitionJSON) as unknown[]);
+          runtime.lowerDocument();
+        }, JSON.stringify(definitions));
+        assert.deepEqual(await read(), { detail: null, img: 0, templates: 0, details: [] });
+        const lazy = page.waitForRequest("https://assets.example/lazy.png");
+        await page.click("button");
+        await page.waitForSelector("b");
+        await lazy;
+        // Opening renders the template with the consumer's hydrated state.
+        assert.deepEqual(await read(), { detail: "server", img: 1, templates: 0, details: ["img", "b"] });
+        assert.deepEqual(requests, ["/lazy.png"]);
+      } finally { await browser.close(); }
+    });
   }
 });

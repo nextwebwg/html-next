@@ -1033,6 +1033,8 @@ interface ProjectedTemplate {
 }
 
 const projectedTemplates = new WeakMap<HTMLTemplateElement, ProjectedTemplate>();
+/** The element roots each consumer `<template slot>` renders, one set per outlet rendering it now. */
+const templateRenderings = new WeakMap<HTMLTemplateElement, Set<Element[]>>();
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
@@ -2445,20 +2447,24 @@ function renderSlot(
     ? node.name ?? ""
     : toText(evaluateCompiled(node.nameExpression, scope));
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
+  const props = node.props ?? [];
+  const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
+  // A consumer's <template slot> renders lazily, like an $if body: only while this outlet renders,
+  // in the consumer's scope, and afresh each time. Plain projection stays eager.
+  const lazy = props.length > 0 || carrier !== undefined;
   const renderScoped = (existing?: readonly Node[]): Node[] => {
-    const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
     const authored = projectedTemplates.get(carrier);
     if (authored === undefined && projectedSlotParser === undefined) {
       fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
     }
-    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, node.props!.map((prop) => prop.name));
+    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
     const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
     const projectionContext = authored === undefined ? context : Object.create(context, {
       definition: { value: authored.context.definition, enumerable: true },
       refs: { value: authored.context.refs, enumerable: true },
     }) as RuntimeRenderContext;
-    for (const prop of node.props!) {
+    for (const prop of props) {
       ownEffect(context, scope, () => {
         const value = evalConforming(prop.expression, scope, context.definition);
         if (value !== NONCONFORMING) projectedScope.set(prop.name, value);
@@ -2475,6 +2481,15 @@ function renderSlot(
       return adopted;
     })();
     for (const child of rendered) markProjectedRoot(child);
+    // host.slots lists these roots while this outlet renders them, following a component's lowered root.
+    const roots = rendered.filter((child): child is Element => child.nodeType === 1);
+    roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
+    ownEffect(context, scope, () => {
+      let renderings = templateRenderings.get(carrier);
+      if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
+      renderings.add(roots);
+      return () => { renderings.delete(roots); };
+    });
     return rendered;
   };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
@@ -2492,7 +2507,7 @@ function renderSlot(
       }
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
-    if ((node.props?.length ?? 0) > 0) {
+    if (lazy) {
       const adopted = renderScoped(hydrating.content);
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
@@ -2508,13 +2523,13 @@ function renderSlot(
   const instruction = (target: string, data: string): Node => renderedFormMark(document, target, data);
   const ranged = (nodes: Node[], fallback: boolean): Node[] => {
     if (nodes.length === 0) return [instruction("marker", `slot=${quoted(name)}`)];
-    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}${(node.props?.length ?? 0) > 0 ? ' scoped=""' : ""}`;
+    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}${lazy ? ' scoped=""' : ""}`;
     return [instruction("start", data), ...nodes, instruction("end", "")];
   };
   if (assigned.length === 0) {
     return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
   }
-  if ((node.props?.length ?? 0) > 0) {
+  if (lazy) {
     return ranged(renderScoped(), false);
   }
   if (context.committed) {
@@ -3843,9 +3858,10 @@ export interface ComponentHost {
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
   /**
    * The elements a consumer projected, by slot name, in document order; `default` reads the
-   * unnamed slot. Empty while a slot shows its fallback. A component lowers into one tree with
-   * no shadow boundary, so a query rooted at `root` cannot tell projected content from the
-   * component's own output: this is the only way to enumerate it.
+   * unnamed slot. Empty while a slot shows its fallback. A consumer's `<template slot>` contributes
+   * the elements it renders while its slot renders, and nothing otherwise. A component lowers into
+   * one tree with no shadow boundary, so a query rooted at `root` cannot tell projected content
+   * from the component's own output: this is the only way to enumerate it.
    */
   readonly slots: Readonly<Record<string, readonly Element[]>>;
   /**
@@ -4006,9 +4022,12 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     const slot = key === "default" ? "" : key;
     // Hydration records each node's slot; a client-rendered instance carries the author's own
     // `slot` attribute instead, and an unmarked node belongs to the unnamed slot either way.
-    return projection.nodes.filter((node): node is Element =>
-      node.nodeType === 1 &&
-      (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === slot
+    // A consumer's <template slot> contributes what its outlets render now, in document order.
+    return projection.nodes.flatMap((node): Element[] =>
+      node.nodeType !== 1 || (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") !== slot ? []
+        : !(node instanceof HTMLTemplateElement) ? [node as Element]
+          : [...templateRenderings.get(node) ?? []].flat().sort((a, b) =>
+            (a.compareDocumentPosition(b) & 4 /* DOCUMENT_POSITION_FOLLOWING */) !== 0 ? -1 : 1)
     );
   };
   const slots = new Proxy({}, {

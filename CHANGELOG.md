@@ -4,6 +4,8 @@
 
 - Every HTML Next package now requires Node `>=22.22.2 <23 || >=24.15 <25` (previously `>=22.13 <23 || >=24 <25`), the Node 22 and 24 releases that jsdom 30 supports. 1.0.0-alpha.33 already uses jsdom 30 for server rendering.
 - A component slotted into a slot that is closed at first render lowers when the slot opens, and a slot that closes and renders again re-inserts the lowered component rather than its raw invocation. Hidden slotted content creates no instance or bindings until a slot renders it.
+- A consumer's `<template slot>` renders lazily for every slot, including one that exposes no props. Previously such a slot inserted the inert `<template>` and its content never rendered. The children render in the consumer's scope only while the slot renders, afresh each time, and nothing inside is created, fetched or bound while the slot is hidden. `host.slots` lists the elements the template renders while its slot renders, and none otherwise; for a slot with props it previously listed the `<template>` itself. Plain projection stays eager.
+- The quick start, counter example, and `@nextwebwg/html-next` README reference state with `$` (`{$count}`, `expr:value="$count + 1"`).
 
 ## 1.0.0-alpha.33
 
