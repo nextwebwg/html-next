@@ -668,7 +668,19 @@ export class ReactiveScope implements Scope {
  */
 const reactiveHandler: ProxyHandler<object> = {
   get(target, key, receiver) {
-    if (activeEffect !== undefined) trackProperty(target, key);
+    if (activeEffect !== undefined) {
+      let properties = objectSubscribers.get(target);
+      if (properties === undefined) {
+        properties = new Map();
+        objectSubscribers.set(target, properties);
+      }
+      let subscribers = properties.get(key);
+      if (subscribers === undefined) {
+        subscribers = { first: undefined, last: undefined };
+        properties.set(key, subscribers);
+      }
+      activeEffect.track(subscribers);
+    }
     return wrap(Reflect.get(target, key, receiver) as Value);
   },
   set(target, key, next, receiver) {
@@ -676,16 +688,36 @@ const reactiveHandler: ProxyHandler<object> = {
     const previous = Reflect.get(target, key, receiver);
     const wrapped = wrap(next as Value);
     const result = Reflect.set(target, key, wrapped, receiver);
-    notifyPropertySet(target, key, previous, wrapped, previousLength);
+    if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+    // Defining an array index can extend length before push writes that same length again.
+    if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+      trigger(objectSubscribers.get(target)?.get("length"));
+    }
+    // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+    if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+      const length = (target as Value[]).length;
+      for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+        if (typeof property !== "string") continue;
+        const index = Number(property);
+        if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+          trigger(subscribers);
+        }
+      }
+    }
     return result;
   },
   deleteProperty(target, key) {
     const had = Reflect.has(target, key);
     const result = Reflect.deleteProperty(target, key);
-    notifyPropertyDelete(target, key, had);
+    if (had) trigger(objectSubscribers.get(target)?.get(key));
     return result;
   },
 };
+
+// ponytail: the three functions below repeat the traps' bodies for compiled controller facades,
+// which track and notify raw targets through the same registry. The traps keep their own inline
+// copies because calling these from them grows every runtime bundle (~30 B gzip); only
+// generated-runtime imports these, so other bundles shake them out.
 
 /** Records that the running effect read `target[key]`; the raw target is the dependency's identity. */
 export function trackProperty(target: object, key: PropertyKey): void {
