@@ -25,7 +25,7 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type Flow, type TemplateNode } from "../template.js";
+import { elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type Flow, type TemplateNode } from "../template.js";
 import { parseDuration } from "../duration.js";
 import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, typeAtKey, type TypeNode } from "../type-system.js";
@@ -71,6 +71,8 @@ interface Root {
   readonly context?: { readonly from: string; readonly name: string };
   /** A `<data>` read, whose state roots follow the props. */
   readonly data?: DataDeclaration;
+  /** A root `$with`'s expression: the alias keeps its last conforming value, and follows the reads. */
+  readonly alias?: CompiledExpression;
 }
 
 /** A lowered expression in the supported subset. */
@@ -233,6 +235,8 @@ export interface BlockPlan {
   /** How many roots are `<state>`, and how many the controller's host shows; props' roots follow them. */
   readonly states: number;
   readonly shown: number;
+  /** A root `$with`: its alias's root, and its value, refreshed before each render. */
+  readonly aliased: readonly { readonly index: number; readonly value: Lowered }[];
   /** `<data>` reads: their state's root, declaration and parameters (a `from` one also recorded). */
   readonly reads: readonly { readonly index: number; readonly declaration: DataDeclaration;
     readonly parameters: readonly { readonly name: string; readonly from: boolean; readonly value: Lowered; readonly recorded: Lowered | undefined; readonly record: string }[] }[];
@@ -1350,12 +1354,16 @@ class Planner {
 export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>): BlockPlan | undefined {
   try {
     const arms = rootArms(definition.template);
-    if (arms === undefined && definition.template.flow !== undefined) return undefined;
+    // A real element's `$match` keeps the element and switches its content, as live's `elementMatchRoot`.
+    const flow = arms === undefined ? definition.template.flow : undefined;
+    const template = flow?.kind === "match" ? elementMatchRoot(definition.template) : definition.template;
 
-    const roots = compileRoots(definition);
+    // A root `$with` names a value for the whole template; it is not the controller's state.
+    const roots = [...compileRoots(definition), ...flow?.kind === "with"
+      ? [{ name: flow.alias, type: "?" as const, initial: "null", alias: flow.expressionPlan ?? compileExpression(flow.expr) }] : []];
     const planner = new Planner(roots, definition, invocations);
     // A root `$match` renders the arm its tests choose (read with `evalValue`, unchecked), each its own root.
-    const nodes = (arms ?? [definition.template]).map((arm) => { const { flow: _flow, ...body } = arm; return body; });
+    const nodes = (arms ?? [template]).map((arm) => { const { flow: _flow, ...body } = arm; return body; });
     const armBlocks = nodes.map((node) => planner.block(node, false, planner.scope, true, false));
     const root = armBlocks[0]!;
     let select: Lowered | undefined;
@@ -1382,7 +1390,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
         });
       }
     }
-    const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined).length;
+    const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined || item.alias !== undefined).length;
     // Each read's parameters, checked as live's `evalConforming` reads them; `from` ones also recorded,
     // so a change to what they read re-requests, as live's request effect re-runs.
     const reads = roots.flatMap((item, index) => item.data === undefined ? [] : [{
@@ -1399,6 +1407,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
+      aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
       ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
@@ -2043,7 +2052,11 @@ export function emitBlocks(
   const provides = !noContextReaders && plan.states > 0;
   const render = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
   // Declared reads re-request before the template renders, as live's priority-0 request effects run first.
-  const update = plan.reads.length === 0 ? render : `((c, d) => { DU(c, d); ${render}(c, d); })`;
+  // A root `$with` keeps its last conforming value, refreshed before the template renders.
+  const aliased = plan.aliased.map(({ index, value }) => `{ const x = ${convertible(value)}; if (x !== NONCONFORMING && !Object.is(x, v[${index}])) { v[${index}] = x; ${
+    index < 29 ? `c |= ${rootBit(index)};` : `c |= ${OVERFLOW}; d.set(${index}, 1);`} } }`);
+  const update = plan.reads.length === 0 && aliased.length === 0 ? render
+    : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
   const instance = provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;

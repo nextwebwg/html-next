@@ -1288,6 +1288,20 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("renders a root $with and a real element's root $match like live", async () => {
+    const rows = `
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>`;
+    const steps: Step[] = [
+      (host) => { host.state.rows = [{ id: 1, label: "a" }, { id: 2, label: "b" }]; },
+      (host) => { host.state.rows[0].label = "z"; host.state.selected = 2; },
+      (host) => { host.state.rows = []; },
+    ];
+    await same(component(rows, `<section $with="rows[0] as first" from:data-n="rows.length"><p>{default(first.label, 'none')}</p><b $if="first">has</b></section>`), steps);
+    await same(component(rows, `<section $match class="m"><p $when="rows.length = 0">empty</p><p $when="selected">{selected}</p><ul $else><li $each="row of rows" $key="row.id" from:data-id="row.id">{row.label}</li></ul></section>`), steps);
+  });
+
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
