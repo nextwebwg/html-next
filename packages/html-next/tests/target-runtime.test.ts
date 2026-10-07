@@ -569,6 +569,7 @@ createApp({ render: () => h(ComputedCounter) }).mount(document.querySelector("ma
         jsx: "automatic",
         nodePaths: [nodeModulesPath],
         loader: { ".css": "empty" },
+        alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
       });
       bundles.set(target, outfile);
     }
@@ -3058,6 +3059,7 @@ createApp({ render: () => [
         loader: { ".css": "empty" },
         alias: {
           "@nextwebwg/html-next/runtime": runtimePath,
+          "@nextwebwg/html-next/generated-runtime": generatedRuntimePath,
           "@nextwebwg/html-next/validation": new URL("../src/validation.ts", import.meta.url).pathname,
         },
       });

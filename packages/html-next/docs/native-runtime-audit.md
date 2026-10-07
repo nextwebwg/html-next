@@ -101,8 +101,8 @@ builds one execution-local `Set`. The runtime still owns read-to-consumer routin
 observation does not expose authored JavaScript state reads. After reordered reads insert a new
 subscription, membership is checked before consuming an old link so the same dependency is not
 subscribed twice. Execution completion releases the membership index; conditional cleanup,
-pause, and stop release obsolete subscriptions. Direct scalar native output compiles this layer
-away; live components and generated general-runtime fallbacks share it.
+pause, and stop release obsolete subscriptions. Live components and compiled components' controller
+hosts share it.
 
 Controller paths retain separate write guards for their destination types. Native `WeakMap`
 identity associates writable facades with their existing reactive objects, so assigning values
@@ -128,38 +128,34 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 
 | Authored feature | Gzip bytes (level 9) | Runtime shape |
 | --- | ---: | --- |
-| Static markup | 347 | Direct DOM creation |
-| Numeric state and handler | 425 | Direct variables, native event, microtask update |
-| Numeric computed state | 431 | Direct arithmetic in the same update |
-| Scalar and enum props | 2,045 | Generated prop boundary and shared lifecycle helper |
-| Keyed list | 38,079 | Shared general-runtime support |
-| Declared read | 38,034 | Shared general-runtime support |
-| Controller lifecycle | 37,973 | Shared general-runtime support |
-| Controller keyed list, `directExtend` | 7,517 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
+| Static markup | 6,617 | Cloned blocks, slot ranges, compiled-root handle and host |
+| Numeric state and handler | 6,855 | Same, with root bits and a handler |
+| Numeric computed state | 7,155 | Same, with a computed root, read-only to the controller |
+| Scalar and enum props | 11,039 | Same, with the live prop boundary and validity, each type compiled to its own checks |
+| Keyed list | 7,577 | Cloned blocks and `KeyedList` |
+| Declared read | 7,455 | Cloned blocks and `DataResource` |
+| Controller lifecycle | 6,648 | Cloned blocks and the generated controller host |
+| Controller keyed list | 8,146 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
-The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
-They are not separate per-component runtimes. An application or library build combines the complete
-input graph, deduplicates shared support, and emits one coherent native target. The first four
-fixtures have hard size gates. The remaining fixtures expose current full-runtime fallbacks while
-their build-scoped implementations and budgets are evaluated.
+The fixtures isolate authored capabilities so regressions remain attributable. They are not separate
+per-component runtimes: an application or library build combines the complete input graph,
+deduplicates the shared support (the handle, host, scheduler and lifecycle coordinator are paid once
+per graph), and emits one coherent native target. Every fixture has a hard size gate, and none may
+bundle the interpreter, a parser, the type system or the formatter.
 
-Native factories that use the general-runtime fallback own their structural bindings. Their shared
-MutationObserver coordinator reports connection changes; the runtime renders `$if` and `$each`
-regions and reconnects the same instance state. Framework adapters give structural ownership to
-their framework renderer instead. The attachment path preserves this distinction, with Chromium,
-Firefox, and WebKit tests covering native keyed updates, branch changes, and reconnect behavior.
+Generated components own their structural bindings. The shared MutationObserver coordinator reports
+connection changes; a component re-renders on reconnect with the same instance state. Framework
+adapters give structural ownership to their framework renderer instead. Chromium, Firefox, and
+WebKit tests cover native keyed updates, branch changes, and reconnect behavior.
 
-## Direct-extend generated components (experimental)
+## Compiled components
 
-`GenerationOptions.directExtend` (the unplugin's `experimentalDirectExtend`) compiles components
-with a controller, declared state, `$if` and keyed `$each` to straight-line DOM code instead of the
-general-runtime fallback. The direct path is meant to cover every feature the live runtime supports;
-until it covers one, a component using it keeps the fallback unchanged, and the unplugin keeps a
-whole graph on the fallback when any component in it needs the general runtime. The
-generated module imports only the `generated-runtime` helpers its features use; the interpreter,
-parsers, type system and formatter never reach it, and `measure:runtime` fails if they do. The
-[compiled direct path](./compiled-direct-path.md) describes its architecture, coverage plan and
-byte budgets.
+Every component the parser accepts compiles to straight-line DOM code with the live runtime's
+semantics; there is no general-runtime fallback and no option. The generated module imports only the
+`generated-runtime` helpers its features use; the interpreter, parsers, type system and formatter
+never reach it, and `measure:runtime` fails if they do. Each declared prop or event type compiles to
+the checks it uses (`type-checks.ts`), which the live type system builds its own checks from.
+[Compiled components](./compiled-direct-path.md) describes the architecture and byte budgets.
 
 | Need | Native mechanism composed | Remaining gap filled by code |
 | --- | --- | --- |
@@ -173,6 +169,7 @@ byte budgets.
 | Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
 | Change notification | None native | Controller effects use the reactivity dependency graph; templates use root bits and written raw objects |
 | Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
+| Prop validity | `ValidityState`, `setCustomValidity` on native control roots; the generalized validity facade elsewhere | Each prop type's compiled check and the live validation messages |
 | Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
 
 ### Indexed equality selection
@@ -200,11 +197,15 @@ added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM 
 32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more
 fall back to the walk, which keeps mutation-order sequencing. Above 32 roots the walk runs.
 
-Only direct-extend output imports the indexed coordinator (`src/generated-lifecycle-index.ts`), so
-other generated output bundles exactly the coordinator it did before. Both occupy the one
-coordinator slot a document has: whichever installs first serves every root registered in that
-document, so two coordinators never disagree. When another coordinator installed first, direct-extend
-roots get the exact walk without the fast path.
+Compiled output imports the indexed coordinator (`src/generated-lifecycle-index.ts`); the live
+runtime installs the plain one. Both occupy the one coordinator slot a document has: whichever
+installs first serves every root registered in that document, so two coordinators never disagree.
+When the live coordinator installed first, compiled roots get the exact walk without the fast path.
+
+A document has one MutationObserver for connection tracking, whatever runs on it: the live runtime,
+compiled components and the React, Svelte and Vue targets' controller hosts all subscribe to the hub
+stored on the document under the shared runtime key. Bound `<select>` elements in the Svelte and Vue
+targets share one more observer per document for their option lists, which no native event reports.
 
 ## Review sequence
 

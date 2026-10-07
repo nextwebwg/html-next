@@ -138,7 +138,7 @@ document.getElementById("app").append(createXApp());
 </html>
 ```
 
-Run your project's usual `npm run dev` command. Click the counter and Reset. Vite builds the HTML definition into JavaScript that creates native DOM elements; a production build does not parse component definitions in the browser.
+Run your project's usual `npm run dev` command. Click the counter and Reset. Vite builds the HTML definition into JavaScript that creates native DOM elements; a production build does not parse component definitions in the browser. Each component becomes a cloned template plus the exact DOM updates its features need, with the same behavior as the browser runtime. [How builds compile components](/html-next/performance#compiled-output) explains more.
 
 :::
 
@@ -445,4 +445,4 @@ For Svelte, use the Vite adapter above. Choose HTML Next in this section for the
 
 - [Ship a library](/html-next/ship) when other projects need your components.
 - Use the [CLI reference](https://github.com/nextwebwg/html-next#inspect-and-build-a-graph) to check definitions or build without Vite.
-- See the [Vite plugin reference](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-unplugin) for libraries, externally defined custom elements, and build limits. Compiled component invocations currently need to be empty and statically placed; unsupported features fail with a source-located diagnostic.
+- See the [Vite plugin reference](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-unplugin) for libraries, externally defined custom elements, and build limits.

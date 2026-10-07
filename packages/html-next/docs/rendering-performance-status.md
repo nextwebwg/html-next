@@ -21,8 +21,10 @@ These are the owner's targets, set on 2026-10-06.
 - **Bundle cost.** Prefer smaller compiled output. The owner accepts a small increase, including
   roughly 50 B gzip for selection, when it improves performance against Solid. Live may grow by
   at most +2 KB gzip in total, and preferably not at all.
-- **Coverage.** Everything the live runtime supports must work when compiled. The general-runtime
-  fallback (`notYetDirect()`) is transitional.
+- **Coverage.** Everything the live runtime supports must work when compiled. Done: every component
+  compiles directly, and the general-runtime fallback and the experimental option are removed.
+- **Speed over bytes** (2026-10-07). Keep bytes under control, but take any speed improvement whose
+  byte cost is small.
 - **Starting point.** Experiments always start from the current improved state, never the original
   baseline.
 
@@ -39,6 +41,7 @@ These are the owner's targets, set on 2026-10-06.
 | **M0 + M1, compiled direct path behind `experimentalDirectExtend`** | **Merged: nextwebwg/html-next#155** (`eba4fa0`) |
 | Key-aligned equality/inequality class selection, compiled and live | Merged: nextwebwg/html-next#156 (`0171638`) |
 | Forward per-row fresh insertion; fragment branch removed | Retained on `optimize/rendering-gap`; two full standard confirmations below |
+| M2 + M3: every component compiled directly with live parity; option, fallback and older emitters removed | `matthew-dean/direct-extend-default` |
 
 M1 moves components with controllers, structured state and keyed lists off
 `manageComponentLifecycle`. Its initial receipt with the option on was **8,051 B gzip**
@@ -159,18 +162,12 @@ Any further performance experiment starts from this retained state and keeps mea
 3. **Preserve the confirmation receipts.** The two full sweeps above identify the exact bundles.
    Reduced screens of `moveBefore = false`, new-facade ancestry shortcuts and uniform facade
    construction were reverted because they did not demonstrate a useful gain.
-4. **M2 coverage.** Work through the coverage table in
-   [compiled-direct-path.md](./compiled-direct-path.md#coverage-plan) one feature per commit, each
-   with its byte line, live-vs-compiled parity fixtures and a Node eligibility test. The benchmark
-   entry must stay ≤ its M1 receipt.
-5. **M3 parity, then default-on.** The owner has approved default-on once these hold:
-   - `getComponentHost`, `inspectInstance` and `serializeRenderedForm` work on compiled roots;
-   - markers are re-synthesized;
-   - the coordinators are deduplicated;
-   - props, slots and invocations compile directly;
-   - the serialization round trip and three-engine parity pass.
-
-   Then make `experimentalDirectExtend` the default.
+4. **M2 coverage and M3 parity: done.** Every component the parser accepts compiles directly, with
+   live-versus-compiled parity in jsdom and three engines; compiled roots answer `getComponentHost`,
+   `inspectInstance` and `serializeRenderedForm`, re-synthesize row markers and hydrate live.
+5. **Default-on: done.** Compiled output is the only build output. The smaller static,
+   primitive-state and scalar-prop emitters did not match live and were folded into the block
+   compiler; prop types compile to their own checks.
 6. **Live runtime.** The live runtime should share the gains:
    - Adopt `KeyedList` for eligible live rows (M4).
    - Add the live row kernel (approved, +2 KB cap).
@@ -179,21 +176,18 @@ Any further performance experiment starts from this retained state and keeps mea
    The live gap map and candidate list are in the analysis archive (`understand/synthesis.md`).
    Experiments 007–009 showed that adding per-row reader allocations on top of today's per-row
    objects regresses creation, so the kernel must replace per-row objects, not add to them.
-7. **Known limits from M1.**
-   - A graph that mixes older direct components that have a lifecycle (such as `prop-button`) with
-     direct-extend components bundles both coordinators: +184 B gzip-9. This is planned for M3.
-   - The indexed fast path is skipped when another coordinator installs first. This costs speed only.
+7. **Known limit.** The indexed coordinator's fast path is skipped when the live runtime's
+   coordinator installs first. This costs speed only.
 8. **Nightly gate.** The "Framework rendering" workflow runs nightly, because a full comparison exceeds
    the 15-minute CI budget. Treat it as a gate only after its noise is characterized on hosted runners.
-   It should probably run with `--direct-extend` once that is the default.
 
 ## Working method
 
 - **Screen while iterating.** Use about 2 entries and 5 samples, which takes minutes:
-  `pnpm measure:frameworks --direct-extend --count 5 --frameworks html-next-vite-candidate solid`,
+  `pnpm measure:frameworks --count 5 --frameworks html-next-vite-candidate solid`,
   optionally with `--benchmarks` for the workloads a change touches.
 - **Confirm with full sweeps.** Use standard samples, all controls and `--record` (about 40 minutes).
-  PRs use the paired gate, `pnpm verify:frameworks --base=main --direct-extend`.
+  PRs use the paired gate, `pnpm verify:frameworks --base=main`.
 - **Measure serially on a quiet machine.** Other sessions on this machine also use port 8080 and the
   CPU. Coordinate before a timed run, and treat timings taken under load as noise.
 - **Read the rules.** AGENTS.md applies: native-first audit, separation of the live interpreter from
