@@ -1,8 +1,11 @@
 import type { ControllerModule } from "./controller.js";
 import { selectedPropType } from "./contract.js";
+import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { applyBoundControlValue, controlValue } from "./controls.js";
+import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
@@ -11,7 +14,6 @@ import {
   NONCONFORMING,
   UndeclaredName,
   compileExpression,
-  dimensionType,
   evaluate,
   type CompiledExpression,
   type ExpressionNode,
@@ -24,6 +26,8 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
+import { documentParsesInstructions, renderedFormMark } from "./rendered-form.js";
+import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
 import { keyedEquality, visitSelected } from "./selection.js";
 import {
   createComputed,
@@ -38,7 +42,7 @@ import {
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
-import { hasExecutableUrl, isUrlAttribute, sanitizeFragment } from "./sanitize.js";
+import { hasExecutableUrl, isContentOnly, isUrlAttribute, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
@@ -51,11 +55,7 @@ import {
 import {
   declarationTypeNode,
   formatType,
-  normalizeType,
-  parseTypeExpression,
   parseTypedValue,
-  serializeTypedValue,
-  typeAtKey,
   type TypeNode,
 } from "./type-system.js";
 import type {
@@ -75,9 +75,9 @@ import type {
 } from "./template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
-import type { ComponentContract, PropContract, PropType, PropValue } from "./types.js";
+import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
-import { manageElementValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
+import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
@@ -169,7 +169,6 @@ interface DocumentRegistry {
   discoverySelector: string | undefined;
 }
 
-const contentOnly = new WeakSet<Element>();
 const selectValueBindings = new WeakMap<HTMLSelectElement, () => void>();
 /**
  * Invocation elements a component has already replaced. A mutation batch can still name one, and
@@ -272,6 +271,43 @@ function documentState(root: Document): DocumentState {
 
 function runtimeInstance(element: Element): RuntimeInstance | undefined {
   return runtimeInstances.get(element);
+}
+
+/** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
+interface CompiledHandle {
+  readonly S: { readonly n: readonly string[]; readonly g: string; readonly k?: number };
+  readonly v: readonly unknown[];
+  readonly H: ComponentHost;
+  /** Its props: their latest inputs and the explicit ones; values follow the state's in `v`. */
+  readonly B?: {
+    readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string>;
+    /** Applies props, as `updateComponentProps` applies a live instance's. */
+    readonly u?: (props: Readonly<Record<string, unknown>>) => void;
+  };
+  /** Its projected nodes and the slot each is for. */
+  readonly J?: readonly (readonly [Node, string])[];
+  /** The components it delegates its root to, which share it. */
+  readonly D?: readonly CompiledHandle[];
+}
+
+/** The compiled handle of a generated root, which the live runtime's instance map never holds. */
+const replacedKey = Symbol.for("@nextwebwg/html-next.replaced.v1");
+
+function compiledHandle(element: Element): CompiledHandle | undefined {
+  // A root switch leaves the element a caller kept pointing at its instance.
+  const handle = ((element as RuntimeElement)[lifecycleKey]?.h ?? (element as Element & { [replacedKey]?: unknown })[replacedKey]) as Partial<CompiledHandle> | undefined;
+  return handle?.H === undefined ? undefined : handle as CompiledHandle;
+}
+
+/** A compiled root's record, as `instanceRecord` reports a live instance's: computeds are not state. */
+function compiledRecord(handle: CompiledHandle): RenderedInstanceRecord {
+  const names = Object.keys(handle.B?.D.props ?? {});
+  return {
+    explicit: [...handle.B?.x ?? []],
+    inputs: { ...handle.B?.i },
+    props: Object.fromEntries(names.map((name, index) => [name, handle.v[handle.S.n.length + index]])),
+    state: Object.fromEntries(handle.S.n.slice(0, handle.S.k).map((name, index) => [name, handle.v[index] as Value])),
+  };
 }
 
 function registryFor(root: Document): DocumentRegistry {
@@ -404,16 +440,6 @@ export function installComponentGraph(
   return installed;
 }
 
-function invocationValue(prop: PropContract, input: unknown, source: "html" | "value" = "html", attributePresent = false, type: PropType | null = prop.type): PropValue | undefined {
-  if (input === null) return null;
-  // Bare boolean attributes retain HTML presence semantics. Explicit values
-  // are invocation strings and must still pass through the declared type.
-  const candidate = type === "boolean" && attributePresent && input === "" ? true : input;
-  if (type === null) return candidate as PropValue;
-  const parsed = parseTypedValue(candidate, type, "$", source);
-  return parsed.ok ? parsed.value as PropValue : undefined;
-}
-
 function propValidity(instance: RuntimeInstance): Validity {
   return validateComponentProps(instance.definition.contract,
     (name) => {
@@ -428,18 +454,6 @@ function rootPropValidity(instance: RuntimeInstance): Validity {
   if (instance.delegates.length === 0) return propValidity(instance);
   const errors = [instance, ...instance.delegates].flatMap((entry) => propValidity(entry).errors);
   return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
-}
-
-function reflectedPropValue(value: unknown, type: PropType | null): string {
-  if (type !== null && parseTypedValue(value, type, "$", "value").ok) {
-    return serializeTypedValue(value, type);
-  }
-  return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
-}
-
-function assignedPropValue(_name: string, prop: PropContract, input: unknown, type: PropType | null = prop.type): Value | undefined {
-  if (input !== undefined) return invocationValue(prop, input, "value", false, type) as Value | undefined;
-  return (prop.default === undefined ? null : prop.default) as Value;
 }
 
 function propAttributeNames(
@@ -469,20 +483,7 @@ function componentScope(
   parent?: RuntimeInstance,
 ): { readonly scope: ReactiveScope; readonly effects: ReactiveOwner[] } {
   const scope = new ReactiveScope();
-  const resolvingDimensions = new Set<string>();
-  scope.typeOfDeclaredPath = (path) => declaredTypeAt(definition, path);
-  scope.typeOfPath = (path) => {
-    const type = scope.typeOfDeclaredPath?.(path);
-    if (type?.kind === "terminal" && (type.name === "length" || type.name === "percentage" || type.name === "duration")) {
-      return type.name;
-    }
-    if (path.includes(".") || resolvingDimensions.has(path)) return undefined;
-    const computed = definition.declarations?.find((item) => item.kind === "computed" && item.name === path);
-    if (computed?.kind !== "computed" || computed.expression === undefined) return undefined;
-    resolvingDimensions.add(path);
-    try { return dimensionType(computed.expression.ast, scope); }
-    finally { resolvingDimensions.delete(path); }
-  };
+  declareTypes(scope, definition);
   for (const [name, prop] of Object.entries(definition.contract.props)) {
     // The effective value seen by expressions: passed value, default, or null.
     scope.set(
@@ -683,38 +684,9 @@ function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveSc
   return parent.fork(Object.entries(locals));
 }
 
-function declaredExpressionType(expression: string | CompiledExpression, scope: ReactiveScope): TypeNode | undefined {
-  let node = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
-  const path: string[] = [];
-  while (node.kind === "member" || node.kind === "index") {
-    if (node.kind === "member") path.unshift(node.key);
-    else if (node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")) {
-      path.unshift(String(node.index.value));
-    } else return undefined;
-    node = node.object;
-  }
-  if (node.kind !== "id") return undefined;
-  path.unshift(node.name);
-  return scope.typeOfDeclaredPath?.(path.join("."));
-}
-
 function typedLayer(parent: ReactiveScope, locals: Record<string, Value>, types: Readonly<Record<string, TypeNode | undefined>>): ReactiveScope {
   const child = layer(parent, locals);
-  child.typeOfDeclaredPath = (path) => {
-    const [root, ...keys] = path.split(".");
-    if (!Object.hasOwn(types, root!)) return parent.typeOfDeclaredPath?.(path);
-    let type = types[root!];
-    for (const key of keys) {
-      if (type === undefined) break;
-      type = typeAtKey(type, key);
-    }
-    return type;
-  };
-  child.typeOfPath = (path) => {
-    const type = child.typeOfDeclaredPath?.(path);
-    return type?.kind === "terminal" && (type.name === "length" || type.name === "percentage" || type.name === "duration")
-      ? type.name : parent.typeOfPath?.(path);
-  };
+  declareLayerTypes(child, parent, types);
   return child;
 }
 
@@ -725,72 +697,6 @@ function evalValue(expression: string, scope: Scope): Value {
     if (error instanceof UndeclaredName) fail("HB001", error.message);
     throw error;
   }
-}
-
-/** The state surface a declared read publishes, so a path through it resolves to a declared type. */
-const DATA_STATE_FIELDS: Readonly<Record<string, TypeNode | undefined>> = {
-  pending: { kind: "terminal", name: "boolean" },
-  ok: { kind: "terminal", name: "boolean" },
-  error: { kind: "terminal", name: "unknown" },
-};
-
-const declaredPathTypes = new WeakMap<ComponentDefinition, Map<string, TypeNode | undefined>>();
-
-/**
- * The type a reference must satisfy, or undefined when nothing declares one.
- *
- * Only a declaration carrying a type constrains a reference: a prop, a typed `<state>`/`<computed>`,
- * or a `<data>` read (whose declared type describes `.value`). A loop alias or an untyped
- * declaration says nothing, so references through it are unconstrained.
- */
-function declaredTypeAt(definition: ComponentDefinition, path: string | readonly (string | number)[], scope?: Scope): TypeNode | undefined {
-  let cache = declaredPathTypes.get(definition);
-  if (cache === undefined) {
-    cache = new Map();
-    declaredPathTypes.set(definition, cache);
-  }
-  const segments = typeof path === "string" ? path.split(".") : path.map(String);
-  const cacheKey = JSON.stringify(segments);
-  const selected = definition.contract.props[segments[0]!]?.select !== undefined && scope !== undefined;
-  if (!selected && cache.has(cacheKey)) return cache.get(cacheKey);
-
-  const [root, ...steps] = segments;
-  let type = rootDeclaredType(definition, root!, steps, scope);
-  for (const step of type === undefined ? [] : steps) {
-    if (type === undefined) break;
-    type = typeAtKey(type, step);
-  }
-  if (!selected) cache.set(cacheKey, type);
-  return type;
-}
-
-/** Resolves the declared type of a path's root, consuming the steps a `<data>` surface owns. */
-function rootDeclaredType(
-  definition: ComponentDefinition,
-  root: string,
-  steps: string[],
-  scope?: Scope,
-): TypeNode | undefined {
-  const prop = definition.contract.props[root];
-  if (prop !== undefined) {
-    const type = prop.select === undefined || scope === undefined
-      ? prop.type : selectedPropType(definition.contract, prop, { [prop.select.from]: scope.get(prop.select.from) });
-    return type === null ? { kind: "terminal", name: "null" } : normalizeType(type);
-  }
-  for (const declaration of definition.declarations ?? []) {
-    if (declaration.name !== root) continue;
-    if (declaration.kind === "state" || declaration.kind === "computed") {
-      return declarationTypeNode(declaration.type, declaration.shape);
-    }
-    if (declaration.kind !== "data") return undefined;
-    // `<data type>` describes the resolved value, reached through `.value`; the rest of the state
-    // surface has its own types.
-    const first = steps.shift();
-    if (first === undefined) return undefined;
-    if (first !== "value") return DATA_STATE_FIELDS[first];
-    return declaration.type === undefined ? undefined : parseTypeExpression(declaration.type);
-  }
-  return undefined;
 }
 
 /** A path an expression reads that a declaration constrains, and its type. */
@@ -849,33 +755,6 @@ function constrainedReferences(
  * whether an item's field satisfies its own type is that field reference's business. That keeps the
  * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
  */
-function conformsAtReference(value: Value, type: TypeNode): boolean {
-  if (value === null) return true;
-  switch (type.kind) {
-    case "list":
-      return Array.isArray(value);
-    case "record":
-    case "object":
-      return typeof value === "object" && value !== null && !Array.isArray(value);
-    case "union":
-      return type.members.some((member) => conformsAtReference(value, member));
-    case "constrained":
-      return conformsAtReference(value, type.base);
-    default:
-      return parseTypedValue(value, type, "$", "value").ok;
-  }
-}
-
-/** Check the destination's immediate type; nested fields are checked when read. */
-function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
-  if (type === undefined || value === ABSENT) return true;
-  if (type === null) return false;
-  // A missing number source cannot overwrite a child's declared default. Only a destination
-  // that explicitly includes null accepts it; ordinary nullable rendering is handled elsewhere.
-  if (value === null) return parseTypedValue(value, type, "$", "value").ok;
-  return conformsAtReference(value, normalizeType(type));
-}
-
 /**
  * Evaluates a binding expression, or leaves it inert when a reference fails its declared type.
  *
@@ -1113,57 +992,7 @@ function setWritablePath(scope: ReactiveScope, path: WritablePath, value: Value)
   if ((typeof key === "string" || typeof key === "number") && target != null) target[key] = value;
 }
 
-function controlValue(element: Element): Value {
-  if (element instanceof HTMLInputElement) {
-    if (element.type === "checkbox" || element.type === "radio") return element.checked;
-    if (element.type === "number" || element.type === "range") {
-      return Number.isNaN(element.valueAsNumber) ? null : element.valueAsNumber;
-    }
-    return element.value;
-  }
-  if (element instanceof HTMLSelectElement) {
-    return element.multiple
-      ? Array.from(element.selectedOptions, (option) => option.value)
-      : element.value;
-  }
-  if (element instanceof HTMLTextAreaElement) return element.value;
-  return (element as unknown as { value?: Value }).value ?? element.getAttribute("value");
-}
 
-/**
- * Writes a bound value into a native control, skipping writes the control already agrees with.
- *
- * The skip is required, not an optimization: assigning `value` resets the control's dirty value
- * flag even when the string is identical, and `minlength`/`maxlength` only constrain a dirty
- * value. Echoing the user's own input back would therefore switch off their constraints.
- */
-function applyBoundControlValue(element: Element, name: string, value: Value): boolean {
-  const lowerName = name.toLowerCase();
-  if (lowerName === "checked" && element instanceof HTMLInputElement) {
-    const next = truthy(value);
-    if (element.checked !== next) element.checked = next;
-    return true;
-  }
-  if (lowerName === "value" && element instanceof HTMLSelectElement && element.multiple) {
-    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    for (const option of Array.from(element.options)) {
-      const next = selected.has(option.value);
-      if (option.selected !== next) option.selected = next;
-    }
-    return true;
-  }
-  if (
-    lowerName === "value" &&
-    (element instanceof HTMLInputElement ||
-      element instanceof HTMLTextAreaElement ||
-      element instanceof HTMLSelectElement)
-  ) {
-    const next = value == null ? "" : String(value);
-    if (element.value !== next) element.value = next;
-    return true;
-  }
-  return false;
-}
 
 const eventDependentHandlers = new WeakMap<HandlerDeclaration, boolean>();
 
@@ -1253,34 +1082,6 @@ function dispatchComponentEvent(
   return (target as Element).dispatchEvent(new CustomEvent(event, init));
 }
 
-function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
-  if (modifiers.includes("self") && event.target !== element) return false;
-  if (event instanceof MouseEvent) {
-    const buttonFilters = modifiers.filter((modifier) => ["left", "middle", "right"].includes(modifier));
-    const buttons: Record<string, number> = { left: 0, middle: 1, right: 2 };
-    if (buttonFilters.length > 0 && !buttonFilters.some((filter) => event.button === buttons[filter])) return false;
-  }
-  const systemKeys = ["ctrl", "shift", "alt", "meta"] as const;
-  for (const key of systemKeys) {
-    if (modifiers.includes(key) && !(event as unknown as Record<string, boolean>)[`${key}Key`]) return false;
-  }
-  if (
-    modifiers.includes("exact") &&
-    systemKeys.some((key) => !modifiers.includes(key) && (event as unknown as Record<string, boolean>)[`${key}Key`])
-  ) return false;
-  if (event instanceof KeyboardEvent) {
-    const keyFilters = modifiers.filter((modifier) =>
-      ["enter", "escape", "space", "tab", "up", "down", "left", "right"].includes(modifier),
-    );
-    const keyNames: Record<string, string> = {
-      enter: "Enter", escape: "Escape", space: " ", tab: "Tab",
-      up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
-    };
-    if (keyFilters.length > 0 && !keyFilters.some((filter) => event.key === keyNames[filter])) return false;
-  }
-  return true;
-}
-
 function bindEvents(
   element: Element,
   node: ElementNode,
@@ -1333,7 +1134,7 @@ function applyContent(
   const value = evalConforming(directive.expression, scope, definition);
   if (value === NONCONFORMING) return;
   if (directive.name === "value") element.textContent = toText(value);
-  else element.replaceChildren(sanitizeFragment(toText(value), document, (node) => contentOnly.add(node)));
+  else element.replaceChildren(sanitizeFragment(toText(value), document, markContentOnly));
 }
 
 function compareValues(a: Value, b: Value): number {
@@ -2217,7 +2018,7 @@ function renderInstance(
         const value = evalConforming(contentDirective.expression, scope, context.definition);
         if (value === NONCONFORMING) return;
         clearRange(start, end);
-        end.before(sanitizeFragment(toText(value), document, (element) => contentOnly.add(element)));
+        end.before(sanitizeFragment(toText(value), document, markContentOnly));
       });
       return [fragment];
     }
@@ -2294,8 +2095,16 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
+  // An adopted root already holds its literals merged with its invocation's attributes, which win
+  // (class and style combine), so only a literal it lacks is written. A root control's default
+  // value and checkedness are the template's again once adopted (below), so those are written.
+  const adoptedRoot = adopted && node === context.rootNode;
+  const resetDefault = (name: string): boolean => (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+    (name === "value" || name === "checked");
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+    if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name) && !resetDefault(attribute.name))) {
+      element.setAttribute(attribute.name, attribute.value);
+    }
   }
   // Serialized live control values use HTML's default-value attributes until hydration. Once
   // adopted, the authored template regains ownership of reset defaults; the captured live value
@@ -2561,27 +2370,6 @@ function pseudoAttributes(data: string): Map<string, string> {
   return attributes;
 }
 
-const piParsingByDocument = new WeakMap<Document, boolean>();
-function documentParsesInstructions(document: Document): boolean {
-  let piParsing = piParsingByDocument.get(document);
-  if (piParsing === undefined) {
-    const probe = document.createElement("div");
-    probe.innerHTML = '<?probe x="1"?>';
-    piParsing = probe.firstChild?.nodeType === 7;
-    piParsingByDocument.set(document, piParsing);
-  }
-  return piParsing;
-}
-/**
- * A rendered-form mark: a processing instruction, or, where the parser does not produce them, the
- * comment it would produce instead, so a lowered DOM and a hydrated DOM hold the same nodes.
- */
-function renderedFormMark(document: Document, target: string, data: string): Node {
-  return documentParsesInstructions(document)
-    ? document.createProcessingInstruction(target, data)
-    : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
-}
-
 function serverMark(node: Node): ServerMark | undefined {
   if (node.nodeType === 7) {
     const pi = node as ProcessingInstruction;
@@ -2785,18 +2573,36 @@ export function serializeRenderedForm(container: Element): string {
       }
     }
     const instance = runtimeInstance(original);
+    const compiled = instance === undefined ? compiledHandle(original) : undefined;
     if (instance !== undefined) {
       const records = Object.fromEntries([instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, instanceRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
+    } else if (compiled !== undefined) {
+      const records = Object.fromEntries([compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, compiledRecord(entry)]));
+      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     }
-    const projection = instance?.projection;
-    if (projection === undefined) return;
-    const unrendered = projection.nodes.filter((node) => !original.contains(node));
+    const projected = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
+    if (projected === undefined) return;
+    const unrendered = projected.filter((node) => !original.contains(node));
     if (unrendered.length === 0) return;
     const carrier = clone.ownerDocument.createElement("template");
     for (const node of unrendered) carrier.content.append(node.cloneNode(true));
     copies[index]!.append(renderedFormMark(clone.ownerDocument, "carrier", ""), carrier);
   });
+  // Compiled keyed rows are their element, without item markers (owner decision 2a). Hydration
+  // adopts rows by their markers, so a region whose first child is not one gets them back here.
+  const regions = clone.ownerDocument.createTreeWalker(clone, 128 /* SHOW_COMMENT */);
+  for (let node = regions.nextNode(); node !== null; node = regions.nextNode()) {
+    if ((node as Comment).data !== "html-next:each-start") continue;
+    const first = node.nextSibling;
+    if (first === null || first.nodeType === 8 && /^html-next:(?:item-start|each-end)$/.test((first as Comment).data)) continue;
+    for (let row: ChildNode | null = first; row !== null && !(row.nodeType === 8 && (row as Comment).data === "html-next:each-end");) {
+      const next: ChildNode | null = row.nextSibling;
+      row.before(clone.ownerDocument.createComment("html-next:item-start"));
+      row.after(clone.ownerDocument.createComment("html-next:item-end"));
+      row = next;
+    }
+  }
   // Serialize marks in the HTML spelling every parser accepts: a PI in supporting browsers and
   // the fallback comment elsewhere. Node's DOM and a browser need not support the same node type.
   const marks: string[] = [];
@@ -2824,22 +2630,34 @@ export function serializeRenderedForm(container: Element): string {
  */
 export function inspectInstance(element: Element): unknown {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return undefined;
-  return inspectRuntimeInstance(instance);
+  if (instance !== undefined) return inspectRuntimeInstance(instance);
+  const handle = compiledHandle(element);
+  return handle === undefined ? undefined : inspectCompiled(handle, handle.D ?? []);
+}
+
+function inspectCompiled(handle: CompiledHandle, delegates: readonly CompiledHandle[]): unknown {
+  const record = compiledRecord(handle);
+  return { tag: handle.S.g, explicit: [...record.explicit].sort(), props: record.props, state: record.state,
+    slots: inspectedSlots(handle.J ?? []), delegates: delegates.map((delegate) => inspectCompiled(delegate, [])) };
+}
+
+/** Each slot's projected nodes, as inspection shows them. */
+function inspectedSlots(projected: readonly (readonly [Node, string])[]): Record<string, string[]> {
+  const slots: Record<string, string[]> = {};
+  for (const [node, slot] of projected) {
+    (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
+  }
+  // Order across slots is not observable; order within a slot is.
+  return Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function inspectRuntimeInstance(instance: RuntimeInstance): unknown {
   const props: Record<string, unknown> = {};
   for (const name of Object.keys(instance.definition.contract.props)) props[name] = instance.scope.get(name);
-  const slots: Record<string, string[]> = {};
-  for (const node of instance.projection?.nodes ?? []) {
-    const slot = instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
-    (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
-  }
-  // Order across slots is not observable; order within a slot is.
-  const sorted = Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
+  const slots = inspectedSlots((instance.projection?.nodes ?? []).map((node) => [node,
+    instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "")]));
   return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props,
-    state: instanceRecord(instance).state, slots: sorted, delegates: instance.delegates.map(inspectRuntimeInstance) };
+    state: instanceRecord(instance).state, slots, delegates: instance.delegates.map(inspectRuntimeInstance) };
 }
 
 function renderTemplateNode(
@@ -3091,7 +2909,7 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   instance.element = element;
   instance.validityCleanup?.();
   if (Object.keys(instance.definition.contract.props).length > 0) {
-    instance.validityCleanup = manageElementValidity(element, {}, { derive: () => rootPropValidity(instance) });
+    instance.validityCleanup = manageDerivedValidity(element, () => rootPropValidity(instance));
   }
   for (const delegate of instance.delegates) {
     delegate.element = element;
@@ -3303,7 +3121,7 @@ function lowerRenderedComponents(
       if (live === undefined) continue;
       const { definition } = live;
       if (
-        contentOnly.has(element) ||
+        isContentOnly(element) ||
         withinUnrendered(element, unrendered) ||
         supersededInvocations.has(element) ||
         alreadyLowered(element, definition.contract.tag) ||
@@ -3360,7 +3178,7 @@ function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
     installPropReflection(instance);
     installStateAttribute(instance);
     if (owner.validityCleanup === undefined && Object.keys(instance.definition.contract.props).length > 0) {
-      owner.validityCleanup = manageElementValidity(root, {}, { derive: () => rootPropValidity(owner) });
+      owner.validityCleanup = manageDerivedValidity(root, () => rootPropValidity(owner));
     }
   }
 }
@@ -3395,7 +3213,7 @@ function lowerScopes(
   for (const scope of scopes) collectWithin(scope, selector, discovered);
   const definitions: LiveDefinition[] = [];
   for (const element of discovered) {
-    if (element.localName === "template" && element.hasAttribute("component") && !contentOnly.has(element)) {
+    if (element.localName === "template" && element.hasAttribute("component") && !isContentOnly(element)) {
       definitions.push(parseDefinition(element as HTMLTemplateElement, definitions.length));
     }
   }
@@ -3421,7 +3239,7 @@ function lowerScopes(
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
-      contentOnly.has(element) ||
+      isContentOnly(element) ||
       !hydration && withinUnrendered(element, unrendered) ||
       supersededInvocations.has(element) ||
       // Already lowered here: a repeat pass must not build this component onto its own root a
@@ -3447,6 +3265,8 @@ function lowerScopes(
         if (!existing.frameworkOwned) roots.add(element);
         continue;
       }
+      // Generated output registered this root's lifecycle itself; it is rendered and owned, not server markup.
+      if ((element as RuntimeElement)[lifecycleKey] !== undefined) continue;
       let accepted = false;
       for (const tag of new Set((element.getAttribute("data-component") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
@@ -3526,6 +3346,8 @@ interface ManagedComponentLifecycle {
   disconnect: undefined | (() => void);
   /** The element that carries the record; a root switch moves it. */
   element: Element;
+  /** A compiled root's handle (see `CompiledHandle`). */
+  readonly h?: unknown;
 }
 
 interface LifecycleCoordinator {
@@ -3747,7 +3569,8 @@ function attachRuntimeComponent(
 
   const attached = runtimeInstance(element);
   if (attached === undefined) fail("HR005", `Could not attach <${definition.contract.tag}> to its native root.`);
-  updateComponentProps(element, options.props ?? {});
+  // The options' props are the instance's initial input; a reconnect keeps whatever they became since.
+  if (instance === undefined) updateComponentProps(element, options.props ?? {});
   connectRuntimeInstance(attached);
 
   let controllerCleanup: void | (() => void);
@@ -3778,8 +3601,9 @@ export function updateComponentProps(
   props: Readonly<Record<string, unknown>>,
 ): void {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return;
-  applyComponentProps(instance, props);
+  // A compiled root takes them through its own prop channel, which applies them as below.
+  if (instance === undefined) compiledHandle(element)?.B?.u?.(props);
+  else applyComponentProps(instance, props);
 }
 
 /** Applies props to one named instance, which a shared root makes explicit. */
@@ -3803,14 +3627,14 @@ function applyComponentProps(
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select === undefined) {
-      const accepted = assignedPropValue(name, prop, input);
+      const accepted = assignedPropValue(prop, input) as Value | undefined;
       if (accepted !== undefined) next[name] = accepted;
     }
   }
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop !== undefined && prop.select !== undefined) {
-      const accepted = assignedPropValue(name, prop, input, selectedPropType(contract, prop, next));
+      const accepted = assignedPropValue(prop, input, selectedPropType(contract, prop, next)) as Value | undefined;
       if (accepted !== undefined) next[name] = accepted;
     }
   }
@@ -3929,7 +3753,7 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
 /** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
 export function getComponentHost(element: Element): ComponentHost | undefined {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return undefined;
+  if (instance === undefined) return compiledHandle(element)?.H;
   if (instance.host !== undefined) return instance.host;
   const writable = new Set(
     (instance.definition.declarations ?? [])

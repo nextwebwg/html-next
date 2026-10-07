@@ -73,7 +73,8 @@ describe("generateComponent", () => {
     const vanilla = artifacts.find((artifact) => artifact.path === "vanilla/XBounded.js")!.content;
     assert.match(vanilla, /"min":1,"max":10/);
     assert.match(vanilla, /"minLength":2,"maxLength":8/);
-    assert.match(vanilla, /html-next\/runtime/);
+    // Compiled directly; tests/vanilla-blocks.test.ts holds its validity to the live runtime's.
+    assert.doesNotMatch(vanilla, /html-next\/runtime/);
   });
 
   it("keeps the primitive native and makes owned values win over native spreads", async () => {
@@ -122,7 +123,7 @@ describe("generateComponent", () => {
     );
   });
 
-  it("keeps list-joining computed expressions on the full-runtime fallback", () => {
+  it("compiles list-joining computed expressions directly through the interpreter's join", () => {
     const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
       <defs>
         <state type="list(string)" name="parts" value="['a', 'b']"></state>
@@ -136,7 +137,8 @@ describe("generateComponent", () => {
       .find((artifact) => artifact.path === "vanilla/ComputedLabel.js")?.content;
 
     assert.ok(vanilla);
-    assert.match(vanilla, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(vanilla, /@nextwebwg\/html-next\/runtime/);
+    assert.match(vanilla, /textCall\("join", \[v\[0\], v\[1\]\]\)/);
   });
 
   it("provides and reads ancestor state in generated targets and lowers conditional values", () => {
@@ -149,8 +151,10 @@ describe("generateComponent", () => {
     const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
     const providerOutput = artifacts(provider);
     const readerOutput = artifacts(reader);
-    assert.match(providerOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
-    assert.match(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
+    // A compiled reader finds its compiled provider's root among its ancestors (tests/vanilla-blocks.test.ts).
+    assert.doesNotMatch(providerOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.match(readerOutput.get("vanilla/XStep.js")!, /readContext\(I, X, \d+, "x-steps", "current"/);
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
@@ -158,7 +162,8 @@ describe("generateComponent", () => {
 
     const nestedProvider = parseComponent(`<template component="x-steps"><defs>` +
       `<state type="number" name="current" value="1"></state></defs><section><x-step></x-step></section></template>`);
-    assert.match(artifacts(nestedProvider).get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
+    // Without a graph naming <x-step>, it is a custom element no component claims, as it is to live.
+    assert.doesNotMatch(artifacts(nestedProvider).get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
     const closedGraphOutput = new Map(generateComponent(nestedProvider, { noContextReaders: true })
       .map((item) => [item.path, item.content]));
     assert.doesNotMatch(closedGraphOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
@@ -170,7 +175,8 @@ describe("generateComponent", () => {
     ));
     const byPath = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
 
-    assert.match(byPath.get("vanilla/DemoAction.js")!, /=== undefined \? false/);
+    // Compiled directly; tests/vanilla-blocks.test.ts holds this shape's DOM to the live runtime's.
+    assert.doesNotMatch(byPath.get("vanilla/DemoAction.js")!, /html-next\/runtime/);
     assert.match(byPath.get("vanilla/DemoAction.js")!, /\["formAction"\] =/);
     const vue = byPath.get("vue/DemoAction.vue")!;
     assert.match(vue, /:formAction\.prop="checkedProps\.destination as any"/);

@@ -353,7 +353,7 @@ describe("generated lifecycle coordinator", () => {
 });
 
 describe("generated controller host", () => {
-  const spec = (names: readonly string[], types: readonly CompactType[]): GeneratedStateSpec => ({ n: names, t: types, f: "x.html" });
+  const spec = (names: readonly string[], types: readonly CompactType[]): GeneratedStateSpec => ({ n: names, t: types, f: "x.html", g: "x-test" });
 
   it("validates, stores raw values, and renders once per flush after controller effects are ordered", async () => {
     const root = document.createElement("div");
@@ -512,5 +512,72 @@ describe("generated controller host", () => {
       assert.equal(host.dispatch("ping", 3), true);
       assert.deepEqual(events, [3]);
     });
+  });
+});
+
+describe("framework targets' observers", () => {
+  /** The TypeScript a target generates, as a function returning the names it declares. */
+  async function load<T>(source: string, names: readonly string[]): Promise<T> {
+    const { transform } = await import("esbuild");
+    const { code } = await transform(source, { loader: "ts" });
+    // oxlint-disable-next-line typescript/no-implied-eval
+    return new Function("MutationObserver", `${code}\nreturn { ${names.join(", ")} };`)(window.MutationObserver) as T;
+  }
+  const counted = (): { count: () => number } => {
+    let made = 0;
+    const Native = window.MutationObserver;
+    window.MutationObserver = class extends Native { constructor(callback: MutationCallback) { super(callback); made += 1; } };
+    return { count: () => made };
+  };
+
+  it("share the document's one observer with live and compiled roots", async () => {
+    const { NATIVE_CONNECTION_SOURCE } = await import("../src/targets/native-connection-source.js");
+    const { subscribeDocumentMutations } = await import("../src/generated-lifecycle.js");
+    const made = counted();
+    const { observeConnection } = await load<{ observeConnection: (element: Element, check: () => void) => () => void }>(
+      NATIVE_CONNECTION_SOURCE, ["observeConnection"]);
+    const root = document.createElement("div");
+    document.body.append(root);
+    const seen: string[] = [];
+    const stopRuntime = subscribeDocumentMutations(document, () => seen.push("runtime"));
+    const stopReact = observeConnection(root, () => seen.push("react"));
+    const stopVue = observeConnection(root, () => seen.push("vue"));
+    root.remove();
+    await flush();
+    assert.equal(made.count(), 1, "one document observer");
+    assert.deepEqual(seen, ["runtime", "react", "vue"]);
+    stopReact();
+    stopVue();
+    stopRuntime();
+    // The last subscriber disconnects it; the next one starts a new one.
+    observeConnection(root, () => {})();
+    assert.equal(made.count(), 2);
+  });
+
+  it("watch every bound select's options with one observer, each select checking only its own", async () => {
+    const { OPTION_WATCH_SOURCE } = await import("../src/targets/shared-generated.js");
+    const made = counted();
+    const { watchOptions } = await load<{ watchOptions: (select: HTMLSelectElement, check: () => void) => () => void }>(
+      OPTION_WATCH_SOURCE, ["watchOptions"]);
+    const [first, second] = [0, 1].map(() => {
+      const select = document.createElement("select");
+      select.append(new window.Option("a", "a"));
+      document.body.append(select);
+      return select;
+    }) as [HTMLSelectElement, HTMLSelectElement];
+    const checked: string[] = [];
+    const stopFirst = watchOptions(first, () => checked.push("first"));
+    const stopSecond = watchOptions(second, () => checked.push("second"));
+    first.options[0]!.value = "b";
+    first.options[0]!.textContent = "b";
+    await flush();
+    second.append(new window.Option("c", "c"));
+    await flush();
+    stopFirst();
+    first.append(new window.Option("d", "d"));
+    await flush();
+    assert.equal(made.count(), 1, "one observer for every bound select");
+    assert.deepEqual(checked, ["first", "second"]);
+    stopSecond();
   });
 });

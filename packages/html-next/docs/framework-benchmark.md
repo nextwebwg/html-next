@@ -27,8 +27,8 @@ Run these from the repository root with the supported Node line. Prefix them wit
 | --- | --- |
 | `pnpm setup:frameworks [--force]` | Create or refresh the ignored checkout `packages/html-next/.benchmark/js-framework-benchmark`. |
 | `pnpm measure:frameworks [options]` | Build the HTML Next entries and run one serial sweep against the controls. |
-| `pnpm verify:frameworks --base=<ref> [--count=<n>] [--output=<file>] [--direct-extend]` | Paired gate: the working tree's Vite-compiled and live entries against `<ref>` (default `origin/main`). |
-| `pnpm smoke:frameworks [--removals=<n>] [--direct-extend]` | Functional check of the Vite-compiled and live entries in Chromium. |
+| `pnpm verify:frameworks --base=<ref> [--count=<n>] [--output=<file>]` | Paired gate: the working tree's Vite-compiled and live entries against `<ref>` (default `origin/main`). |
+| `pnpm smoke:frameworks [--removals=<n>]` | Functional check of the Vite-compiled and live entries in Chromium. |
 
 Setup makes a sparse, blob-filtered checkout of the pinned fork containing only the runner
 (`webdriver-ts`), server, CSS and the `html-next`, `vanillajs`, `react-hooks`, `vue`, `svelte` and
@@ -52,9 +52,6 @@ fork revision and lockfile hashes are therefore the checked values, not assumpti
   With `--reference=HEAD` and a clean tree it is an A/A control; entry positions are fixed here, so it
   includes any position effect as well as noise.
 - `--record`: also write the summary to the ledger (below).
-- `--direct-extend`: build the Vite entry with the unplugin's `experimentalDirectExtend` (see
-  [the compiled direct path](./compiled-direct-path.md)). Also accepted by `verify:frameworks` and
-  `smoke:frameworks`.
 
 Each run writes `packages/html-next/.benchmark/runs/<UTC stamp>/` with the runner's `results/`,
 `traces/`, `runner.log`, `server.log`, `command.json` and `summary.json`. Raw results and traces stay
@@ -71,13 +68,9 @@ All HTML Next entries use the authored `benchmark-app.html` and `controller.js` 
   default native target (no framework conversion), `base: "./"` and target ES2022, into `dist/`
   (`customURL: "/dist"`). The plugin and the `@nextwebwg/html-next` source it compiles with, and the
   runtime modules the generated code imports, all come from the tree being measured (the working
-  tree, or an extracted `--base` revision), never from a published or prebuilt package.
-  With `--direct-extend` the plugin is called with `experimentalDirectExtend: true`, for the base
-  revision as well as the working tree. The entry's size receipt then carries `directExtend`, read
-  from the build's `html-next.manifest.json`: `{ applied, runtimeComponents }` as the plugin
-  recorded it, or `"unsupported"` when the revision predates the option (its plugin ignores the
-  option and builds the general-runtime fallback). The working tree's build must report
-  `applied: true`, or the command stops.
+  tree, or an extracted `--base` revision), never from a published or prebuilt package. Every
+  component compiles to direct DOM code ([compiled components](./compiled-direct-path.md)); a base
+  revision from before that change builds as it shipped, which for this entry was the general runtime.
 - `html-next-live-candidate`: an esbuild bundle of `src/browser.ts` (ES2022, minified, no legal
   comments) with the fork's `index.html` and `bootstrap.js`.
 - `html-next`: the fork's own entry, not rebuilt by this tool. At the pin its checked-in live bundle
@@ -98,8 +91,7 @@ so a refused command never rewrites an entry another run is loading.
 The smoke check exercises both entries with seeded labels, then requires their component markup to
 be identical at seven checkpoints (after update, select, swap, removals, append, reconnect and clear).
 Per-item comment markers are left out of that comparison, because rows may omit them (owner decision
-of 2026-10-06; direct-extend rows do). Run it with and without `--direct-extend` to cover both Vite
-builds.
+of 2026-10-06; compiled rows do).
 
 ## Protocol
 
@@ -145,8 +137,7 @@ Each mode reports its own status; the gate passes only when both pass, and fails
 either regressed, otherwise as `inconclusive`. `inconclusive` needs a quieter rerun. `--count` permits
 a quick local check but marks the report `reduced`. The JSON report records both revisions, the dirty
 flag, the environment, and per mode the bundles, size assessment, comparisons and speed assessment,
-followed by every sweep's medians, and `directExtend` (whether the Vite entries were built with the
-option; each Vite bundle records what its revision applied).
+followed by every sweep's medians.
 
 The nightly "Framework rendering" workflow runs the gate against main as of 24 hours earlier when
 `packages/html-next/src` or `packages/html-next-unplugin/src` changed since then; it can also be run
@@ -159,12 +150,12 @@ not run it, and it is not a release gate until its noise on hosted runners is kn
 `packages/html-next/benchmarks/framework-results/<UTC stamp>-<short commit>.json`. Record full
 standard runs from a quiet machine; reduced runs are exploratory. A summary holds:
 
-- `protocol`, `cpu_samples`, `frameworks`, `benchmarks`, `direct_extend` (whether the Vite entry was
-  built with the option), and the `environment` (Chrome, CPU, OS, Node, fork revision, control
+- `protocol`, `cpu_samples`, `frameworks`, `benchmarks`, and the `environment` (Chrome, CPU, OS, Node, fork revision, control
   lockfile hashes, HTML Next commit and dirty flag).
 - `bundles`: each entry's size receipt, HTML Next entries and controls alike, with
-  `vite_gzip_bytes` and `live_gzip_bytes` repeated at the top level. With `--direct-extend`, the
-  Vite receipt's `directExtend` records what the build applied.
+  `vite_gzip_bytes` and `live_gzip_bytes` repeated at the top level. Ledger entries recorded before
+  every component compiled directly also carry `direct_extend` and a Vite receipt's `directExtend`,
+  from the removed `--direct-extend` option.
 - `median_ms` and `scores` per entry, and `controls` mapping each control to its result name.
 - For each mode `vite` and `live`: `<mode>_score`, `<mode>_vs_<control>` for every control that ran
   (`react_hooks`, `vue`, `svelte`, `solid`), `<mode>_vs_gated_max` (the largest of the Solid, Vue and

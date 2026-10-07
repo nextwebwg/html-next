@@ -144,12 +144,7 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
       const operand = evalNode(node.operand, scope);
       if (operand === NONCONFORMING) return NONCONFORMING;
       if (node.op === "not") return !truthyIn(operand, scope);
-      if (dimensionType(node.operand, scope) !== undefined && typeof operand === "string") {
-        const quantity = parseQuantity(operand);
-        return quantity === undefined ? ABSENT : `${-quantity.value}${quantity.unit}`;
-      }
-      const number = asNumber(operand);
-      return number === ABSENT ? ABSENT : -number;
+      return negate(operand, dimensionType(node.operand, scope));
     }
     case "binary": return evalBinary(node, scope);
     case "conditional": {
@@ -188,9 +183,33 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
     const right = evalNode(node.right, scope);
     return right === NONCONFORMING ? NONCONFORMING : truthyIn(right, scope);
   }
-
   const left = evalNode(node.left, scope);
   const right = evalNode(node.right, scope);
+  // Dimensions are looked up only where `binaryValue` reads them: arithmetic on a non-number.
+  const dimensional = (op === "+" || op === "-" || op === "*" || op === "/") &&
+    (typeof left !== "number" || typeof right !== "number");
+  return binaryValue(op, left, right,
+    dimensional ? dimensionType(node.left, scope) : undefined, dimensional ? dimensionType(node.right, scope) : undefined);
+}
+
+type Dimension = "length" | "percentage" | "duration";
+
+/** Unary minus over an evaluated operand; `dimension` is the operand's declared dimension, if any. */
+export function negate(operand: Value, dimension: Dimension | undefined): Value {
+  if (operand === NONCONFORMING) return NONCONFORMING;
+  if (dimension !== undefined && typeof operand === "string") {
+    const quantity = parseQuantity(operand);
+    return quantity === undefined ? ABSENT : `${-quantity.value}${quantity.unit}`;
+  }
+  const number = asNumber(operand);
+  return number === ABSENT ? ABSENT : -number;
+}
+
+/**
+ * A binary operator other than `and`/`or` over evaluated operands. The dimensions are the operands'
+ * declared dimension types; they matter only for arithmetic on an operand that is not a number.
+ */
+export function binaryValue(op: string, left: Value, right: Value, leftDimension?: Dimension, rightDimension?: Dimension): Value {
   if (left === NONCONFORMING || right === NONCONFORMING) return NONCONFORMING;
   if (op === "=") return left === right;
   if (op === "!=") return left !== right;
@@ -203,8 +222,6 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
 
   if ((op === "+" || op === "-" || op === "*" || op === "/") &&
     (typeof left !== "number" || typeof right !== "number")) {
-    const leftDimension = dimensionType(node.left, scope);
-    const rightDimension = dimensionType(node.right, scope);
     if (leftDimension !== undefined || rightDimension !== undefined) {
       if (isAbsent(left) || isAbsent(right)) return ABSENT;
       const leftQuantity = leftDimension !== undefined && typeof left === "string" ? parseQuantity(left) : undefined;
@@ -255,11 +272,7 @@ function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope)
   const { args, fn } = node;
   if (fn === "format" || fn === "formatRange" || fn === "formatParts") {
     const values = args.map((argument) => reveal(evalNode(argument, scope), scope));
-    if (values.includes(NONCONFORMING)) return NONCONFORMING;
-    if (values.includes(ABSENT)) return ABSENT;
-    if (args.length < (fn === "formatRange" ? 2 : 1)) return NONCONFORMING;
-    const result = formatValue(values[0], expressionFormattingType(args[0]!, scope), fn, ...values.slice(1));
-    return result === Symbol.for("html-next.invalid-result") ? NONCONFORMING : result === undefined ? ABSENT : result;
+    return formatCall(fn, values, args.length === 0 ? undefined : expressionFormattingType(args[0]!, scope));
   }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
@@ -270,38 +283,64 @@ function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope)
   if (fn === "concat" || fn === "join") {
     const values: Value[] = [];
     for (const argument of args) values.push(reveal(evalNode(argument, scope), scope));
-    if (values.includes(NONCONFORMING)) return NONCONFORMING;
-    if (fn === "concat") {
-      if (values.some((value) => value === ABSENT)) return ABSENT;
-      if (values.length === 0 || values.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
-      return values.map((value) => value === null ? "" : String(value)).join("");
-    }
-    if (values.some((value) => value === ABSENT)) return ABSENT;
-    if (values.length !== 2 || !Array.isArray(values[0]) || typeof values[1] !== "string") return NONCONFORMING;
-    const items = values[0];
-    if (items.some((value) => value === ABSENT)) return ABSENT;
-    if (items.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
-    if (new Set(items.filter((value) => value !== null).map((value) => typeof value)).size > 1) return NONCONFORMING;
-    return items.map((value) => value === null ? "" : String(value)).join(values[1]);
+    return textCall(fn, values);
   }
-
-  const isRound = fn === "round";
-  if (fn === "abs" && args.length !== 1 || isRound && (args.length < 1 || args.length > 2)
-    || (fn === "min" || fn === "max") && args.length === 0 || fn === "clamp" && args.length !== 3) return NONCONFORMING;
+  if (!mathArity(fn, args.length)) return NONCONFORMING;
   const dimension = dimensionType(args[0]!, scope);
+  return mathCall(fn, args.map((argument) => evalNode(argument, scope)), dimension,
+    dimension === undefined ? [] : args.map((argument) => dimensionType(argument, scope)));
+}
+
+/** `format`, `formatRange` and `formatParts` over evaluated arguments and the first one's formatting type. */
+export function formatCall(fn: string, values: readonly Value[], type: string | undefined): Value {
+  if (values.includes(NONCONFORMING)) return NONCONFORMING;
+  if (values.includes(ABSENT)) return ABSENT;
+  if (values.length < (fn === "formatRange" ? 2 : 1)) return NONCONFORMING;
+  const result = formatValue(values[0], type, fn, ...values.slice(1));
+  return result === Symbol.for("html-next.invalid-result") ? NONCONFORMING : result === undefined ? ABSENT : result;
+}
+
+/** `concat` and `join` over evaluated arguments. */
+export function textCall(fn: string, values: readonly Value[]): Value {
+  if (values.includes(NONCONFORMING)) return NONCONFORMING;
+  if (fn === "concat") {
+    if (values.some((value) => value === ABSENT)) return ABSENT;
+    if (values.length === 0 || values.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
+    return values.map((value) => value === null ? "" : String(value)).join("");
+  }
+  if (values.some((value) => value === ABSENT)) return ABSENT;
+  if (values.length !== 2 || !Array.isArray(values[0]) || typeof values[1] !== "string") return NONCONFORMING;
+  const items = values[0] as readonly Value[];
+  if (items.some((value) => value === ABSENT)) return ABSENT;
+  if (items.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
+  if (new Set(items.filter((value) => value !== null).map((value) => typeof value)).size > 1) return NONCONFORMING;
+  return items.map((value) => value === null ? "" : String(value)).join(values[1] as string);
+}
+
+/** Whether a math call has an argument count it accepts. */
+export function mathArity(fn: string, count: number): boolean {
+  return !(fn === "abs" && count !== 1 || fn === "round" && (count < 1 || count > 2) ||
+    (fn === "min" || fn === "max") && count === 0 || fn === "clamp" && count !== 3);
+}
+
+/**
+ * `abs`, `round`, `min`, `max` and `clamp` over evaluated arguments of an accepted count. Arguments
+ * are checked in order, so the first absent, nonconforming or mistyped one decides. `dimension` is
+ * the first argument's declared dimension and `dimensions` each argument's, read only when it is set.
+ */
+export function mathCall(fn: string, values: readonly Value[], dimension: Dimension | undefined, dimensions: readonly (Dimension | undefined)[]): Value {
   let unit: string | undefined;
   const numbers: number[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const value = evalNode(args[index]!, scope);
-    if (value === NONCONFORMING) return NONCONFORMING;
-    if (value === ABSENT) return ABSENT;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]!;
+    if (value === NONCONFORMING || value === ABSENT) return value;
     if (dimension === undefined) {
       const number = asNumber(value);
       if (number === ABSENT) return NONCONFORMING;
       numbers.push(number);
       continue;
     }
-    if (dimensionType(args[index]!, scope) !== dimension || typeof value !== "string") return NONCONFORMING;
+    if (dimensions[index] !== dimension || typeof value !== "string") return NONCONFORMING;
     const quantity = parseQuantity(value);
     if (quantity === undefined || quantity.dimension !== dimension) return NONCONFORMING;
     if (unit !== undefined && quantity.unit !== unit) return NONCONFORMING;
@@ -370,7 +409,7 @@ export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "
 const cache = new Map<string, CompiledExpression>();
 
 /** Formatting inference uses declared identities and typed operators, never string contents. */
-function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
+export function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
   const collection = (type: TypeNode | undefined): boolean => {
     if (type?.kind === "constrained") return collection(type.base);
     if (type?.kind === "union") return type.members.every((member) =>

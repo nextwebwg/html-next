@@ -23,4 +23,5 @@ it("builds existing Markdown, heading links, generated reference data, and an au
     expect(reference).toContain('href="/proof/guide/quick-start/"');
     expect(result.browserInputs.some(path => /(?:marked|\.server\.|proof\.ts)/.test(path))).toBe(false);
   } finally { await rm(root, { recursive: true, force: true }); }
-}, 60_000);
+  // It builds the whole guide, which takes about a minute on a quiet machine.
+}, 120_000);

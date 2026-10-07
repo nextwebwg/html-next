@@ -20,6 +20,7 @@ import {
   type GeneratedArtifact,
 } from "./generate.js";
 import { addControllerGraph } from "./controller-files.js";
+import type { TemplateNode } from "./template.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
 
 export type BuildTarget = "docs" | "styles" | "vanilla" | "vue";
@@ -121,7 +122,13 @@ export async function buildComponents(
     const definition = controllerTarget === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: `../${controllerTarget}` });
-    const generated = generateComponent(definition).filter((artifact) => selected.has(artifact.path.split("/", 1)[0] as BuildTarget));
+    // The graph's components this template invokes, from their sibling Vanilla modules.
+    const invocations = new Map([...graph.tags].flatMap(([tag, id]) => {
+      const invoked = graph.nodes.get(id)!.definition;
+      return id !== node.id && definitionInvokes(node.definition.template, tag)
+        ? [[tag, { module: `./${invoked.contract.name}.js`, definition: invoked }] as const] : [];
+    }));
+    const generated = generateComponent(definition, { invocations }).filter((artifact) => selected.has(artifact.path.split("/", 1)[0] as BuildTarget));
     for (const artifact of generated) {
       if (artifacts.has(artifact.path)) {
         throw new Error(`Generated artifact collision at ${artifact.path}.`);
@@ -212,4 +219,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
+}
+
+/** Whether a template (or a slot's fallback) invokes `tag`. */
+function definitionInvokes(node: TemplateNode, tag: string): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot") return (node.fallback ?? []).some((child) => definitionInvokes(child, tag));
+  return node.name === tag || node.children.some((child) => definitionInvokes(child, tag));
 }
