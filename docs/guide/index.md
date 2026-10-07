@@ -22,8 +22,6 @@ Build reactive components in HTML. Keep markup, state, and styles together, then
 
 HTML Forms has its own [installation and usage guide](/html-next/forms).
 
-See [Performance and size](/html-next/performance) for benchmark results and bundle measurements.
-
 ## Built on a public proposal
 
 HTML Next is JavaScript tooling for the [Declarative HTML Components](/declarative-components/) and [HTML Forms](/html-forms/) proposals. The component language has one reference: the public proposal. These guides cover installing and using its implementation.

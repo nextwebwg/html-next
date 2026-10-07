@@ -110,7 +110,8 @@ export const render = () => renderToStaticMarkup(<XCard title="Hello"><XBadge />
       const typeOptions: ts.CompilerOptions = {
         noEmit: true, strict: true, skipLibCheck: true, allowImportingTsExtensions: true,
         jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-        target: ts.ScriptTarget.ES2022,
+        // TypeScript 6+ default: a stylesheet import needs a declaration.
+        target: ts.ScriptTarget.ES2022, noUncheckedSideEffectImports: true,
       };
       const typeErrors = (file: string) => ts.getPreEmitDiagnostics(ts.createProgram([file], typeOptions))
         .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
