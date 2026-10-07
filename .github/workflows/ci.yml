@@ -57,7 +57,7 @@ jobs:
     # pwuser shares the runner's uid 1001; Firefox refuses to run as root with a HOME it doesn't own.
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
-      options: --user 1001 --ipc=host --init
+      options: --user 1001 --ipc=host --init --security-opt seccomp=unconfined
     # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
     # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
     timeout-minutes: 15
