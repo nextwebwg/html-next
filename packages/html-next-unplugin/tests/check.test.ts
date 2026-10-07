@@ -193,6 +193,24 @@ describe("checkHtmlNext", () => {
     assert.equal(resource[0]?.column, 3);
   });
 
+  it.each(["native", "vue", "react", "svelte"] as const)("warns when a bare %s keyword spells a name in scope, beside errors", async (target) => {
+    const root = await fixture();
+    const source = (extra: string) => `<template component="x-app" status="early" summary="App.">
+  <defs><state name="count" type="number" value="1"></state></defs>
+  <main>
+    <output from:title="count" from:data-mode="compact" $value="$count"></output>
+    <input type="number" bind:value="count">${extra}
+  </main>
+</template>`;
+    await writeFile(join(root, "app.html"), source(""));
+    const warnings = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
+    assert.deepEqual(warnings.map(({ code, severity, line }) => [code, severity, line]), [["HT022", "warning", 4]]);
+    assert.match(warnings[0]!.message, /`count` is a keyword, not a reference; did you mean `\$count`\?/);
+    await writeFile(join(root, "app.html"), source('\n    <output $value="$missing"></output>'));
+    const mixed = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
+    assert.deepEqual(mixed.map(({ code, severity, line }) => [code, severity, line]), [["HT022", "warning", 4], ["HT003", "error", 6]]);
+  });
+
   it("rejects operational failures rather than reporting a clean check", async () => {
     const root = await fixture();
     const diagnostics = await checkHtmlNext({ entries: ["missing.html"], root });
