@@ -20,13 +20,14 @@ export async function fixture(): Promise<string> {
     return { props: { brand: 'HTMLKit' }, data: { owner: 'kit' }, head: { title: 'Application' } };
   }`);
   await write(root, "app/pages/index.html", `<meta name="htmlkit:page" content="home-page">
+    <template component="home-button"><defs><prop name="count" type="number" default="0">Count</prop></defs><button type="button"><slot></slot><span $value="count"></span></button></template>
     <template component="home-label"><strong>Shared-file helper</strong><style>:host { color: rgb(90, 80, 70); }</style></template>
     <template component="home-page" controller="./home.js"><meta name="description" from:content="asset"><defs>
     <prop name="asset" type="string" required>Asset URL</prop>
     <state name="count" type="number" value="0"></state>
     <state name="text" type="string" value="initial"></state>
     <data name="result" src="./data.json"></data></defs>
-    <section><h1>Home</h1><home-label></home-label><img from:src="asset" alt="Mark"><button $ref="button">Next</button>
+    <section><h1>Home</h1><home-label></home-label><img from:src="asset" alt="Mark"><home-button $ref="button" from:count="count" from:aria-expanded="count > 4" class:active="count > 4" style:opacity="count > 4 ? '0.5' : '1'">Next</home-button>
       <output $value="count"></output><input bind:value="text"><p $if="result.pending">Loading data</p>
       <p $if="result.ok" $value="result.value.label"></p></section><style>:host { border-color: rgb(10, 20, 30); }</style></template>`);
   await write(root, "app/pages/data.json", '{"label":"Loaded data"}');

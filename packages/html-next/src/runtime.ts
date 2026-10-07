@@ -28,6 +28,8 @@ import {
   createEffect,
   createSignal,
   ReactiveScope,
+  readItems,
+  readKey,
   registerReactiveAlias,
   untracked,
   type ReactiveEffect,
@@ -150,12 +152,6 @@ interface DocumentRegistry {
 const contentOnly = new WeakSet<Element>();
 const selectValueBindings = new WeakMap<HTMLSelectElement, () => void>();
 /**
- * An invocation element is replaced by the component's own root when it lowers. A parent renders
- * against the invocation, so its bound props and event listeners resolve through this to reach the
- * component that actually lowered there.
- */
-const loweredInvocations = new WeakMap<Element, { instance: RuntimeInstance }>();
-/**
  * Invocation elements a component has already replaced. A mutation batch can still name one, and
  * lowering it again would build a second instance whose own root gets discovered in turn.
  */
@@ -167,6 +163,60 @@ function whenLowered(invocation: Element, rebind: (root: Element) => void): void
   const pending = rebindOnLower.get(invocation);
   if (pending === undefined) rebindOnLower.set(invocation, [rebind]);
   else pending.push(rebind);
+}
+
+/**
+ * What a parent bound on a template-component invocation. Lowering discards that element, so the
+ * parent binds nothing to it: these bindings act on the component that lowers in its place.
+ */
+interface InvocationBinding {
+  readonly tag: string;
+  /** A registered component's invocation: lowering replaces it, so nothing attaches to it meanwhile. */
+  readonly awaitsLowering: boolean;
+  component: RuntimeInstance | undefined;
+  /** Run against the component's root when it lowers and again whenever that root is replaced. */
+  readonly effects: ReactiveEffect[];
+}
+/** Bindings waiting for their component, keyed by invocation (or, when hydrating, its server root). */
+const pendingInvocationBindings = new WeakMap<Element, InvocationBinding[]>();
+
+/** The component named `tag` that already owns `root`, directly or as a delegate. */
+function committedComponent(root: Element, tag: string): RuntimeInstance | undefined {
+  const owner = runtimeInstances.get(root);
+  return owner?.definition.contract.tag === tag
+    ? owner : owner?.delegates.find((instance) => instance.definition.contract.tag === tag);
+}
+
+function followComponent(binding: InvocationBinding, component: RuntimeInstance): void {
+  binding.component = component;
+  component.followers.push(() => { for (const effect of binding.effects) effect.execute(); });
+}
+
+/**
+ * Where bound values go. Until its component lowers, an invocation's attributes are that component's
+ * inputs (a hydrating root is already the component's root); afterwards they go to its current root.
+ */
+function valueTarget(element: Element, invocation: InvocationBinding | undefined): Element | undefined {
+  const component = invocation?.component;
+  return component === undefined ? element : untracked(() => component.rootElement.get()) ?? component.element;
+}
+
+/**
+ * Where listeners, properties and refs go: the root of the component an invocation became. Before
+ * then, a server-rendered root or an element no registered component claims yet is itself the target.
+ */
+function rootTarget(element: Element, invocation: InvocationBinding | undefined): Element | undefined {
+  const component = invocation?.component;
+  if (component !== undefined) return untracked(() => component.rootElement.get());
+  return invocation?.awaitsLowering === true ? undefined : element;
+}
+
+/** Re-run what invocations bound on a root, a delegate's bindings before those of the component it serves. */
+function followRoot(owner: RuntimeInstance, root: Element): void {
+  for (let index = owner.delegates.length; index >= 0; index -= 1) {
+    const instance = index === 0 ? owner : owner.delegates[index - 1]!;
+    for (const follow of instance.followers) follow(root);
+  }
 }
 const runtimeInstances = new WeakMap<Element, RuntimeInstance>();
 /** How deep one lowering pass follows component invocations that other components render. */
@@ -713,16 +763,16 @@ const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly C
  * The value at a dependency path. A path names both a list index and a record key as a segment
  * (`items.0`, `byId.42`), so each segment is read the way the value in hand reads it.
  */
-function readPath(path: string, scope: Scope): Value {
+function readPath(path: string, scope: ReactiveScope): Value {
   const [root, ...keys] = path.split(".");
-  let value = scope.get(root!);
+  let value = scope.read(root!);
   for (const key of keys) {
     if (Array.isArray(value)) {
-      value = key === "length" ? value.length : /^\d+$/.test(key) ? value[Number(key)] : undefined;
+      value = key === "length" || /^\d+$/.test(key) ? readKey(value, key === "length" ? key : Number(key)) : undefined;
     } else if (typeof value === "string" && key === "length") {
       value = value.length;
     } else if (typeof value === "object" && value !== null) {
-      value = (value as { readonly [key: string]: Value })[key];
+      value = readKey(value, key);
     } else {
       return ABSENT;
     }
@@ -1179,45 +1229,31 @@ function bindEvents(
   node: ElementNode,
   scope: ReactiveScope,
   context: RuntimeRenderContext,
+  invocation?: InvocationBinding,
 ): void {
   for (const binding of node.events ?? []) {
     const declaration = (context.definition.declarations ?? []).find(
       (candidate): candidate is HandlerDeclaration =>
         candidate.kind === "handler" && candidate.name === binding.handler,
     )!;
-    // A component invocation is replaced by that component's own root, so the listener has to
-    // follow it there; for an ordinary element the target never changes.
-    let target = element;
-    const listener = (event: Event): void => {
-      if (!eventPasses(event, target, binding.modifiers)) return;
-      if (binding.modifiers.includes("prevent")) event.preventDefault();
-      if (binding.modifiers.includes("stop")) event.stopPropagation();
-      runHandler(declaration, target, scope, context, event);
-    };
     const capture = binding.modifiers.includes("capture");
-    let attached = false;
-    const attach = (): void => {
-      target.addEventListener(binding.name, listener, {
-        capture,
-        passive: binding.modifiers.includes("passive"),
-        once: binding.modifiers.includes("once"),
-      });
-      attached = true;
-    };
-    const detach = (): void => {
-      target.removeEventListener(binding.name, listener, { capture });
-      attached = false;
-    };
-    ownEffect(context, scope, () => {
-      attach();
-      return detach;
+    const once = binding.modifiers.includes("once");
+    // Native `once` removes the listener after its first call; a later root must not re-arm it.
+    let fired = false;
+    const effect = ownEffect(context, scope, () => {
+      const target = rootTarget(element, invocation);
+      if (target === undefined || fired) return;
+      const listener = (event: Event): void => {
+        fired = once;
+        if (!eventPasses(event, target, binding.modifiers)) return;
+        if (binding.modifiers.includes("prevent")) event.preventDefault();
+        if (binding.modifiers.includes("stop")) event.stopPropagation();
+        runHandler(declaration, target, scope, context, event);
+      };
+      target.addEventListener(binding.name, listener, { capture, passive: binding.modifiers.includes("passive"), once });
+      return () => target.removeEventListener(binding.name, listener, { capture });
     }, 2);
-    whenLowered(element, (root) => {
-      const live = attached;
-      if (live) detach();
-      target = root;
-      if (live) attach();
-    });
+    invocation?.effects.push(effect);
   }
 }
 
@@ -1254,7 +1290,8 @@ function shapeList(
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
 ): Value[] {
-  let result = items.slice();
+  // Rows stay plain: tracked like the proxy's reads, but no row ever needs its own proxy.
+  let result = readItems(items);
   if (flow.where !== undefined) {
     const where = flow.where;
     result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
@@ -1521,18 +1558,6 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
   return stable;
 }
 
-/** A row's scope. Its loop record gets a proxy only if something reads it. */
-function rowScope(
-  parent: ReactiveScope,
-  locals: Record<string, Value>,
-  types: Readonly<Record<string, TypeNode | undefined>>,
-  loop: Record<string, Value> | undefined,
-): ReactiveScope {
-  const local = typedLayer(parent, locals, types);
-  if (loop !== undefined) local.setUnread("loop", loop);
-  return local;
-}
-
 function renderEachRegion(
   node: ElementNode | SlotNode,
   scope: ReactiveScope,
@@ -1560,8 +1585,6 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
-  // An item or index named `loop` shadows the record, so it then stays an ordinary local.
-  const unreadLoop = flow.item !== "loop" && flow.index !== "loop";
   const { flow: _flow, ...body } = node;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
@@ -1575,19 +1598,21 @@ function renderEachRegion(
     let retained = 0;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
-      const locals: Record<string, Value> = unreadLoop ? { [flow.item]: item } : { [flow.item]: item, loop };
+      const locals: Record<string, Value> = {
+        [flow.item]: item,
+        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+      };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local = typedLayer(scope, locals, { [flow.item]: itemType });
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(context, owned);
         const adopted = adopting[adoptionIndex++];
@@ -1612,8 +1637,7 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        if (unreadLoop) block.scope.setUnread("loop", loop);
-        else block.scope.set("loop", locals.loop!);
+        block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
       ordered?.push(block);
@@ -1741,93 +1765,149 @@ function renderMatch(
   return renderInstance(armNode, match.scope, document, [], context, candidate);
 }
 
-/** Install the existing attribute/property bindings on an already-created element. */
-function bindElementAttributes(
+function bindElement(
   element: Element,
   node: ElementNode,
   scope: ReactiveScope,
   context: RuntimeRenderContext,
 ): void {
+  if (node.ref !== undefined) {
+    if (iteratedRefNames(context.definition).has(node.ref)) {
+      ((context.refs[node.ref] ??= []) as Element[]).push(element);
+    } else context.refs[node.ref] = element;
+  }
+  bindElementAttributes(element, node, scope, context);
+}
+
+/**
+ * Bind a template-component invocation through the component that lowers there: props reach the
+ * component, and everything else its current root. The component may already own `element` when
+ * it was adopted in an earlier pass; otherwise lowering claims these bindings.
+ */
+function bindInvocation(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+  awaitsLowering: boolean,
+): InvocationBinding {
+  const invocation: InvocationBinding = {
+    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [],
+  };
+  if (node.ref !== undefined) {
+    const ref = node.ref;
+    // Hold the ref's place in render order until the component's root fills it.
+    let current = element;
+    if (iteratedRefNames(context.definition).has(ref)) ((context.refs[ref] ??= []) as Element[]).push(current);
+    else context.refs[ref] = current;
+    invocation.effects.push(ownEffect(context, scope, () => {
+      const root = rootTarget(element, invocation);
+      if (root === undefined || root === current) return;
+      const recorded = context.refs[ref];
+      if (Array.isArray(recorded)) {
+        const index = recorded.indexOf(current);
+        if (index >= 0) (recorded as Element[])[index] = root;
+      } else if (recorded === current) context.refs[ref] = root;
+      current = root;
+    }));
+  }
+  bindElementAttributes(element, node, scope, context, invocation);
+  return invocation;
+}
+
+/** Hand an invocation's bindings to the component that owns it, or keep them until it lowers. */
+function settleInvocation(element: Element, invocation: InvocationBinding): void {
+  if (invocation.component !== undefined) followComponent(invocation, invocation.component);
+  else pendingInvocationBindings.set(element, [...pendingInvocationBindings.get(element) ?? [], invocation]);
+}
+
+/** Attach what parents bound on an invocation to the component that just lowered there. */
+function claimInvocationBindings(element: Element, component: RuntimeInstance): boolean {
+  const pending = pendingInvocationBindings.get(element);
+  if (pending === undefined) return false;
+  const tag = component.definition.contract.tag;
+  const claimed = pending.filter((invocation) => invocation.tag === tag);
+  if (claimed.length === pending.length) pendingInvocationBindings.delete(element);
+  else pendingInvocationBindings.set(element, pending.filter((invocation) => invocation.tag !== tag));
+  for (const invocation of claimed) followComponent(invocation, component);
+  return claimed.length > 0;
+}
+
+/** Install the existing attribute/property bindings on an element, or on an invocation's component. */
+function bindElementAttributes(
+  element: Element,
+  node: ElementNode,
+  scope: ReactiveScope,
+  context: RuntimeRenderContext,
+  invocation?: InvocationBinding,
+): void {
+  const own = (run: () => void | (() => void), priority?: number): void => {
+    const effect = ownEffect(context, scope, run, priority);
+    invocation?.effects.push(effect);
+  };
   for (const attribute of node.attributes) {
     if (attribute.kind === "attribute") {
-      let bindingTarget = element;
-      const applyBinding = (): void => {
+      own(() => {
         const value = evalConforming(attribute.expression, scope, context.definition);
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
         if (value === NONCONFORMING) return;
-        // A lowered child owns its props: write them through the same channel framework adapters
-        // use, so the child re-parses the declared type and reflects the value itself.
-        const lowered = loweredInvocations.get(element);
-        const childDefinition = lowered?.instance.definition ?? (element.localName.includes("-")
-          ? registryFor(element.ownerDocument).definitions.get(element.localName)?.definition : undefined);
-        if (childDefinition !== undefined && attribute.target === undefined) {
-          const propName = propAttributeNames(childDefinition, false)[attribute.name.toLowerCase()];
-          if (propName !== undefined) {
-            const contract = childDefinition.contract;
-            const prop = contract.props[propName]!;
-            const selected = prop.select === undefined ? prop.type : lowered === undefined ? undefined
-              : selectedPropType(contract, prop, { [prop.select.from]: lowered.instance.scope.get(prop.select.from) });
-            if (!conformsAtDestination(value, selected)) return;
-            if (lowered !== undefined) {
-              applyComponentProps(lowered.instance, { [propName]: value });
-              return;
-            }
+        // A component owns its props: write them through the same channel framework adapters use,
+        // so the component re-parses the declared type and reflects the value itself.
+        const child = invocation?.component;
+        const definition = invocation === undefined ? undefined
+          : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
+        const propName = definition === undefined || attribute.target !== undefined
+          ? undefined : propAttributeNames(definition, false)[attribute.name.toLowerCase()];
+        if (propName !== undefined) {
+          const contract = definition!.contract;
+          const prop = contract.props[propName]!;
+          const selected = prop.select === undefined ? prop.type : child === undefined ? undefined
+            : selectedPropType(contract, prop, { [prop.select.from]: child.scope.get(prop.select.from) });
+          if (!conformsAtDestination(value, selected)) return;
+          if (child !== undefined) {
+            applyComponentProps(child, { [propName]: value });
+            return;
           }
+          // A server-rendered root carries its serialized props; they replay when it is adopted.
+          if (element.localName !== node.name) return;
         }
+        const target = valueTarget(element, invocation);
+        if (target === undefined) return;
         if (attribute.target === "class") {
-          bindingTarget.classList.toggle(attribute.name, truthy(value));
+          target.classList.toggle(attribute.name, truthy(value));
         } else if (attribute.target === "style") {
-          (bindingTarget as HTMLElement).style.setProperty(attribute.name, toText(value));
-        } else if (attribute.twoWay === true && applyBoundControlValue(bindingTarget, attribute.name, value)) {
+          (target as HTMLElement).style.setProperty(attribute.name, toText(value));
+        } else if (attribute.twoWay === true && applyBoundControlValue(target, attribute.name, value)) {
           // Native form-control properties carry the live value; no duplicate attribute write.
         } else {
-          setAttribute(bindingTarget, attribute.name, toAttribute(value, attribute.name));
+          setAttribute(target, attribute.name, toAttribute(value, attribute.name));
         }
-      };
-      const bindingEffect = ownEffect(context, scope, applyBinding);
-      if (node.name.includes("-")) whenLowered(element, (root) => {
-        bindingTarget = root;
-        bindingEffect.execute();
       });
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
-        let target = element;
-        let attached = false;
-        let eventName = "input";
-        const listener = (): void => {
-          if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
-          setWritablePath(scope, attribute.writablePath!, controlValue(target));
-        };
-        const attach = (): void => {
-          eventName = target instanceof HTMLSelectElement ||
+        own(() => {
+          const target = rootTarget(element, invocation);
+          if (target === undefined) return;
+          const eventName = target instanceof HTMLSelectElement ||
             (target instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(target.type))
             ? "change" : "input";
+          const listener = (): void => {
+            if (target instanceof HTMLInputElement && target.type === "radio" && !target.checked) return;
+            setWritablePath(scope, attribute.writablePath!, controlValue(target));
+          };
           target.addEventListener(eventName, listener);
-          attached = true;
-        };
-        const detach = (): void => {
-          target.removeEventListener(eventName, listener);
-          attached = false;
-        };
-        ownEffect(context, scope, () => {
-          attach();
-          return detach;
+          return () => target.removeEventListener(eventName, listener);
         }, 2);
-        whenLowered(element, (root) => {
-          const live = attached;
-          if (live) detach();
-          target = root;
-          if (live) attach();
-        });
       }
     } else if (attribute.kind === "property") {
-      ownEffect(context, scope, () => {
+      own(() => {
         const property = evalConforming(attribute.expression, scope, context.definition);
         if (property === NONCONFORMING) return;
-        (element as unknown as Record<string, unknown>)[attribute.name] = property;
+        const target = rootTarget(element, invocation);
+        if (target !== undefined) (target as unknown as Record<string, unknown>)[attribute.name] = property;
       });
     }
-    // Content directives are handled below.
+    // Content directives are handled by the renderer.
   }
 }
 
@@ -2037,6 +2117,9 @@ function renderInstance(
     // not as the authored invocation tag. That child owns its already-adopted
     // subtree; walking the parent's invocation shape would move its projected
     // nodes into a disconnected synthetic element.
+    const invocation = bindInvocation(candidate, node, scope, context, false);
+    bindEvents(candidate, node, scope, context, invocation);
+    settleInvocation(candidate, invocation);
     return [candidate];
   }
   if (
@@ -2049,6 +2132,9 @@ function renderInstance(
     // A nested component the server already lowered. Keep its root, and bind this
     // definition's nodes that were projected into it: they sit in the nested root's slot ranges (or its
     // carrier), exactly where lowering put them.
+    const invocation = bindInvocation(candidate, node, scope, context, false);
+    bindEvents(candidate, node, scope, context, invocation);
+    settleInvocation(candidate, invocation);
     const nested = serverRanges(candidate, false);
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
@@ -2090,22 +2176,6 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
-  if (node.ref !== undefined) {
-    if (iteratedRefNames(context.definition).has(node.ref)) {
-      ((context.refs[node.ref] ??= []) as Element[]).push(element);
-    } else context.refs[node.ref] = element;
-    if (node.name.includes("-")) {
-      let current = element;
-      whenLowered(element, (root) => {
-        const recorded = context.refs[node.ref!];
-        if (Array.isArray(recorded)) {
-          const index = recorded.indexOf(current);
-          if (index >= 0) (recorded as Element[])[index] = root;
-        } else if (recorded === current) context.refs[node.ref!] = root;
-        current = root;
-      });
-    }
-  }
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
   }
@@ -2133,11 +2203,16 @@ function renderInstance(
     const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
     element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
   }
-  bindElementAttributes(element, node, scope, context);
+  // A component may lower onto any custom-element name. Lowering replaces a registered component's
+  // invocation, so nothing attaches to it; an unregistered one keeps its bindings until claimed.
+  const invocation = elementName.includes("-") && document.defaultView?.customElements.get(elementName) === undefined
+    ? bindInvocation(element, node, scope, context, registryFor(document).definitions.has(elementName)) : undefined;
+  if (invocation === undefined) bindElement(element, node, scope, context);
 
   if (contentDirective !== undefined) {
     ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document, context.definition));
-    bindEvents(element, node, scope, context);
+    bindEvents(element, node, scope, context, invocation);
+    if (invocation !== undefined) settleInvocation(element, invocation);
     return [element];
   }
 
@@ -2223,7 +2298,8 @@ function renderInstance(
       element.setSelectionRange(controlState.selectionStart, controlState.selectionEnd);
     }
   }
-  bindEvents(element, node, scope, context);
+  bindEvents(element, node, scope, context, invocation);
+  if (invocation !== undefined) settleInvocation(element, invocation);
   return [element];
 }
 
@@ -2876,13 +2952,7 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   runtimeInstances.set(element, instance);
   instance.rootElement.set(element);
   // A delegated root may already have followers before its first native root is installed.
-  if (previous !== element) {
-    // Inner bindings apply before the outer invocation's bindings on a shared root.
-    for (let index = instance.delegates.length; index >= 0; index -= 1) {
-      const owner = index === 0 ? instance : instance.delegates[index - 1]!;
-      for (const follow of owner.followers) follow(element);
-    }
-  }
+  if (previous !== element) followRoot(instance, element);
 }
 
 /**
@@ -3010,7 +3080,6 @@ function commitRuntimeInvocations(
     if (invocation.replace) {
       supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
-      loweredInvocations.set(invocation.invocation, { instance: invocation.instance });
       runtimeInstances.delete(invocation.invocation);
       // Whatever a parent deferred for this invocation now has the element it was waiting for.
       for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {
@@ -3036,6 +3105,11 @@ function commitRuntimeInvocations(
       });
     } else {
       adoptComponentRoot(invocation.instance, host);
+    }
+    if (claimInvocationBindings(invocation.invocation, invocation.instance)) {
+      const root = untracked(() => invocation.instance.rootElement.get());
+      // A delegate claims after the component it serves attached the root; keep inner before outer.
+      if (root !== undefined) followRoot(runtimeInstances.get(root) ?? invocation.instance, root);
     }
     connectRuntimeInstance(invocation.instance);
   }

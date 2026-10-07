@@ -15,9 +15,8 @@ interface Dependency {
 
 interface ReactiveCell extends Dependency {
   computed?: ReactiveComputed<Value>;
+  /** Always plain; JavaScript readers get its proxy from `get`. */
   value: Value;
-  /** The value is still the raw object `setUnread` bound; its first read wraps it. */
-  unread: boolean;
 }
 
 interface Subscription {
@@ -40,12 +39,68 @@ export function untracked<T>(read: () => T): T {
 let nextEffectId = 0;
 const maximumExecutionsPerFlush = 100;
 const proxyCache = new WeakMap<object, object>();
+/** The plain object behind each reactive proxy and writable alias. */
+const plainTargets = new WeakMap<object, object>();
 const objectSubscribers = new WeakMap<object, Map<PropertyKey, Dependency>>();
 
 /** Keep a writable controller facade from becoming another layer of reactive identity. */
 export function registerReactiveAlias(alias: object, value: object): void {
-  const canonical = proxyCache.get(value);
-  if (canonical !== undefined) proxyCache.set(alias, canonical);
+  const plain = toPlain(value);
+  const canonical = proxyCache.get(plain);
+  if (canonical === undefined) return;
+  proxyCache.set(alias, canonical);
+  plainTargets.set(alias, plain);
+}
+
+/**
+ * Reactive storage holds plain objects, never proxies. JavaScript reads through a proxy, which
+ * tracks each property it reads; the expression engine reads the plain objects with `readKey`,
+ * which tracks the same (object, key) dependencies, so a write through either reaches both.
+ */
+export function toPlain<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  return (plainTargets.get(value) as T | undefined) ?? value;
+}
+
+/** The dependency for one property of a plain object, created on its first tracked read. */
+function propertyDependency(target: object, key: PropertyKey): Dependency {
+  let properties = objectSubscribers.get(target);
+  if (properties === undefined) {
+    properties = new Map();
+    objectSubscribers.set(target, properties);
+  }
+  let subscribers = properties.get(key);
+  if (subscribers === undefined) {
+    subscribers = { first: undefined, last: undefined };
+    properties.set(key, subscribers);
+  }
+  return subscribers;
+}
+
+/**
+ * A property read for the expression engine: tracked like a proxy read, but the object stays plain
+ * and so does the result. Only records and lists take this path. Anything else (a class instance,
+ * whose accessors must see the proxy as `this`) reads through its proxy.
+ */
+export function readKey(object: object, key: string | number): Value | undefined {
+  const prototype = Object.getPrototypeOf(object);
+  if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
+    return toPlain((wrap(object as Value) as Record<PropertyKey, Value>)[key]);
+  }
+  if (activeEffect !== undefined && !Object.isFrozen(object)) {
+    activeEffect.track(propertyDependency(object, typeof key === "number" ? String(key) : key));
+  }
+  const value = (object as Record<PropertyKey, Value | undefined>)[key];
+  return value !== null && typeof value === "object" ? toPlain(value) : value;
+}
+
+/** A list's items for the expression engine, tracking its length and each index it reads. */
+export function readItems(list: readonly Value[]): Value[] {
+  const plain = toPlain(list);
+  const length = readKey(plain, "length") as number;
+  const items: Value[] = [];
+  for (let index = 0; index < length; index += 1) items.push(readKey(plain, index)!);
+  return items;
 }
 
 function unsubscribe(subscription: Subscription): void {
@@ -565,42 +620,41 @@ export class ReactiveScope implements Scope {
     return this.#local(name) !== undefined || this.parent?.has(name) === true;
   }
 
+  /** The value as JavaScript sees it: an object comes back as its proxy. */
   get(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
     activeEffect?.track(cell);
-    return cell.unread ? this.#read(cell) : cell.value;
+    return wrap(cell.value);
+  }
+
+  /** The plain value, for the expression engine; see `readKey`. */
+  read(name: string): Value | undefined {
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.read(name);
+    activeEffect?.track(cell);
+    return cell.value;
+  }
+
+  readKey(object: object, key: string | number): Value | undefined {
+    return readKey(object, key);
+  }
+
+  reveal(value: Value): Value {
+    return wrap(value);
   }
 
   set(name: string, value: Value): void {
-    const wrapped = wrap(value);
+    const plain = toPlain(value);
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: wrapped, first: undefined, last: undefined, unread: false };
+      cell = { value: plain, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
       return;
     }
-    if (Object.is(cell.unread ? this.#read(cell) : cell.value, wrapped)) return;
-    cell.value = wrapped;
-    trigger(cell);
-  }
-
-  /**
-   * Binds an object this binding has never held, as `set` would, but defers its proxy to the first
-   * read. Wrapping has no observable effect, so a value nothing reads never needs a proxy. Being a
-   * new value, it notifies the binding's readers like `set` does.
-   */
-  setUnread(name: string, value: Record<string, Value>): void {
-    const cell = this.#local(name);
-    if (cell === undefined) {
-      const created: ReactiveCell = { value, first: undefined, last: undefined, unread: true };
-      this.#cells.set(name, created);
-      this.#cachedCell = created;
-      return;
-    }
-    cell.value = value;
-    cell.unread = true;
+    if (Object.is(cell.value, plain)) return;
+    cell.value = plain;
     trigger(cell);
   }
 
@@ -617,19 +671,22 @@ export class ReactiveScope implements Scope {
   defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: null, first: undefined, last: undefined, unread: false };
+      cell = { value: null, first: undefined, last: undefined };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
     }
     const computed = new ReactiveComputed(
       this.scheduler,
-      () => wrap(compute()),
+      () => toPlain(compute()),
       cell,
     );
     cell.computed = computed;
     // Most scopes contain only writable values. Install the extra computed lookup only on scopes
     // that need it so ordinary state reads retain the minimal hot path.
-    if (!Object.hasOwn(this, "get")) this.get = this.#getWithComputed;
+    if (!Object.hasOwn(this, "get")) {
+      this.get = this.#getWithComputed;
+      this.read = this.#readWithComputed;
+    }
     return computed;
   }
 
@@ -651,14 +708,17 @@ export class ReactiveScope implements Scope {
   #getWithComputed(name: string): Value | undefined {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
-    if (cell.computed !== undefined) return cell.computed.get();
+    if (cell.computed !== undefined) return wrap(cell.computed.get());
     activeEffect?.track(cell);
-    return cell.unread ? this.#read(cell) : cell.value;
+    return wrap(cell.value);
   }
 
-  #read(cell: ReactiveCell): Value {
-    cell.unread = false;
-    return cell.value = wrap(cell.value);
+  #readWithComputed(name: string): Value | undefined {
+    const cell = this.#local(name);
+    if (cell === undefined) return this.parent?.read(name);
+    if (cell.computed !== undefined) return cell.computed.get();
+    activeEffect?.track(cell);
+    return cell.value;
   }
 }
 
@@ -668,27 +728,15 @@ export class ReactiveScope implements Scope {
  */
 const reactiveHandler: ProxyHandler<object> = {
   get(target, key, receiver) {
-    if (activeEffect !== undefined) {
-      let properties = objectSubscribers.get(target);
-      if (properties === undefined) {
-        properties = new Map();
-        objectSubscribers.set(target, properties);
-      }
-      let subscribers = properties.get(key);
-      if (subscribers === undefined) {
-        subscribers = { first: undefined, last: undefined };
-        properties.set(key, subscribers);
-      }
-      activeEffect.track(subscribers);
-    }
+    if (activeEffect !== undefined) activeEffect.track(propertyDependency(target, key));
     return wrap(Reflect.get(target, key, receiver) as Value);
   },
   set(target, key, next, receiver) {
     const previousLength = Array.isArray(target) ? target.length : undefined;
-    const previous = Reflect.get(target, key, receiver);
-    const wrapped = wrap(next as Value);
-    const result = Reflect.set(target, key, wrapped, receiver);
-    if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+    const previous = toPlain(Reflect.get(target, key, receiver));
+    const plain = toPlain(next as Value);
+    const result = Reflect.set(target, key, plain, receiver);
+    if (!Object.is(previous, plain)) trigger(objectSubscribers.get(target)?.get(key));
     // Defining an array index can extend length before push writes that same length again.
     if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
       trigger(objectSubscribers.get(target)?.get("length"));
@@ -774,9 +822,10 @@ function wrap(value: Value): Value {
   if (value === null || typeof value !== "object") return value;
   const cached = proxyCache.get(value);
   if (cached !== undefined) return cached as Value;
-  if (isNativeEvent(value) || Object.isFrozen(value)) return value;
+  // Already a proxy: storage is plain, so this is rare enough for a second lookup.
+  if (plainTargets.has(value) || isNativeEvent(value) || Object.isFrozen(value)) return value;
   const proxy = new Proxy(value, reactiveHandler);
   proxyCache.set(value, proxy);
-  proxyCache.set(proxy, proxy);
+  plainTargets.set(proxy, value);
   return proxy as Value;
 }
