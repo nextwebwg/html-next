@@ -250,7 +250,7 @@ for (const target of ["vue", "react"] as const) it(`${target} supports named loc
     ? `import { UiButton } from "./controls.html"; export const good = <UiButton label="Save" />;`
     : `<script setup lang="ts">import { UiButton } from "./controls.html";</script><template><UiButton label="Save" /></template>`);
   await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { noEmit: true, strict: true,
-    skipLibCheck: false, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
+    skipLibCheck: false, noUncheckedSideEffectImports: true, allowArbitraryExtensions: true, module: "ESNext", moduleResolution: "Bundler", target: "ES2022", jsx: "react-jsx" }, include: ["src"] }));
   const compiler = require.resolve(target === "vue" ? "vue-tsc/bin/vue-tsc.js" : "typescript/bin/tsc");
   await run(process.execPath, [compiler, "-p", join(root, "tsconfig.json")], { cwd: root });
   assert.ok(result.sourceFiles.some((path) => path.endsWith(join("src", "controls.html"))));
