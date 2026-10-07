@@ -7,13 +7,22 @@
  * cases here without changing the generated shape of components already on the direct path.
  */
 
-import type { ExpressionNode } from "../expression.js";
-import { compactTypeAt, conforms, type CompactType } from "../generated-runtime.js";
+import { declaredExpressionType, declaredTypeAt, declareLayerTypes, declareTypes } from "../declared-types.js";
+import {
+  dimensionType,
+  expressionFormattingType,
+  mathArity,
+  typeCheckedDependencies,
+  type CompiledExpression,
+  type ExpressionNode,
+  type Scope as TypeScope,
+} from "../expression.js";
+import { conforms, type CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
 import { rootArms, type ComponentDefinition, type ElementNode, type TemplateNode } from "../template.js";
-import { declarationTypeNode, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, type TypeNode } from "../type-system.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
@@ -48,6 +57,8 @@ interface Lowered {
   readonly deep: boolean;
   /** A truthiness conversion inside reads the contents of a possible container from the item. */
   readonly contents: boolean;
+  /** May evaluate to NONCONFORMING, which a binding then does not write. */
+  readonly fails: boolean;
   /** Structural identity, so equal expressions in one update share an evaluation. */
   readonly key: string;
 }
@@ -189,6 +200,20 @@ function literalValue(node: ExpressionNode): unknown {
 interface Scope {
   readonly roots: readonly Root[];
   readonly alias: string | undefined;
+  /** Declared types at build time, as the live scope answers them (`declareTypes`). */
+  readonly types: TypeScope;
+}
+
+const ARITHMETIC = new Set(["+", "-", "*", "/"]);
+
+/** Source for a build-time dimension, which the shared helpers test against `undefined`. */
+const dimensionSource = (dimension: string | undefined): string => dimension === undefined ? "undefined" : JSON.stringify(dimension);
+const MATH = new Set(["abs", "round", "min", "max", "clamp"]);
+const FORMAT = new Set(["format", "formatRange", "formatParts"]);
+
+/** Lowered reads with nothing read yet: literals, and the base other results extend. */
+function none(key: string, source: string): Lowered {
+  return { source, bits: 0, nested: false, item: false, boolean: false, deep: false, contents: false, fails: false, key };
 }
 
 function lower(node: ExpressionNode, scope: Scope): Lowered {
@@ -197,10 +222,10 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     case "literal": {
       const value = node.value;
       if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") notYetDirect();
-      return { source: valueSource(value), bits: 0, nested: false, item: false, boolean: typeof value === "boolean", deep: false, contents: false, key };
+      return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
-      if (node.name === scope.alias) return { source: "o", bits: 0, nested: false, item: true, boolean: false, deep: true, contents: false, key };
+      if (node.name === scope.alias) return { ...none(key, "o"), item: true, deep: true };
       // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
       if (scope.alias !== undefined && node.name === "loop") notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -208,51 +233,63 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const root = scope.roots[index]!;
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
-        source: `v[${index}]`, bits: 1 << index, nested: false, item: false,
-        boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type), contents: false, key,
+        ...none(key, `v[${index}]`), bits: 1 << index,
+        boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type),
       };
     }
     case "member": {
-      // The loop item one level deep, or an undeclared path below a root.
-      if (node.object.kind === "id" && node.object.name === scope.alias) {
-        return { source: `readMember(o, ${JSON.stringify(node.key)})`, bits: 0, nested: false, item: true, boolean: false, deep: true, contents: false, key };
-      }
-      const keys: string[] = [node.key];
-      let object = node.object;
-      while (object.kind === "member") {
-        keys.unshift(object.key);
-        object = object.object;
-      }
-      if (object.kind !== "id" || object.name === scope.alias) notYetDirect();
-      const index = scope.roots.findIndex((root) => root.name === (object as { name: string }).name);
-      if (index < 0) notYetDirect();
-      // A declared path is validated where it is read; that prepass is not in this subset yet.
-      let type = scope.roots[index]!.type;
-      for (const step of keys) type = compactTypeAt(type, step);
-      if (type !== 0) notYetDirect();
-      let source = `v[${index}]`;
-      for (const step of keys) source = `readMember(${source}, ${JSON.stringify(step)})`;
-      return { source, bits: 1 << index, nested: true, item: false, boolean: false, deep: true, contents: false, key };
+      const object = lower(node.object, scope);
+      return {
+        ...object, key, boolean: false, deep: true,
+        source: `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`,
+        // A read below a root follows that root's data; a read below the item is item data.
+        nested: object.nested || !object.item && object.bits !== 0,
+      };
+    }
+    case "index": {
+      const object = lower(node.object, scope);
+      const index = lower(node.index, scope);
+      const both = merge(object, index);
+      return {
+        ...none(key, `readIndex(${object.source}, ${index.source})`), ...both, deep: true,
+        nested: both.nested || !object.item && object.bits !== 0,
+      };
     }
     case "unary": {
-      if (node.op !== "not") notYetDirect();
+      if (node.op === "-") {
+        const operand = lower(node.operand, scope);
+        const dimension = dimensionType(node.operand, scope.types);
+        return { ...operand, key, boolean: false, deep: false, source: `negate(${operand.source}, ${dimensionSource(dimension)})` };
+      }
       const operand = truthiness(lower(node.operand, scope));
-      return { ...operand, source: `!${operand.source}`, boolean: true, deep: false, key };
+      return operand.fails
+        ? { ...operand, source: `notValue(${operand.source})`, boolean: false, deep: false, key }
+        : { ...operand, source: `!${operand.source}`, boolean: true, deep: false, key };
     }
     case "binary": {
       const left = lower(node.left, scope);
       const right = lower(node.right, scope);
-      if (node.op === "=" || node.op === "!=") {
-        // Identity comparison reads no contents, and both sides share the interpreter's ABSENT.
-        return {
-          source: `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`,
-          ...merge(left, right), boolean: true, deep: false, key,
-        };
+      const fails = left.fails || right.fails;
+      if (node.op === "and" || node.op === "or") {
+        const a = truthiness(left);
+        const b = truthiness(right);
+        return fails
+          ? { ...none(key, `logicValue(${node.op === "and"}, ${a.source}, ${b.source})`), ...merge(a, b), fails: true }
+          : { ...none(key, `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`), ...merge(a, b), boolean: true };
       }
-      if (node.op !== "and" && node.op !== "or") notYetDirect();
-      const a = truthiness(left);
-      const b = truthiness(right);
-      return { source: `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`, ...merge(a, b), boolean: true, deep: false, key };
+      if ((node.op === "=" || node.op === "!=") && !fails) {
+        // Identity comparison reads no contents, and both sides share the interpreter's ABSENT.
+        return { ...none(key, `(${left.source} ${node.op === "=" ? "===" : "!=="} ${right.source})`), ...merge(left, right), boolean: true };
+      }
+      const arithmetic = ARITHMETIC.has(node.op);
+      const leftDimension = arithmetic ? dimensionType(node.left, scope.types) : undefined;
+      const rightDimension = arithmetic ? dimensionType(node.right, scope.types) : undefined;
+      const dimensions = leftDimension === undefined && rightDimension === undefined ? ""
+        : `, ${dimensionSource(leftDimension)}, ${dimensionSource(rightDimension)}`;
+      return {
+        ...none(key, `binaryValue(${JSON.stringify(node.op)}, ${left.source}, ${right.source}${dimensions})`),
+        ...merge(left, right), fails: fails || dimensions !== "",
+      };
     }
     case "conditional": {
       const test = truthiness(lower(node.test, scope));
@@ -260,18 +297,72 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const alternate = lower(node.alternate, scope);
       const both = merge(test, merge(consequent, alternate));
       return {
-        source: `(${test.source} ? ${consequent.source} : ${alternate.source})`, ...both,
-        boolean: consequent.boolean && alternate.boolean, deep: consequent.deep || alternate.deep, key,
+        ...none(key, test.fails
+          ? `chooseValue(${test.source}, ${consequent.source}, ${alternate.source})`
+          : `(${test.source} ? ${consequent.source} : ${alternate.source})`),
+        ...both, boolean: consequent.boolean && alternate.boolean, deep: consequent.deep || alternate.deep,
       };
     }
-    default: notYetDirect();
+    case "call": {
+      const args = node.args.map((argument) => lower(argument, scope));
+      const reads = args.reduce<Reads>((all, argument) => merge(all, argument), none(key, ""));
+      if (node.fn === "default") {
+        if (args.length !== 2) return { ...none(key, "NONCONFORMING"), fails: true };
+        const [value, fallback] = args as [Lowered, Lowered];
+        return {
+          ...none(key, `defaultValue(${value.source}, ${fallback.source})`), ...reads,
+          boolean: value.boolean && fallback.boolean, deep: value.deep || fallback.deep,
+        };
+      }
+      // Text and formatting read a list's or object's contents, as a converting binding does.
+      const values = (): string => `[${args.map(convertible).join(", ")}]`;
+      const contents = args.reduce<Reads>((all, argument) => {
+        const read = converted(argument);
+        return merge(all, { ...read, contents: read.contents || itemContainer(argument) });
+      }, none(key, ""));
+      if (node.fn === "concat" || node.fn === "join") {
+        return { ...none(key, `textCall(${JSON.stringify(node.fn)}, ${values()})`), ...contents, fails: true };
+      }
+      if (FORMAT.has(node.fn)) {
+        const type = node.args.length === 0 ? undefined : expressionFormattingType(node.args[0]!, scope.types);
+        return {
+          ...none(key, `formatCall(${JSON.stringify(node.fn)}, ${values()}, ${dimensionSource(type)})`), ...contents,
+          fails: true, deep: node.fn === "formatParts",
+        };
+      }
+      if (!MATH.has(node.fn) || !mathArity(node.fn, args.length)) return { ...none(key, "NONCONFORMING"), fails: true };
+      const dimension = dimensionType(node.args[0]!, scope.types);
+      const dimensions = dimension === undefined ? "[]"
+        : `[${node.args.map((argument) => dimensionSource(dimensionType(argument, scope.types))).join(", ")}]`;
+      return {
+        ...none(key, `mathCall(${JSON.stringify(node.fn)}, [${args.map((argument) => argument.source).join(", ")}], ${dimensionSource(dimension)}, ${dimensions})`),
+        ...reads, fails: true,
+      };
+    }
+    case "object": {
+      const values = node.pairs.map((pair) => lower(pair.value, scope));
+      const reads = values.reduce<Reads>((all, value) => merge(all, value), none(key, ""));
+      const source = reads.fails
+        ? `recordValue(${JSON.stringify(node.pairs.map((pair) => pair.key))}, [${values.map((value) => value.source).join(", ")}])`
+        : `{ ${node.pairs.map((pair, index) => `${JSON.stringify(pair.key)}: ${values[index]!.source}`).join(", ")} }`;
+      return { ...none(key, source), ...reads, deep: true };
+    }
+    case "array": {
+      const items = node.items.map((item) => lower(item, scope));
+      const reads = items.reduce<Reads>((all, item) => merge(all, item), none(key, ""));
+      const list = `[${items.map((item) => item.source).join(", ")}]`;
+      return { ...none(key, reads.fails ? `listValue(${list})` : list), ...reads, deep: true };
+    }
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails">;
 
 function merge(left: Reads, right: Reads): Reads {
-  return { bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item, contents: left.contents || right.contents };
+  return {
+    bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
+    contents: left.contents || right.contents, fails: left.fails || right.fails,
+  };
 }
 
 /** Whether converting the value may read the contents of a list or object the row's item reached. */
@@ -287,8 +378,8 @@ function convertible(value: Lowered): string {
 /** Applies the interpreter's truthiness; converting a possible container reads its contents. */
 function truthiness(value: Lowered): Lowered {
   return value.boolean ? value : {
-    ...converted(value), source: `truthy(${convertible(value)})`, boolean: true, deep: false,
-    contents: value.contents || itemContainer(value),
+    ...converted(value), source: `${value.fails ? "truthyValue" : "truthy"}(${convertible(value)})`,
+    boolean: !value.fails, deep: false, contents: value.contents || itemContainer(value),
   };
 }
 
@@ -322,15 +413,52 @@ function compileRoots(definition: ComponentDefinition): Root[] {
   });
 }
 
+/** A declared path's read (`readPath`): list items by index, `length`, and object keys. */
+function pathSource(root: number, steps: readonly string[]): string {
+  return steps.length === 0 ? `v[${root}]` : `readDeclared(v[${root}], ${JSON.stringify(steps)})`;
+}
+
 class Planner {
   readonly blocks: Block[] = [];
+  readonly scope: Scope;
 
-  constructor(readonly roots: readonly Root[]) {}
+  constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition) {
+    const types: TypeScope = { get: () => undefined };
+    declareTypes(types, definition);
+    this.scope = { roots, alias: undefined, types };
+  }
 
-  block(element: ElementNode, row: boolean, alias: string | undefined, root: boolean): Block {
+  /**
+   * Lowers an expression the live runtime evaluates with `evalConforming`: a declared path below a
+   * root is checked against its own type first, and a failing one warns once and leaves the
+   * expression nonconforming. A root's own value is checked on every write, so it always passes.
+   */
+  checked(plan: CompiledExpression, scope: Scope): Lowered {
+    const value = lower(plan.ast, scope);
+    let paths: readonly string[] = [];
+    try { paths = typeCheckedDependencies(plan); } catch { /* evaluated as written */ }
+    const checks: string[] = [];
+    let reads: Reads = value;
+    for (const path of paths) {
+      const declared = declaredTypeAt(this.definition, path);
+      if (declared === undefined) continue;
+      const [name, ...steps] = path.split(".");
+      const index = this.roots.findIndex((root) => root.name === name);
+      if (index < 0) notYetDirect();
+      if (steps.length === 0) continue;
+      const type = compactType(declared);
+      if (type === undefined) notYetDirect();
+      checks.push(`checkReference(S, ${pathSource(index, steps)}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+      reads = merge(reads, { bits: 1 << index, nested: true, item: false, contents: false, fails: true });
+    }
+    if (checks.length === 0) return value;
+    return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
+  }
+
+  block(element: ElementNode, row: boolean, scope: Scope, root: boolean): Block {
     const block: Block = { id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row };
     this.blocks.push(block);
-    const spec = this.element(block, element, [], { roots: this.roots, alias }, root);
+    const spec = this.element(block, element, [], scope, root);
     // The root's own element is the factory's; its children clone from a fragment.
     (block as { spec: unknown }).spec = root ? ["", [], ...spec.slice(2)] : spec;
     return block;
@@ -355,7 +483,7 @@ class Planner {
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
       if (attribute.expressionPlan === undefined) notYetDirect();
-      const expression = lower(attribute.expressionPlan.ast, scope);
+      const expression = this.checked(attribute.expressionPlan, scope);
       if (attribute.kind === "directive") {
         if (attribute.name !== "value") notYetDirect();
         content = expression;
@@ -402,7 +530,7 @@ class Planner {
     if (node.kind === "text") {
       if (node.segments !== undefined) notYetDirect();
       if (node.expressionPlan === undefined) return node.value;
-      const expression = lower(node.expressionPlan.ast, scope);
+      const expression = this.checked(node.expressionPlan, scope);
       block.bindings.push({ site: this.site(block, path), kind: "text", name: "", expression, initial: '""' });
       return 0;
     }
@@ -413,23 +541,26 @@ class Planner {
     const site = this.site(block, path);
     if (flow.kind === "if") {
       if (flow.testPlan === undefined) notYetDirect();
-      const test = truthiness(lower(flow.testPlan.ast, scope));
+      const test = truthiness(this.checked(flow.testPlan, scope));
       // A test re-renders its body whenever its inputs change, as the live runtime does, so it
       // may read only roots it can name exactly.
       if (test.nested || test.item) notYetDirect();
-      block.regions.push({ kind: "if", site, block: this.block(body, false, undefined, false), test });
+      block.regions.push({ kind: "if", site, block: this.block(body, false, scope, false), test });
       return 1;
     }
     if (flow.kind !== "each" || flow.key === undefined || flow.keyPlan === undefined || flow.listPlan === undefined ||
       flow.index !== undefined || flow.where !== undefined || flow.sort !== undefined || flow.limit !== undefined ||
       flow.item === "loop" || this.roots.some((root) => root.name === flow.item)) notYetDirect();
-    const list = lower(flow.listPlan.ast, scope);
-    const rowScope = { roots: this.roots, alias: flow.item };
+    const list = this.checked(flow.listPlan, scope);
+    const listType = declaredExpressionType(flow.listPlan, scope.types);
+    const types: TypeScope = { get: () => undefined };
+    declareLayerTypes(types, scope.types, { [flow.item]: listType?.kind === "list" ? listType.item : undefined });
+    const rowScope: Scope = { roots: this.roots, alias: flow.item, types };
     const key = lower(flow.keyPlan.ast, rowScope);
     // A key is memoized per item, so it may read only the item, and never a container's contents.
     if (key.bits !== 0 || key.nested || key.contents) notYetDirect();
     if (list.item) notYetDirect();
-    block.regions.push({ kind: "each", site, block: this.block(body, true, flow.item, false), list, key, alias: flow.item });
+    block.regions.push({ kind: "each", site, block: this.block(body, true, rowScope, false), list, key, alias: flow.item });
     return 2;
   }
 }
@@ -445,8 +576,8 @@ export function blockPlan(definition: ComponentDefinition): BlockPlan | undefine
       rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
     if (compileComponentStylesForBuild(definition.css, definition).stateNames.length > 0) return undefined;
     const roots = compileRoots(definition);
-    const planner = new Planner(roots);
-    const root = planner.block(definition.template, false, undefined, true);
+    const planner = new Planner(roots, definition);
+    const root = planner.block(definition.template, false, planner.scope, true);
     return { roots, root, blocks: planner.blocks };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
@@ -590,6 +721,10 @@ export function emitBlocks(
         const last = `r.v${index}`;
         const site = field(block, binding.site);
         const output = `s${index}`;
+        // A nonconforming result leaves what the binding last wrote, as the live runtime does.
+        const fails = finalExpression(binding).fails;
+        if (fails) lines.push(`    if (${value} !== NONCONFORMING) {`);
+        const start = lines.length;
         switch (binding.kind) {
           case "attribute":
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
@@ -606,6 +741,10 @@ export function emitBlocks(
               `    if (${output} !== ${last}) ${site}.classList.toggle(${JSON.stringify(binding.name)}, ${last} = ${output});`);
             break;
         }
+        if (fails) {
+          for (let line = start; line < lines.length; line += 1) lines[line] = `  ${lines[line]}`;
+          lines.push("    }");
+        }
       }
       lines.push("  }");
     }
@@ -613,16 +752,22 @@ export function emitBlocks(
       const child = region.block.id;
       if (region.kind === "if") {
         const test = region.test!;
-        lines.push(
-          `  if (${guard(maskOf(test))}) {`,
+        // A nonconforming test leaves the region as it is, and its body keeps updating.
+        lines.push(test.fails
+          ? `  let t${index};\n  if (${guard(maskOf(test))} && (t${index} = ${test.source}) !== NONCONFORMING) {`
+          : `  if (${guard(maskOf(test))}) {`,
           `    r.b${index} = undefined;`,
           `    clearRegion(r.a${region.site}, r.e${index});`,
-          `    if (${test.source}) r.e${index}.before((r.b${index} = m${child}(d)).n);`,
+          `    if (${test.fails ? `t${index}` : test.source}) r.e${index}.before((r.b${index} = m${child}(d)).n);`,
           `  } else if (r.b${index} !== undefined) p${child}(r.b${index}, c, d);`,
         );
         return;
       }
-      lines.push(`  if (${guard(maskOf(region.list!) | NESTED)}) r.L${index}.update(${region.list!.source}, d, c);`);
+      const list = region.list!;
+      // A nonconforming list leaves the rows as they are.
+      lines.push(list.fails
+        ? `  if (${guard(maskOf(list) | NESTED)}) { const l = ${list.source}; if (l !== NONCONFORMING) r.L${index}.update(l, d, c); }`
+        : `  if (${guard(maskOf(list) | NESTED)}) r.L${index}.update(${list.source}, d, c);`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
         (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c);`);
@@ -701,9 +846,11 @@ export function emitBlocks(
     ...body,
   ];
   const source = factory.join("\n");
-  const helpers = ["attachGeneratedController", "buildTemplate", "clearRegion", "KeyedList", "readMember", "toAttribute",
-    "toText", "trackContainer", "truthy", "visitSelected", "writeAttribute", "writeText"].filter((name) => name === "attachGeneratedController" ||
-    new RegExp(`\\b${name}\\b`).test(source));
+  const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
+    "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
+    "readDeclared", "readFailing", "readIndex", "readMember", "recordValue", "textCall", "toAttribute", "toText",
+    "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText"]
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(source));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
   const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);
   return [
@@ -730,7 +877,7 @@ export function lowerExpression(
   alias?: string,
 ): string | undefined {
   try {
-    return lower(node, { roots: roots.map((root) => ({ ...root, initial: "undefined" })), alias }).source;
+    return lower(node, { roots: roots.map((root) => ({ ...root, initial: "undefined" })), alias, types: { get: () => undefined } }).source;
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
     throw error;

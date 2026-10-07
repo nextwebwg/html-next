@@ -271,7 +271,8 @@ export function binaryValue(op: string, left: Value, right: Value, leftDimension
 function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): Value {
   const { args, fn } = node;
   if (fn === "format" || fn === "formatRange" || fn === "formatParts") {
-    return formatCall(fn, args.map((argument) => reveal(evalNode(argument, scope), scope)), expressionFormattingType(args[0]!, scope));
+    const values = args.map((argument) => reveal(evalNode(argument, scope), scope));
+    return formatCall(fn, values, args.length === 0 ? undefined : expressionFormattingType(args[0]!, scope));
   }
   if (fn === "default") {
     if (args.length !== 2) return NONCONFORMING;
@@ -408,7 +409,7 @@ export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "
 const cache = new Map<string, CompiledExpression>();
 
 /** Formatting inference uses declared identities and typed operators, never string contents. */
-function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
+export function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
   const collection = (type: TypeNode | undefined): boolean => {
     if (type?.kind === "constrained") return collection(type.base);
     if (type?.kind === "union") return type.members.every((member) =>

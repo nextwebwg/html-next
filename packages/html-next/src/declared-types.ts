@@ -5,7 +5,7 @@
  */
 
 import { selectedPropType } from "./contract.js";
-import { dimensionType, type Scope } from "./expression.js";
+import { compileExpression, dimensionType, type CompiledExpression, type Scope } from "./expression.js";
 import type { ComponentDefinition } from "./template.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "./type-system.js";
 
@@ -111,4 +111,20 @@ export function declareLayerTypes(child: Scope, parent: Scope, types: Readonly<R
     return type;
   };
   child.typeOfPath = (path) => dimensionOf(child.typeOfDeclaredPath?.(path)) ?? parent.typeOfPath?.(path);
+}
+
+/** The declared type of an expression that is a path (`items`, `order.lines.0`), or undefined. */
+export function declaredExpressionType(expression: string | CompiledExpression, scope: Scope): TypeNode | undefined {
+  let node = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
+  const path: string[] = [];
+  while (node.kind === "member" || node.kind === "index") {
+    if (node.kind === "member") path.unshift(node.key);
+    else if (node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")) {
+      path.unshift(String(node.index.value));
+    } else return undefined;
+    node = node.object;
+  }
+  if (node.kind !== "id") return undefined;
+  path.unshift(node.name);
+  return scope.typeOfDeclaredPath?.(path.join("."));
 }

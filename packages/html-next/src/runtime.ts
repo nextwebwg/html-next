@@ -1,6 +1,6 @@
 import type { ControllerModule } from "./controller.js";
 import { selectedPropType } from "./contract.js";
-import { declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
+import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes } from "./declared-types.js";
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
@@ -666,21 +666,6 @@ function readInvocation(
 /** A child scope layer whose locals shadow the parent (for $each/$with/$match aliases). */
 function layer(parent: ReactiveScope, locals: Record<string, Value>): ReactiveScope {
   return parent.fork(Object.entries(locals));
-}
-
-function declaredExpressionType(expression: string | CompiledExpression, scope: ReactiveScope): TypeNode | undefined {
-  let node = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
-  const path: string[] = [];
-  while (node.kind === "member" || node.kind === "index") {
-    if (node.kind === "member") path.unshift(node.key);
-    else if (node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")) {
-      path.unshift(String(node.index.value));
-    } else return undefined;
-    node = node.object;
-  }
-  if (node.kind !== "id") return undefined;
-  path.unshift(node.name);
-  return scope.typeOfDeclaredPath?.(path.join("."));
 }
 
 function typedLayer(parent: ReactiveScope, locals: Record<string, Value>, types: Readonly<Record<string, TypeNode | undefined>>): ReactiveScope {

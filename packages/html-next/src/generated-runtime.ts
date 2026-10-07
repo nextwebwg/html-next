@@ -3,7 +3,7 @@
 import { fail } from "./diagnostics.js";
 import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
-import { ABSENT } from "./expression.js";
+import { ABSENT, NONCONFORMING, truthy, type Value } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import {
@@ -20,7 +20,7 @@ import {
 } from "./reactivity.js";
 import { parseTypedValue, parseTypeExpression } from "./type-system.js";
 
-export { toAttribute, toText, truthy } from "./expression.js";
+export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { KeyedList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
@@ -309,6 +309,42 @@ export const readMember = (object: unknown, key: string): unknown =>
     : object === null || typeof object !== "object" || Array.isArray(object) ? ABSENT
     : (object = (object as Record<string, unknown>)[key]) === undefined ? ABSENT : raw(object);
 
+/** The interpreter's index read (`list[n]`, `record[key]`) over raw values. */
+export function readIndex(object: unknown, index: unknown): unknown {
+  if (object === NONCONFORMING || index === NONCONFORMING) return NONCONFORMING;
+  if (object === ABSENT || object === null || index === ABSENT || index === null) return ABSENT;
+  let value: unknown;
+  if (Array.isArray(object) && typeof index === "number") value = object[index];
+  else if (typeof object === "object" && (typeof index === "string" || typeof index === "number")) {
+    value = (object as Record<string, unknown>)[String(index)];
+  } else return ABSENT;
+  return value === undefined ? ABSENT : raw(value);
+}
+
+/** A member read whose object may be nonconforming, which then stays nonconforming. */
+export const readFailing = (object: unknown, key: string): unknown =>
+  object === NONCONFORMING ? object : readMember(object, key);
+
+/** `not`, truthiness, `and`/`or`, `? :` and `default` over evaluated operands that may be nonconforming. */
+export const notValue = (value: unknown): unknown => value === NONCONFORMING ? value : !truthy(value as Value);
+export const truthyValue = (value: unknown): unknown => value === NONCONFORMING ? value : truthy(value as Value);
+export const logicValue = (and: boolean, left: unknown, right: unknown): unknown =>
+  left === NONCONFORMING ? left : truthy(left as Value) !== and ? !and
+    : right === NONCONFORMING ? right : truthy(right as Value);
+export const chooseValue = (test: unknown, consequent: unknown, alternate: unknown): unknown =>
+  test === NONCONFORMING ? test : truthy(test as Value) ? consequent : alternate;
+export const defaultValue = (value: unknown, fallback: unknown): unknown =>
+  value === NONCONFORMING ? value : value === ABSENT || value === null ? fallback : value;
+
+/** A list or object literal whose items may be nonconforming. */
+export const listValue = (items: unknown[]): unknown => items.includes(NONCONFORMING) ? NONCONFORMING : items;
+export function recordValue(keys: readonly string[], values: readonly unknown[]): unknown {
+  if (values.includes(NONCONFORMING)) return NONCONFORMING;
+  const record: Record<string, unknown> = {};
+  keys.forEach((key, index) => { record[key] = values[index]; });
+  return record;
+}
+
 /** Flags a row whose binding converts a list or object (see `KeyedRow.w`); returns the value. */
 export const trackContainer = (row: { w?: number }, value: unknown): unknown => {
   if (value !== null && typeof value === "object") row.w = 1;
@@ -364,6 +400,13 @@ const conformsAtReference = (value: unknown, type: CompactType): boolean => {
   }
   return false;
 };
+
+/**
+ * A declared reference's check (`evalConforming`): a missing value or null always passes, and
+ * anything else must satisfy the reference's own type, not its subtree.
+ */
+export const referenceConforms = (value: unknown, type: CompactType): boolean =>
+  value === ABSENT || value === null || conformsAtReference(value, type);
 
 /** @internal The destination check (`conformsAtDestination`) on a compact type. */
 export const conforms = (value: unknown, type: CompactType): boolean =>
@@ -429,6 +472,38 @@ interface Facade extends ProxyHandler<object> {
 
 const reportedWarnings = new WeakMap<GeneratedStateSpec, Set<string>>();
 
+/** A declared reference's value (`readPath`): list items by index, `length`, and object keys. */
+export function readDeclared(value: unknown, steps: readonly string[]): unknown {
+  for (const step of steps) {
+    if (Array.isArray(value)) {
+      value = step === "length" ? value.length : /^\d+$/.test(step) ? value[Number(step)] : undefined;
+    } else if (typeof value === "string" && step === "length") {
+      value = value.length;
+    } else if (typeof value === "object" && value !== null) {
+      value = (value as Record<string, unknown>)[step];
+    } else {
+      return ABSENT;
+    }
+  }
+  return value === undefined ? ABSENT : raw(value);
+}
+
+/** Checks a declared reference; a failing one warns once (HR007) and leaves its expression nonconforming. */
+export function checkReference(spec: GeneratedStateSpec, value: unknown, type: CompactType, key: string, message: string): boolean {
+  if (referenceConforms(value, type)) return true;
+  warnOnce(spec, key, message);
+  return false;
+}
+
+/** Warns HR007 once per component and key, as the live runtime's authored warnings do. */
+export function warnOnce(spec: GeneratedStateSpec, key: string, message: string): void {
+  let reported = reportedWarnings.get(spec);
+  if (reported === undefined) reportedWarnings.set(spec, reported = new Set());
+  if (reported.has(key)) return;
+  reported.add(key);
+  console.warn(`${spec.f}: HR007: ${message}`);
+}
+
 /**
  * Attaches the controller contract to a generated root and renders its initial state. Template
  * reads stay raw; writes through `host.state` are validated, stored raw, and mark the roots and
@@ -442,7 +517,7 @@ export function attachGeneratedController(
   /** Calls the controller module's default export; read when the root first connects, as live does. */
   controller: (host: never) => unknown,
 ): void {
-  const { n: names, t: types, f: file } = spec;
+  const { n: names, t: types } = spec;
   const scheduler = new ReactiveScheduler();
   const entries: ReactiveOwner[] = [];
   const facades = new WeakMap<object, Facade>();
@@ -468,13 +543,7 @@ export function attachGeneratedController(
     dirty = 0;
     render(changed);
   }, 1);
-  const warn = (path: string, message: string): void => {
-    let reported = reportedWarnings.get(spec);
-    if (reported === undefined) reportedWarnings.set(spec, reported = new Set());
-    if (reported.has(path)) return;
-    reported.add(path);
-    console.warn(`${file}: HR007: ${message}`);
-  };
+  const warn = (path: string, message: string): void => warnOnce(spec, `controller:${path}`, message);
   const readOnly = (path: string): void => warn(path, `Destination \`${path}\` is read-only.`);
   const mismatch = (path: string): void => warn(path, `State \`${path}\` does not satisfy its declared type.`);
   const pathOf = (facade: Facade | undefined, key: PropertyKey): string => {

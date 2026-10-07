@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { inspect } from "node:util";
 
 import { build, transform } from "esbuild";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
 
-import { compileExpression, evaluateCompiled, truthy, type Value } from "../src/expression.js";
+import { compileExpression, evaluateCompiled, type Value } from "../src/expression.js";
 import { generateComponent } from "../src/generate.js";
-import { compactTypeAt, conforms, readMember, trackContainer, type CompactType } from "../src/generated-runtime.js";
+import { compactTypeAt, conforms, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 import { visitSelected } from "../src/selection.js";
 import { blockPlan, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
@@ -121,14 +122,11 @@ describe("direct-extend Vanilla generation", () => {
     "each sort": component(state, '<ul><li $each="row of rows" $key="row.id" $sort="id" $value="row.label"></li></ul>'),
     "each limit": component(state, '<ul><li $each="row of rows" $key="row.id" $limit="2" $value="row.label"></li></ul>'),
     "nested flow in a row": component(state, '<ul><li $each="row of rows" $key="row.id"><b $if="ready">x</b></li></ul>'),
-    "deep item path": component(state, '<ul><li $each="row of rows" $key="row.id" $value="row.user.name"></li></ul>'),
     "loop record": component(state, '<ul><li $each="row of rows" $key="row.id" $value="loop.index"></li></ul>'),
     "loop shadows a root": component(`${state}<state name="loop" type="number" value="1"></state>`, '<ul><li $each="row of rows" $key="row.id" $value="loop"></li></ul>'),
     "key reads state": component(state, '<ul><li $each="row of rows" $key="ready" $value="row.label"></li></ul>'),
-    "constrained root path": component('<state name="user" type="object({ name: string })" value="{ name: \'a\' }"></state>', '<p $value="user.name"></p>'),
     "member test": component(state, '<p><b $if="rows.length">x</b></p>'),
     "container test": component(state, '<p><b $if="rows">x</b></p>'),
-    arithmetic: component('<state name="n" type="number" value="1"></state>', '<p $value="n + 1"></p>'),
     "class attribute and toggle": component(state, '<p from:class="rows.length" class:on="ready"></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
@@ -155,33 +153,37 @@ describe("direct-extend Vanilla generation", () => {
   });
 });
 
-describe("direct-extend expression lowering (differential)", () => {
-  const pool: Value[] = [null, true, false, 0, 1, -0, Number.NaN, "", "x", "length", [], [1, "a"], [[1], []], {}, { k: 1 },
-    { k: null }, { k: [2] }, { length: 2 }, { k: { k: "deep" } }];
+describe("direct-extend expression lowering (differential)", async () => {
+  const pool: Value[] = [null, true, false, 0, 1, -0, 2.5, Number.NaN, "", "x", "length", "10px", "5%", "3ms", [], [1, "a"],
+    [[1], []], {}, { k: 1 }, { k: null }, { k: [2] }, { length: 2 }, { k: { k: "deep" } }];
   const expressions = [
     "1", "'x'", "true", "null", "a", "row", "row.k", "row.length", "a.k", "a.length", "a.k.k", "a = b", "a != row.k",
     "row.k = a", "a = null", "a and b", "a or row", "not a", "not row.k", "a ? b : row.k", "a and b ? row : 'none'",
-    "(a = b) or (row.k and not a)", "a ? (b ? 1 : 2) : row.k.k",
+    "(a = b) or (row.k and not a)", "a ? (b ? 1 : 2) : row.k.k", "row.k.k",
+    "a + 1", "a - b", "a * 2", "a / b", "a % 2", "a < b", "a <= 1", "a > row.k", "a >= b", "-a", "-row.k", "not -a",
+    "a ^= 'x'", "a $= b", "a *= 'x'", "a[0]", "a['k']", "row[b]", "a[b]", "a[0].k", "row.k[0]",
+    "default(a, 1)", "default(row.k, b)", "default(a.k, row)", "concat(a, 'x')", "concat(a, b)", "concat(a)", "join(a, ',')",
+    "join(row, b)", "abs(a)", "round(a, 2)", "round(a)", "min(a, b, 1)", "max(a)", "clamp(0, a, 10)",
+    "{ x: a, y: row.k }", "[a, b]", "[a, [row.k]]", "default(a + b, 0)", "a + b = 3",
+    "concat(a, b) ? 1 : 2", "not concat(a)", "concat(a) and b", "a or concat(b)", "a + 1 > b",
   ];
   const roots: { name: string; type: CompactType }[] = [{ name: "a", type: "?" }, { name: "b", type: "?" }];
+  const helpers = await import("../src/generated-runtime.js");
+  const same = (left: unknown, right: unknown): boolean =>
+    left !== null && typeof left === "object" ? JSON.stringify(left) === JSON.stringify(right) : Object.is(left, right);
   for (const text of expressions) {
     it(`matches the interpreter for ${text}`, () => {
       const ast = compileExpression(text).ast;
       const lowered = lowerExpression(ast, roots, "row");
-      // Item paths deeper than one step are outside the subset.
-      if (text.includes("row.k.k")) {
-        assert.equal(lowered, undefined);
-        return;
-      }
       assert.notEqual(lowered, undefined, text);
       // oxlint-disable-next-line typescript/no-implied-eval
-      const run = new Function("v", "o", "r", "readMember", "truthy", "trackContainer", `return ${lowered};`) as
-        (v: unknown[], o: unknown, r: object, member: typeof readMember, truth: typeof truthy, track: typeof trackContainer) => unknown;
-      for (const a of pool) for (const b of pool.slice(0, 8)) for (const row of pool) {
+      const run = new Function("v", "o", "r", "h", `with (h) { return ${lowered}; }`) as
+        (v: unknown[], o: unknown, r: object, h: typeof helpers) => unknown;
+      for (const a of pool) for (const b of pool.slice(0, 12)) for (const row of pool) {
         const scope = { get: (name: string) => name === "a" ? a : name === "b" ? b : name === "row" ? row : undefined };
         const expected = evaluateCompiled(ast, scope);
-        const actual = run([a, b], row, {}, readMember, truthy, trackContainer);
-        assert.ok(Object.is(actual, expected), `${text} with a=${JSON.stringify(a)} b=${JSON.stringify(b)} row=${JSON.stringify(row)}: ${String(actual)} vs ${String(expected)}`);
+        const actual = run([a, b], row, {}, helpers);
+        if (!same(actual, expected)) assert.fail(`${text} with a=${inspect(a)} b=${inspect(b)} row=${inspect(row)}: ${inspect(actual)} vs ${inspect(expected)}`);
       }
     });
   }
@@ -422,6 +424,30 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows[0].label.push("y"); },
       (host) => { host.state.rows[1].tags = ["z"]; host.state.rows[1].tags.push("w"); },
       (host) => { host.state.rows[1].label = "plain"; host.state.rows[0].label.push("q"); },
+    ]);
+  });
+
+  it("evaluates arithmetic, calls, index reads and declared references like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string, tags: list(string), user: object({ name: string }) }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="user" type="object({ name: string, age: number })" value="{ name: 'Ada', age: 36 }"></state>`, `
+      <section from:data-next="selected + 1" from:title="concat(user.name, '/', user.age)">
+        <p $value="default(selected, 'none')"></p>
+        <output $value="user.age * 2"></output><span $value="rows[0].label"></span><s $value="user.name"></s>
+        <ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id" class:even="row.id % 2 = 0">
+          <b $value="row.user.name"></b><i $value="abs(row.id - 3)"></i><em $value="join(row.tags, '+')"></em>
+        </li></ul></section>`);
+    let kept = { name: "Raw", age: 1 };
+    await same(text, [
+      (host) => { host.state.rows = [1, 2, 3].map((id) => ({ id, label: `r${id}`, tags: ["a", String(id)], user: { name: `u${id}` } })); },
+      (host) => { host.state.selected = 2; host.state.user.age = 40; },
+      (host) => { host.state.rows[0].user.name = "renamed"; host.state.rows[1].tags.push("x"); },
+      (host) => { kept = { name: "Raw", age: 1 }; host.state.user = kept; },
+      // A controller that kept the raw object can still corrupt it; the read-time reference check catches it.
+      (host) => { (kept as { name: unknown }).name = 5; host.state.user.age = 2; },
+      (host) => { host.state.selected = null; host.state.rows = host.state.rows.toReversed(); },
     ]);
   });
 
