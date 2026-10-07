@@ -10,6 +10,7 @@ import { compileExpression, evaluateCompiled, truthy, type Value } from "../src/
 import { generateComponent } from "../src/generate.js";
 import { compactTypeAt, conforms, readMember, trackContainer, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
+import { visitSelected } from "../src/selection.js";
 import { blockPlan, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
 import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../src/type-system.js";
 
@@ -64,7 +65,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape, true);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -339,6 +340,68 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("selects only affected keyed rows while preserving live/compiled DOM parity", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>`, `
+      <section><p>rows</p><ul $if="ready">
+        <li $each="row of rows" $key="row.id" from:data-id="row.id" class:on="row.id = selected"
+          class:off="selected != row.id"><b $value="row.label"></b></li>
+      </ul></section>`);
+    const reads = new Set<number>();
+    await same(text, [
+      (host) => { host.state.rows = [1, 2, 3].map((id) => ({ get id() { reads.add(id); return id; }, label: `r${id}` })); },
+      (host) => { host.state.selected = 1; },
+      (host) => { reads.clear(); host.state.selected = 3; },
+      () => { assert.deepEqual([...reads].sort(), [1, 3]); },
+      (host) => { host.state.selected = 2; host.state.rows = [{ id: 2, label: "new" }, { id: 4, label: "four" }]; },
+      (host) => { host.state.rows[0].id = 5; host.state.selected = 5; },
+      (host) => { host.state.rows = host.state.rows.filter((row: { id: number }) => row.id !== 5); host.state.selected = 4; },
+      (host) => { host.state.selected = null; },
+      (host) => { host.state.ready = false; host.state.selected = 4; },
+      (host) => { host.state.ready = true; },
+      (host) => { host.state.rows = []; },
+    ]);
+  });
+
+  it("keeps explicit loop-index comparisons reactive when retained rows move", async () => {
+    const text = component(`
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
+      <section><p>rows</p><ul><li $each="row, i of rows" $key="row.id"
+        from:data-id="row.id" class:on="row.id = i"><b $value="i"></b></li></ul></section>`);
+    const result = await same(text, [
+      (host) => { host.state.rows = [{ id: 0, label: "zero" }, { id: 1, label: "one" }]; },
+      (host) => { host.state.rows = host.state.rows.toReversed(); },
+    ]);
+    assert.equal(result.snapshots[1]!.match(/class="on"/g)?.length, 2);
+    assert.doesNotMatch(result.snapshots[2]!, /class="on"/);
+    assert.equal(result.identities[2], "1:same,0:same");
+  });
+
+  it("keeps independent selectors and ordinary root reads correct in one batched update", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="other" type="number" nullable></state>`, `
+      <section><p>rows</p><div $if="ready">
+        <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"
+          class:on="row.id = selected" class:other="row.id = other"><b $value="row.label"></b></li></ul>
+        <ol><li $each="row of rows" $key="row.id" class:off="selected != row.id"
+          from:title="selected" class:label="row.label = selected"><b $value="row.label"></b></li></ol>
+      </div></section>`);
+    await same(text, [
+      (host) => { host.state.rows = [{ id: -0, label: "zero" }, { id: 1, label: "one" }, { id: null, label: "null" }]; },
+      (host) => { host.state.selected = 0; host.state.other = 1; },
+      (host) => { host.state.selected = -0; },
+      (host) => { host.state.selected = 1; host.state.other = null; },
+      (host) => { host.state.rows[1].id = 2; host.state.selected = 2; host.state.other = 0; },
+      (host) => { host.state.selected = null; host.state.other = 2; },
+      (host) => { host.state.rows = []; host.state.selected = 4; },
+    ]);
+  });
+
   it("re-renders container conversions written through any path, not only through the row's item", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
@@ -385,5 +448,21 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.ready = false; },
       (host) => { host.state.ready = true; host.state.rows = [{ id: 2, label: "" }, { id: 1, label: "a" }]; },
     ]);
+  });
+});
+
+describe("indexed selection lookup", () => {
+  it("visits affected entries once with SameValueZero lookup and forwards the update mask", () => {
+    const a = {}, b = {}, nan = {};
+    const index = new Map<unknown, object>([[0, a], [1, b], [Number.NaN, nan]]);
+    const cases: Array<[unknown, unknown, object[]]> = [
+      [0, 1, [a, b]], [1, null, [b]], [null, 1, [b]], [null, undefined, []],
+      [0, 0, []], [-0, 0, []], [Number.NaN, Number.NaN, [nan]], [Number.NaN, 0, [nan, a]],
+    ];
+    for (const [before, after, expected] of cases) {
+      const visited: object[] = [];
+      visitSelected(index, before, after, (row, mask) => { assert.equal(mask, 4); visited.push(row); }, 4);
+      assert.deepEqual(visited, expected);
+    }
   });
 });
