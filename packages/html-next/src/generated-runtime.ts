@@ -564,12 +564,16 @@ export function compactTypeAt(type: CompactType, key: PropertyKey): CompactType 
       return type[2] === 1 ? 0 : "a";
     }
     case "u": {
-      const described: CompactType[] = [];
+      // One describing member (a nullable list, for example) is returned as is, without allocating.
+      let found: CompactType = 0;
+      let several: unknown[] | undefined;
       for (let index = 1; index < type.length; index += 1) {
         const member = compactTypeAt(type[index] as CompactType, key);
-        if (member !== 0) described.push(member);
+        if (member === 0) continue;
+        if (found === 0) found = member;
+        else (several ??= ["u", found]).push(member);
       }
-      return described.length === 0 ? 0 : described.length === 1 ? described[0]! : ["u", ...described];
+      return several ?? found;
     }
   }
   return 0;
@@ -662,8 +666,10 @@ export function attachGeneratedController(
     dirty |= NESTED;
     job.schedule();
   };
-  const same = (left: CompactType, right: CompactType): boolean =>
-    left === right || typeof left === "object" && JSON.stringify(left) === JSON.stringify(right);
+  /** Structural type equality: a union step can build an equal type afresh. */
+  const same = (left: unknown, right: unknown): boolean => left === right ||
+    Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((item, index) => same(item, right[index]));
   const wrap = (value: unknown, type: CompactType, parent: Facade | undefined, key: PropertyKey): unknown => {
     if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
     const target = raw(value) as object;

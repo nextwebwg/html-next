@@ -116,6 +116,8 @@ describe("compact declared types", () => {
     assert.deepEqual(compactTypeAt(["u", ["l", "s"], ["l", "n"], "s"], "1"), ["u", "s", "n"]);
     assert.equal(compactTypeAt(["u", ["l", "s"], "s"], "1"), "s");
     assert.equal(compactTypeAt("s", "length"), 0);
+    // A union with one describing member steps to that member itself.
+    assert.equal(compactTypeAt(["u", ["l", object], "z"], "3"), object);
   });
 });
 
@@ -307,6 +309,19 @@ describe("generated controller host", () => {
     assert.equal(raw(values[0]), values[0]);
     assert.equal(raw((values[0] as unknown[])[0]), row);
     warn.mockRestore();
+  });
+
+  it("keeps one facade per raw object for a type a union step builds afresh", async () => {
+    const root = document.createElement("div");
+    let host: any;
+    const ids: CompactType = ["l", ["o", ["id", "n"]]];
+    const labels: CompactType = ["l", ["o", ["label", "s"]]];
+    attachGeneratedController(root, spec(["rows"], [["u", ids, labels]]), [[{ id: 1, label: "a" }]], () => {},
+      (value: unknown) => { host = value; });
+    document.body.append(root);
+    await flush();
+    assert.deepEqual(compactTypeAt(["u", ids, labels], "0"), ["u", ids[1], labels[1]]);
+    assert.equal(host.state.rows[0], host.state.rows[0]);
   });
 
   it("terminates writes through cyclic data and parent back-pointers", async () => {
