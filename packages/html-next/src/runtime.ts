@@ -61,7 +61,7 @@ import type { PropContract, PropValue } from "./types.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
-  readonly style: HTMLStyleElement | undefined;
+  readonly style: HTMLStyleElement | HTMLLinkElement | undefined;
   readonly definition: ComponentDefinition;
 }
 
@@ -187,10 +187,31 @@ function registryFor(root: Document): DocumentRegistry {
 /** The props and state each definition's `:host-state()` rules test, recorded when its styles compile. */
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
-function compileStyles(css: string, definition: ComponentDefinition, document: Document): string {
-  const compiled = compileComponentStyles(css, definition, document);
+/** Only explicitly owned style nodes participate in reuse; application CSS is never inspected. */
+function installComponentStyles(
+  definition: ComponentDefinition,
+  document: Document,
+  carrier?: HTMLStyleElement,
+): HTMLStyleElement | HTMLLinkElement | undefined {
+  const tag = definition.contract.tag;
+  const existing = document.head.querySelector<HTMLStyleElement | HTMLLinkElement>(
+    `style[data-html-next-component-styles~="${tag}"],link[rel="stylesheet"][data-html-next-component-styles~="${tag}"]`,
+  );
+  if (existing !== null) {
+    const names = JSON.parse(existing.getAttribute("data-html-next-style-states") ?? "{}") as Record<string, string[]>;
+    stateNamesByDefinition.set(definition, names[tag] ?? []);
+    return existing;
+  }
+  if (definition.css === "" && carrier === undefined) return undefined;
+  const style = carrier ?? document.createElement("style");
+  const compiled = compileComponentStyles(definition.css, definition, document);
   stateNamesByDefinition.set(definition, compiled.stateNames);
-  return compiled.css;
+  style.textContent = compiled.css;
+  style.setAttribute("data-html-next-component-styles", tag);
+  // Hydration needs this metadata without parsing or transforming the server's CSS again.
+  style.setAttribute("data-html-next-style-states", JSON.stringify({ [tag]: compiled.stateNames }));
+  document.head.append(style);
+  return style;
 }
 
 function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
@@ -257,11 +278,7 @@ export function installComponentGraph(
     if (node.shadowedByCustomElement) continue;
     const tag = node.definition.contract.tag;
     if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
-    const style = node.definition.css === "" ? undefined : root.createElement("style");
-    if (style !== undefined) {
-      style.textContent = compileStyles(node.definition.css, node.definition, root);
-      root.head.append(style);
-    }
+    const style = installComponentStyles(node.definition, root);
     registerDefinition(registry, tag, {
       definition: node.definition,
       style,
@@ -2295,11 +2312,9 @@ function lowerScopes(
   }
 
   for (const live of definitions) {
-    registerDefinition(registry, live.definition.contract.tag, live);
-    if (live.style !== undefined) {
-      live.style.textContent = compileStyles(live.style.textContent ?? "", live.definition, live.wrapper!.ownerDocument);
-      live.wrapper!.ownerDocument.head.append(live.style);
-    }
+    const style = installComponentStyles(live.definition, live.wrapper!.ownerDocument,
+      live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined);
+    registerDefinition(registry, live.definition.contract.tag, { ...live, style });
     live.wrapper!.remove();
   }
 
@@ -2483,13 +2498,8 @@ export function registerComponentDefinitions(
     }
     registerDefinition(registry, definition.contract.tag, {
       definition,
-      style: undefined,
+      style: installComponentStyles(definition, root),
     });
-    if (definition.css !== "") {
-      const style = root.createElement("style");
-      style.textContent = compileStyles(definition.css, definition, root);
-      root.head.append(style);
-    }
   }
 }
 

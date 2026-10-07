@@ -393,9 +393,11 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     const definition: ComponentDefinition = node.controller === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
-    const artifact = generateComponent(definition)
-      .find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
+    const artifacts = generateComponent(definition);
+    const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
+    const stylesheet = artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
+    if (stylesheet === undefined) throw new Error(`No stylesheet was generated for ${definition.contract.tag}.`);
     const encodedURL = encodeURIComponent(node.url);
     const styleId = `${stylePrefix}${encodedURL}.css`;
     let module = artifact.content.replace(
@@ -412,7 +414,7 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     }
     module = routeSupportImports(module, supportImports);
     components.set(resolvedComponentId(node.url), module);
-    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, definition.css);
+    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, stylesheet.content);
     const capabilities = componentCapabilities(definition);
     for (const capability of capabilities) allCapabilities.add(capability);
     manifestComponents.push(Object.freeze({

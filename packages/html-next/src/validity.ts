@@ -5,7 +5,6 @@ import {
   type Validity,
   type ValidityError,
 } from "./validate.js";
-import { rewriteValiditySelectors } from "./validity-css.js";
 
 export interface GeneralizedValidityState {
   readonly valid: boolean;
@@ -43,19 +42,11 @@ interface ManagedState {
   readonly cleanup: Array<() => void>;
 }
 
-interface InstalledStyles {
-  readonly companion: HTMLStyleElement;
-  readonly observer: MutationObserver;
-  queued: boolean;
-  readonly inaccessible: WeakSet<CSSStyleSheet>;
-}
-
 const VALID: Validity = { valid: true, errors: [] };
 const states = new WeakMap<Element, ManagedState>();
 const derivedStore = new WeakMap<Element, Validity>();
 const externalStore = new WeakMap<Element, readonly ValidityError[]>();
 const nativeBridgeMessages = new WeakMap<Element, string>();
-const installedDocuments = new WeakMap<Document, InstalledStyles>();
 const ariaMirrors = new WeakSet<Element>();
 const formElements = new WeakMap<HTMLFormElement, Set<Element>>();
 const formCleanup = new WeakMap<HTMLFormElement, () => void>();
@@ -171,94 +162,6 @@ function reflect(el: Element, state: ManagedState | undefined): void {
   else el.removeAttribute("data-user-invalid");
 }
 
-function styleText(document: Document, companion: HTMLStyleElement, inaccessible: WeakSet<CSSStyleSheet>): string {
-  const mirrored: string[] = [];
-  const sheets = new Set<CSSStyleSheet>([
-    ...Array.from(document.styleSheets),
-    ...Array.from(document.adoptedStyleSheets ?? []),
-  ]);
-  for (const sheet of sheets) {
-    if (sheet.ownerNode === companion) continue;
-    try {
-      const source = Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
-      const rewritten = rewriteValiditySelectors(source);
-      if (rewritten !== source) mirrored.push(rewritten);
-    } catch {
-      if (!inaccessible.has(sheet)) {
-        inaccessible.add(sheet);
-        document.dispatchEvent(new CustomEvent("htmlnextdiagnostic", {
-          detail: {
-            code: "HV001",
-            message: "A stylesheet containing validity selectors could not be read. Transform cross-origin CSS with rewriteValiditySelectors() during the package build.",
-          },
-        }));
-      }
-    }
-  }
-  return mirrored.join("\n");
-}
-
-function refreshValidityStyles(document: Document, installed: InstalledStyles): void {
-  installed.queued = false;
-  const next = styleText(document, installed.companion, installed.inaccessible);
-  if (installed.companion.textContent !== next) installed.companion.textContent = next;
-}
-
-function scheduleStyleRefresh(document: Document): void {
-  const installed = installedDocuments.get(document);
-  if (installed === undefined || installed.queued) return;
-  installed.queued = true;
-  queueMicrotask(() => refreshValidityStyles(document, installed));
-}
-
-const patchedCSSOM = new WeakSet<object>();
-function patchCSSOM(document: Document): void {
-  const prototype = document.defaultView?.CSSStyleSheet?.prototype;
-  if (prototype === undefined || patchedCSSOM.has(prototype)) return;
-  patchedCSSOM.add(prototype);
-  for (const name of ["insertRule", "deleteRule", "replace", "replaceSync"] as const) {
-    const original = prototype[name];
-    if (typeof original !== "function") continue;
-    Object.defineProperty(prototype, name, {
-      configurable: true,
-      writable: true,
-      value: function (this: CSSStyleSheet, ...args: unknown[]): unknown {
-        const result = (original as (...values: unknown[]) => unknown).apply(this, args);
-        const refresh = (): void => {
-          if (Array.from(document.styleSheets).includes(this) ||
-              Array.from(document.adoptedStyleSheets ?? []).includes(this)) {
-            scheduleStyleRefresh(document);
-          }
-        };
-        if (result instanceof Promise) void result.finally(refresh);
-        else refresh();
-        return result;
-      },
-    });
-  }
-}
-
-/** Install automatic selector mirroring for inline, linked, and constructed author CSS. */
-export function installValidityStyles(document: Document): void {
-  if (installedDocuments.has(document)) return;
-  const companion = document.createElement("style");
-  companion.setAttribute("data-html-next-validity-styles", "");
-  document.head.append(companion);
-  let installed: InstalledStyles;
-  const observer = new MutationObserver((mutations) => {
-    if (mutations.every((mutation) => mutation.target === companion || companion.contains(mutation.target))) return;
-    for (const link of Array.from(document.querySelectorAll("link[rel=stylesheet]"))) {
-      link.addEventListener("load", () => scheduleStyleRefresh(document), { once: true });
-    }
-    scheduleStyleRefresh(document);
-  });
-  installed = { companion, observer, queued: false, inaccessible: new WeakSet() };
-  observer.observe(document.head, { childList: true, subtree: true, characterData: true, attributes: true });
-  installedDocuments.set(document, installed);
-  patchCSSOM(document);
-  refreshValidityStyles(document, installed);
-}
-
 function readValueUnmanaged(el: Element): unknown {
   if (el instanceof HTMLInputElement) {
     if (el.type === "checkbox" || el.type === "radio") return el.checked;
@@ -292,7 +195,6 @@ export function validationMessage(el: Element): string {
 
 /** Set derived validity. Explicit custom/application issues remain intact. */
 export function setElementValidity(el: Element, validity: Validity): void {
-  installValidityStyles(el.ownerDocument);
   derivedStore.set(el, validity);
   const state = states.get(el);
   if (state !== undefined) state.derived = validity;
@@ -441,7 +343,6 @@ export function manageElementValidity(
     cleanup: [],
   };
   states.set(el, state);
-  installValidityStyles(el.ownerDocument);
   installFacade(el);
   const update = (): void => {
     state.interacted = true;

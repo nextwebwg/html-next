@@ -73,6 +73,61 @@ describe.skipIf(!enabled)("browser runtime", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    for (const delivery of ["inline", "bundled-link"] as const) {
+      it(`${name} reuses server-delivered ${delivery} component styles without compiling again`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const first = `<template component="x-styled-ssr" status="early" summary="Style hydration.">` +
+            `<defs><prop name="active" type="boolean" default="false">Active.</prop></defs>` +
+            `<article></article><style>:host { color: rgb(10, 20, 30) }` +
+            `:host-state([active]) { color: rgb(40, 50, 60) }</style></template>`;
+          const second = `<template component="x-other-ssr" status="early" summary="Second bundled component.">` +
+            `<aside></aside><style>:host { padding: 7px }</style></template>`;
+          const definitions = first + second;
+          await page.setContent(definitions + `<x-styled-ssr></x-styled-ssr><x-other-ssr></x-other-ssr>`);
+          await page.addScriptTag({ path: bundlePath });
+          const serverHTML = await page.evaluate((delivery) => {
+            (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+            const styles = [...document.head.querySelectorAll("style")];
+            const carrier = delivery === "inline" ? document.createElement("style") : document.createElement("link");
+            const css = styles.map(style => style.textContent).join("\n");
+            if (carrier instanceof HTMLLinkElement) {
+              carrier.rel = "stylesheet";
+              carrier.href = "data:text/css," + encodeURIComponent(css);
+            } else carrier.textContent = css;
+            carrier.setAttribute("data-html-next-component-styles", styles.map(style => style.getAttribute("data-html-next-component-styles")).join(" "));
+            carrier.setAttribute("data-html-next-style-states", JSON.stringify(Object.assign({},
+              ...styles.map(style => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}")))));
+            return { styles: carrier.outerHTML, roots: document.body.innerHTML };
+          }, delivery);
+          // A fresh document/runtime consumes the server's bundled CSS and native roots.
+          await page.setContent(serverHTML.styles + definitions + serverHTML.roots);
+          await page.addScriptTag({ path: bundlePath });
+          const result = await page.evaluate(`(async () => {
+            const styles = [...document.head.querySelectorAll('style,link[rel=stylesheet]')];
+            let compilations = 0;
+            const replace = CSSStyleSheet.prototype.replaceSync;
+            CSSStyleSheet.prototype.replaceSync = function (...args) { compilations++; return replace.apply(this, args); };
+            window.HtmlRuntime.lowerDocument();
+            window.HtmlRuntime.lowerDocument();
+            const root = document.querySelector('article');
+            const before = getComputedStyle(root).color;
+            window.HtmlRuntime.updateComponentProps(root, { active: true });
+            await new Promise(resolve => setTimeout(resolve, 0));
+            CSSStyleSheet.prototype.replaceSync = replace;
+            return { compilations, styles: document.head.querySelectorAll('style,link[rel=stylesheet]').length,
+              reused: styles.every(style => style.isConnected), before, after: getComputedStyle(root).color,
+              otherPadding: getComputedStyle(document.querySelector('aside')).paddingTop };
+          })()`);
+          assert.deepEqual(result, { compilations: 0, styles: 1, reused: true,
+            before: "rgb(10, 20, 30)", after: "rgb(40, 50, 60)", otherPadding: "7px" });
+        } finally {
+          await browser.close();
+        }
+      });
+    }
+
     it(`${name} can leave application-owned roots out of document observation`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {

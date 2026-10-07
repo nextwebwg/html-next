@@ -36,7 +36,6 @@ export { getDomInterface, resolveDomProperty } from "./platform.js";
 export {
   getElementValidity,
   getElementValidityState,
-  installValidityStyles,
   manageElementValidity,
   readValue,
   refreshElementValidity,
