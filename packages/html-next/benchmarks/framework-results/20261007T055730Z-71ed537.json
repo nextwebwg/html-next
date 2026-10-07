@@ -1,0 +1,202 @@
+{
+  "complete": true,
+  "runner_success": true,
+  "standard_samples": true,
+  "cpu_samples": 15,
+  "protocol": "full_standard",
+  "measuredAt": "20261007T055730Z",
+  "frameworks": [
+    "html-next-vite-candidate",
+    "html-next-live-candidate",
+    "vanillajs",
+    "solid",
+    "vue",
+    "react-hooks",
+    "svelte"
+  ],
+  "benchmarks": [
+    "01_run1k",
+    "02_replace1k",
+    "03_update10th1k_x16",
+    "04_select1k",
+    "05_swap1k",
+    "06_remove-one-1k",
+    "07_create10k",
+    "08_create1k-after1k_x2",
+    "09_clear1k_x8"
+  ],
+  "direct_extend": true,
+  "environment": {
+    "chrome": "153.0.8010.12",
+    "cpu": "Apple M4 Pro",
+    "os": "macOS 26.5.2",
+    "platform": "darwin-arm64",
+    "node": "v24.20.0",
+    "benchmark": {
+      "repository": "https://github.com/nextwebwg/js-framework-benchmark",
+      "revision": "1c5c091eb0dbc2316f4ad3b23658fe2be617747e",
+      "lockfileSha256": {
+        "react-hooks": "bee80a1ff6b695518e5f19961a408c9a6b8cbafa78143a9dc6d4252b4003bb62",
+        "vue": "7b04dd5631706be5c254647a2c4fe6aee7b8c9c359edaa44422cb3e44b7fdb82",
+        "svelte": "26f8c3a37e22b9c561f14944a4d5f797a235d4c57fc6dc4dfd8547569573613a",
+        "solid": "50878ee6d9d788bd5a8a7ef1cb0d61b81d1e95264ef8be0017b54311c01e75c8"
+      }
+    },
+    "htmlNext": {
+      "commit": "71ed53712e04c420245cc8def30e2d14df8ef5b8",
+      "dirty": true
+    }
+  },
+  "bundles": {
+    "html-next-vite-candidate": {
+      "sha256": "6153a30c86edbf3c689eef795de8357fd78da01adf2fde9855e27af82a2e44d4",
+      "raw": 22159,
+      "gzip": 8281,
+      "directExtend": {
+        "applied": true,
+        "runtimeComponents": []
+      }
+    },
+    "html-next-live-candidate": {
+      "sha256": "fe9da04d2bcfa9a44d0de39a750036bb55fc4f9b3f58b8aa696d1aacb01a12b7",
+      "raw": 168812,
+      "gzip": 55717
+    },
+    "vanillajs": {
+      "sha256": "08a5cb7d5cec199396561ed28b3c2db77577f066480f33c19f22ce6b0b0c980f",
+      "raw": 9486,
+      "gzip": 2529
+    },
+    "solid": {
+      "sha256": "9a7954aedff39e0f0107a9223f717bdcee63a1609b5bb2626065283f633314fe",
+      "raw": 11563,
+      "gzip": 4812
+    },
+    "vue": {
+      "sha256": "0f618a0848dd47915c5b7c6f4dec5396eeee66b087eb398092ba1ad3f69e5402",
+      "raw": 65481,
+      "gzip": 25963
+    },
+    "react-hooks": {
+      "sha256": "501f594158cea6a26fa05d25f0bae6b2eb463a55fe0a6975594b5df3e13cd62a",
+      "raw": 194643,
+      "gzip": 61343
+    },
+    "svelte": {
+      "sha256": "38f1cfb64a26539ae1dad97f33e01f3b1211759a6e7fece1650d2a04c5b9c809",
+      "raw": 26953,
+      "gzip": 10722
+    }
+  },
+  "vite_gzip_bytes": 8281,
+  "live_gzip_bytes": 55717,
+  "median_ms": {
+    "html-next-live-candidate-v1.0.0-alpha.31+fe9da04d2bcf-keyed": {
+      "01_run1k": 27.8,
+      "02_replace1k": 33,
+      "03_update10th1k_x16": 16,
+      "04_select1k": 4.3,
+      "05_swap1k": 24.8,
+      "06_remove-one-1k": 17.2,
+      "07_create10k": 305.9,
+      "08_create1k-after1k_x2": 35.1,
+      "09_clear1k_x8": 14.1
+    },
+    "html-next-vite-candidate-v1.0.0-alpha.31+6153a30c86ed-keyed": {
+      "01_run1k": 22.4,
+      "02_replace1k": 24,
+      "03_update10th1k_x16": 13.6,
+      "04_select1k": 3.5,
+      "05_swap1k": 14.4,
+      "06_remove-one-1k": 11.4,
+      "07_create10k": 237.2,
+      "08_create1k-after1k_x2": 25.3,
+      "09_clear1k_x8": 10.3
+    },
+    "react-hooks-v19.2.0-keyed": {
+      "01_run1k": 23.1,
+      "02_replace1k": 30.5,
+      "03_update10th1k_x16": 17.3,
+      "04_select1k": 6.9,
+      "05_swap1k": 92.9,
+      "06_remove-one-1k": 13.3,
+      "07_create10k": 381.8,
+      "08_create1k-after1k_x2": 28.6,
+      "09_clear1k_x8": 16.5
+    },
+    "solid-v1.9.3-keyed": {
+      "01_run1k": 22.1,
+      "02_replace1k": 24.8,
+      "03_update10th1k_x16": 13.2,
+      "04_select1k": 4.6,
+      "05_swap1k": 14.4,
+      "06_remove-one-1k": 11.5,
+      "07_create10k": 240.4,
+      "08_create1k-after1k_x2": 25.2,
+      "09_clear1k_x8": 10.8
+    },
+    "svelte-v5.42.1-keyed": {
+      "01_run1k": 22.9,
+      "02_replace1k": 25.1,
+      "03_update10th1k_x16": 13.6,
+      "04_select1k": 7.2,
+      "05_swap1k": 14.9,
+      "06_remove-one-1k": 11.3,
+      "07_create10k": 240.2,
+      "08_create1k-after1k_x2": 25.3,
+      "09_clear1k_x8": 10.1
+    },
+    "vanillajs-keyed": {
+      "01_run1k": 21.6,
+      "02_replace1k": 22.5,
+      "03_update10th1k_x16": 12.6,
+      "04_select1k": 3.9,
+      "05_swap1k": 14.6,
+      "06_remove-one-1k": 10.8,
+      "07_create10k": 226.9,
+      "08_create1k-after1k_x2": 23.8,
+      "09_clear1k_x8": 8.8
+    },
+    "vue-v3.5.39-keyed": {
+      "01_run1k": 25,
+      "02_replace1k": 27.4,
+      "03_update10th1k_x16": 14.7,
+      "04_select1k": 4.9,
+      "05_swap1k": 16.1,
+      "06_remove-one-1k": 13.7,
+      "07_create10k": 269.1,
+      "08_create1k-after1k_x2": 27.6,
+      "09_clear1k_x8": 13.2
+    }
+  },
+  "scores": {
+    "html-next-live-candidate-v1.0.0-alpha.31+fe9da04d2bcf-keyed": 1.4174629031537496,
+    "html-next-vite-candidate-v1.0.0-alpha.31+6153a30c86ed-keyed": 1.0636137585576242,
+    "react-hooks-v19.2.0-keyed": 1.4482301319318194,
+    "solid-v1.9.3-keyed": 1.0831078155401057,
+    "svelte-v5.42.1-keyed": 1.109835820484313,
+    "vanillajs-keyed": 1.0054642641355815,
+    "vue-v3.5.39-keyed": 1.2255487900605124
+  },
+  "controls": {
+    "react-hooks": "react-hooks-v19.2.0-keyed",
+    "vue": "vue-v3.5.39-keyed",
+    "svelte": "svelte-v5.42.1-keyed",
+    "solid": "solid-v1.9.3-keyed"
+  },
+  "vite_score": 1.0636137585576242,
+  "vite_vs_react_hooks": 0.7344231659776691,
+  "vite_vs_vue": 0.8678673319118592,
+  "vite_vs_svelte": 0.958352342685679,
+  "vite_vs_solid": 0.982001739159494,
+  "vite_vs_gated_max": 0.982001739159494,
+  "vite_vs_fastest_competitor": 0.982001739159494,
+  "live_score": 1.4174629031537496,
+  "live_vs_react_hooks": 0.9787552902679708,
+  "live_vs_vue": 1.1565944290832855,
+  "live_vs_svelte": 1.2771825138381219,
+  "live_vs_solid": 1.3086997275953671,
+  "live_vs_gated_max": 1.3086997275953671,
+  "live_vs_fastest_competitor": 1.3086997275953671,
+  "gated_target_met": true
+}

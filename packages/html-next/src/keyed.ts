@@ -84,8 +84,6 @@ function stablePositions(previous: Int32Array): Uint8Array | undefined {
 }
 
 export class KeyedList<R extends KeyedRow> {
-  /** Screening knob: insert each run of fresh rows as one fragment (owner Q5) or row by row. */
-  static fragment = true;
   /** Screening knob (D1): move retained rows with `moveBefore` where the browser has it. */
   static moveBefore = true;
 
@@ -268,13 +266,7 @@ export class KeyedList<R extends KeyedRow> {
       if (previous[index]! < 0) {
         let run = index;
         while (run > 0 && previous[run - 1]! < 0) run -= 1;
-        if (KeyedList.fragment && run < index) {
-          const fragment = parent.ownerDocument!.createDocumentFragment();
-          for (let item = run; item <= index; item += 1) fragment.append(rows[newStart + item]!.n);
-          parent.insertBefore(fragment, reference);
-        } else {
-          for (let item = run; item <= index; item += 1) parent.insertBefore(rows[newStart + item]!.n, reference);
-        }
+        for (let item = run; item <= index; item += 1) parent.insertBefore(rows[newStart + item]!.n, reference);
         index = run;
         reference = rows[newStart + run]!.n;
         continue;

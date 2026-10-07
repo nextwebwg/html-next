@@ -167,7 +167,7 @@ byte budgets.
 | Find binding sites | `firstChild`/`nextSibling` getters | Paths computed at compile time |
 | `$value` text | `Text.data` on the element's sole Text child; `textContent` for `""` and foreign content | `writeText()`: one guard; writes only when the converted text changed |
 | Attributes, classes | `setAttribute`/`removeAttribute`, `classList.toggle(name, force)` | The interpreter's own `toAttribute`/`toText`/`truthy` conversions |
-| Insertion | `insertBefore`; one `DocumentFragment` per run of fresh rows (row-by-row stays selectable) | Grouping fresh runs |
+| Insertion | Native `insertBefore` for each fresh row, in forward order | Finding each fresh run and its retained insertion reference; fragment grouping is removed after paired screening |
 | Bulk removal | `replaceChildren(start, end)` when the region owns its parent, else `Range.deleteContents()` or `remove()` | Adjacency grouping; foreign nodes split groups |
 | Moves | `moveBefore` with an `insertBefore` fallback, as the live runtime | Swapped ends, then the longest increasing run of retained positions |
 | Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |

@@ -45,67 +45,63 @@ const items = (ids: readonly number[]): Item[] => ids.map((id) => ({ id, label: 
 const none: DirtyObjects = new Map();
 
 afterEach(() => {
-  KeyedList.fragment = true;
   KeyedList.moveBefore = true;
 });
 
 describe("KeyedList", () => {
-  for (const fragment of [true, false]) {
-    it(`matches a brute-force model across list transitions${fragment ? "" : " (row-by-row insertion)"}`, () => {
-      KeyedList.fragment = fragment;
-      const { keyed, rows } = fixture();
-      const pool = new Map<number, Item>();
-      const item = (id: number): Item => {
-        let known = pool.get(id);
-        if (known === undefined) pool.set(id, known = { id, label: `row ${id}` });
-        return known;
-      };
-      let elements = new Map<number, Element>();
-      const step = (ids: readonly number[]): void => {
-        const value = ids.map(item);
-        keyed.update(value, none, 2);
-        const children = rows();
-        assert.deepEqual(children.map((child) => child.textContent), ids.map((id) => `row ${id}`));
-        // Retained keys keep their element; new keys get a new one.
-        const next = new Map<number, Element>();
-        children.forEach((child, index) => {
-          const id = ids[index]!;
-          const prior = elements.get(id);
-          if (prior !== undefined) assert.equal(child, prior, `row ${id} kept its element`);
-          next.set(id, child);
-        });
-        elements = next;
-        assert.equal(keyed.m.size, ids.length);
-        assert.equal(keyed.r.length, ids.length);
-      };
-      const next = random(7);
-      step([]);
-      step([1, 2, 3, 4, 5]);
-      step([0, 1, 2, 3, 4, 5]); // prefix
-      step([0, 1, 2, 3, 4, 5, 6]); // suffix
-      step([1, 2, 3, 4, 5]); // trim both ends
-      step([5, 2, 3, 4, 1]); // swap ends, nested middle kept
-      step([5, 3, 2, 4, 1]); // adjacent swap
-      step([5, 3, 2, 4, 1]); // reverse
-      step([10, 11, 12]); // replace everything
-      step([10, 13, 11, 14, 12, 15]); // interleave fresh rows
-      step([]);
-      step(Array.from({ length: 40 }, (_, index) => index));
-      for (let round = 0; round < 60; round += 1) {
-        const current = rows().map((child) => Number(child.textContent!.slice(4)));
-        const ids = [...current, ...Array.from({ length: Math.floor(next() * 4) }, (_, index) => 100 + round * 4 + index)]
-          .filter(() => next() > 0.15);
-        for (let index = ids.length - 1; index > 0; index -= 1) {
-          if (next() < 0.3) {
-            const other = Math.floor(next() * (index + 1));
-            [ids[index], ids[other]] = [ids[other]!, ids[index]!];
-          }
+  it("matches a brute-force model across list transitions", () => {
+    const { keyed, rows } = fixture();
+    const pool = new Map<number, Item>();
+    const item = (id: number): Item => {
+      let known = pool.get(id);
+      if (known === undefined) pool.set(id, known = { id, label: `row ${id}` });
+      return known;
+    };
+    let elements = new Map<number, Element>();
+    const step = (ids: readonly number[]): void => {
+      const value = ids.map(item);
+      keyed.update(value, none, 2);
+      const children = rows();
+      assert.deepEqual(children.map((child) => child.textContent), ids.map((id) => `row ${id}`));
+      // Retained keys keep their element; new keys get a new one.
+      const next = new Map<number, Element>();
+      children.forEach((child, index) => {
+        const id = ids[index]!;
+        const prior = elements.get(id);
+        if (prior !== undefined) assert.equal(child, prior, `row ${id} kept its element`);
+        next.set(id, child);
+      });
+      elements = next;
+      assert.equal(keyed.m.size, ids.length);
+      assert.equal(keyed.r.length, ids.length);
+    };
+    const next = random(7);
+    step([]);
+    step([1, 2, 3, 4, 5]);
+    step([0, 1, 2, 3, 4, 5]); // prefix
+    step([0, 1, 2, 3, 4, 5, 6]); // suffix
+    step([1, 2, 3, 4, 5]); // trim both ends
+    step([5, 2, 3, 4, 1]); // swap ends, nested middle kept
+    step([5, 3, 2, 4, 1]); // adjacent swap
+    step([5, 3, 2, 4, 1]); // reverse
+    step([10, 11, 12]); // replace everything
+    step([10, 13, 11, 14, 12, 15]); // interleave fresh rows
+    step([]);
+    step(Array.from({ length: 40 }, (_, index) => index));
+    for (let round = 0; round < 60; round += 1) {
+      const current = rows().map((child) => Number(child.textContent!.slice(4)));
+      const ids = [...current, ...Array.from({ length: Math.floor(next() * 4) }, (_, index) => 100 + round * 4 + index)]
+        .filter(() => next() > 0.15);
+      for (let index = ids.length - 1; index > 0; index -= 1) {
+        if (next() < 0.3) {
+          const other = Math.floor(next() * (index + 1));
+          [ids[index], ids[other]] = [ids[other]!, ids[index]!];
         }
-        step(ids);
       }
-      step([]);
-    });
-  }
+      step(ids);
+    }
+    step([]);
+  });
 
   it("moves only the swapped ends and keeps the rest in place", () => {
     const { keyed, observer, list } = fixture();

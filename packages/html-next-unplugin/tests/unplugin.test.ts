@@ -260,7 +260,7 @@ describe("HTML Next unplugin", () => {
     assert.equal(runtime.manifest.directExtend, undefined);
     assert.doesNotMatch(direct.text, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
     assert.match(direct.text, /function attachGeneratedController/);
-    assert.match(direct.text, /class KeyedList/);
+    assert.match(direct.text, /class KeyedList\b|KeyedList = class\b/);
     assert.deepEqual(direct.manifest.directExtend, { applied: true, runtimeComponents: [] });
     assertClosedOverEntries(direct.text);
 
