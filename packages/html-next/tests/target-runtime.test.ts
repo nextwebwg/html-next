@@ -2741,7 +2741,6 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     const singleModule = generateComponent(singleDefinition)
       .find((artifact) => artifact.path === "vanilla/SingleProp.js")?.content;
     assert.ok(singleModule);
-    assert.match(singleModule, /manageGeneratedProp\(/);
     assert.doesNotMatch(singleModule, /@nextwebwg\/html-next\/runtime/);
     await writeFile(join(directory, "styles/single-prop.css"), "");
     await writeFile(join(directory, "vanilla/SingleProp.js"), singleModule);

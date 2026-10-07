@@ -2085,23 +2085,22 @@ function renderInstance(
     element instanceof HTMLSelectElement
   ) ? {
       value: element.value,
-      // Only what the user changed is theirs to keep; an untouched control takes its bindings.
-      // Only a control in value mode holds what a user typed: a checkbox's "on" or a file's path does not.
-      // Against the served markup's defaults: adoption has already restored the authored ones.
-      edited: servedEdits.get(element)?.edited ?? valueEdited(element),
       focused: element.ownerDocument.activeElement === element,
-      ...(element instanceof HTMLInputElement
-        ? { checked: element.checked, toggled: servedEdits.get(element)?.toggled ?? element.checked !== element.defaultChecked }
-        : {}),
+      ...(element instanceof HTMLInputElement ? { checked: element.checked } : {}),
       ...(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
   // An adopted root already holds its literals merged with its invocation's attributes, which win
-  // (class and style combine), so only a literal it lacks is written.
+  // (class and style combine), so only a literal it lacks is written. A root control's default
+  // value and checkedness are the template's again once adopted (below), so those are written.
   const adoptedRoot = adopted && node === context.rootNode;
+  const resetDefault = (name: string): boolean => (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+    (name === "value" || name === "checked");
   for (const attribute of node.attributes) {
-    if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name))) element.setAttribute(attribute.name, attribute.value);
+    if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name) && !resetDefault(attribute.name))) {
+      element.setAttribute(attribute.name, attribute.value);
+    }
   }
   // Serialized live control values use HTML's default-value attributes until hydration. Once
   // adopted, the authored template regains ownership of reset defaults; the captured live value
@@ -2208,8 +2207,8 @@ function renderInstance(
     }
   }
   if (controlState !== undefined) {
-    if (controlState.edited) (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
-    if (element instanceof HTMLInputElement && "checked" in controlState && controlState.toggled) {
+    (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
+    if (element instanceof HTMLInputElement && "checked" in controlState) {
       element.checked = controlState.checked;
     }
     if (
@@ -2225,24 +2224,6 @@ function renderInstance(
   bindEvents(element, node, scope, context, invocation);
   if (invocation !== undefined) settleInvocation(element, invocation);
   return [element];
-}
-
-/** Whether a control holds a value the user changed from its defaults; only value mode holds typed text. */
-function valueEdited(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): boolean {
-  return element instanceof HTMLSelectElement ? selectionEdited(element)
-    : !(element instanceof HTMLInputElement && ["checkbox", "radio", "file", "hidden", "submit", "image", "reset", "button"].includes(element.type)) &&
-      element.value !== element.defaultValue;
-}
-
-/**
- * Whether a select's selection differs from the one its defaults give it: the options marked
- * `selected` (the last for a single select), else its first enabled option.
- */
-function selectionEdited(select: HTMLSelectElement): boolean {
-  const options = Array.from(select.options);
-  if (select.multiple) return options.some((option) => option.selected !== option.defaultSelected);
-  const marked = options.findLastIndex((option) => option.defaultSelected);
-  return select.selectedIndex !== (marked >= 0 ? marked : options.findIndex((option) => !option.disabled));
 }
 
 function renderChildren(
@@ -2517,24 +2498,11 @@ interface SerializedFormDefaults {
   readonly selected?: boolean;
 }
 
-/**
- * Whether a served control was edited before hydration, judged against the served defaults (the
- * rendered values) before `restoreSerializedFormDefaults` gives it back its authored ones.
- */
-const servedEdits = new WeakMap<Element, { readonly edited: boolean; readonly toggled?: boolean }>();
-
 function restoreSerializedFormDefaults(root: Element): void {
   const controls = [root, ...Array.from(root.querySelectorAll(`[${FORM_DEFAULTS_ATTRIBUTE}]`))];
   for (const element of controls) {
     const serialized = element.getAttribute(FORM_DEFAULTS_ATTRIBUTE);
     if (serialized === null) continue;
-    const control = element instanceof HTMLOptionElement ? element.closest("select") : element;
-    if ((control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) && !servedEdits.has(control)) {
-      servedEdits.set(control, {
-        edited: valueEdited(control),
-        ...(control instanceof HTMLInputElement ? { toggled: control.checked !== control.defaultChecked } : {}),
-      });
-    }
     element.removeAttribute(FORM_DEFAULTS_ATTRIBUTE);
     let defaults: SerializedFormDefaults;
     try {

@@ -195,28 +195,4 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     await flush();
     assert.equal(server.firstElementChild!.outerHTML, element.outerHTML);
   });
-
-  it("gives an adopted control its bound value unless the user edited it before hydration", async () => {
-    const control = parseComponent(`<template component="x-control" status="early" summary="Control.">
-      <defs><state name="title" type="string" value="Bound"></state><state name="on" type="boolean" value="true"></state>
-      <state name="size" type="string" value="m"></state></defs>
-      <section><input .value="title"><input .value="title"><input type="checkbox" bind:checked="on">
-      <select bind:value="size"><option value="s">S</option><option value="m">M</option></select></section></template>`, "file:///control.html");
-    const { runtime, document } = await load(definition);
-    const server = document.createElement("main");
-    server.innerHTML = '<section data-component="x-control"><input><input><input type="checkbox"><select><option value="s">S</option><option value="m">M</option></select></section>';
-    document.body.append(server);
-    const [untouched, edited] = Array.from(server.querySelectorAll("input"));
-    edited!.value = "typed";
-    runtime.registerComponentDefinitions([control]);
-    runtime.lowerDocument(document);
-    await flush();
-    assert.equal(untouched!.value, "Bound");
-    assert.equal(edited!.value, "typed");
-    // An untouched checkbox or select takes its binding, and a checkbox's "on" is not written back.
-    const checkbox = server.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    assert.equal(checkbox.checked, true);
-    assert.equal(checkbox.hasAttribute("value"), false);
-    assert.equal((server.querySelector("select") as HTMLSelectElement).value, "m");
-  });
 });
