@@ -93,10 +93,41 @@ with every entry's and control's gzip bytes; raw results stay local. To read a s
 `gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
 and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
 [field reference](./framework-benchmark.md#ledger)). The CI job runs the comparison but is not yet
-Required. The results below predate the Vite
-entry: their "compiled-native" figures are an esbuild bundle of the native generator's output.
+Required.
+
+### October 2026 owner decisions
+
+The owner decided the following on 2026-10-06 for the live runtime. Decisions for compiled output
+are in [the compiled direct path](./compiled-direct-path.md#owner-decisions-2026-10-06).
+
+- **Row evaluation.** Row bindings may be evaluated in one fused update per row, keys may be
+  memoized, and an equality selector may re-evaluate only the rows an outer scalar change (such as
+  `selected`) affects. Getter read counts and repeated validation warnings for unchanged results are
+  not a contract.
+- **DOM shape.** Rows may omit their two per-item comment markers (the element is the boundary);
+  serialization for hydration re-synthesizes them. `$value` may update the existing Text node's
+  `data` instead of replacing the node.
+- **Ordering and diagnostics.** When a whole list is replaced with all-new keys, old rows' cleanups
+  may run before new rows' first effects (clear-first replace). Controller warnings may name the
+  last path used to reach an object instead of the exact index path.
+- **Row kernel.** A compile-once row factory for rows of plain native elements is allowed, behind a
+  go/no-go measurement before the full build, within the live growth cap below.
+- **Not granted.** The lifecycle observer keeps today's exact light-DOM scope. Every other semantic
+  stays exact: validation for every evaluation that runs, HR004, mutable keys, pause, resume and
+  reconnect, hydration adoption, serialization, no retention (006) and events.
+- **Target.** The gated target is the Vite-compiled output at 0.99× or less of Solid, Vue and React
+  Hooks each; Svelte is reported, not gated. The live runtime must stay competitive, with no
+  regressions.
+- **No bundle bloat.** The compiled entry must shrink at every milestone. Live runtime growth is
+  capped at +2 KB gzip in total, preferably net-neutral. Byte-heavy changes bought for marginal speed
+  are rejected.
+- **Baselines.** Experiments start from the current improved state (the latest merged or retained
+  best), never from the original baseline.
 
 ## Keyed component rendering: confirmed October 2026 results
+
+These results predate the Vite entry: their "compiled-native" figures are an esbuild bundle of the
+native generator's output.
 
 Four retained runtime changes removed the dominant dependency-tracking and controller-identity costs and reduced list-clearing work. Through experiment 005, live rendering's weighted time ratio against Solid fell from 4.591× to 1.465×. The target of beating all four framework controls remains unmet: live rendering was still 1.089× React, 1.272× Vue, and 1.424× Svelte. Ordinary compiled-native output was measured separately and reached 1.444× Solid. These are results for one keyed component and its nine workloads, not a general framework ranking.
 

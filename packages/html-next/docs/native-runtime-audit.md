@@ -135,6 +135,7 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Keyed list | 38,079 | Shared general-runtime support |
 | Declared read | 38,034 | Shared general-runtime support |
 | Controller lifecycle | 37,973 | Shared general-runtime support |
+| Controller keyed list, `directExtend` | 7,517 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions and fallback costs remain attributable.
 They are not separate per-component runtimes. An application or library build combines the complete
@@ -147,6 +148,52 @@ MutationObserver coordinator reports connection changes; the runtime renders `$i
 regions and reconnects the same instance state. Framework adapters give structural ownership to
 their framework renderer instead. The attachment path preserves this distinction, with Chromium,
 Firefox, and WebKit tests covering native keyed updates, branch changes, and reconnect behavior.
+
+## Direct-extend generated components (experimental)
+
+`GenerationOptions.directExtend` (the unplugin's `experimentalDirectExtend`) compiles components
+with a controller, declared state, `$if` and keyed `$each` to straight-line DOM code instead of the
+general-runtime fallback. The direct path is meant to cover every feature the live runtime supports;
+until it covers one, a component using it keeps the fallback unchanged, and the unplugin keeps a
+whole graph on the fallback when any component in it needs the general runtime. The
+generated module imports only the `generated-runtime` helpers its features use; the interpreter,
+parsers, type system and formatter never reach it, and `measure:runtime` fails if they do. The
+[compiled direct path](./compiled-direct-path.md) describes its architecture, coverage plan and
+byte budgets.
+
+| Need | Native mechanism composed | Remaining gap filled by code |
+| --- | --- | --- |
+| Build row and branch DOM | `createElement`/`setAttribute` once into a prototype, then `cloneNode(true)`; no HTML or Trusted Types sink | `buildTemplate()` spec walker |
+| Find binding sites | `firstChild`/`nextSibling` getters | Paths computed at compile time |
+| `$value` text | `Text.data` on the element's sole Text child; `textContent` for `""` and foreign content | `writeText()`: one guard; writes only when the converted text changed |
+| Attributes, classes | `setAttribute`/`removeAttribute`, `classList.toggle(name, force)` | The interpreter's own `toAttribute`/`toText`/`truthy` conversions |
+| Insertion | `insertBefore`; one `DocumentFragment` per run of fresh rows (row-by-row stays selectable) | Grouping fresh runs |
+| Bulk removal | `replaceChildren(start, end)` when the region owns its parent, else `Range.deleteContents()` or `remove()` | Adjacency grouping; foreign nodes split groups |
+| Moves | `moveBefore` with an `insertBefore` fallback, as the live runtime | Swapped ends, then the longest increasing run of retained positions |
+| Controller contract | `Proxy` with shared traps per instance (one handler record per raw object and type), `WeakMap` cache | Compact declared-type checks (`conforms`) |
+| Change notification | None native | Controller effects use the reactivity dependency graph; templates use root bits and written raw objects |
+| Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
+| Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
+
+The platform has no keyed reconciliation and no reactive binding of template parts; DOM Parts and
+Template Instantiation have not shipped. These helpers are the smallest layer that binds cloned DOM
+to declared state while keeping the controller contract. If `ChildNodePart`/`AttributePart` ship, the
+compile-time site walks map onto them.
+
+The coordinator fast path keeps today's light-DOM scope exactly and retains no root the document no
+longer holds: registered roots' lifecycle records are held through `WeakRef`s, pruned by a
+`FinalizationRegistry`. Indexing the record rather than the element keeps a live root indexed when
+a root `$match` switches it to another element, since the live runtime moves the record. The
+marker walk only acts on a root whose connection no longer matches its record and that the batch's
+added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM scope). With at most
+32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more
+fall back to the walk, which keeps mutation-order sequencing. Above 32 roots the walk runs.
+
+Only direct-extend output imports the indexed coordinator (`src/generated-lifecycle-index.ts`), so
+other generated output bundles exactly the coordinator it did before. Both occupy the one
+coordinator slot a document has: whichever installs first serves every root registered in that
+document, so two coordinators never disagree. When another coordinator installed first, direct-extend
+roots get the exact walk without the fast path.
 
 ## Review sequence
 

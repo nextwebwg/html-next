@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, it } from "vitest";
 import { build } from "vite";
 
@@ -158,6 +159,146 @@ describe("HTML Next unplugin", () => {
       capabilities: manifest.capabilities,
     });
     assert.match(output, /function manageGeneratedProp(?:s)?/);
+  });
+
+  it("resolves every helper a generated module imports through the shared support module", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-support-"));
+    temporary.push(root);
+    await writeFile(join(root, "once.html"), `<template component="x-once" status="early" summary="Once listener.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+    </template>`);
+    await writeFile(join(root, "dispatch.html"), `<template component="x-dispatch" status="early" summary="Declared dispatch.">
+      <defs>
+        <event name="saved" type="number"></event>
+        <state type="number" name="count" value="0"></state>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save</button>
+    </template>`);
+    await writeFile(join(root, "polymorphic.html"), `<template component="x-polymorphic" status="early" summary="Root match.">
+      <defs><prop name="as" type="keyword" values="button, a" default="button">Element.</prop></defs>
+      <template $match>
+        <a $when="as = 'a'" href="/next"><slot></slot></a>
+        <button $else type="button"><slot></slot></button>
+      </template>
+    </template>`);
+    const aliases = {
+      "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+      "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+    };
+    const bundle = async (entry: string, factory: string): Promise<string> => {
+      const directory = join(root, entry.replace(".html", ""));
+      await mkdir(directory);
+      await writeFile(join(directory, "main.js"), `export { ${factory} } from ${JSON.stringify(componentsModule)};`);
+      await build({
+        root,
+        logLevel: "silent",
+        plugins: [htmlNext.vite({ entries: [entry], root, manifestFile: false })],
+        resolve: { alias: aliases },
+        build: {
+          minify: false,
+          outDir: join(directory, "dist"),
+          lib: { entry: join(directory, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" },
+        },
+      });
+      return readFile(join(directory, "dist/app.js"), "utf8");
+    };
+
+    const once = await bundle("once.html", "createXOnce");
+    assert.match(once, /function manageGeneratedLifecycle/);
+    // Re-exporting the whole entry still leaves unused helpers and the general runtime out.
+    assert.doesNotMatch(once, /function manageGeneratedProps?\b|function manageComponentLifecycle/);
+    const dispatch = await bundle("dispatch.html", "createXDispatch");
+    assert.match(dispatch, /function dispatchGeneratedEvent/);
+    assert.doesNotMatch(dispatch, /function manageComponentLifecycle/);
+    const polymorphic = await bundle("polymorphic.html", "createXPolymorphic");
+    assert.match(polymorphic, /function componentRootIndex/);
+    assert.match(polymorphic, /function manageComponentLifecycle/);
+  });
+
+  it("compiles controller components directly with experimentalDirectExtend", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-direct-extend-"));
+    temporary.push(root);
+    await writeFile(join(root, "list.html"), `<template component="x-list" controller="./list.js" status="early" summary="List.">
+      <defs>
+        <state name="ready" type="boolean" value="false"></state>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      </defs>
+      <section><ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section>
+    </template>`);
+    await writeFile(join(root, "list.js"), `export default (host) => {
+      host.on("connect", () => { host.state.ready = true; host.state.rows = [{ id: 1, label: "one" }, { id: 2, label: "two" }]; });
+    };`);
+    // Arithmetic is not on the direct path yet, so this component still needs the general runtime.
+    await writeFile(join(root, "counter.html"), `<template component="x-counter" controller="./list.js" status="early" summary="Counter.">
+      <defs><state name="count" type="number" value="1"></state></defs>
+      <output $value="count + 1"></output>
+    </template>`);
+    const aliases = {
+      "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+      "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+    };
+    const bundle = async (entries: string[], experimentalDirectExtend: boolean): Promise<{ text: string; manifest: any }> => {
+      const outDir = join(root, `${entries.length}-${experimentalDirectExtend ? "direct" : "runtime"}`);
+      await writeFile(join(root, "main.js"), `export { ${entries.map((entry) => `createX${entry[0]!.toUpperCase()}${entry.slice(1, -5)}`).join(", ")} } from ${JSON.stringify(componentsModule)};`);
+      await build({
+        root,
+        logLevel: "silent",
+        plugins: [htmlNext.vite({ entries, root, manifestFile: "html-next.manifest.json", experimentalDirectExtend })],
+        resolve: { alias: aliases },
+        build: { minify: false, outDir, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+      });
+      return {
+        text: await readFile(join(outDir, "app.js"), "utf8"),
+        manifest: JSON.parse(await readFile(join(outDir, "html-next.manifest.json"), "utf8")),
+      };
+    };
+    const runtime = await bundle(["list.html"], false);
+    const direct = await bundle(["list.html"], true);
+    assert.match(runtime.text, /function manageComponentLifecycle/);
+    assert.equal(runtime.manifest.directExtend, undefined);
+    assert.doesNotMatch(direct.text, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
+    assert.match(direct.text, /function attachGeneratedController/);
+    assert.match(direct.text, /class KeyedList/);
+    assert.deepEqual(direct.manifest.directExtend, { applied: true, runtimeComponents: [] });
+    assertClosedOverEntries(direct.text);
+
+    // One component that still needs the general runtime keeps the whole graph on today's output,
+    // so the option never adds the direct helpers next to the runtime.
+    const mixedRuntime = await bundle(["list.html", "counter.html"], false);
+    const mixedDirect = await bundle(["list.html", "counter.html"], true);
+    assert.equal(mixedDirect.text, mixedRuntime.text);
+    assert.deepEqual(mixedDirect.manifest.directExtend, { applied: false, runtimeComponents: ["x-counter"] });
+  });
+
+  it("keeps the direct benchmark entry within its gzip ceiling", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-vite-ceiling-"));
+    temporary.push(root);
+    const fixtures = new URL("../../html-next/tests/fixtures/direct-extend/", import.meta.url);
+    await writeFile(join(root, "benchmark-app.html"), await readFile(new URL("benchmark-app.html", fixtures)));
+    await writeFile(join(root, "controller.js"), await readFile(new URL("benchmark-controller.js", fixtures)));
+    await writeFile(join(root, "main.js"), `import { createBenchmarkApp } from ${JSON.stringify(componentsModule)};\ndocument.body.append(createBenchmarkApp());\n`);
+    await writeFile(join(root, "index.html"), '<!doctype html>\n<script type="module" src="./main.js"></script>\n');
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [htmlNext.vite({ entries: ["benchmark-app.html"], root, manifestFile: false, experimentalDirectExtend: true })],
+      resolve: { alias: {
+        "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
+        "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
+      } },
+      build: { outDir: join(root, "dist"), modulePreload: { polyfill: false } },
+    });
+    const scripts = (await readdir(join(root, "dist/assets"))).filter((name) => name.endsWith(".js"));
+    assert.equal(scripts.length, 1);
+    const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
+    assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
+    // The js-framework-benchmark entry is 8,051 B gzip-6 (controller included) since the indexed
+    // coordinator split, a ceiling later milestones may not raise; ratchet this down whenever it shrinks.
+    const gzip = gzipSync(bundle, { level: 6 }).byteLength;
+    assert.ok(gzip <= 8_100, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

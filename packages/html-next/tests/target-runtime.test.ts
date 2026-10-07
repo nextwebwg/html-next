@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
-import { chromium, firefox, webkit, type BrowserType } from "playwright";
+import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
 import { generateComponent, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
@@ -3130,6 +3130,182 @@ createApp({ render: () => [
         { tag: "a", href: "/save", type: null, text: "Save" },
         { tag: "button", href: null, type: "button", text: "Save" },
       ]);
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
+  let directory = "";
+  const bundles = new Map<string, string>();
+  const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
+  // Each fixture builds twice: the general-runtime fallback (live behavior) and the direct path.
+  const components = [
+    { name: "parity", source: "parity.html", controller: "controller.js", factory: "createXParity" },
+    { name: "benchmark", source: "benchmark-app.html", controller: "benchmark-controller.js", factory: "createBenchmarkApp" },
+  ];
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "html-next-direct-extend-"));
+    const actions = await readFile(new URL("actions.js", fixtures), "utf8");
+    for (const component of components) {
+      const text = await readFile(new URL(component.source, fixtures), "utf8");
+      const controller = await readFile(new URL(component.controller, fixtures), "utf8");
+      for (const directExtend of [false, true]) {
+        const variant = join(directory, component.name, directExtend ? "direct" : "runtime");
+        const artifacts = generateComponent(parseComponent(text, component.source), { directExtend });
+        for (const artifact of artifacts) {
+          const path = join(variant, artifact.path);
+          await mkdir(join(path, ".."), { recursive: true });
+          await writeFile(path, artifact.content);
+        }
+        const module = artifacts.find((artifact) => artifact.path.startsWith("vanilla/") && artifact.path.endsWith(".js"))!;
+        assert.equal(module.content.includes("@nextwebwg/html-next/runtime"), !directExtend);
+        await writeFile(join(variant, "vanilla", "controller.js"), controller);
+        await writeFile(join(variant, "entry.js"), `import { ${component.factory} as create } from "./${module.path}";\n${actions}`);
+        const outfile = join(variant, "bundle.js");
+        await build({
+          entryPoints: [join(variant, "entry.js")],
+          outfile,
+          bundle: true,
+          format: "iife",
+          platform: "browser",
+          target: ["es2022"],
+          define: { "import.meta.url": JSON.stringify("https://example.test/generated/component.js") },
+          loader: { ".css": "empty" },
+          alias: {
+            "@nextwebwg/html-next/generated-runtime": generatedRuntimePath,
+            "@nextwebwg/html-next/runtime": runtimePath,
+          },
+        });
+        bundles.set(`${component.name} ${directExtend ? "direct" : "runtime"}`, outfile);
+      }
+    }
+  });
+
+  afterAll(async () => {
+    if (directory !== "") await rm(directory, { recursive: true, force: true });
+  });
+
+  /** Opens a page with one bundle; `errors` collects uncaught page errors. */
+  const open = async (browser: Browser, bundle: string): Promise<{ page: Page; errors: string[] }> => {
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    // A same-origin page and script: WebKit reports errors from about:blank as "Script error."
+    await page.route("https://example.test/**", (route) => route.fulfill(route.request().url().endsWith(".js")
+      ? { contentType: "text/javascript", path: bundles.get(bundle)! }
+      : { contentType: "text/html", body: "<main></main><script src=\"/bundle.js\"></script>" }));
+    await page.goto("https://example.test/");
+    return { page, errors };
+  };
+  /** Runs `window[action]()` against the general-runtime and the direct bundle of one fixture. */
+  const both = async (browser: Browser, component: string, action: string): Promise<[unknown, unknown]> => {
+    const results: unknown[] = [];
+    for (const variant of ["runtime", "direct"]) {
+      const { page, errors } = await open(browser, `${component} ${variant}`);
+      results.push(await page.evaluate((name) => (window as unknown as Record<string, () => Promise<unknown>>)[name]!(), action));
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    return results as [unknown, unknown];
+  };
+
+  const engines: ReadonlyArray<[string, BrowserType]> = [
+    ["Chromium", chromium],
+    ["Firefox", firefox],
+    ["WebKit", webkit],
+  ];
+  for (const [name, browserType] of engines) {
+    it(`${name} matches the general runtime on list transitions, diagnostics, the controller contract and lifecycle`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const [live, compiled] = await both(browser, "parity", "runParity") as Array<Record<string, string[]>>;
+        assert.equal(live!.snapshots!.length, 36);
+        assert.deepEqual(compiled!.snapshots, live!.snapshots);
+        assert.deepEqual(compiled!.identities, live!.identities);
+        assert.deepEqual(compiled!.warnings, live!.warnings);
+        assert.equal(live!.warnings!.length, 8);
+        assert.deepEqual(compiled!.errors, live!.errors);
+        assert.deepEqual(live!.errors!.map((error) => /H[RB]00\d/.exec(error)?.[0]), ["HR004", "HB001", "HB001", "HB001"]);
+        // HR004 and HB001 throw before the list touches its DOM.
+        assert.deepEqual(compiled!.quiet, [0, 0, 0, 0]);
+        assert.deepEqual(live!.quiet, [0, 0, 0, 0]);
+        assert.deepEqual(compiled!.contract, live!.contract);
+        assert.deepEqual(compiled!.events, live!.events);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps the coordinator's light-DOM scope, batch order and controller cleanup`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const [live, compiled] = await both(browser, "parity", "runLifecycle") as Array<Record<string, unknown[]>>;
+        assert.deepEqual(compiled, live);
+        assert.ok(live!.events!.includes("3 late cleanup"));
+        assert.deepEqual(live!.warnings, []);
+        assert.deepEqual(live!.errors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} renders the benchmark operations like the general runtime`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const [live, compiled] = await both(browser, "benchmark", "runBenchmark") as Array<{
+          steps: Array<{ name: string; rows: number; same: number }>; warnings: string[]; errors: string[];
+        }>;
+        assert.deepEqual(compiled!.steps, live!.steps);
+        assert.deepEqual(live!.steps.map((step) => [step.rows, step.same]), [
+          [0, 0], [1000, 0], [1000, 0], [1000, 1000], [1000, 1000], [1000, 1000], [999, 999], [979, 979],
+          [1979, 979], [1979, 0], [1979, 1979], [0, 0], [10000, 0], [10000, 10000], [0, 0],
+        ]);
+        assert.deepEqual([compiled!.warnings, compiled!.errors, live!.warnings, live!.errors], [[], [], [], []]);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
+  // Experiment 006's forced-GC probe: nine create/clear cycles must not retain rows or DOM.
+  it("Chromium releases cleared rows after forced garbage collection", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const measured: Record<string, { nodes: number; heap: number; retained: number }> = {};
+      for (const variant of ["runtime", "direct"]) {
+        const { page, errors } = await open(browser, `benchmark ${variant}`);
+        const session = await page.context().newCDPSession(page);
+        await session.send("Performance.enable");
+        const sample = async (): Promise<Record<string, number>> => {
+          await session.send("HeapProfiler.collectGarbage");
+          await session.send("HeapProfiler.collectGarbage");
+          const { metrics } = await session.send("Performance.getMetrics");
+          return Object.fromEntries(metrics.map((metric) => [metric.name, metric.value]));
+        };
+        await page.evaluate(() => (window as unknown as { mountBenchmark(): Promise<unknown> }).mountBenchmark().then(() => undefined));
+        await page.evaluate(() => (window as unknown as { retentionCycle(): Promise<void> }).retentionCycle());
+        const before = await sample();
+        for (let cycle = 0; cycle < 9; cycle += 1) {
+          await page.evaluate(() => (window as unknown as { retentionCycle(): Promise<void> }).retentionCycle());
+        }
+        const after = await sample();
+        const retained = await page.evaluate(() =>
+          (window as unknown as { released: WeakRef<Element>[] }).released.filter((row) => row.deref() !== undefined).length
+        );
+        measured[variant] = { nodes: after.Nodes! - before.Nodes!, heap: after.JSHeapUsedSize! - before.JSHeapUsedSize!, retained };
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+      // Before 006 the live runtime kept +90,000 nodes and 13.6 MiB over nine cycles; one leaked row
+      // per cycle shows here as +90 nodes. Both variants measure 0 nodes.
+      for (const result of Object.values(measured)) {
+        assert.equal(result.retained, 0, JSON.stringify(measured));
+        assert.ok(result.nodes < 9, JSON.stringify(measured));
+        assert.ok(result.heap < 2 * 1024 * 1024, JSON.stringify(measured));
+      }
     } finally {
       await browser.close();
     }

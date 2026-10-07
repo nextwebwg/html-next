@@ -762,6 +762,61 @@ const reactiveHandler: ProxyHandler<object> = {
   },
 };
 
+// ponytail: the three functions below repeat the traps' bodies for compiled controller facades,
+// which track and notify raw targets through the same registry. The traps keep their own inline
+// copies because calling these from them grows every runtime bundle (~30 B gzip); only
+// generated-runtime imports these, so other bundles shake them out.
+
+/** Records that the running effect read `target[key]`; the raw target is the dependency's identity. */
+export function trackProperty(target: object, key: PropertyKey): void {
+  if (activeEffect === undefined) return;
+  let properties = objectSubscribers.get(target);
+  if (properties === undefined) {
+    properties = new Map();
+    objectSubscribers.set(target, properties);
+  }
+  let subscribers = properties.get(key);
+  if (subscribers === undefined) {
+    subscribers = { first: undefined, last: undefined };
+    properties.set(key, subscribers);
+  }
+  activeEffect.track(subscribers);
+}
+
+/**
+ * Notifies the readers a property write affects, after the write. `previousLength` is the array's
+ * length before it, or undefined for other targets.
+ */
+export function notifyPropertySet(
+  target: object,
+  key: PropertyKey,
+  previous: unknown,
+  next: unknown,
+  previousLength: number | undefined,
+): void {
+  if (!Object.is(previous, next)) trigger(objectSubscribers.get(target)?.get(key));
+  // Defining an array index can extend length before push writes that same length again.
+  if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+    trigger(objectSubscribers.get(target)?.get("length"));
+  }
+  // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+  if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+    const length = (target as Value[]).length;
+    for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+      if (typeof property !== "string") continue;
+      const index = Number(property);
+      if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+        trigger(subscribers);
+      }
+    }
+  }
+}
+
+/** Notifies the readers of a deleted property; `had` is whether it existed before the delete. */
+export function notifyPropertyDelete(target: object, key: PropertyKey, had: boolean): void {
+  if (had) trigger(objectSubscribers.get(target)?.get(key));
+}
+
 /** The canonical reactive proxy for a mutable object; primitives, frozen values and events stay as they are. */
 function wrap(value: Value): Value {
   if (value === null || typeof value !== "object") return value;
