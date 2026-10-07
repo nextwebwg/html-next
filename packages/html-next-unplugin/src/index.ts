@@ -722,9 +722,11 @@ export interface HtmlNextCheckDiagnostic extends HtmlDiagnostic {
  */
 export async function checkHtmlNext(options: HtmlNextCheckOptions = {}): Promise<readonly HtmlNextCheckDiagnostic[]> {
   try {
-    if (options.target === "vue" || options.target === "react" || options.target === "svelte") await checkConversion(options);
-    else await compileGraph(options, true);
-    return Object.freeze([]);
+    const warnings: HtmlDiagnostic[] = [];
+    if (options.target === "vue" || options.target === "react" || options.target === "svelte") {
+      await checkConversion({ ...options, onWarning: (warning) => { warnings.push(warning); } });
+    } else await compileGraph(options, true);
+    return checkDiagnostics(warnings);
   } catch (error) {
     let diagnostic: HtmlDiagnostic;
     if (error instanceof HtmlDiagnosticAggregateError) return checkDiagnostics(error.diagnostics);

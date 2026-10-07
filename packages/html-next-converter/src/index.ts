@@ -328,7 +328,10 @@ function nativeBindingRoots(graph: ComponentGraph): Map<string, Set<string>> {
   return receivers;
 }
 
-export type CheckConversionOptions = Omit<ConvertOptions, "outDirectory">;
+export type CheckConversionOptions = Omit<ConvertOptions, "outDirectory"> & {
+  /** Receives non-fatal diagnostics, such as `HT022`, from a check that otherwise succeeds. */
+  readonly onWarning?: (diagnostic: HtmlDiagnostic) => void;
+};
 
 /** Runs the conversion planner and backend checks without writing artifacts. */
 export async function checkConversion(options: CheckConversionOptions): Promise<ConversionManifest> {
@@ -645,7 +648,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     }),
     components: Object.freeze(manifestComponents),
   });
-  // Check-mode warnings surface only once every phase has run.
-  if (graph.warnings !== undefined) throw new HtmlDiagnosticAggregateError(graph.warnings);
+  for (const warning of graph.warnings ?? []) options.onWarning?.(warning);
   return { manifest, artifacts: planned.map(({ artifact }) => artifact) };
 }

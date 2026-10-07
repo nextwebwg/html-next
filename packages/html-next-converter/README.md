@@ -29,6 +29,7 @@ users can call `checkConversion` with the same options as `convertComponents`, o
 `outDirectory`; it returns the planned conversion manifest, writes no files, and throws the same
 compiler diagnostics as conversion. Independent check failures are collected in
 `HtmlDiagnosticAggregateError.diagnostics`; conversion itself continues to stop at the first error.
+Pass `onWarning` to receive warnings, such as `HT022`, that do not fail the check.
 
 Quote the glob so the converter, not your shell, expands it. It discovers every `.html`
 component below `components/`, including definitions with no incoming component link, and
