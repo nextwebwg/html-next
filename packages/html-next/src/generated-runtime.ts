@@ -174,8 +174,9 @@ export function invoke(
   const root = factory(options, html);
   // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
   if (placeholder.parentNode !== null) placeholder.replaceWith(root);
-  // A component the compact paths compile keeps its root and takes props through its factory's channel.
-  const child = ((root as RuntimeElement)[lifecycleKey]?.h ?? { e: root }) as GeneratedInstance;
+  // A projected invocation's projection entry follows its root, so a slot that renders again inserts it.
+  follows(placeholder, root);
+  const child = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
   let current = root;
   const effect = createEffect(instance.q, () => {
     trackProperty(child, "e");
@@ -183,6 +184,7 @@ export function invoke(
     if (next !== current) {
       const previous = current;
       current = next;
+      follows(previous, next);
       untracked(() => follow(next, previous));
     }
   }, 2, instance.c());
@@ -1064,7 +1066,40 @@ export interface GeneratedInstance {
 }
 
 /** Each projected node and the name of the slot it is for (`""` for the unnamed slot). */
-export type Projection = readonly (readonly [node: Node, slot: string])[];
+export type Projection = readonly [node: Node, slot: string][];
+
+/** Each top-level projected node's projection entry, which follows an invoked component's root. */
+const projectedEntries = new WeakMap<Node, [Node, string]>();
+/** Components invoked in projected content no slot has placed yet, by the top-level projected node holding them. */
+const waiting = new WeakMap<Node, Map<Node, () => void>>();
+
+function follows(previous: Node, root: Node): void {
+  const entry = projectedEntries.get(previous);
+  if (entry === undefined) return;
+  entry[0] = root;
+  projectedEntries.set(root, entry);
+  markProjectedRoot(root);
+}
+
+/**
+ * Whether a component invoked in projected content may be created: once a rendered slot has placed
+ * the projected node holding it, as live lowering waits for a slot to render it. Hidden content gets
+ * no instance or bindings; until then `realize` waits for a slot to place that node.
+ */
+export function placed(site: Node, realize: () => void): boolean {
+  // The projected node holding the site; before its component has it, the node under the projection's fragment.
+  let top = site;
+  for (let node: Node | null = site; node !== null && node.nodeType !== 11; node = node.parentNode) {
+    top = node;
+    if (projectedEntries.has(node)) break;
+  }
+  const parent = top.parentNode;
+  if (projectedEntries.has(top) && parent !== null && parent.nodeType !== 11) return true;
+  let pending = waiting.get(top);
+  if (pending === undefined) waiting.set(top, pending = new Map());
+  pending.set(site, realize);
+  return false;
+}
 
 /**
  * A factory's projection, as the live runtime takes a factory's: `children` for the unnamed slot,
@@ -1079,7 +1114,9 @@ export function project(
     for (const child of nodes) {
       const node = typeof child === "string" ? document.createTextNode(child) : child;
       markProjectedRoot(node);
-      projected.push([node, name]);
+      const entry: [Node, string] = [node, name];
+      projected.push(entry);
+      projectedEntries.set(node, entry);
     }
   }
   const into = (key: string): Element[] => projected
@@ -1146,7 +1183,16 @@ export function fillSlot(
   end.replaceWith(close);
   if (assigned.length === 0) return close;
   if (rendered !== undefined) close.before(rendered[1].n);
-  else close.before(...assigned);
+  else {
+    close.before(...assigned);
+    // Components invoked in the nodes this slot now places are created, as live lowers them now.
+    for (const node of assigned) {
+      const pending = waiting.get(node);
+      if (pending === undefined) continue;
+      waiting.delete(node);
+      for (const realize of pending.values()) realize();
+    }
+  }
   return rendered;
 }
 

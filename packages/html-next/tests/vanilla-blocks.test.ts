@@ -37,7 +37,10 @@ function graph(texts: readonly string[]): { readonly entry: string; readonly mod
 function reference(text: string, invoked: readonly string[] = []): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
   const named = definition.controller === undefined ? definition : { ...definition, controller: `./${definition.controller.split("/").at(-1)}` };
-  return liveReference(named, invoked.map((other) => parseComponent(other, new URL("component.html", fixtures).href)));
+  return liveReference(named, invoked.map((other) => {
+    const parsed = parseComponent(other, new URL("component.html", fixtures).href);
+    return parsed.controller === undefined ? parsed : { ...parsed, controller: `./${parsed.controller.split("/").at(-1)}` };
+  }));
 }
 
 const component = (defs: string, body: string, controller = true): string =>
@@ -1509,6 +1512,22 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         (host) => { (globalThis as any).directExtendLog.events.push(`valid ${(host.root as any).validity?.valid} ${(host.root as any).validationMessage}`); },
       ], { tone: "nope" });
     }
+  });
+
+  it("creates a component projected into a closed slot only when a slot renders it, like live", async () => {
+    const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
+      <p class="leaf" data-id="leaf" $value="text"></p></template>`;
+    const host = (controller: boolean): string => `<template component="x-host" ${controller ? 'controller="./slots-controller.js" ' : ""}status="early" summary="Host.">
+      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
+      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="open"><slot name="head"></slot></section></div></template>`;
+    const page = `<template component="x-page" status="early" summary="Page."><defs><state type="string" name="label" value="from the page"></state></defs>
+      <div><x-host><x-leaf slot="head" from:text="label"></x-leaf><b slot="tail">tail</b></x-host></div></template>`;
+    const toggle = ({ root }: any): void => root.querySelector("button.toggle").click();
+    // Closed at first render: nothing is created until the slot opens; then closing and reopening
+    // inserts the same component root again.
+    await same([page, host(false), leaf], [() => {}, toggle, toggle, toggle]);
+    // The host's controller reads its slots while the slot is closed, then opens it on connect.
+    await same([page, host(true), leaf], [toggle, toggle]);
   });
 
   it("invokes a scalar prop component like live lowering", async () => {

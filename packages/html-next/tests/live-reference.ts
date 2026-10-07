@@ -15,15 +15,19 @@ export function liveReference(definition: ComponentDefinition, others: readonly 
     'import { componentRootIndex, getComponentHost, manageComponentLifecycle, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
     ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
+    ...others.flatMap((other, index) => other.controller === undefined ? [] : [`import * as controller${index} from ${JSON.stringify(other.controller)};`]),
     // Registered as a live document registers it, with its styles and their `:host-state()` names.
     `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
     `registerComponentDefinitions([definition${others.map((other) => `, { ...${serializedDefinition(other)}, css: ${JSON.stringify(other.css)} }`).join("")}]);`,
     // A live document is observed, so an invocation a region renders later lowers too. A root lowered
     // from its invocation gets its controller as the browser loader gives one: once per host, on connect.
-    ...others.length > 0 ? [controlled ? [
+    ...others.length > 0 ? [controlled || others.some((other) => other.controller !== undefined) ? [
+      `const controllers = { ${[...controlled ? [`${JSON.stringify(definition.contract.tag)}: controller`] : [],
+        ...others.flatMap((other, index) => other.controller === undefined ? [] : [`${JSON.stringify(other.contract.tag)}: controller${index}`])].join(", ")} };`,
       "const initialized = new WeakSet();",
       "observeDocument(document, { onConnect(element, connected) {",
-      `  if (connected.contract.tag !== ${JSON.stringify(definition.contract.tag)}) return;`,
+      "  const controller = controllers[connected.contract.tag];",
+      "  if (controller === undefined) return;",
       "  const host = getComponentHost(element);",
       "  if (initialized.has(host)) return;",
       "  initialized.add(host);",

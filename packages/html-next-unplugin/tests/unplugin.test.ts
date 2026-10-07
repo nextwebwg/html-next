@@ -16,6 +16,8 @@ import {
 import { installSourcePackage } from "./source-package.js";
 
 const temporary: string[] = [];
+/** Generated modules resolve the helpers from source, never from a stale local build. */
+const generatedRuntimeAlias = { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname };
 
 // A build is compiled for its entries. Only the live browser runtime watches the document for
 // component links and later definitions, so none of that machinery may reach a build.
@@ -280,6 +282,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {
@@ -325,6 +328,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {
@@ -359,6 +363,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {
@@ -438,6 +443,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {
@@ -473,6 +479,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {
@@ -511,6 +518,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: generatedRuntimeAlias },
       build: {
         minify: false,
         lib: {

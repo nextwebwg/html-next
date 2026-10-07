@@ -187,7 +187,12 @@ interface Block {
   ranged?: boolean;
   /** A consumer's scoped-slot templates projected from this block: the carrier's site and its content's block. */
   readonly scopes: { readonly site: number; readonly block: Block }[];
+  /** A parent's content projected into a component it invokes. */
+  projection?: boolean;
 }
+
+/** Whether a block renders projected content, where invoked components wait for a slot to place them. */
+const inProjection = (block: Block | undefined): boolean => block !== undefined && (block.projection === true || inProjection(block.parent));
 
 /**
  * A component the template invokes, created through its factory where the placeholder sits, as
@@ -967,7 +972,10 @@ class Planner {
       invocations: [], scopes: [],
     };
     this.blocks.push(block);
-    if (projecting !== undefined) projecting.block = block;
+    if (projecting !== undefined) {
+      projecting.block = block;
+      block.projection = true;
+    }
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
       // A `<template $each>` row is several nodes, between item markers as live renders them.
@@ -1149,8 +1157,10 @@ class Planner {
         ? this.carrier(block, child, path, index, scope, svg)
         : [this.child(block, parent, child, [...path, index], scope, svg)];
       for (const item of planned) {
-        // An invoked component's placeholder is an empty Text, which its root replaces.
-        items.push(item === 5 ? 0 : item);
+        // An invoked component's placeholder is an empty Text, which its root replaces. In projected
+        // content it is the invocation element, as live leaves it until a slot renders it.
+        items.push(item !== 5 ? item : child.kind === "element" && inProjection(block)
+          ? [child.name, child.attributes.flatMap((attribute) => attribute.kind === "literal" ? [attribute.name, attribute.value] : [])] : 0);
         // A region is an anchor pair, so the next child sits two nodes on; an invocation's placeholder is one.
         index += item === 1 || item === 2 || item === 3 || item === 4 ? 2 : 1;
       }
@@ -1640,8 +1650,10 @@ export function emitBlocks(
           `${binding.expression.fails ? `if (${value} !== NONCONFORMING) ` : ""}root[${JSON.stringify(binding.name)}] = ${value};`];
       }),
     ];
+    // In projected content a component waits until a slot places it, as live lowering does.
+    const waits = inProjection(block);
     return [
-      `  if (r.h${index} === undefined) {`,
+      waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, 0, new Map()))) {` : `  if (r.h${index} === undefined) {`,
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
       `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
       // A bound prop is first its attribute's text, which the component reads as HTML input, then its value.
@@ -1671,7 +1683,7 @@ export function emitBlocks(
       ...[...invocation.controls, ...block.bindings.filter((binding) => binding.site === invocation.site && binding.kind === "control").map((binding) => binding.path!)]
         .map((path) => `    r.z.push(bindRootControl(I, r.h${index}, ${path}));`),
       ...projection === undefined ? [] : [`    r.z.push(() => dispose(r.j${index}));`],
-      `  } else {`,
+      waits ? `  } } else {` : `  } else {`,
       ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
       ...invocation.props.flatMap((prop, at) => [
         `    if (${guard(maskOf(prop.expression) | NESTED)}) {`,
@@ -2247,7 +2259,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl", "undeclared", "readonlyView",
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures"]
