@@ -3,7 +3,7 @@
 import { fail } from "./diagnostics.js";
 import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
-import { ABSENT, NONCONFORMING, truthy, type Value } from "./expression.js";
+import { ABSENT, NONCONFORMING, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { hasExecutableUrl } from "./sanitize.js";
@@ -23,7 +23,7 @@ import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-syst
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
-export { KeyedList } from "./keyed.js";
+export { dispose, IndexedList, KeyedList, PositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
 
 export interface GeneratedEvent {
@@ -404,6 +404,38 @@ export function recordValue(keys: readonly string[], values: readonly unknown[])
   return record;
 }
 
+/**
+ * The `$each` modifiers over a list's items, as live `shapeList` applies them: `$where` keeps
+ * truthy items, `$sort` orders by each key (numbers numerically, anything else by its text,
+ * `-` descending), and `$limit` keeps that many when it is a number.
+ */
+export function shapeItems(
+  items: unknown, where: ((item: unknown) => unknown) | 0,
+  sort: readonly (readonly [read: (item: unknown) => unknown, descending: boolean])[], limit: unknown,
+): unknown[] {
+  let result = Array.isArray(items) ? [...items as unknown[]] : [];
+  if (where !== 0) result = result.filter((item) => truthy(where(raw(item)) as Value));
+  if (sort.length > 0) {
+    const compare = (a: unknown, b: unknown): number =>
+      typeof a === "number" && typeof b === "number" ? a - b : toText(a as Value).localeCompare(toText(b as Value));
+    const value = (item: unknown, read: (item: unknown) => unknown): unknown =>
+      item !== null && typeof item === "object" && !Array.isArray(item) ? read(item) : item;
+    result.sort((a, b) => {
+      for (const [read, descending] of sort) {
+        const order = compare(value(raw(a), read), value(raw(b), read));
+        if (order !== 0) return descending ? -order : order;
+      }
+      return 0;
+    });
+  }
+  if (typeof limit === "number") result = result.slice(0, Math.max(0, Math.trunc(limit)));
+  return result;
+}
+
+/** A row's `loop` record, made afresh for each read as live makes one per update. */
+export const loopRecord = (row: { j?: number; l?: number }): Record<string, unknown> =>
+  ({ index: row.j, first: row.j === 0, last: row.j === row.l! - 1, count: row.l });
+
 /** Flags a row whose binding converts a list or object (see `KeyedRow.w`); returns the value. */
 export const trackContainer = (row: { w?: number }, value: unknown): unknown => {
   if (value !== null && typeof value === "object") row.w = 1;
@@ -543,6 +575,17 @@ export interface GeneratedStateSpec {
   readonly d?: Readonly<Record<string, GeneratedEventDeclaration>>;
   /** `dispatchDeclared`, supplied by a module that declares events, so others do not bundle it. */
   readonly x?: typeof dispatchDeclared;
+  /** `iteratedRef`, supplied by a module with refs inside rows. */
+  readonly z?: typeof iteratedRef;
+}
+
+/** A ref the host reads: an iterated one is what the iteration still renders, in document order. */
+export function iteratedRef(recorded: Record<string, unknown>, key: string): unknown {
+  const value = recorded[key];
+  if (!Array.isArray(value)) return value;
+  const live = (value as Element[]).filter((element) => element.isConnected);
+  if (live.length !== value.length) recorded[key] = live;
+  return live.sort((a, b) => (a.compareDocumentPosition(b) & 4) !== 0 ? -1 : 1);
 }
 
 /**
@@ -673,6 +716,8 @@ export function attachGeneratedController(
   /** Calls the controller module's default export; read when the root first connects, as live does. */
   controller: ((host: never) => unknown) | undefined,
   channel?: GeneratedChannel,
+  /** Filled before the first render, so regions it renders can already listen and record refs. */
+  handle = {} as GeneratedInstance,
 ): GeneratedInstance {
   const { n: names, t: types } = spec;
   const writable = spec.k ?? names.length;
@@ -847,7 +892,7 @@ export function attachGeneratedController(
     },
     props: Object.freeze(Object.create(null) as object),
     refs: new Proxy({}, {
-      get: (_target, key) => typeof key === "string" ? recorded[key] : undefined,
+      get: (_target, key) => typeof key !== "string" ? undefined : spec.z === undefined ? recorded[key] : spec.z(recorded, key),
       has: (_target, key) => typeof key === "string" && recorded[key] !== undefined,
     }),
     slots: new Proxy({}, {
@@ -868,6 +913,7 @@ export function attachGeneratedController(
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
   });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
@@ -897,5 +943,5 @@ export function attachGeneratedController(
     }
     return disconnect;
   }, { S: spec, v: values, H: host });
-  return { S: spec, s: state as Record<PropertyKey, unknown>, q: scheduler, o: entries, r: recorded, c: () => connected };
+  return handle;
 }

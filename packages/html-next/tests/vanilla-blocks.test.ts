@@ -102,18 +102,6 @@ describe("direct-extend Vanilla generation", () => {
     "select region": component(state, '<p><select><option $if="ready">A</option></select></p>'),
     "two-way binding": component('<state name="name" type="string" value="a"></state>', '<p><input bind:value="name"></p>'),
     html: component(state, '<p $html="rows.length"></p>'),
-    with: component(state, '<p><span $with="rows as list" $value="list.length"></span></p>'),
-    "unkeyed each": component(state, '<ul><li $each="row of rows" $value="row.label"></li></ul>'),
-    "each index": component(state, '<ul><li $each="row, i of rows" $key="row.id" $value="i"></li></ul>'),
-    "each where": component(state, '<ul><li $each="row of rows" $key="row.id" $where="row.id" $value="row.label"></li></ul>'),
-    "each sort": component(state, '<ul><li $each="row of rows" $key="row.id" $sort="id" $value="row.label"></li></ul>'),
-    "each limit": component(state, '<ul><li $each="row of rows" $key="row.id" $limit="2" $value="row.label"></li></ul>'),
-    "nested flow in a row": component(state, '<ul><li $each="row of rows" $key="row.id"><b $if="ready">x</b></li></ul>'),
-    "loop record": component(state, '<ul><li $each="row of rows" $key="row.id" $value="loop.index"></li></ul>'),
-    "loop shadows a root": component(`${state}<state name="loop" type="number" value="1"></state>`, '<ul><li $each="row of rows" $key="row.id" $value="loop"></li></ul>'),
-    "key reads state": component(state, '<ul><li $each="row of rows" $key="ready" $value="row.label"></li></ul>'),
-    "member test": component(state, '<p><b $if="rows.length">x</b></p>'),
-    "container test": component(state, '<p><b $if="rows">x</b></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
     it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
@@ -300,6 +288,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     const compiled = await run(text, true, steps);
+    if (process.env.DBG !== undefined) (await import("node:fs")).writeFileSync(process.env.DBG, JSON.stringify({ live: live.errors, compiled: compiled.errors, lw: live.warnings, cw: compiled.warnings }, null, 1));
     for (let index = 0; index < live.snapshots.length; index += 1) {
       assert.equal(compiled.snapshots[index], live.snapshots[index], `snapshot ${index}`);
       assert.equal(compiled.identities[index], live.identities[index], `identity ${index}`);
@@ -504,6 +493,39 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       },
       ({ root }) => { click(root, "go"); click(root, "go"); click(root, "go"); log(root, "four"); },
       ({ root }) => { click(root, "bad"); click(root, "bad"); log(root, "bad"); },
+    ]);
+  });
+
+  it("renders every flow like the general runtime: tests, $with, $match, unkeyed, shaped and nested lists", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="title" type="string" value="Rows"></state>
+      <state name="limit" type="number" value="3"></state>
+      <state name="prefix" type="string" value="k"></state>
+      <handler name="pick"><set name="title" expr:value="concat($$event.type, ':', $$event.target.textContent)"></set></handler>`, `
+      <section><p>{title}</p>
+        <b $if="rows.length">some</b><i $if="rows">truthy</i><s $if="rows[0].tags">tagged</s>
+        <span $with="rows[0] as first"><em $value="first.label"></em> <u $value="first.tags.length"></u></span>
+        <template $match="selected as chosen"><b $when="chosen = 1">one</b><i $when="chosen > 1">many {chosen}</i><u $else>none</u></template>
+        <ol><li $each="row, i of rows" from:data-id="row.id" class:first="loop.first" class:last="loop.last">{i}/{loop.count} {row.label}
+          <button $ref="picks" on:click.stop="pick">{row.label}</button><em $if="row.tags.length > 0 and ready">{row.tags}</em>
+          <ul><li $each="tag of row.tags" $key="tag">{tag}</li></ul></li></ol>
+        <menu><li $each="row of rows" $key="concat(prefix, row.id)" $where="row.label" $sort="-label,id" $limit="limit" from:data-key="row.id">{row.label}</li></menu>
+      </section>`);
+    const note = (host: any, label: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${label} refs=${(host.refs.picks ?? []).map((button: Element) => button.textContent).join("|")}`);
+    };
+    await same(text, [
+      (host) => { host.state.rows = [1, 2, 3, 4].map((id) => ({ id, label: `r${id}`, tags: id % 2 === 0 ? ["t"] : [] })); note(host, "rows"); },
+      (host) => { host.state.selected = 1; host.root.querySelector("ol button").click(); note(host, "click"); },
+      (host) => { host.state.rows[0].tags.push("x"); host.state.selected = 3; },
+      (host) => { host.state.rows = host.state.rows.toReversed(); note(host, "reversed"); },
+      (host) => { host.state.rows[1].label = ""; host.state.limit = 2; host.state.prefix = "p"; },
+      (host) => { host.state.rows.splice(1, 1); host.state.rows[0].label = "z"; note(host, "spliced"); },
+      (host) => { host.state.rows[0].tags.length = 0; host.state.ready = false; },
+      (host) => { host.state.rows = []; host.state.selected = null; note(host, "empty"); },
     ]);
   });
 

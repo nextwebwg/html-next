@@ -9,6 +9,7 @@
 
 import { declaredExpressionType, declaredTypeAt, declareLayerTypes, declareTypes } from "../declared-types.js";
 import {
+  compileExpression,
   dimensionType,
   expressionFormattingType,
   mathArity,
@@ -23,7 +24,7 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { rootArms, type ComponentDefinition, type ElementNode, type TemplateNode } from "../template.js";
+import { iteratedRefNames, rootArms, type ComponentDefinition, type ElementNode, type Flow, type TemplateNode } from "../template.js";
 import { declarationTypeNode, formatType, type TypeNode } from "../type-system.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
@@ -76,6 +77,8 @@ interface Lowered {
   readonly contents: boolean;
   /** May evaluate to NONCONFORMING, which a binding then does not write. */
   readonly fails: boolean;
+  /** Reads the row's index or `loop` record. */
+  readonly positional?: boolean;
   /** Structural identity, so equal expressions in one update share an evaluation. */
   readonly key: string;
 }
@@ -100,14 +103,27 @@ interface Binding {
 }
 
 interface Region {
-  readonly kind: "if" | "each";
+  readonly kind: "if" | "each" | "with" | "match";
   /** The start anchor's site; the end anchor follows it in the prototype. */
   readonly site: number;
+  /** The body (`$if`, `$with`, `$each` rows); a `$match` has one per arm instead. */
   readonly block: Block;
+  readonly arms?: readonly Block[];
+  /**
+   * What decides the body: an `$if` test, a `$with` value, or a `$match` selection (an arm index,
+   * -1 for none, or NONCONFORMING), with the match value in `m` when it has one.
+   */
   readonly test?: Lowered;
+  /** The reads array of a decision that reads below a root or an item: it rebuilds only when they change. */
+  readonly recorded?: string | undefined;
   readonly list?: Lowered;
-  readonly key?: Lowered;
+  /** Keyed rows' key, or undefined for rows that follow positions. */
+  readonly key?: Lowered | undefined;
   readonly alias?: string;
+  /** Rows read their index or `loop`. */
+  readonly positional?: boolean;
+  /** `$match`: the matched expression, bound to its alias in the arms. */
+  readonly matched?: Lowered | undefined;
 }
 
 interface Block {
@@ -123,8 +139,22 @@ interface Block {
   readonly svg: boolean;
   /** `on:` listeners: the site, the event, its handler's function name and the modifiers. */
   readonly events: { readonly site: number; readonly name: string; readonly handler: string; readonly modifiers: readonly string[] }[];
-  /** `$ref` names recorded for a site. */
-  readonly refs: { readonly site: number; readonly name: string }[];
+  /** `$ref` names recorded for a site; iterated ones (inside rows) collect into a list. */
+  readonly refs: { readonly site: number; readonly name: string; readonly iterated: boolean }[];
+  /** A row, or a `$with` or `$match` body: its record holds the item or alias value in `i`. */
+  readonly alias: boolean;
+  /** A row that reads its position: its record keeps its index and the row count. */
+  positional?: boolean;
+  readonly level: number;
+  readonly parent: Block | undefined;
+  /** A read below walks up through this block's record, which then links its parent's (`u`). */
+  needsParent?: boolean;
+}
+
+/** Whether a block, or a region below it, listens: removing it must stop those listeners. */
+function disposable(block: Block): boolean {
+  return block.events.length > 0 ||
+    block.regions.some((region) => [region.block, ...region.arms ?? []].some(disposable));
 }
 
 export interface BlockPlan {
@@ -233,9 +263,26 @@ function literalValue(node: ExpressionNode): unknown {
   notYetDirect();
 }
 
+/** A local name: a row's item, index or `loop` record, or a `$with`/`$match` alias. */
+interface AliasEntry {
+  readonly name: string;
+  /** The level of the block whose record holds it. */
+  readonly level: number;
+  readonly kind: "item" | "index" | "loop";
+  /** A variable that holds it where it is evaluated (a function's parameter), not the record chain. */
+  readonly source?: string;
+}
+
 interface Scope {
   readonly roots: readonly Root[];
-  readonly alias: string | undefined;
+  /** Local names, innermost last. */
+  readonly aliases: readonly AliasEntry[];
+  /** The nesting level of the block an expression is evaluated in; the root block is 0. */
+  readonly level: number;
+  /** The block at `level`, whose ancestors keep a parent link when a read walks up to them. */
+  readonly block?: Block | undefined;
+  /** Evaluated in a function whose `o` is its own parameter, so the block's own item is `r.i`. */
+  readonly closure?: boolean | undefined;
   /** Declared types at build time, as the live scope answers them (`declareTypes`). */
   readonly types: TypeScope;
   /** The reads array an exact binding records every value it reads into (see `Binding.exact`). */
@@ -246,6 +293,18 @@ interface Scope {
   readonly event?: boolean | undefined;
   /** A computed root's lowered expression (reads, result flags). */
   readonly computed?: ((index: number) => Lowered) | undefined;
+}
+
+/** Where a local name's value is read from the block evaluating it. */
+function aliasSource(scope: Scope, entry: AliasEntry): string {
+  if (entry.source !== undefined) return entry.source;
+  const up = scope.level - entry.level;
+  // Every block between the reader and the holder keeps a link to its parent's record.
+  for (let block = scope.block, step = 0; step < up && block !== undefined; step += 1, block = block.parent) block.needsParent = true;
+  const record = `r${".u".repeat(up)}`;
+  if (entry.kind === "index") return `${record}.j`;
+  if (entry.kind === "loop") return `loopRecord(${record})`;
+  return up === 0 && scope.closure !== true ? "o" : `${record}.i`;
 }
 
 /** A read, recorded when the binding is exact. */
@@ -273,10 +332,14 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
-      if (node.name === scope.alias) return { ...none(key, read(scope, "o")), item: true, deep: true };
+      // The innermost local of that name: an item, an index or a `loop` record, which follow positions.
+      const entry = scope.aliases.findLast((candidate) => candidate.name === node.name);
+      if (entry !== undefined) {
+        const source = read(scope, aliasSource(scope, entry));
+        return entry.kind === "index" ? { ...none(key, source), item: true, positional: true }
+          : { ...none(key, source), item: true, deep: true, positional: entry.kind === "loop" };
+      }
       if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
-      // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
-      if (scope.alias !== undefined && node.name === "loop") notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === node.name);
       if (index < 0) notYetDirect();
       const root = scope.roots[index]!;
@@ -413,13 +476,32 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails">;
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional">;
 
 function merge(left: Reads, right: Reads): Reads {
   return {
     bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item,
     contents: left.contents || right.contents, fails: left.fails || right.fails,
+    positional: left.positional === true || right.positional === true,
   };
+}
+
+/** The parameters a key function reads: its item, then its position and count, then the owner record. */
+function keyParameters(source: string): string {
+  return /\br\b/.test(source) ? "o, j, l, r" : /\b[jl]\b/.test(source) ? "o, j, l" : "o";
+}
+
+/** Whether a list's rows or key reach the record of the block holding it. */
+function listOwned(region: Region): boolean {
+  return region.block.needsParent === true || region.key !== undefined && /\br\b/.test(region.key.source);
+}
+
+/** Whether a row's bindings, or the regions below it (not nested rows), read its position. */
+function readsPosition(block: Block): boolean {
+  return block.bindings.some((binding) => binding.expression.positional === true ||
+      binding.parts?.some((part) => typeof part !== "string" && part.positional === true) === true) ||
+    block.regions.some((region) => region.test?.positional === true || region.list?.positional === true ||
+      region.kind !== "each" && [region.block, ...region.arms ?? []].some(readsPosition));
 }
 
 /** Whether converting the value may read the contents of a list or object the row's item reached. */
@@ -513,7 +595,7 @@ class Planner {
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition) {
     const types: TypeScope = { get: () => undefined };
     declareTypes(types, definition);
-    this.scope = { roots, alias: undefined, types, computed: (index) => this.computedLowered(index) };
+    this.scope = { roots, aliases: [], level: 0, types, computed: (index) => this.computedLowered(index) };
     roots.forEach((root, index) => {
       // Live evaluates initializers with `evalValue`, without reference checks.
       if (root.init !== undefined) this.initializers.push(`  v[${index}] = ${lower(root.init.ast, { ...this.scope, initializing: index }).source};`);
@@ -597,6 +679,17 @@ class Planner {
       const index = this.roots.findIndex((root) => root.name === name);
       if (index < 0) notYetDirect();
       const root = this.roots[index]!;
+      // A local that shadows a root is still checked against the root's declared type, as live does.
+      const shadow = scope.aliases.findLast((candidate) => candidate.name === name);
+      if (shadow !== undefined) {
+        const type = compactType(declared);
+        if (type === undefined) notYetDirect();
+        const local = aliasSource(scope, shadow);
+        const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
+        checks.push(`checkReference(S, ${scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+        reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
+        continue;
+      }
       // A state root's own value is checked on every write, unless its initial value may not conform.
       if (steps.length === 0 && root.checked !== true) continue;
       const type = compactType(declared);
@@ -618,13 +711,28 @@ class Planner {
     return { ...scope, record: `f${this.recordings++}` };
   }
 
-  block(element: ElementNode, row: boolean, scope: Scope, root: boolean, svg: boolean): Block {
-    // The root's prototype is a fragment of its children, which are SVG when the root is `<svg>`.
+  block(element: ElementNode, row: boolean, outer: Scope, root: boolean, svg: boolean, alias = row): Block {
+    // The root's prototype is a fragment of its children, which are SVG when the root is `<svg>`;
+    // a `<template>` body is a fragment of its children too.
+    const fragment = root || element.name === "template";
     const block: Block = {
-      id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row, svg: root ? element.name === "svg" : svg,
-      events: [], refs: [],
+      id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row,
+      svg: root ? element.name === "svg" : svg, events: [], refs: [], alias, level: outer.level, parent: root ? undefined : outer.block,
     };
     this.blocks.push(block);
+    const scope: Scope = { ...outer, block };
+    if (fragment && !root) {
+      if (row) notYetDirect();
+      const spec: unknown[] = ["", []];
+      let index = 0;
+      for (const child of element.children) {
+        const item = this.child(block, element, child, [index], scope, svg);
+        spec.push(item);
+        index += item === 1 || item === 2 ? 2 : 1;
+      }
+      (block as { spec: unknown }).spec = spec;
+      return block;
+    }
     const spec = this.element(block, element, [], scope, root, svg);
     // The root's own element is the factory's; its children clone from a fragment.
     (block as { spec: unknown }).spec = root ? ["", [], ...spec.slice(2)] : spec;
@@ -641,9 +749,9 @@ class Planner {
 
   element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] {
     if (EXCLUDED.has(node.name) || node.name.includes("-")) notYetDirect();
-    // Listeners and refs inside a region or row are not direct yet; the root block's are.
-    if ((node.ref !== undefined || (node.events?.length ?? 0) > 0) && block.id !== 0) notYetDirect();
-    if (node.ref !== undefined) block.refs.push({ site: this.site(block, path), name: node.ref });
+    if (node.ref !== undefined) {
+      block.refs.push({ site: this.site(block, path), name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) });
+    }
     for (const event of node.events ?? []) {
       block.events.push({ site: this.site(block, path), name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers });
     }
@@ -728,33 +836,146 @@ class Planner {
       return 0;
     }
     const flow = node.flow;
-    if (flow === undefined) return this.element(block, node, path, scope, false, svg);
-    if (block.row || SELECTS.has(parent.name)) notYetDirect();
+    // Outside a `$match`, a `$when` or `$else` marker is ignored and the element renders as written.
+    if (flow === undefined || flow.kind === "when" || flow.kind === "else") {
+      const { flow: _ignored, ...plain } = node;
+      return this.element(block, plain, path, scope, false, svg);
+    }
+    if (SELECTS.has(parent.name)) notYetDirect();
     const { flow: _flow, ...body } = node;
     const site = this.site(block, path);
+    const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
+    /** A decision rebuilds its body whenever what it read changes, as its live effect re-runs. */
+    const decide = (lowerDecision: (decisionScope: Scope) => Lowered): { test: Lowered; recorded: string | undefined } => {
+      const exact = lowerDecision(scope);
+      // A decision that reads only roots rebuilds on their change bits, which are exactly live's notifications.
+      if (!exact.nested && !exact.item) return { test: exact, recorded: undefined };
+      const recording = this.recording(scope);
+      return { test: lowerDecision(recording), recorded: recording.record };
+    };
+    if (node.name === "template" && flow.kind !== "match" && flow.kind !== "if" && flow.kind !== "with") notYetDirect();
+    const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
-      if (flow.testPlan === undefined) notYetDirect();
-      const test = truthiness(this.checked(flow.testPlan, scope));
-      // A test re-renders its body whenever its inputs change, as the live runtime does, so it
-      // may read only roots it can name exactly.
-      if (test.nested || test.item) notYetDirect();
-      block.regions.push({ kind: "if", site, block: this.block(body, false, scope, false, svg), test });
+      const { test, recorded } = decide((decisionScope) => truthiness(this.checked(plan(flow.testPlan, flow.test), decisionScope), decisionScope.record));
+      block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), test, recorded });
       return 1;
     }
-    if (flow.kind !== "each" || flow.key === undefined || flow.keyPlan === undefined || flow.listPlan === undefined ||
-      flow.index !== undefined || flow.where !== undefined || flow.sort !== undefined || flow.limit !== undefined ||
-      flow.item === "loop" || this.roots.some((root) => root.name === flow.item)) notYetDirect();
-    const list = this.checked(flow.listPlan, scope);
-    const listType = declaredExpressionType(flow.listPlan, scope.types);
-    const types: TypeScope = { get: () => undefined };
-    declareLayerTypes(types, scope.types, { [flow.item]: listType?.kind === "list" ? listType.item : undefined });
-    const rowScope: Scope = { roots: this.roots, alias: flow.item, types };
-    const key = lower(flow.keyPlan.ast, rowScope);
-    // A key is memoized per item, so it may read only the item, and never a container's contents.
-    if (key.bits !== 0 || key.nested || key.contents) notYetDirect();
-    if (list.item) notYetDirect();
-    block.regions.push({ kind: "each", site, block: this.block(body, true, rowScope, false, svg), list, key, alias: flow.item });
+    if (flow.kind === "with") {
+      const expression = plan(flow.expressionPlan, flow.expr);
+      const { test, recorded } = decide((decisionScope) => this.checked(expression, decisionScope));
+      const aliasScope = this.layer(inner, flow.alias, declaredExpressionType(expression, scope.types), "item");
+      block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), test, recorded });
+      return 1;
+    }
+    if (flow.kind === "match") {
+      const expression = flow.expr === undefined ? undefined : plan(flow.expressionPlan, flow.expr);
+      const alias = flow.alias;
+      const armScope = alias === undefined ? inner
+        : this.layer(inner, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item");
+      // The arms' tests run in a function of the match value, `o`, inside the region's own block.
+      const testBase = alias === undefined ? scope : {
+        ...this.layer(scope, alias, expression === undefined ? undefined : declaredExpressionType(expression, scope.types), "item", "o"),
+        closure: true,
+      };
+      const arms = node.children.filter((child): child is ElementNode =>
+        child.kind === "element" && (child.flow?.kind === "when" || child.flow?.kind === "else"));
+      const chosen: ElementNode[] = [];
+      for (const arm of arms) {
+        chosen.push(arm);
+        if (arm.flow?.kind === "else") break;
+      }
+      let matched: Lowered | undefined;
+      const { test, recorded } = decide((decisionScope) => {
+        const value = expression === undefined ? undefined : this.checked(expression, decisionScope);
+        if (decisionScope === scope) matched = value;
+        const testScope = { ...testBase, record: decisionScope.record };
+        // The arms' tests run in order until one is truthy, so only those are read.
+        let reads: Reads = value ?? none("", "");
+        const lines = chosen.map((arm, index) => {
+          if (arm.flow?.kind === "else") return `return ${index};`;
+          const armTest = this.checked(plan((arm.flow as { testPlan?: CompiledExpression }).testPlan, (arm.flow as { test: string }).test), testScope);
+          reads = merge(reads, converted(armTest));
+          return `{ const t = ${armTest.source}; if (t === NONCONFORMING) return t; if (truthy(t)) return ${index}; }`;
+        });
+        const source = `((o) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : `mv = ${value.source}`})`;
+        const selection = value === undefined ? source : `((mv = ${value.source}) === NONCONFORMING ? mv : ${source.replace(`mv = ${value.source}`, "mv")})`;
+        return { ...none(`match:${site}`, selection), ...reads, fails: true };
+      });
+      const armBlocks = chosen.map((arm) => {
+        const { flow: _armFlow, ...armBody } = arm;
+        return this.block(armBody, false, armScope, false, svg, alias !== undefined);
+      });
+      block.regions.push({ kind: "match", site, block: armBlocks[0] ?? this.block({ ...body, children: [] }, false, inner, false, svg, false),
+        arms: armBlocks, test, recorded, matched });
+      return 1;
+    }
+    if (node.name === "template") notYetDirect();
+    const listPlan = plan(flow.listPlan, flow.list);
+    const list = this.checked(listPlan, scope);
+    const listType = declaredExpressionType(listPlan, scope.types);
+    const itemType = listType?.kind === "list" ? listType.item : undefined;
+    // A row holds its item, its index alias and its `loop` record.
+    const positions = (base: Scope, item?: string, index?: string, loop?: string): Scope => {
+      const layered = this.layer(base, flow.item, itemType, "item", item);
+      return {
+        ...layered,
+        aliases: [
+          ...layered.aliases,
+          ...flow.index === undefined ? [] : [{ name: flow.index, level: base.level, kind: "index" as const, ...index === undefined ? {} : { source: index } }],
+          { name: "loop", level: base.level, kind: "loop" as const, ...loop === undefined ? {} : { source: loop } },
+        ],
+      };
+    };
+    const rowScope = positions(inner);
+    // A key is a function of the item and its position, run beside the row's owner: `(o, j, l, r)`.
+    const keyScope: Scope = { ...positions(scope, "o", "j", "loopRecord({ j, l })"), closure: true };
+    const key = flow.key === undefined ? undefined : lower(plan(flow.keyPlan, flow.key).ast, keyScope);
+    const shaped = this.shape(flow, scope, list, itemType);
+    const rows = this.block(body, true, rowScope, false, svg);
+    const positional = readsPosition(rows) || key?.positional === true;
+    rows.positional = positional;
+    block.regions.push({ kind: "each", site, block: rows, list: shaped.list, key, alias: flow.item, positional });
     return 2;
+  }
+
+  /** A local layer over `scope`: a row's item, or a `$with` or `$match` alias, at the scope's level. */
+  layer(scope: Scope, alias: string, type: TypeNode | undefined, kind: AliasEntry["kind"], source?: string): Scope {
+    const types: TypeScope = { get: () => undefined };
+    declareLayerTypes(types, scope.types, { [alias]: type });
+    return { ...scope, types, aliases: [...scope.aliases, { name: alias, level: scope.level, kind, ...source === undefined ? {} : { source } }] };
+  }
+
+  /** `$where`, `$sort` and `$limit` around a list, through the shared `shapeItems`. */
+  shape(flow: Extract<Flow, { kind: "each" }>, scope: Scope, list: Lowered, itemType: TypeNode | undefined): { list: Lowered; positional: boolean } {
+    if (flow.where === undefined && flow.sort === undefined && flow.limit === undefined) return { list, positional: false };
+    let reads: Reads = list;
+    let where = "0";
+    if (flow.where !== undefined) {
+      // `$where`, `$sort` and `$limit` use `evalValue`, without reference checks.
+      // `$where` runs per item in a function of it, `(o)`, beside the list's owner.
+      const whereScope: Scope = { ...this.layer(scope, flow.item, itemType, "item", "o"), closure: true };
+      const lowered = lower((flow.wherePlan ?? compileExpression(flow.where)).ast, whereScope);
+      reads = merge(reads, { ...converted(lowered), item: false, nested: true });
+      where = `(o) => ${lowered.source}`;
+    }
+    const sorts = (flow.sort ?? "").split(",").map((key: string) => key.trim()).filter((key: string) => key !== "").map((key: string) => {
+      const descending = key.startsWith("-");
+      const field = descending ? key.slice(1).trim() : key;
+      let source = "o";
+      for (const step of field.split(".")) source = `readMember(${source}, ${JSON.stringify(step)})`;
+      return `[(o) => ${source}, ${descending}]`;
+    });
+    if (sorts.length > 0) reads = merge(reads, { bits: 0, nested: true, item: false, contents: false, fails: false });
+    let limit = "undefined";
+    if (flow.limit !== undefined) {
+      const lowered = lower((flow.limitPlan ?? compileExpression(flow.limit)).ast, scope);
+      reads = merge(reads, lowered);
+      limit = lowered.source;
+    }
+    return {
+      list: { ...list, ...reads, source: `shapeItems(${list.source}, ${where}, [${sorts.join(", ")}], ${limit})`, deep: true },
+      positional: false,
+    };
   }
 }
 
@@ -840,6 +1061,19 @@ function tracks(block: Block): boolean {
   return block.bindings.some((binding) => binding.expression.contents || itemContainer(binding.expression));
 }
 
+/** What the regions inside a row read besides the row's own item: those changes patch every row. */
+function regionOuter(block: Block): number {
+  let mask = 0;
+  for (const region of block.regions) {
+    if (region.test !== undefined) mask |= outerOf(region.test);
+    if (region.list !== undefined) mask |= outerOf(region.list) | (region.list.nested ? NESTED : 0);
+    if (region.kind !== "each") for (const body of [region.block, ...region.arms ?? []]) {
+      mask |= body.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | regionOuter(body);
+    }
+  }
+  return mask;
+}
+
 /** Emits the direct-extend module for a plan from `blockPlan`. */
 export function emitBlocks(
   plan: BlockPlan,
@@ -850,7 +1084,7 @@ export function emitBlocks(
   const { contract } = definition;
   const blocks = plan.blocks;
   const selectorRoot = (binding: Binding, region: Region): number => {
-    if (binding.kind !== "class") return -1;
+    if (binding.kind !== "class" || region.key === undefined || binding.exact !== undefined) return -1;
     const name = keyedEquality(JSON.parse(binding.expression.key), JSON.parse(region.key!.key), region.alias!);
     return plan.roots.findIndex((root) => root.name === name && !mayContain(root.type));
   };
@@ -877,11 +1111,15 @@ export function emitBlocks(
     });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
-      if (region.kind === "if") {
+      if (region.kind !== "each") {
         entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`);
+        if (region.recorded !== undefined) entries.push(`q${index}: undefined`);
       } else {
         const child = region.block.id;
-        entries.push(`L${index}: new KeyedList(${start}, ${start}.nextSibling, m${child}, p${child}, (o) => ${region.key!.source}, ${JSON.stringify(region.alias)})`);
+        const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
+        const positional = region.positional === true || region.key?.positional === true;
+        const type = region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList";
+        entries.push(`L${index}: new ${type}(${start}, ${start}.nextSibling, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`);
       }
     });
     return entries;
@@ -985,27 +1223,57 @@ export function emitBlocks(
     }
     block.regions.forEach((region, index) => {
       const child = region.block.id;
-      if (region.kind === "if") {
+      if (region.kind !== "each") {
         const test = region.test!;
-        // A nonconforming test leaves the region as it is, and its body keeps updating.
-        lines.push(test.fails
-          ? `  let t${index};\n  if (${guard(maskOf(test))} && (t${index} = ${test.source}) !== NONCONFORMING) {`
-          : `  if (${guard(maskOf(test))}) {`,
-          `    r.b${index} = undefined;`,
-          `    clearRegion(r.a${region.site}, r.e${index});`,
-          `    if (${test.fails ? `t${index}` : test.source}) r.e${index}.before((r.b${index} = m${child}(d)).n);`,
-          `  } else if (r.b${index} !== undefined) p${child}(r.b${index}, c, d);`,
+        const body = `r.b${index}`;
+        const patchBody = region.kind === "match"
+          ? `${region.arms!.map((arm, armIndex) => `if (${body}.s === ${armIndex}) p${arm.id}(${body}, c, d);`).join(" ")}`
+          : `p${child}(${body}, c, d);`;
+        // What a rebuilt body is made from: nothing, the `$with` value, or the chosen arm and match value.
+        const linked = [region.block, ...region.arms ?? []].some((body) => body.needsParent === true) ? ", r" : "";
+        const make = region.kind === "if" ? `m${child}(d${linked === "" ? "" : ", undefined, r"})`
+          : region.kind === "with" ? `m${child}(d, t${index}${linked})`
+          : `[${region.arms!.map((arm) => `m${arm.id}`).join(", ")}][t${index}](d, mv${linked})`;
+        const show = region.kind === "if" ? `t${index}` : region.kind === "with" ? "true" : `t${index} >= 0`;
+        const rebuild = [
+          ...([region.block, ...region.arms ?? []].some(disposable) ? [`      dispose(${body});`] : []),
+          `      ${body} = undefined;`,
+          `      clearRegion(r.a${region.site}, r.e${index});`,
+          `      if (${show}) { ${body} = ${make};${region.kind === "match" ? ` ${body}.s = t${index};` : ""} r.e${index}.before(${body}.n); }`,
+        ];
+        const decide = region.recorded === undefined ? [] : [`    const ${region.recorded} = [];`];
+        const changed = region.recorded === undefined ? "true"
+          : `c === -1${test.bits === 0 ? "" : ` || c & ${test.bits}`} || readsChanged(r.q${index}, ${region.recorded})`;
+        lines.push(
+          `  if (${guard(maskOf(test))}) {`,
+          ...(region.kind === "match" ? ["    let mv;"] : []),
+          ...decide,
+          `    const t${index} = ${test.source};`,
+          `    if (${changed}) {`,
+          ...(region.recorded === undefined ? [] : [`      r.q${index} = ${region.recorded};`]),
+          // A nonconforming decision leaves the region as it is, and its body keeps updating.
+          test.fails ? `      if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${patchBody} } else {` : "      {",
+          ...rebuild.map((line) => `  ${line}`),
+          "      }",
+          `    } else if (${body} !== undefined) ${patchBody}`,
+          `  } else if (${body} !== undefined) ${patchBody}`,
         );
         return;
       }
       const list = region.list!;
+      const key = region.key;
+      // Keys that read roots, nested data or positions are re-read for every item when those change.
+      const rekey = key === undefined ? 0 : key.bits | (key.nested ? NESTED : 0);
+      const full = key?.positional === true ? "true" : rekey === 0 ? undefined : `(c & ${rekey}) !== 0`;
+      const apply = (value: string): string => full === undefined ? `r.L${index}.update(${value}, d, c)`
+        : `if (c === -1 || ${full}) r.L${index}.set(${value}, d, true); else r.L${index}.update(${value}, d, c)`;
       // A nonconforming list leaves the rows as they are.
-      lines.push(list.fails
-        ? `  if (${guard(maskOf(list) | NESTED)}) { const l = ${list.source}; if (l !== NONCONFORMING) r.L${index}.update(l, d, c); }`
-        : `  if (${guard(maskOf(list) | NESTED)}) r.L${index}.update(${list.source}, d, c);`);
+      lines.push(list.fails || full !== undefined
+        ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")}; } }`
+        : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
-        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0);
-      if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c);`);
+        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | regionOuter(region.block);
+      if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c, d);`);
       for (const root of selectors(region)) {
         lines.push(`  if (c !== -1 && c & ${1 << root}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
       }
@@ -1015,39 +1283,68 @@ export function emitBlocks(
 
   const prototype = (block: Block): string => `buildTemplate(T${block.id}${block.svg ? ", document, 1" : ""})`;
   const body: string[] = [];
+  /** Listeners and refs of a block, and what disposing its record stops. */
+  const ownership = (block: Block, sites: readonly string[], record: string, indent: string): string[] => {
+    const lines: string[] = [];
+    const siteOf = (site: number): string => block.sites[site]!.length === 0 ? "n" : sites[site]!;
+    for (const ref of block.refs) {
+      lines.push(ref.iterated
+        ? `${indent}(I.r[${JSON.stringify(ref.name)}] ??= []).push(${siteOf(ref.site)});`
+        : `${indent}I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`);
+    }
+    block.regions.forEach((region, index) => {
+      if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
+      if (region.kind === "each" && region.key === undefined && region.positional === true) lines.push(`${indent}${record}.L${index}.q = true;`);
+    });
+    const stops = block.events.map((event) => listener(event, siteOf(event.site)));
+    // A cleared region or removed row stops its listeners and the regions and rows below it.
+    block.regions.forEach((region, index) => {
+      if (![region.block, ...region.arms ?? []].some(disposable)) return;
+      stops.push(region.kind === "each" ? `() => { for (const row of ${record}.L${index}.r) dispose(row); }` : `() => dispose(${record}.b${index})`);
+    });
+    if (stops.length > 0) lines.push(`${indent}${record}.z = [${stops.join(", ")}];`);
+    return lines;
+  };
+  const listener = (event: Block["events"][number], target: string): string => {
+    const filter = event.modifiers.some((modifier) => !["capture", "once", "passive", "prevent", "stop"].includes(modifier))
+      ? `if (!eventPasses(event, ${target}, ${JSON.stringify(event.modifiers)})) return; ` : "";
+    const effects = `${event.modifiers.includes("prevent") ? "event.preventDefault(); " : ""}${event.modifiers.includes("stop") ? "event.stopPropagation(); " : ""}`;
+    return `listen(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")})`;
+  };
   for (const block of blocks.slice(1)) {
     const lines: string[] = [];
     const sites = walk("n", block.sites, lines, "t");
     const entries = fields(block, sites);
-    const reads = block.bindings.some((binding) => finalExpression(binding).item);
+    const reads = block.alias;
     if (block.row) {
       body.push(
-        `  const m${block.id} = (o) => {`,
+        `  const m${block.id} = (o, j, l${block.needsParent === true ? ", u" : ""}) => {`,
         `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
         ...lines.map((line) => `    ${line}`),
-        `    const r = { k: undefined, i: o, n, x: 0, y: 0${entries.map((entry) => `, ${entry}`).join("")} };`,
-        `    p${block.id}(r, -1);`,
+        `    const r = { k: undefined, i: o, n, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
+        ...ownership(block, sites, "r", "    "),
+        `    p${block.id}(r, -1, E);`,
         "    return r;",
-        "  };",
-        `  const p${block.id} = (r, c) => {`,
-        ...(reads ? ["    const o = r.i;"] : []),
-        ...patch(block).map((line) => `  ${line}`),
         "  };",
       );
     } else {
       body.push(
-        `  const m${block.id} = (d) => {`,
+        `  const m${block.id} = (d${block.alias || block.needsParent === true ? ", o" : ""}${block.needsParent === true ? ", u" : ""}) => {`,
         `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
         ...lines.map((line) => `    ${line}`),
-        `    const r = { n${entries.map((entry) => `, ${entry}`).join("")} };`,
+        `    const r = { n${block.alias ? ", i: o" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
+        ...ownership(block, sites, "r", "    "),
         `    p${block.id}(r, -1, d);`,
         "    return r;",
         "  };",
-        `  const p${block.id} = (r, c, d) => {`,
-        ...patch(block).map((line) => `  ${line}`),
-        "  };",
       );
     }
+    body.push(
+      `  const p${block.id} = (r, c, d) => {`,
+      ...(reads ? ["    const o = r.i;"] : []),
+      ...patch(block).map((line) => `  ${line}`),
+      "  };",
+    );
   }
   const root = plan.root;
   const rootChildren = (root.spec as unknown[]).length > 2;
@@ -1062,19 +1359,19 @@ export function emitBlocks(
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
+    ...root.regions.flatMap((region, index) => region.kind !== "each" ? [] : [
+      ...listOwned(region) ? [`  R.L${index}.u = R;`] : [],
+      ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
+    ]),
   );
-  const instance = plan.handlers.length > 0 || root.refs.length > 0;
+  const instance = plan.handlers.length > 0 || blocks.some((block) => block.refs.length > 0 || block.events.length > 0);
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
-    `  ${instance ? "const I = " : ""}attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${plan.computeds.length > 0 ? ", X" : ""});`,
+    ...(instance ? ["  const I = {};"] : []),
+    `  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${
+      plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
-    ...root.events.map((event) => {
-      const target = siteOf(event.site);
-      const filter = event.modifiers.some((modifier) => !["capture", "once", "passive", "prevent", "stop"].includes(modifier))
-        ? `if (!eventPasses(event, ${target}, ${JSON.stringify(event.modifiers)})) return; ` : "";
-      const effects = `${event.modifiers.includes("prevent") ? "event.preventDefault(); " : ""}${event.modifiers.includes("stop") ? "event.stopPropagation(); " : ""}`;
-      return `  listen(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")});`;
-    }),
+    ...root.events.map((event) => `  ${listener(event, siteOf(event.site))};`),
     "  return element;",
     "}",
   );
@@ -1123,12 +1420,14 @@ export function emitBlocks(
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${JSON.stringify(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
   const stateSpec = `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
-    plan.computeds.length === 0 ? "" : `, k: ${plan.computeds[0]!.index}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`} };`;
+    plan.computeds.length === 0 ? "" : `, k: ${plan.computeds[0]!.index}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
+    blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""} };`;
   const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState"]
+    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState",
+    "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 
@@ -1141,6 +1440,8 @@ export function emitBlocks(
     "",
     ...specs,
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
+    // A fresh row's first patch has nothing written yet.
+    ...(blocks.some((block) => block.row) ? ["const E = new Map();"] : []),
     stateSpec,
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
     ...(definition.controller === undefined ? [] : ["const C = (host) => controller.default(host);"]),
@@ -1157,7 +1458,10 @@ export function lowerExpression(
   alias?: string,
 ): string | undefined {
   try {
-    return lower(node, { roots: roots.map((root) => ({ ...root, initial: "undefined" })), alias, types: { get: () => undefined } }).source;
+    return lower(node, {
+      roots: roots.map((root) => ({ ...root, initial: "undefined" })), level: 0, types: { get: () => undefined },
+      aliases: alias === undefined ? [] : [{ name: alias, level: 0, kind: "item" }],
+    }).source;
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
     throw error;
