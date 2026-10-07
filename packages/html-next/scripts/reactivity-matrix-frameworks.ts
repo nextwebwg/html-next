@@ -8,8 +8,7 @@ import { createEffect as xEffect, createMemo as xMemo, createRoot as xRoot, crea
 import { computed as alienComputed, effect as alienEffect, effectScope, signal as alienSignal } from "alien-signals";
 import { c as anodFactory, root as anodRoot, signal as anodSignal } from "anod";
 import { autorun, computed as mobxComputed, observable, runInAction } from "mobx";
-// Pota's package entry loads browser globals, while this benchmark runs in Node.
-import * as pota from "pota/src/lib/reactivity/primitives/solid.js";
+import { cleanup as potaCleanup, memo as potaMemo, root as potaRoot, signal as potaSignal, syncEffect as potaSyncEffect } from "pota";
 import S from "s-js";
 import { Signal as PolyfillSignal } from "signal-polyfill";
 // Node resolves Solid's default export to its server build, so use the client runtime explicitly.
@@ -349,35 +348,29 @@ function sjs(): BenchmarkFramework {
 }
 
 function potaSignals(): BenchmarkFramework {
-  const { signal, memo, renderEffect, root, cleanup } = pota as unknown as {
-    signal<T>(value: T): readonly [() => T, (next: T) => void];
-    memo<T>(compute: () => T): () => T;
-    renderEffect(run: () => void): void;
-    root(run: (dispose: () => void) => void): void;
-    cleanup(run: () => void): void;
-  };
   return {
     name: "pota",
     signal(initialValue) {
-      const [read, write] = signal(initialValue);
+      const { read, write } = potaSignal(initialValue);
       return { read, write };
     },
     computed(compute) {
-      return { read: memo(compute) };
+      return { read: potaMemo(compute) };
     },
     effect(run) {
       let dispose = (): void => undefined;
-      root((stop) => {
+      potaRoot((stop) => {
         dispose = stop;
-        renderEffect(() => {
+        potaSyncEffect(() => {
           const next = run();
-          if (next !== undefined) cleanup(next);
+          if (next !== undefined) potaCleanup(next);
         });
       });
       return dispose;
     },
+    // Pota's root batches writes until it returns, so timed sections run outside one.
     run(run) {
-      root((dispose) => { run(); dispose(); });
+      run();
     },
   };
 }
