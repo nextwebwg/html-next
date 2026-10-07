@@ -818,6 +818,7 @@ describe("HTML Next unplugin", () => {
     assert.match(output, /"css":\s*""/);
     const css = await readFile(join(root, "dist/components.css"), "utf8");
     assert.match(css, /rebeccapurple/);
+    assert.match(css, /@scope\s*\(\[data-component~="x-child"\]\)/);
   });
 
   it("rejects dynamic linked invocation inputs until they can preserve the full child contract", async () => {

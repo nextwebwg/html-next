@@ -31,13 +31,18 @@ const counter = parseComponent(`<template component="x-counter"><defs>
   <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
 </defs><button type="button" on:click="increment"><span $value="count"></span></button></template>`);
 
-const { html, css } = await renderComponents('<x-counter id="counter"></x-counter>', {
+const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
   state: { "#counter": { count: 5 } },
 });
 ```
 
-Serve `html` as page content and `css` as a stylesheet. In the browser, register the same definitions
+Serve `html` as page content and `css` as a stylesheet. Mark its style or link with
+`data-html-next-component-styles` containing `Object.keys(styleOwnership).join(" ")` and
+`data-html-next-style-states` containing `JSON.stringify(styleOwnership)` (escape attribute values
+when serializing HTML). Hydration reuses that carrier without recompiling or injecting its CSS.
+See [style delivery metadata](style-scoping.md#delivery-and-hydration) for bundled CSS.
+In the browser, register the same definitions
 with `registerComponentDefinitions()` from `@nextwebwg/html-next/runtime`, then call `lowerDocument()`
 or `observeDocument()`. Hydration adopts the rendered roots; clicking the example counter changes 5
 to 6. A graph from `loadNodeComponents()` supplies definitions through its non-shadowed nodes.

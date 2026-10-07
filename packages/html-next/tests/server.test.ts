@@ -31,6 +31,7 @@ describe("Node component rendering", () => {
     assert.match(rendered.html, /<span>0<\/span>/);
     assert.match(rendered.html, /<\?start slot=""\?>Hello<\?end\?>/);
     assert.match(rendered.css, /@scope/);
+    assert.deepEqual(rendered.styleOwnership, { "x-server-counter": [] });
     assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "document"), before);
   });
 

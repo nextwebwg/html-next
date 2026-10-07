@@ -49,6 +49,8 @@ try {
   const result = {
     html: serializeRenderedForm(document.body),
     css: Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n"),
+    styleOwnership: Object.assign({}, ...Array.from(document.head.querySelectorAll("style[data-html-next-component-styles]"),
+      (style) => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}"))) as Record<string, string[]>,
   };
   // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node MessagePort has no origin argument.
   parentPort!.postMessage({ result } satisfies ServerRenderReply);
