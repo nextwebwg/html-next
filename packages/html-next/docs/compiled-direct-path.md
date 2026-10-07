@@ -16,6 +16,9 @@ to a whole graph or not at all. When any component in the graph still needs the 
 the whole graph builds exactly as without the option, and the build manifest's
 `directExtend: { applied, runtimeComponents }` names the components that kept it there.
 
+Measured results, the required next work (including the equality selector) and the working method
+are tracked in [rendering-performance-status.md](./rendering-performance-status.md).
+
 ## Architecture
 
 ```
