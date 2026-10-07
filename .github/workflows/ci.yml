@@ -55,10 +55,9 @@ jobs:
     # Playwright's image for the locked version carries the browsers and their OS libraries, so no
     # step waits on Ubuntu's apt mirrors (14 minutes for 115 MB on 2026-10-07) or Playwright's CDN.
     # pwuser shares the runner's uid 1001; Firefox refuses to run as root with a HOME it doesn't own.
-    # Docker's seccomp filter made the runtime suite about 12% slower; the job VM stays the boundary.
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
-      options: --user 1001 --ipc=host --init --security-opt seccomp=unconfined
+      options: --user 1001 --ipc=host --init
     # Each check stays within the Threadlabs 15-minute budget. Parity specs launch their own
     # browsers, so each runner keeps one spec active and the parity suite is sharded instead.
     timeout-minutes: 15
