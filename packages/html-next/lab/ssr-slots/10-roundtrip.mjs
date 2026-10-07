@@ -13,7 +13,7 @@ const definitions = `
 <template component="x-adj" status="early" summary="t."><p>Hello <slot></slot>!</p></template>
 <template component="x-wrap" status="early" summary="t."><section><x-card><span slot="title"><slot name="heading"></slot></span><slot></slot></x-card></section></template>
 <template component="x-list" status="early" summary="t."><defs><prop name="rows" type="list(string)" default="[]">R.</prop></defs>
-  <ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>`;
+  <ul><li $each="row of rows" $key="row"><slot :name="concat('row-', row)">Unnamed</slot></li></ul></template>`;
 const slotsOf = { "x-card": () => ["title", ""], "x-two": () => ["a", "b"], "x-adj": () => [""], "x-wrap": () => ["heading", ""],
   "x-list": (el) => JSON.parse(el.getAttribute("rows") ?? "[]").map((row) => `row-${row}`) };
 const cases = {

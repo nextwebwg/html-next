@@ -1,6 +1,6 @@
 # Style scoping: implementation
 
-How this package realizes the [styling contract](https://nextwebwg.org/html-next/styling). The
+How this package realizes the [styling contract](https://nextwebwg.org/declarative-components/styling). The
 contract is the source of truth; this note only records how the tooling meets it.
 
 ## Markers
@@ -60,10 +60,15 @@ A bundling/SSR integration can list several tags on one carrier and merge their 
 
 `data-html-next-component-styles` is a whitespace-separated list of component tags whose CSS has
 already been compiled into that carrier. `data-html-next-style-states` is a JSON object mapping
-each tag to an array of the declared prop/state names tested by its CSS. A component with no state
+each tag to an array of the declared mutable/computed state names tested by its CSS. A component with no state
 selectors has an empty array; an omitted record is also treated as empty. Preserve the compiler's
 records when combining sheets. These are tooling metadata, supplied by the integration that owns
 CSS delivery. An unmarked sheet does not assert ownership and cannot suppress injection.
+
+Node's `renderComponents()` returns `styleOwnership` alongside `html` and `css`. Use its keys for
+the carrier's component tag list and its JSON representation for the state metadata attribute.
+When combining several render results, combine their CSS in application order and merge the
+ownership records. Deliver each component version once.
 
 The delivery integration owns link loading and stylesheet order. Publish the compiled CSS before
 the corresponding markup can paint. Native builds import extracted CSS and register definitions

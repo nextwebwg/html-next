@@ -1,22 +1,56 @@
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
-import { generateVue } from "./targets/vue.js";
+import { generateVue, type VueConversionOptions } from "./targets/vue.js";
+import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
+import { generateSvelteOutput, type SvelteConversionOptions, type SvelteConversionOutput } from "./targets/svelte.js";
+import { reactEventsArtifact as makeReactEventsArtifact } from "./targets/react-events.js";
+import { reactControlArtifact as makeReactControlArtifact } from "./targets/react-control.js";
+import { reactDataArtifact as makeReactDataArtifact } from "./targets/react-data.js";
+import { reactHtmlArtifact as makeReactHtmlArtifact } from "./targets/react-html.js";
+import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host.js";
+import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
+import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
+import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
+import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
+import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
+import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
+import { svelteReactivityArtifact as makeSvelteReactivityArtifact } from "./targets/svelte-reactivity.js";
+import { svelteDataArtifact as makeSvelteDataArtifact } from "./targets/svelte-data.js";
+import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte-props.js";
+import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
+import { svelteEventsArtifact as makeSvelteEventsArtifact } from "./targets/svelte-events.js";
+import { svelteHtmlArtifact as makeSvelteHtmlArtifact } from "./targets/svelte-html.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
+import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
+import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
+import { VUE_PROPS_PATH, vuePropsModule } from "./targets/vue-props.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild } from "./component-styles-build.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.7";
+export const GENERATOR_VERSION = "1.0.0-alpha.31";
 
 export interface GeneratedArtifact {
   readonly path: string;
   readonly content: string;
 }
 
+export interface GenerationOptions {
+  /** A closed component graph proves no descendant reads this definition's state through <context>. */
+  readonly noContextReaders?: boolean;
+  /**
+   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
+   * DOM updates instead of the general-runtime fallback. A component using a feature the direct
+   * path does not cover yet keeps the fallback. Off by default.
+   */
+  readonly directExtend?: boolean;
+}
+
 export function generateComponent(
   definition: ComponentDefinition,
+  options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend === true);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;
@@ -38,7 +72,98 @@ export function vueHostArtifact(): GeneratedArtifact {
   return Object.freeze({ path: VUE_HOST_PATH, content: vueHostModule(GENERATOR_VERSION) });
 }
 
+/** Feature-specific safe-markup helper for Vue components that author `$html`. */
+export function vueHtmlArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_HTML_PATH, content: vueHtmlModule(GENERATOR_VERSION) });
+}
+
+/** Feature-specific native-control binding and hydration preservation for Vue. */
+export function vueControlArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_CONTROL_PATH, content: vueControlModule(GENERATOR_VERSION) });
+}
+
+/** Feature-specific typed-prop boundary for Vue components that declare props. */
+export function vuePropsArtifact(): GeneratedArtifact {
+  return Object.freeze({ path: VUE_PROPS_PATH, content: vuePropsModule(GENERATOR_VERSION) });
+}
+
+/** Target-independent typed invocation rules, copied into React output only when props are used. */
+export function reactPropsArtifact(): GeneratedArtifact {
+  return makeReactPropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteDecorationsArtifact(): GeneratedArtifact {
+  return makeSvelteDecorationsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteStyleArtifacts(): readonly GeneratedArtifact[] {
+  return makeSvelteStyleArtifacts(GENERATOR_VERSION);
+}
+
+export function svelteConnectionArtifact(): GeneratedArtifact {
+  return makeSvelteConnectionArtifact(GENERATOR_VERSION);
+}
+
+export function svelteHostArtifact(): GeneratedArtifact {
+  return makeSvelteHostArtifact(GENERATOR_VERSION);
+}
+
+export function svelteReactivityArtifact(): GeneratedArtifact {
+  return makeSvelteReactivityArtifact(GENERATOR_VERSION);
+}
+
+export function svelteDataArtifact(): GeneratedArtifact {
+  return makeSvelteDataArtifact(GENERATOR_VERSION);
+}
+
+export function sveltePropsArtifact(): GeneratedArtifact {
+  return makeSveltePropsArtifact(GENERATOR_VERSION);
+}
+
+export function svelteHtmlArtifact(): GeneratedArtifact {
+  return makeSvelteHtmlArtifact(GENERATOR_VERSION);
+}
+
+export function svelteControlArtifact(): GeneratedArtifact {
+  return makeSvelteControlArtifact(GENERATOR_VERSION);
+}
+
+export function svelteEventsArtifact(declared = false): GeneratedArtifact {
+  return makeSvelteEventsArtifact(GENERATOR_VERSION, declared);
+}
+
+export function reactEventsArtifact(declared = false): GeneratedArtifact {
+  return makeReactEventsArtifact(GENERATOR_VERSION, declared);
+}
+
+export function reactControlArtifact(): GeneratedArtifact {
+  return makeReactControlArtifact(GENERATOR_VERSION);
+}
+
+export function reactDataArtifact(): GeneratedArtifact {
+  return makeReactDataArtifact(GENERATOR_VERSION);
+}
+
+export function reactHtmlArtifact(): GeneratedArtifact {
+  return makeReactHtmlArtifact(GENERATOR_VERSION);
+}
+
+export function reactHostArtifact(): GeneratedArtifact {
+  return makeReactHostArtifact(GENERATOR_VERSION);
+}
+
+export function reactContextArtifact(): GeneratedArtifact {
+  return makeReactContextArtifact(GENERATOR_VERSION);
+}
+
+export function reactDepthArtifact(): GeneratedArtifact {
+  return makeReactDepthArtifact(GENERATOR_VERSION);
+}
+
 export { importsVueHost } from "./targets/vue-host.js";
+export { importsVueHtml } from "./targets/vue-html.js";
+export { importsVueControl } from "./targets/vue-control.js";
+export { importsVueProps } from "./targets/vue-props.js";
 
 export type { ComponentDefinition } from "./template.js";
 
@@ -56,6 +181,20 @@ function convertedToVue(definition: ComponentDefinition): string | undefined {
 }
 
 /** Converts one definition to a Vue single-file component, failing with a diagnostic if it cannot. */
-export function generateVueComponent(definition: ComponentDefinition): string {
-  return generateVue(definition, GENERATOR_VERSION);
+export function generateVueComponent(definition: ComponentDefinition, options?: VueConversionOptions): string {
+  return generateVue(definition, GENERATOR_VERSION, options);
+}
+
+/** Converts one definition to a React component, failing when a construct is not yet mapped. */
+export function generateReactComponent(definition: ComponentDefinition, options?: ReactConversionOptions): string {
+  return generateReact(definition, GENERATOR_VERSION, options);
+}
+
+/** Converts one definition with CSS and helper usage for package-level output. */
+export function generateReactConversion(definition: ComponentDefinition, options?: ReactConversionOptions): ReactConversionOutput {
+  return generateReactOutput(definition, GENERATOR_VERSION, options);
+}
+
+export function generateSvelteConversion(definition: ComponentDefinition, options?: SvelteConversionOptions): SvelteConversionOutput {
+  return generateSvelteOutput(definition, options);
 }

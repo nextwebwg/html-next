@@ -9,7 +9,13 @@ import ts from "typescript-compiler";
 import {
   generateComponent,
   importsVueHost,
+  importsVueHtml,
+  importsVueControl,
+  importsVueProps,
   vueHostArtifact,
+  vueHtmlArtifact,
+  vueControlArtifact,
+  vuePropsArtifact,
   GENERATOR_VERSION,
   type GeneratedArtifact,
 } from "./generate.js";
@@ -67,7 +73,7 @@ export interface InspectedComponentGraph {
 export async function inspectComponents(entries: readonly string[]): Promise<InspectedComponentGraph> {
   const graph = await componentGraph(entries);
   const display = (url: string): string => url.startsWith("file:")
-    ? relative(process.cwd(), fileURLToPath(url)).split(sep).join("/")
+    ? relative(process.cwd(), fileURLToPath(url)).split(sep).join("/") + new URL(url).hash
     : url;
   return Object.freeze({
     roots: Object.freeze(graph.roots.map(display)),
@@ -102,7 +108,7 @@ export async function buildComponents(
   const components: Array<BuildManifest["components"][number]> = [];
   const selected = new Set(options.targets ?? ["docs", "styles", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
-  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/");
+  const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/") + new URL(url).hash;
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
     const entry = fileURLToPath(node.url);
@@ -135,6 +141,18 @@ export async function buildComponents(
   if ([...artifacts.values()].some((artifact) => importsVueHost(artifact.content))) {
     const host = vueHostArtifact();
     artifacts.set(host.path, host);
+  }
+  if ([...artifacts.values()].some((artifact) => importsVueHtml(artifact.content))) {
+    const html = vueHtmlArtifact();
+    artifacts.set(html.path, html);
+  }
+  if ([...artifacts.values()].some((artifact) => importsVueControl(artifact.content))) {
+    const control = vueControlArtifact();
+    artifacts.set(control.path, control);
+  }
+  if ([...artifacts.values()].some((artifact) => importsVueProps(artifact.content))) {
+    const props = vuePropsArtifact();
+    artifacts.set(props.path, props);
   }
 
   await mkdir(outputRoot, { recursive: true });

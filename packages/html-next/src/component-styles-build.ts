@@ -6,34 +6,49 @@ import postcss, { type AtRule, type ChildNode, type Container, type Rule } from 
 
 import {
   assembleComponentStyles,
+  componentStyleNameResolver,
   COMPONENT_ATTRIBUTE,
   type CompiledComponentStyles,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
   styleRuleKind,
   type StyleRuleKind,
-  validateStateNames,
 } from "./component-styles.js";
 import type { ComponentDefinition } from "./template.js";
 
 /** At-rules whose block holds style rules; everything else is document-wide and hoisted. */
 const GROUPING = new Set(["media", "supports", "container", "layer", "scope", "starting-style"]);
 
+export const SVELTE_OWNER_ATTRIBUTE = "data-html-next-owner";
+
 export function compileComponentStylesForBuild(
   css: string,
   definition: ComponentDefinition,
   source?: string,
 ): CompiledComponentStyles {
+  return compileStyles(css, definition, source);
+}
+
+/** Snippets are opaque on the server, so scope by authored ownership instead of mutating them. */
+export function compileComponentStylesForSvelte(css: string, definition: ComponentDefinition): CompiledComponentStyles {
+  const projected = (definition.slots?.length ?? 0) === 0 ? undefined
+    : `:not([${SVELTE_OWNER_ATTRIBUTE}~="${definition.contract.tag}"])`;
+  return compileStyles(css, definition, undefined, projected);
+}
+
+function compileStyles(css: string, definition: ComponentDefinition, source?: string,
+  projected?: string): CompiledComponentStyles {
   const tag = definition.contract.tag;
   if (css.trim() === "") return { css: "", stateNames: [] };
   const renamed = renameComponentPseudoClasses(css);
   const names = new Set<string>();
   const hoisted: string[] = [];
+  const canonical = componentStyleNameResolver(definition, source);
 
   const rewrite = (rule: Rule): void => {
-    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, ":scope", names, canonical, projected);
     rule.walkRules((nested) => {
-      nested.selector = rewriteComponentSelector(nested.selector, tag, ":scope", names);
+      nested.selector = rewriteComponentSelector(nested.selector, tag, ":scope", names, canonical, projected);
     });
   };
   const prune = (container: Container<ChildNode>, want: StyleRuleKind, topLevel: boolean): void => {
@@ -44,7 +59,8 @@ export function compileComponentStylesForBuild(
       } else if (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()) && node.nodes !== undefined) {
         prune(node as AtRule, want, false);
       } else if (node.type === "atrule") {
-        if (topLevel && want === "own") hoisted.push(node.toString());
+        // PostCSS serializes a detached statement without its parent's trailing semicolon.
+        if (topLevel && want === "own") hoisted.push(node.toString() + (node.nodes === undefined ? ";" : ""));
         node.remove();
       } else if (node.type === "decl") {
         node.remove();
@@ -58,8 +74,7 @@ export function compileComponentStylesForBuild(
   };
   const own = compile("own");
   const slotted = compile("slotted");
-  validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n"), projected), stateNames: Array.from(names) };
 }
 
 /**
@@ -76,12 +91,12 @@ export function compileComponentStylesForVue(
   const tag = definition.contract.tag;
   if (css.trim() === "") return { css: "", stateNames: [] };
   const names = new Set<string>();
+  const canonical = componentStyleNameResolver(definition, source);
   const root = postcss.parse(renameComponentPseudoClasses(css, ["host-state"]));
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names, canonical);
   });
-  validateStateNames(definition, names, source);
-  return { css: root.toString().trim(), stateNames: [...names] };
+  return { css: root.toString().trim(), stateNames: Array.from(names) };
 }

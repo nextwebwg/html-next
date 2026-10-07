@@ -8,7 +8,7 @@ const definitions = `
 <template component="x-if" status="early" summary="t."><defs><prop name="open" type="boolean" default="false">O.</prop></defs>
   <div><section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>
 <template component="x-list" status="early" summary="t."><defs><prop name="rows" type="list(string)" default="[]">R.</prop></defs>
-  <ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>`;
+  <ul><li $each="row of rows" $key="row"><slot :name="concat('row-', row)">Unnamed</slot></li></ul></template>`;
 const cases = [
   { name: "slot under $if, then open", authored: `<x-if><i slot="extra">E</i>main</x-if>`, change: ["data-open", "true"] },
   { name: "$each row added later", authored: `<x-list rows='["a"]'><span slot="row-b">B!</span></x-list>`, change: ["data-rows", '["a","b"]'] },

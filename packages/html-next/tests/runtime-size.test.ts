@@ -71,7 +71,11 @@ describe("runtime size measurement", () => {
       "keyed",
       "data",
       "controller",
+      "controllerKeyed",
     ]);
+    const keyed = native.capabilityFixtures.controllerKeyed as { forbiddenModules: string[]; targetMet: boolean };
+    assert.deepEqual(keyed.forbiddenModules, []);
+    assert.equal(keyed.targetMet, true);
   });
 
   it("provides a flat complete-live profile for the optimizer", async () => {

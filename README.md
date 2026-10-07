@@ -1,22 +1,31 @@
 # HTML Next implementations
 
+Build universal components using the next generation of HTML. Author once, then run them in a
+browser, compile to native DOM, or use them in Vue, React, and Svelte.
+
+[Get started](https://nextwebwg.org/html-next/quick-start) ·
+[Usage](https://nextwebwg.org/html-next/usage) ·
+[Ship a library](https://nextwebwg.org/html-next/ship)
+
 This pnpm monorepo holds the JavaScript tools for the HTML Next proposals.
-`@nextwebwg/html-next` is those tools; every other package is a build-time adapter over it,
-named for it and versioned independently. Shared policy and verification live at the
+`@nextwebwg/html-next` supplies component tooling; HTMLKit builds applications on it, and the
+converter and unplugin adapt it to other build workflows.
+All four packages share one version and publish together. Shared policy and verification live at the
 repository root.
 
 | Package | Role | Current scope |
 | --- | --- | --- |
 | [`@nextwebwg/html-next`](./packages/html-next) | The tools | Live browser runtime, the shared compiler, validity on any element, native form request construction, and native-DOM/CSS/package generation |
 | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | Bundler adapter | Closed-graph unplugin and Vite application/library builds |
-| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue conversion (React in development) |
+| [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | Framework adapter | Vue, React, and Svelte conversion |
+| [`@nextwebwg/htmlkit`](./packages/htmlkit) | Application platform | File-based and registered routes, layouts, server loaders, dev/build/preview, and static deployment |
 
 The tools package implements both proposals it needs:
-[Declarative HTML Components](https://nextwebwg.org/html-next/) and
+[Declarative HTML Components](https://nextwebwg.org/declarative-components/) and
 [HTML Forms](https://nextwebwg.org/html-forms/). A component is authored once as inert,
 browser-parseable HTML; the same definition can run directly in a browser or compile to
 native DOM, CSS, types, and inspectable package artifacts. The component language is defined by the
-[proposal](https://nextwebwg.org/html-next/); this repository is its JavaScript tooling, verified by
+[proposal](https://nextwebwg.org/declarative-components/); this repository is its JavaScript tooling, verified by
 conformance tests.
 
 HTML Forms lives at [`@nextwebwg/html-next/forms`](./packages/html-next/src/forms.ts) and operates
@@ -25,7 +34,7 @@ reactive-runtime dependency, so importing that subpath pulls in nothing else; th
 consumes its validity model for form declarations but does not re-export request construction.
 
 > Stage 0: the syntax and generated package shape may change. The repository and its packages are
-> MIT-licensed and publish to npm under the `next` tag as `1.0.0-alpha` prereleases.
+> MIT-licensed and publish `1.0.0-alpha` prereleases to npm under the default `latest` tag.
 
 ## Declarative Components delivery modes
 
@@ -36,7 +45,7 @@ modes:
 | --- | --- | --- | --- |
 | **Live browser runtime** — supports any graph | [`@nextwebwg/html-next`](./packages/html-next) | Any component graph selected or added by the application at runtime | One distributable that parses, mounts, updates, and disconnects every supported capability, for any graph, with no build step |
 | **Compiled native build** — tree-shaken, via a Vite unplugin | [`@nextwebwg/html-next-unplugin`](./packages/html-next-unplugin) | An application entry graph or a concrete set of library entries | Native DOM modules tree-shaken to the exact capabilities the graph uses, with shared support combined by the bundler |
-| **Framework conversion** — to Vue (React in development) | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a Vue target | Vue single-file components that import only Vue and their own controllers |
+| **Framework conversion** — to Vue, React, or Svelte | [`@nextwebwg/html-next-converter`](./packages/html-next-converter) | A component graph plus a target framework | Vue or Svelte single-file components, or React TSX components, with no HTML Next runtime dependency |
 
 These are the only three build outputs, and they are distinct: the **runtime** ships one universal
 distributable, the **compiled build** emits tree-shaken native DOM for a known graph, and the
@@ -47,11 +56,12 @@ Components. Such migrations are consumer-specific and live outside this reposito
 An application build may serve as a complete alternative to a framework application.
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
-must produce the same observable native DOM, state, events, validation, lifecycle, and hydration
-behavior.
+must preserve appearance, interactions, state, events, validation, lifecycle, and successful
+hydration. Frameworks may use their own DOM and SSR representations; acceptance is based on how
+the resulting component looks and acts, including controller connect/disconnect and cleanup.
 
 The detailed contracts and independent progress tracks are in the
-[proposal](https://nextwebwg.org/html-next/) and
+[proposal](https://nextwebwg.org/declarative-components/) and
 [delivery goal ledger](./packages/html-next/docs/delivery-goals.md).
 
 ## A working implementation
@@ -65,6 +75,13 @@ structural directives — exercises both the runtime and the Vue target outside 
 
 - [Looma documentation](https://threadlabs.studio/looma/)
 - [Looma source](https://github.com/threadlabs-studio/looma) (MIT)
+
+## Reactive performance
+
+HTML Next ranked **#3 of 15** in a six-workload reactive-primitive benchmark on
+Node 24/macOS ARM64. The [results and reproduction guide](./packages/html-next/docs/reactivity-benchmarks.md)
+includes raw timings, exclusions, measurement limits and clean-checkout commands.
+The full matrix is dev-only; CI runs a smaller regression comparison against main.
 
 ## Install and verify
 
@@ -91,13 +108,12 @@ component dependency graph, not a registration script.
 <template component="x-counter" controller="./counter.js"
   status="early" summary="A native counter button.">
   <defs>
-    <prop name="start" type="number" default="0">Initial count.</prop>
-    <state name="count" :value="start"></state>
-    <computed name="label" :value="format('Count: {0}', count)"></computed>
+    <state name="count" type="number" value="0"></state>
+    <computed name="label" from="concat('Count: ', count)"></computed>
   </defs>
 
   <button $ref="button" type="button">
-    <span $value="label"></span>
+    <span>{$label}</span>
   </button>
 
   <style>
@@ -118,43 +134,47 @@ export default function controller({ refs, state }) {
 
 Definitions may also use declarative handlers, structural directives, two-way bindings,
 named and data-derived slots, typed data sources, native form participation, and generalized
-validation. See the [proposal](https://nextwebwg.org/html-next/) for the complete syntax.
+validation. See the [proposal](https://nextwebwg.org/declarative-components/) for the complete syntax.
 
 ## Run a live component graph
 
-The application chooses the trusted root entry. Each definition declares its relative
-component and controller dependencies, and the public browser loader follows that graph:
+One script in the `<head>` is the whole setup. The browser entry starts itself, loads every
+component the page links, and follows each definition's declared component and controller
+dependencies:
 
 ```html
-<script type="importmap">
-{
-  "imports": {
-    "@example/components/": "https://cdn.example/components/"
-  }
-}
-</script>
-<link rel="component" href="@example/components/app.html">
-<x-app></x-app>
-
-<script type="module">
-  import { startBrowserComponents } from "@nextwebwg/html-next/browser-loader";
-  await startBrowserComponents();
-</script>
+<head>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@nextwebwg/html-next/dist/browser.js"></script>
+  <link rel="component" href="/components/app.html">
+</head>
+<body>
+  <x-app></x-app>
+</body>
 ```
 
-For a live URL, the application's direct mapping is the trust decision. Relative HTML
-and controller edges must stay inside its canonical component root. Definitions are
+The runtime keeps one `MutationObserver` on the document. A `<link rel="component">` added
+later loads its graph into the running page, and instances of any registered tag are rendered
+as they are added, including ones that were waiting for their definition. `HTMLNext.ready`
+resolves once the initially linked components have loaded. A compiled build does none of this:
+it is closed over the components it was built from.
+
+A same-origin `href` needs nothing else. A bare `href` such as `@acme/ui/app.html` is a package
+specifier that the page's import map resolves, and a component root on another origin needs an
+import-map entry. Relative HTML and controller edges must stay inside their root. Definitions are
 parsed as inert data and cannot add import maps, scripts, base URLs, or policy metadata.
-Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern
-their module graph, but ESM is not a sandbox.
+Controller modules are trusted same-realm JavaScript: native ESM, CORS, and CSP govern their
+module graph, but ESM is not a sandbox.
 
-`startBrowserComponents()` observes the document. Definitions and component instances
-added later are registered and lowered, and reconnect/disconnect cleanup is balanced.
-Applications can call the lower-level loader and runtime APIs when they need explicit
-lifecycle control.
+Component resources may also contain titles, non-policy-changing metadata, and ordinary metadata
+links outside their component carriers. The Node and browser graph loaders accept and ignore these
+nodes: they do not change the consuming document's head, evaluate metadata bindings, or fetch linked
+stylesheets and other assets. Application tooling may interpret them separately. This allowance
+does not admit arbitrary resource-level nodes: `<style>`, every `<script>` type, `<base>`,
+`http-equiv` metadata, HTML Imports, body elements, plain non-component templates, and
+non-whitespace text remain rejected, as do executable event-handler attributes. Scoped `<style>`
+inside a component carrier and its declared controller module keep their existing behavior.
 
-The runnable [live graph example](./packages/html-next/examples/poc/README.md)
-uses this public API.
+The runnable [live graph example](./packages/html-next/examples/poc/README.md) uses this entry.
 
 ## Browser compatibility layer
 
@@ -167,7 +187,7 @@ definitions it loads:
 | Component parsing | The browser's HTML parser creates the inert DOM; the library reads declarations, validates the proposal grammar, and reports component diagnostics. |
 | Reactive declarations | Native events and microtasks drive a small dependency layer for live state, computed values, bindings, and effects. |
 | Declared types | Component-authored prop and event types are parsed and enforced at their public boundaries; external data may use an application adapter. |
-| Dynamic `$html` | A 696-byte minified DOM sanitizer preserves the proposal's cross-browser content policy. It is retained until native `setHTML()` is available in every target engine with equivalent policy control. |
+| Dynamic `$html` | The HTML fragment parser plus the Sanitizer API's safe-default allowlist produces deterministic output across browsers and SSR. Native `setHTML()` is deliberately not used: Firefox currently parses malformed table content differently, which would break hydration parity. |
 | Scoped styles | Native `@scope` provides the boundary; selector transformation preserves lowered component roots, nested components, and projected content. |
 | Keyed lists | Native DOM identity and `moveBefore()` preserve retained blocks where available; the WebKit compatibility path uses `insertBefore()`, with the same keyed reconciliation. |
 | Component resources | Native `URL`, Fetch, ESM, CORS, and CSP provide loading primitives; the loader applies the proposal's component graph and trust-root rules. |
@@ -207,6 +227,35 @@ Generated targets preserve the definition's native root; they do not add a compo
 wrapper. The checked-in [button output](./packages/html-next/examples/generated)
 demonstrates each target.
 
+## Render in Node and hydrate in the browser
+
+The `@nextwebwg/html-next/server` entry renders validated definitions with the same
+general runtime used in the browser:
+
+```ts
+import { parseComponent } from "@nextwebwg/html-next";
+import { renderComponents } from "@nextwebwg/html-next/server";
+
+const definition = parseComponent(componentSource);
+const { html, css } = await renderComponents('<x-counter id="counter"></x-counter>', {
+  definitions: [definition],
+  state: { "#counter": { count: 5 } },
+});
+```
+
+Serve the returned markup and styles. In the browser, register the same definitions through
+`registerComponentDefinitions()` and call `lowerDocument()` or `observeDocument()` from the runtime
+entry. Hydration restores props, explicitness, declared state and projected slots while adopting
+existing native nodes. Node-to-browser tests compare the restored instance and subsequent updates
+against fresh client rendering in Chromium, Firefox and WebKit.
+
+See [Node rendering and hydration](./packages/html-next/docs/server-rendering.md) for the API,
+platform choices and verification. The server renders the declarative baseline; browser hydration
+connects declared reads and attaches controllers through the live loader or bundled controller
+imports, following the [proposal's lifecycle](https://nextwebwg.org/declarative-components/javascript/#lifecycle-and-hydration).
+Tests cover both the live loader and a tree-shaken browser bundle, including later controller and
+read updates. The specialized build and converter delivery tracks have separate completion criteria.
+
 ## Types and validation
 
 HTML Next has a fully specified type grammar rather than a loose “CSS-like” shorthand.
@@ -228,7 +277,7 @@ The package assembler emits:
 
 - side-effect registration and concrete component HTML;
 - Vanilla and Vue components with native roots;
-- typed props (as HTML attributes), events, slots, and exposed methods;
+- typed props (as HTML attributes), events, slots, and controller subscriptions;
 - scoped component CSS;
 - controller and dependency graphs preserved as static modules; and
 - explicitly declared ordinary JavaScript, declaration, and CSS pass-through exports.
@@ -239,14 +288,15 @@ only application resolution and trust differ.
 
 ## Repository map
 
-- [Proposal](https://nextwebwg.org/html-next/) (the source of truth; not in this repository)
+- [Proposal](https://nextwebwg.org/declarative-components/) (the source of truth; not in this repository)
+- [Tools guide](https://nextwebwg.org/html-next/), published from [`docs/guide`](./docs/guide)
 - [Converter requirements](./packages/html-next-converter/docs/requirements.md)
 - [Conformance corpus](./packages/html-next/tests/conformance/README.md)
 - [Style-scoping note](./packages/html-next/docs/style-scoping.md)
 - [Historical component-generation plan](./packages/html-next/docs/mvp-plan.md)
 - [Looma](https://threadlabs.studio/looma/), a UI library built on this implementation
 
-The public [HTML Next Working Draft](https://nextwebwg.org/html-next/) explains and
+The public [HTML Next Working Draft](https://nextwebwg.org/declarative-components/) explains and
 motivates the proposal. This repository and its conformance corpus are library-agnostic.
 
 ## License

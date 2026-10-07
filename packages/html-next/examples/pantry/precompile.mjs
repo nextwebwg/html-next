@@ -4,7 +4,7 @@
 //
 // The shipped `@nextwebwg/html-next-unplugin` compiles components all the way to
 // native DOM factories, which is smaller still, but it cannot yet express this app: compiled
-// invocations carry no attributes or projected children (HN009), and a component using the
+// invocations carry no dynamic inputs or dynamic projected slot content (HN009), and a component using the
 // general runtime cannot contain them at all (HN003). Until that lands, a build integration
 // pre-parses the graph and keeps the general runtime renderer, which is what this file does.
 import { readFile } from "node:fs/promises";
@@ -40,24 +40,26 @@ export async function precompileGraph(entryPath, publicRoot = resolve(dirname(en
   }
 
   return [
-    'import { getComponentHost, observeDocument, registerComponentDefinitions, setControllerModule }',
+    'import { getComponentHost, observeDocument, registerComponentDefinitions }',
     '  from "@nextwebwg/html-next/runtime";',
     ...imports,
     "",
     `const definitions = ${JSON.stringify(definitions)};`,
     `const controllers = {\n${controllers.join("\n")}\n};`,
     "",
+    "const initialized = new WeakSet();",
     "export function start(root = document) {",
     "  registerComponentDefinitions(definitions, root);",
     "  return observeDocument(root, {",
     "    onConnect(element, definition) {",
     "      const module = controllers[definition.contract.tag];",
     "      if (module === undefined) return;",
-    "      // Declared public methods resolve through the whole module, so hand over all exports.",
-    "      setControllerModule(element, Promise.resolve(module));",
+    "      const host = getComponentHost(element);",
+    "      if (initialized.has(host)) return;",
+    "      initialized.add(host);",
     "      let disposed = false;",
     "      let cleanup;",
-    "      Promise.resolve(module.default(getComponentHost(element))).then((value) => {",
+    "      Promise.resolve(module.default(host)).then((value) => {",
     "        if (typeof value !== 'function') return;",
     "        if (disposed) value();",
     "        else cleanup = value;",

@@ -9,7 +9,7 @@
  *  - pre-compiled: a Vite build parses the graph and ships only the definitions.
  *
  * One scenario drives both, and every step must observe the same DOM: the proposal requires the
- * delivery modes to agree on the observable result (https://nextwebwg.org/html-next/). Engine
+ * delivery modes to agree on the observable result (https://nextwebwg.org/declarative-components/). Engine
  * coverage is the conformance suite's job, so this test uses Chromium.
  *
  * Run with:  HTMLNEXT_BROWSER_TEST=1 pnpm exec vitest run --config vitest.browser.config.ts \
@@ -131,9 +131,9 @@ async function runScenario(page: Page): Promise<Record<string, unknown>> {
   await settle();
   await snapshot("added");
 
-  // A declared public method reaches the controller's named export through the lowered root.
+  // A native request event reaches the controller through the rendered root.
   // The outermost element carrying the component's lineage is its lowered root.
-  await page.evaluate(`document.querySelector('[data-component~="pantry-app"]').restockAll()`);
+  await page.evaluate(`document.querySelector('[data-component~="pantry-app"]').dispatchEvent(new Event('restock-request'))`);
   await settle();
   await snapshot("restockedAll");
 
@@ -177,9 +177,9 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
     browser = await chromium.launch({ headless: true });
     directory = await mkdtemp(join(tmpdir(), "html-next-pantry-"));
 
-    // Live delivery: the public browser loader, built from this checkout.
+    // Live delivery: the browser entry, built from this checkout.
     const built = await esbuild({
-      entryPoints: [join(packageRoot, "src/browser-loader.ts")],
+      entryPoints: [join(packageRoot, "src/browser.ts")],
       bundle: true, format: "esm", platform: "browser", target: ["es2022"], write: false,
     });
     loaderBundle = built.outputFiles[0]!.text;
@@ -224,8 +224,8 @@ describe.skipIf(!enabled)("pantry example across delivery modes", () => {
       const served = await endpoints(url);
       if (served !== undefined) return served;
       if (url.pathname === "/") return readFile(new URL("index.html", example), "utf8");
-      if (url.pathname === "/dist/browser-loader.bundle.js") return loaderBundle;
-      if (url.pathname.startsWith("/components/") || url.pathname === "/live.js") {
+      if (url.pathname === "/dist/browser.js") return loaderBundle;
+      if (url.pathname.startsWith("/components/")) {
         return readFile(new URL(`.${url.pathname}`, example), "utf8").catch(() => undefined);
       }
       return undefined;

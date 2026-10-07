@@ -9,6 +9,8 @@
  * function in the component, emitted when used.
  */
 import { isEnumeratedBoolean, type ExpressionNode } from "../expression.js";
+import { formattingType } from "../format.js";
+import { formattingHelperSource } from "./format-source.js";
 import type { TypeNode } from "../type-system.js";
 import { quote } from "./shared.js";
 
@@ -45,11 +47,12 @@ export function present(type: TypeNode): Static {
 export function category(type: TypeNode): Category {
   switch (type.kind) {
     case "terminal":
-      if (type.name === "string") return "string";
+      if (["string", "keyword", "url", "email", "date", "month", "week", "time", "datetime-local", "datetime", "color", "color-hex", "length", "percentage", "duration"].includes(type.name)) return "string";
       if (type.name === "boolean") return "boolean";
       if (type.name === "number" || type.name === "integer") return "number";
       return "unknown";
     case "keyword": return "string";
+    case "separated-list": return "list";
     case "list": return "list";
     case "record":
     case "object": return "object";
@@ -60,6 +63,11 @@ export function category(type: TypeNode): Category {
         ? "scalar"
         : "unknown";
     }
+    case "selected": {
+      const members = new Set(type.options.map((option) => category(option.type)));
+      return members.size === 1 ? [...members][0]! : "scalar";
+    }
+    case "constrained": return category(type.base);
   }
 }
 
@@ -72,6 +80,7 @@ const isScalar = (value: Static): boolean => ["boolean", "string", "number", "sc
 export function typeOf(node: ExpressionNode, scope: Scope): Static {
   switch (node.kind) {
     case "literal":
+      if (node.dimension !== undefined) return { type: { kind: "terminal", name: node.dimension }, nullable: false };
       if (typeof node.value === "string") return terminal("string");
       if (typeof node.value === "number") return terminal("number");
       if (typeof node.value === "boolean") return terminal("boolean");
@@ -82,11 +91,14 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
     case "index": {
       const object = typeOf(node.object, scope);
       const type = object.type;
+      const key = node.kind === "member" ? node.key
+        : node.index.kind === "literal" && (typeof node.index.value === "string" || typeof node.index.value === "number")
+          ? String(node.index.value) : undefined;
       let result: Static = UNKNOWN;
       if (node.kind === "member" && node.key === "length" && (type.kind === "list" || category(type) === "string")) {
         result = terminal("number");
-      } else if (node.kind === "member" && type.kind === "object") {
-        const field = type.fields.find((candidate) => candidate.name === node.key);
+      } else if (key !== undefined && type.kind === "object") {
+        const field = type.fields.find((candidate) => candidate.name === key);
         if (field !== undefined) {
           const value = present(field.type);
           result = { type: value.type, nullable: value.nullable || field.optional, null: value.null ?? false };
@@ -98,12 +110,64 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
       }
       return object.nullable ? { ...result, nullable: true } : result;
     }
-    case "unary":
-      return node.op === "not" ? terminal("boolean") : { ...terminal("number"), nullable: true };
-    case "binary":
+    case "unary": {
+      if (node.op === "not") return terminal("boolean");
+      const operand = typeOf(node.operand, scope);
+      if (operand.type.kind === "terminal" && ["length", "percentage", "duration"].includes(operand.type.name)) {
+        return { ...operand, nullable: true };
+      }
+      return { ...terminal("number"), nullable: true };
+    }
+    case "binary": {
+      if (["+", "-", "*", "/"].includes(node.op)) {
+        const left = typeOf(node.left, scope);
+        const right = typeOf(node.right, scope);
+        const leftName = left.type.kind === "terminal" ? left.type.name : undefined;
+        const rightName = right.type.kind === "terminal" ? right.type.name : undefined;
+        const leftDimensional = leftName === "length" || leftName === "percentage" || leftName === "duration";
+        const rightDimensional = rightName === "length" || rightName === "percentage" || rightName === "duration";
+        if ((node.op === "+" || node.op === "-") && leftDimensional && leftName === rightName ||
+          node.op === "*" && (leftDimensional && !rightDimensional || rightDimensional && !leftDimensional) ||
+          node.op === "/" && leftDimensional && !rightDimensional) {
+          return { type: (leftDimensional ? left : right).type, nullable: true };
+        }
+      }
       return ["+", "-", "*", "/", "%"].includes(node.op) ? { ...terminal("number"), nullable: true } : terminal("boolean");
-    case "call":
-      return node.fn === "format" ? terminal("string") : { ...terminal("number"), nullable: true };
+    }
+    case "conditional": {
+      const consequent = typeOf(node.consequent, scope);
+      const alternate = typeOf(node.alternate, scope);
+      if (node.consequent.kind === "literal" && node.consequent.value === null) {
+        return { ...alternate, nullable: true, null: true };
+      }
+      if (node.alternate.kind === "literal" && node.alternate.value === null) {
+        return { ...consequent, nullable: true, null: true };
+      }
+      return {
+        type: JSON.stringify(consequent.type) === JSON.stringify(alternate.type)
+          ? consequent.type
+          : { kind: "union", members: [consequent.type, alternate.type] },
+        nullable: consequent.nullable || alternate.nullable,
+        null: consequent.null === true || alternate.null === true,
+      };
+    }
+    case "call": {
+      if (node.fn === "concat" || node.fn === "join" || node.fn === "format" || node.fn === "formatRange") return { ...terminal("string"), nullable: true };
+      if (node.fn === "formatParts") return UNKNOWN;
+      if (node.fn === "default") {
+        if (node.args[0] === undefined) return UNKNOWN;
+        const selected = node.args[0].kind === "literal" && node.args[0].value === null ? node.args[1] : node.args[0];
+        return selected === undefined ? UNKNOWN : { ...typeOf(selected, scope), nullable: true };
+      }
+      const argument = node.args[node.fn === "clamp" ? 1 : 0];
+      if (argument !== undefined) {
+        const type = typeOf(argument, scope).type;
+        if (type.kind === "terminal" && (type.name === "length" || type.name === "percentage" || type.name === "duration")) {
+          return { type, nullable: true };
+        }
+      }
+      return { ...terminal("number"), nullable: true };
+    }
     case "object":
       return {
         type: {
@@ -125,19 +189,52 @@ export function typeOf(node: ExpressionNode, scope: Scope): Static {
   }
 }
 
+/** Whether a generated expression can produce an invalid result that must retain its destination. */
+export function mayProduceInvalidResult(node: ExpressionNode, scope: Scope): boolean {
+  switch (node.kind) {
+    case "call": return true;
+    case "binary": {
+      if (["+", "-", "*", "/"].includes(node.op)) {
+        const dimensional = (operand: ExpressionNode): boolean => {
+          const type = typeOf(operand, scope).type;
+          return type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name);
+        };
+        if (dimensional(node.left) || dimensional(node.right)) return true;
+      }
+      return mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope);
+    }
+    case "unary": {
+      const type = typeOf(node.operand, scope).type;
+      return node.op === "-" && type.kind === "terminal" &&
+        ["length", "percentage", "duration"].includes(type.name) || mayProduceInvalidResult(node.operand, scope);
+    }
+    case "conditional": return mayProduceInvalidResult(node.test, scope) ||
+      mayProduceInvalidResult(node.consequent, scope) || mayProduceInvalidResult(node.alternate, scope);
+    case "member": return mayProduceInvalidResult(node.object, scope);
+    case "index": return mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope);
+    case "array": return node.items.some((item) => mayProduceInvalidResult(item, scope));
+    case "object": return node.pairs.some((pair) => mayProduceInvalidResult(pair.value, scope));
+    default: return false;
+  }
+}
+
 /** A TypeScript type for a value, with unknown parts as `any` so a template reads them freely. */
 export function typeScript(value: Static): string {
   const source = (type: TypeNode): string => {
     switch (type.kind) {
       case "terminal":
-        return type.name === "string" ? "string"
+        return ["string", "keyword", "url", "email", "date", "month", "week", "time", "datetime-local", "datetime", "color", "color-hex", "length", "percentage", "duration"].includes(type.name) ? "string"
           : type.name === "boolean" ? "boolean"
           : type.name === "number" || type.name === "integer" ? "number"
           : type.name === "null" ? "null"
           : type.name === "absent" ? "undefined"
           : "any";
       case "keyword": return JSON.stringify(type.value);
+      case "separated-list": return "string[]";
       case "union": return type.members.map(source).join(" | ");
+      case "selected": return [...new Set(type.options.map((option) => source(option.type)))].join(" | ");
+      case "constrained": return type.values === undefined ? source(type.base)
+        : type.values.map((value) => JSON.stringify(value)).join(" | ");
       case "list": return type.item.kind === "union" ? `(${source(type.item)})[]` : `${source(type.item)}[]`;
       case "record": return `Record<string, ${source(type.value)}>`;
       case "object": {
@@ -156,7 +253,13 @@ export function typeScript(value: Static): string {
 const FALLBACKS: Readonly<Record<string, string>> = {
   truthy: `function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
-  if (value !== null && typeof value === "object") return Object.keys(value).length > 0;
+  if (value instanceof Error) return true;
+  if (value !== null && typeof value === "object") {
+    if (typeof Event !== "undefined" && "type" in value) {
+      try { Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!.call(value); return true; } catch { /* ordinary objects use their fields */ }
+    }
+    return Object.keys(value).length > 0;
+  }
   return Boolean(value);
 }`,
   text: `function text(value: unknown): string {
@@ -173,12 +276,109 @@ const FALLBACKS: Readonly<Record<string, string>> = {
   number: `function number(value: unknown): number | undefined {
   return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }`,
-  format: `function format(pattern: unknown, ...values: unknown[]): string | undefined {
-  let index = 0;
-  return typeof pattern === "string" ? pattern.replace(/%s/g, () => index < values.length ? text(values[index++]) : "%s") : undefined;
+  concat: `// A nonempty scalar call cannot produce the invalid-result sentinel.
+type ConcatResult<T extends unknown[]> = T extends [string | number | boolean | null | undefined, ...(string | number | boolean | null | undefined)[]]
+  ? string | undefined : string | symbol | undefined;
+function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
+  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  if (values.some(value => value === undefined)) return undefined as ConcatResult<T>;
+  if (values.length === 0 || values.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result") as ConcatResult<T>;
+  return values.map(value => value === null ? "" : String(value)).join("") as ConcatResult<T>;
+}`,
+  join: `function join(...values: unknown[]): string | symbol | undefined {
+  if (values.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
+  if (values.some(value => value === undefined)) return undefined;
+  if (values.length !== 2) return Symbol.for("html-next.invalid-result");
+  const [items, separator] = values;
+  if (!Array.isArray(items) || typeof separator !== "string") return Symbol.for("html-next.invalid-result");
+  if (items.some(value => value === Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
+  if (items.some(value => value === undefined)) return undefined;
+  if (items.some(value => typeof value === "object" && value !== null)) return Symbol.for("html-next.invalid-result");
+  if (new Set(items.filter(value => value !== null).map(value => typeof value)).size > 1) return Symbol.for("html-next.invalid-result");
+  return items.map(value => value === null ? "" : String(value)).join(separator);
+}`,
+  math: `function math(fn: string, kinds: readonly string[], values: readonly unknown[]): number | string | symbol | undefined {
+  if (values.includes(Symbol.for("html-next.invalid-result"))) return Symbol.for("html-next.invalid-result");
+  if (values.some(value => value === undefined || value === null)) return undefined;
+  if ((fn === "abs" || fn === "negate") && values.length !== 1 || fn === "round" && (values.length < 1 || values.length > 2) ||
+      (fn === "min" || fn === "max") && values.length === 0 || fn === "clamp" && values.length !== 3) return Symbol.for("html-next.invalid-result");
+  const kind = kinds[0];
+  const dimensional = kind === "length" || kind === "percentage" || kind === "duration";
+  if (!dimensional && kind !== "number") return Symbol.for("html-next.invalid-result");
+  let unit: string | undefined;
+  const numbers: number[] = [];
+  for (let index = 0; index < values.length; index++) {
+    if (kinds[index] !== kind) return Symbol.for("html-next.invalid-result");
+    const value = values[index];
+    if (!dimensional) {
+      if (typeof value !== "number" || !Number.isFinite(value)) return Symbol.for("html-next.invalid-result");
+      numbers.push(value);
+      continue;
+    }
+    if (typeof value !== "string") return Symbol.for("html-next.invalid-result");
+    const match = /^(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%)$/.exec(value);
+    if (match === null || unit !== undefined && match[2] !== unit) return Symbol.for("html-next.invalid-result");
+    unit = match[2];
+    if ((unit === "%" ? "percentage" : unit === "ms" || unit === "s" ? "duration" : "length") !== kind) return Symbol.for("html-next.invalid-result");
+    const number = Number(match[1]);
+    if (!Number.isFinite(number)) return Symbol.for("html-next.invalid-result");
+    numbers.push(number);
+  }
+  let result: number;
+  switch (fn) {
+    case "abs": result = Math.abs(numbers[0]!); break;
+    case "negate": result = -numbers[0]!; break;
+    case "round": {
+      const step = Math.abs(numbers[1] ?? 1);
+      if (step === 0) return Symbol.for("html-next.invalid-result");
+      result = Math.round(numbers[0]! / step) * step;
+      break;
+    }
+    case "min": result = Math.min(...numbers); break;
+    case "max": result = Math.max(...numbers); break;
+    case "clamp": result = Math.max(numbers[0]!, Math.min(numbers[1]!, numbers[2]!)); break;
+    default: return Symbol.for("html-next.invalid-result");
+  }
+  return !Number.isFinite(result) ? Symbol.for("html-next.invalid-result") : unit === undefined ? result : String(result) + unit;
+}`,
+  arithmetic: `function arithmetic(op: string, leftKind: string, rightKind: string, left: unknown, right: unknown): string | symbol | undefined {
+  const invalid = Symbol.for("html-next.invalid-result");
+  if (left === invalid || right === invalid) return invalid;
+  if (left === null || left === undefined || right === null || right === undefined) return undefined;
+  const isDimension = (kind: string): boolean => kind === "length" || kind === "percentage" || kind === "duration";
+  const parse = (value: unknown, kind: string): { number: number; unit: string } | undefined => {
+    if (typeof value !== "string" || !isDimension(kind)) return undefined;
+    const match = /^(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%)$/.exec(value);
+    if (match === null) return undefined;
+    const unit = match[2]!;
+    if ((unit === "%" ? "percentage" : unit === "ms" || unit === "s" ? "duration" : "length") !== kind) return undefined;
+    const number = Number(match[1]);
+    return Number.isFinite(number) ? { number, unit } : undefined;
+  };
+  const x = parse(left, leftKind), y = parse(right, rightKind);
+  if (isDimension(leftKind) && x === undefined || isDimension(rightKind) && y === undefined) return invalid;
+  let value: number, unit: string;
+  if (op === "+" || op === "-") {
+    if (x === undefined || y === undefined || leftKind !== rightKind || x.unit !== y.unit) return invalid;
+    value = op === "+" ? x.number + y.number : x.number - y.number;
+    unit = x.unit;
+  } else if (op === "*") {
+    const quantity = x ?? y;
+    const factor = x === undefined ? left : right;
+    if (quantity === undefined || x !== undefined && y !== undefined || typeof factor !== "number" || !Number.isFinite(factor)) return invalid;
+    value = quantity.number * factor;
+    unit = quantity.unit;
+  } else {
+    if (op !== "/" || x === undefined || y !== undefined || typeof right !== "number" || !Number.isFinite(right) || right === 0) return invalid;
+    value = x.number / right;
+    unit = x.unit;
+  }
+  return Number.isFinite(value) ? String(value) + unit : invalid;
 }`,
   sortBy: `function sortBy(items: any[], keys: readonly string[]): any[] {
-  const field = (item: any, path: string): unknown => path.split(".").reduce((value, key) => value?.[key], item);
+  const field = (item: any, path: string): unknown => item !== null && typeof item === "object" && !Array.isArray(item)
+    ? path.split(".").reduce((value, key) => value?.[key], item)
+    : item;
   return items.slice().sort((a, b) => {
     for (const key of keys) {
       const descending = key.startsWith("-");
@@ -190,9 +390,26 @@ const FALLBACKS: Readonly<Record<string, string>> = {
     return 0;
   });
 }`,
+  eachRows: `function eachRows<T>(items: readonly T[]): { item: T; index: number; loop: { index: number; first: boolean; last: boolean; count: number } }[] {
+  return items.map((item, index) => ({ item, index, loop: { index, first: index === 0, last: index === items.length - 1, count: items.length } }));
+}`,
+  uniqueKeys: `function uniqueKeys<T>(items: readonly T[], keyOf: (item: T, index: number, loop: { index: number; first: boolean; last: boolean; count: number }) => unknown): readonly T[] {
+  const seen = new Set<unknown>();
+  for (let index = 0; index < items.length; index += 1) {
+    const key = keyOf(items[index]!, index, { index, first: index === 0, last: index === items.length - 1, count: items.length });
+    if (seen.has(key)) {
+      const message = \`A keyed list produced duplicate key \\\`\${text(key)}\\\`.\`;
+      throw Object.assign(new Error(\`HR004: \${message}\`), {
+        name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR004", message }),
+      });
+    }
+    seen.add(key);
+  }
+  return items;
+}`,
 };
 
-const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], format: ["text"], sortBy: ["text"] };
+const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
 /** Vue's boolean attributes: it removes them for false and writes them empty for true. */
 const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,checked,controls,default,defer,disabled,"
@@ -205,6 +422,26 @@ const IDENTIFIER_PATH = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*$/;
 export class Lowering {
   readonly #used = new Set<string>();
 
+  constructor(readonly warningName = "htmlNextAuthoredCheck") {}
+
+  /** Warn once for an authored location while retaining the existing acceptance predicate. */
+  authoredCheck(check: string, location: string, message: string): string {
+    this.#used.add("authoredWarning");
+    return `${this.warningName}(${check}, ${quote(location)}, ${quote(message)})`;
+  }
+
+  authoredFallbacks(): string[] {
+    if (!this.#used.has("authoredWarning")) return [];
+    return [`const ${this.warningName}Reported = new Set<string>();
+function ${this.warningName}(accepted: boolean, location: string, message: string): boolean {
+  if (!accepted && !${this.warningName}Reported.has(location)) {
+    ${this.warningName}Reported.add(location);
+    console.warn(message);
+  }
+  return accepted;
+}`];
+  }
+
   #use(name: string): string {
     this.#used.add(name);
     for (const dependency of FALLBACK_DEPENDENCIES[name] ?? []) this.#used.add(dependency);
@@ -216,6 +453,11 @@ export class Lowering {
     return Object.keys(FALLBACKS).filter((name) => this.#used.has(name)).map((name) => FALLBACKS[name]!);
   }
 
+  /** Stateful Intl reuse belongs to the module, outside component setup or render. */
+  moduleFallbacks(binding = "formatValue"): string[] {
+    return this.#used.has("formatValue") ? [formattingHelperSource(binding)] : [];
+  }
+
   /** The expression's value. */
   value(node: ExpressionNode, scope: Scope): string {
     switch (node.kind) {
@@ -225,14 +467,39 @@ export class Lowering {
         return scope.code.get(node.name) ?? "undefined";
       case "member": {
         const object = this.#operand(node.object, scope);
-        const access = typeOf(node.object, scope).nullable ? "?." : ".";
-        return /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${object}${access}${node.key}` : `${object}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
+        const objectType = typeOf(node.object, scope);
+        const access = objectType.nullable ? "?." : ".";
+        const retains = mayProduceInvalidResult(node.object, scope);
+        const candidate = retains ? "candidate" : objectType.type.kind === "terminal" && objectType.type.name === "event" ? `(${object} as any)` : object;
+        // A closed shape still permits an absent read; the result is undefined at runtime.
+        const read = objectType.type.kind === "object" && !objectType.type.fields.some((field) => field.name === node.key)
+          ? `(${candidate} as Record<string, any>${objectType.nullable ? " | null | undefined" : ""})${objectType.nullable ? "?." : ""}[${quote(node.key)}]`
+          : /^[A-Za-z_$][\w$]*$/.test(node.key) ? `${candidate}${access}${node.key}` : `${candidate}${access === "?." ? "?." : ""}[${quote(node.key)}]`;
+        return retains ? `((candidate: any) => candidate === Symbol.for("html-next.invalid-result") ? candidate : ${read})(${object})`
+          : read;
       }
-      case "index":
-        return `${this.#operand(node.object, scope)}${typeOf(node.object, scope).nullable ? "?." : ""}[${this.value(node.index, scope)}]`;
+      case "index": {
+        const object = this.#operand(node.object, scope);
+        const index = this.value(node.index, scope);
+        if (mayProduceInvalidResult(node.object, scope) || mayProduceInvalidResult(node.index, scope)) {
+          return `((objectValue: any, indexValue: any) => objectValue === Symbol.for("html-next.invalid-result") || indexValue === Symbol.for("html-next.invalid-result") ? Symbol.for("html-next.invalid-result") : objectValue${typeOf(node.object, scope).nullable ? "?." : ""}[indexValue])(${object}, ${index})`;
+        }
+        const objectType = typeOf(node.object, scope).type;
+        if (objectType.kind === "terminal" && objectType.name === "event") return `(${object} as any)[${index}]`;
+        // A computed key may not be one of an object literal's declared names. JavaScript then
+        // reads an absent property, while TypeScript rejects the indexing expression.
+        if (typeOf(node.object, scope).type.kind === "object") {
+          return `(${object} as Record<string, any>${typeOf(node.object, scope).nullable ? " | null | undefined" : ""})${typeOf(node.object, scope).nullable ? "?." : ""}[${index}]`;
+        }
+        return `${object}${typeOf(node.object, scope).nullable ? "?." : ""}[${index}]`;
+      }
       case "unary": {
         if (node.op === "not") return this.#not(node.operand, scope);
         if (node.operand.kind === "literal" && typeof node.operand.value === "number") return `-${node.operand.value}`;
+        const type = typeOf(node.operand, scope).type;
+        if (type.kind === "terminal" && ["length", "percentage", "duration"].includes(type.name)) {
+          return `(${this.#use("math")}("negate", [${quote(type.name)}], [${this.value(node.operand, scope)}]) as string | undefined)`;
+        }
         const operand = this.#numeric(node.operand, scope);
         if (operand !== undefined) return `-${operand}`;
         const number = this.#use("number");
@@ -240,18 +507,44 @@ export class Lowering {
       }
       case "binary":
         return this.#binary(node, scope);
+      case "conditional":
+        if (mayProduceInvalidResult(node.test, scope)) {
+          const test = this.condition(node.test, scope);
+          return `(() => { const condition: any = ${test}; if (condition === Symbol.for("html-next.invalid-result")) return condition; return condition ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}; })()`;
+        }
+        return `${this.condition(node.test, scope)} ? ${this.value(node.consequent, scope)} : ${this.value(node.alternate, scope)}`;
       case "call":
         return this.#call(node, scope);
-      case "object":
-        return `{ ${node.pairs.map((pair) => `${/^[A-Za-z_$][\w$]*$/.test(pair.key) ? pair.key : quote(pair.key)}: ${this.value(pair.value, scope)}`).join(", ")} }`;
-      case "array":
-        return `[${node.items.map((item) => this.value(item, scope)).join(", ")}]`;
+      case "object": {
+        const value = `{ ${node.pairs.map((pair) => `${/^[A-Za-z_$][\w$]*$/.test(pair.key) ? pair.key : quote(pair.key)}: ${this.value(pair.value, scope)}`).join(", ")} }`;
+        return node.pairs.some((pair) => mayProduceInvalidResult(pair.value, scope))
+          ? `(() => { const value = ${value}; return Object.values(value).some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
+          : value;
+      }
+      case "array": {
+        const value = `[${node.items.map((item) => this.value(item, scope)).join(", ")}]`;
+        return node.items.some((item) => mayProduceInvalidResult(item, scope))
+          ? `(() => { const value = ${value}; return value.some((entry: unknown) => entry === Symbol.for("html-next.invalid-result")) ? Symbol.for("html-next.invalid-result") : value; })()`
+          : value;
+      }
     }
+  }
+
+  /** Apply native expression truthiness to an already evaluated value. */
+  truthiness(source: string): string {
+    return `${this.#use("truthy")}(${source})`;
   }
 
   /** The expression as a condition, where JavaScript truthiness is enough. */
   condition(node: ExpressionNode, scope: Scope): string {
     if (node.kind === "binary" && (node.op === "and" || node.op === "or")) {
+      if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
+        const left = this.condition(node.left, scope);
+        const right = this.condition(node.right, scope);
+        const shortCircuit = node.op === "and" ? "!left" : "left";
+        const shortValue = node.op === "and" ? "false" : "true";
+        return `(() => { const left: any = ${left}; if (left === Symbol.for("html-next.invalid-result")) return left; if (${shortCircuit}) return ${shortValue}; const right: any = ${right}; return right; })()`;
+      }
       const join = node.op === "and" ? "&&" : "||";
       const side = (side: ExpressionNode): string => {
         const code = this.condition(side, scope);
@@ -262,13 +555,16 @@ export class Lowering {
     }
     if (node.kind === "unary" && node.op === "not") return this.#not(node.operand, scope);
     const code = this.value(node, scope);
+    if (node.kind === "literal" && (typeof node.value === "string" || typeof node.value === "number")) return `Boolean(${code})`;
     const type = typeOf(node, scope);
     // A closed object with a required field always has keys, so only its absence makes it false.
     const filled = type.type.kind === "object" && type.type.fields.some((field) => !field.optional);
-    if (filled) return code;
+    if (filled || type.type.kind === "terminal" && type.type.name === "event") return code;
     switch (category(type.type)) {
       case "boolean": case "string": case "number": case "scalar": return code;
-      case "list": return type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
+      case "list": return mayProduceInvalidResult(node, scope)
+        ? `((value: any) => value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}length)(${code})`
+        : type.nullable ? `${this.#wrap(node, code)}?.length` : `${this.#wrap(node, code)}.length`;
       default: return `${this.#use("truthy")}(${code})`;
     }
   }
@@ -279,7 +575,9 @@ export class Lowering {
     const type = typeOf(node, scope);
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
     if (isScalar(type)) return code;
-    if (item !== undefined && isScalar(item)) return `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
+    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
+      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
+      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
     return `${this.#use("text")}(${code})`;
   }
 
@@ -297,7 +595,9 @@ export class Lowering {
     // A string-or-number union serializes as Vue writes it; one with a boolean member needs the rule.
     if (kind === "scalar" && !hasBoolean(type.type)) return plain;
     const item = type.type.kind === "list" ? present(type.type.item) : undefined;
-    if (item !== undefined && isScalar(item)) return `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
+    if (item !== undefined && isScalar(item)) return mayProduceInvalidResult(node, scope)
+      ? `(() => { const value: any = ${code}; return value === Symbol.for("html-next.invalid-result") ? value : value${type.nullable ? "?." : "."}join(" "); })()`
+      : `${this.#wrap(node, code)}${type.nullable ? "?." : "."}join(" ")`;
     if (isEnumeratedBoolean(name)) return `typeof (${code}) === "boolean" ? String(${code}) : ${this.#use("attribute")}(${code})`;
     return `${this.#use("attribute")}(${code})`;
   }
@@ -308,10 +608,11 @@ export class Lowering {
     scope: Scope,
     item: string,
     options: { where?: ExpressionNode; itemScope: Scope; sort: readonly string[]; limit?: ExpressionNode },
+    source = this.value(node, scope),
   ): string {
     const type = typeOf(node, scope);
     // Vue iterates null and undefined as nothing; anything but a list must also iterate as nothing.
-    let code = type.type.kind === "list" ? this.value(node, scope) : `${this.#use("list")}(${this.value(node, scope)})`;
+    let code = type.type.kind === "list" ? source : `${this.#use("list")}(${source})`;
     if (options.where === undefined && options.sort.length === 0 && options.limit === undefined) return code;
     if (type.type.kind === "list" && type.nullable) code = `(${code} ?? [])`;
     if (options.where !== undefined) code = `${code}.filter((${item}) => ${this.condition(options.where, options.itemScope)})`;
@@ -320,7 +621,20 @@ export class Lowering {
     return code;
   }
 
+  /** Bind an already-shaped list and its loop metadata once for Vue's iteration. */
+  eachRows(code: string): string {
+    return `${this.#use("eachRows")}(${code})`;
+  }
+
+  uniqueKeys(items: string, keyOf: string): string {
+    return `${this.#use("uniqueKeys")}(${items}, ${keyOf})`;
+  }
+
   #not(node: ExpressionNode, scope: Scope): string {
+    if (mayProduceInvalidResult(node, scope)) {
+      const value = this.condition(node, scope);
+      return `(() => { const operand: any = ${value}; return operand === Symbol.for("html-next.invalid-result") ? operand : !operand; })()`;
+    }
     if (node.kind === "binary" && node.op === "=") return `${this.#operand(node.left, scope)} !== ${this.#operand(node.right, scope)}`;
     if (node.kind === "binary" && node.op === "!=") return `${this.#operand(node.left, scope)} === ${this.#operand(node.right, scope)}`;
     const code = this.condition(node, scope);
@@ -335,52 +649,78 @@ export class Lowering {
     }
     const left = this.#operand(node.left, scope);
     const right = this.#operand(node.right, scope);
-    if (node.op === "=") return `${left} === ${right}`;
-    if (node.op === "!=") return `${left} !== ${right}`;
-    if (node.op === "^=" || node.op === "$=" || node.op === "*=") {
-      const method = node.op === "^=" ? "startsWith" : node.op === "$=" ? "endsWith" : "includes";
+    if (mayProduceInvalidResult(node.left, scope) || mayProduceInvalidResult(node.right, scope)) {
+      const body = this.#binaryOperands(node, scope, "left", "right");
+      return `(() => { const left: any = ${left}; if (left === Symbol.for("html-next.invalid-result")) return left; const right: any = ${right}; if (right === Symbol.for("html-next.invalid-result")) return right; return ${body}; })()`;
+    }
+    return this.#binaryOperands(node, scope, left, right);
+  }
+
+  #binaryOperands(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope, left: string, right: string): string {
+    const { op } = node;
+    if (op === "=" || op === "!=") {
+      const leftCategory = category(typeOf(node.left, scope).type);
+      const rightCategory = category(typeOf(node.right, scope).type);
+      const compared = leftCategory !== rightCategory && leftCategory !== "unknown" && rightCategory !== "unknown"
+        ? `(${left} as unknown)` : left;
+      return `${compared} ${op === "=" ? "===" : "!=="} ${right}`;
+    }
+    if (op === "^=" || op === "$=" || op === "*=") {
+      const method = op === "^=" ? "startsWith" : op === "$=" ? "endsWith" : "includes";
       const strings = category(typeOf(node.left, scope).type) === "string" && category(typeOf(node.right, scope).type) === "string";
       if (strings && !typeOf(node.right, scope).nullable) return `${left}${typeOf(node.left, scope).nullable ? "?." : "."}${method}(${right})`;
       return `(typeof ${left} === "string" && typeof ${right} === "string" ? ${left}.${method}(${right}) : undefined)`;
     }
+    if (["+", "-", "*", "/"].includes(op)) {
+      const leftType = typeOf(node.left, scope).type;
+      const rightType = typeOf(node.right, scope).type;
+      const leftKind = leftType.kind === "terminal" ? leftType.name : "unknown";
+      const rightKind = rightType.kind === "terminal" ? rightType.name : "unknown";
+      if (["length", "percentage", "duration"].includes(leftKind) ||
+        ["length", "percentage", "duration"].includes(rightKind)) {
+        return `(${this.#use("arithmetic")}(${quote(op)}, ${quote(leftKind)}, ${quote(rightKind)}, ${left}, ${right}) as string | symbol | undefined)`;
+      }
+    }
     const x = this.#numeric(node.left, scope);
     const y = this.#numeric(node.right, scope);
-    if (x !== undefined && y !== undefined) return `${x} ${node.op} ${y}`;
+    if (x !== undefined && y !== undefined) return `${left} ${op} ${right}`;
     const number = this.#use("number");
-    return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${number}(${left})! ${node.op} ${number}(${right})!)`;
+    return `(${number}(${left}) === undefined || ${number}(${right}) === undefined ? undefined : ${number}(${left})! ${op} ${number}(${right})!)`;
   }
 
   #call(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): string {
-    if (node.fn === "format") {
-      const [pattern, ...args] = node.args;
-      if (pattern?.kind === "literal" && typeof pattern.value === "string") {
-        let index = 0;
-        const parts = pattern.value.split("%s");
-        return `\`${parts.map((part, position) => {
-          const escaped = part.replace(/[\\`]/g, "\\$&").replace(/\$\{/g, "\\${");
-          if (position === parts.length - 1) return escaped;
-          const argument = args[index++];
-          return `${escaped}${argument === undefined ? "%s" : `\${${this.#interpolated(argument, scope)}}`}`;
-        }).join("")}\``;
-      }
-      return `${this.#use("format")}(${node.args.map((argument) => this.value(argument, scope)).join(", ")})`;
+    const values = node.args.map((argument) => this.value(argument, scope)).join(", ");
+    if (["format", "formatRange", "formatParts"].includes(node.fn)) {
+      const input = node.args[0];
+      if (input === undefined) return "Symbol.for('html-next.invalid-result')";
+      const hint = input.kind === "array" && input.items.length === 0 ? "list" : formattingType(typeOf(input, scope).type);
+      return `${this.#use("formatValue")}(${this.value(input, scope)}, ${hint === undefined ? "undefined" : quote(hint)}, ${quote(node.fn)}${node.args.length > 1 ? ", " + node.args.slice(1).map((arg) => this.value(arg, scope)).join(", ") : ""})`;
     }
-    const numbers = node.args.map((argument) => this.#numeric(argument, scope));
-    if (numbers.every((value): value is string => value !== undefined)) {
-      if (node.fn === "clamp" && numbers.length === 3) return `Math.min(Math.max(${numbers[0]}, ${numbers[1]}), ${numbers[2]})`;
-      return `Math.${node.fn}(${numbers.join(", ")})`;
+    if (node.fn === "default") {
+      if (node.args.length !== 2) return "undefined";
+      if (node.args[0]?.kind === "literal" && node.args[0].value === null) return this.value(node.args[1]!, scope);
+      return `(${this.value(node.args[0]!, scope)} ?? ${this.value(node.args[1]!, scope)})`;
     }
-    const number = this.#use("number");
-    const args = node.args.map((argument) => `${number}(${this.value(argument, scope)})`);
-    const call = node.fn === "clamp" ? `Math.min(Math.max(values[0]!, values[1]!), values[2]!)` : `Math.${node.fn}(...values)`;
-    return `((values: (number | undefined)[]) => values.includes(undefined) ? undefined : ${call.replace(/values\[(\d)\]!/g, "(values as number[])[$1]!").replace("...values", "...(values as number[])")})([${args.join(", ")}])`;
-  }
-
-  /** A value inside a template literal: HTML Next text, which writes absence as "". */
-  #interpolated(node: ExpressionNode, scope: Scope): string {
-    const type = typeOf(node, scope);
-    const text = this.text(node, scope);
-    return isScalar(type) && type.nullable ? `${this.#wrap(node, text)} ?? ""` : text;
+    if (node.fn === "concat" || node.fn === "join") {
+      return `${this.#use(node.fn)}(${values})`;
+    }
+    const kinds = node.args.map((argument) => {
+      const type = typeOf(argument, scope).type;
+      if (type.kind !== "terminal") return "invalid";
+      return type.name === "integer" ? "number" : type.name;
+    });
+    if (kinds.length > 0 && kinds.every((kind) => kind === "number") &&
+      node.args.every((argument) => !typeOf(argument, scope).nullable)) {
+      const args = node.args.map((argument) => this.value(argument, scope));
+      if (node.fn === "abs" && args.length === 1) return `Math.abs(${args[0]})`;
+      if (node.fn === "round" && args.length === 1) return `Math.round(${args[0]})`;
+      if (node.fn === "min" && args.length > 0) return `Math.min(${args.join(", ")})`;
+      if (node.fn === "max" && args.length > 0) return `Math.max(${args.join(", ")})`;
+      if (node.fn === "clamp" && args.length === 3) return `Math.max(${args[0]}, Math.min(${args[1]}, ${args[2]}))`;
+    }
+    const resultType = typeOf(node, scope).type;
+    const result = resultType.kind === "terminal" && ["length", "percentage", "duration"].includes(resultType.name) ? "string" : "number";
+    return `(${this.#use("math")}(${quote(node.fn)}, [${kinds.map(quote).join(", ")}], [${values}]) as ${result} | symbol | undefined)`;
   }
 
   /** A known, present number, or undefined when HTML Next's arithmetic would yield absence. */
@@ -395,6 +735,6 @@ export class Lowering {
   }
 
   #wrap(node: ExpressionNode, code: string): string {
-    return node.kind === "binary" || (node.kind === "unary" && node.op === "-") || /[?:] /.test(code) ? `(${code})` : code;
+    return node.kind === "binary" || node.kind === "conditional" || (node.kind === "unary" && node.op === "-") || /[?:] /.test(code) ? `(${code})` : code;
   }
 }

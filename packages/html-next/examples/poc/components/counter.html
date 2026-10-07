@@ -2,7 +2,7 @@
 <template component="x-counter" controller="./counter.js" status="early" summary="A controller-driven counter button.">
   <defs>
     <prop name="start" type="number" default="0">Initial count.</prop>
-    <state name="count" :value="start"></state>
+    <state name="count" type="number" value="0"></state>
   </defs>
   <button $ref="btn" type="button">count: <span $value="count"></span></button>
 </template>

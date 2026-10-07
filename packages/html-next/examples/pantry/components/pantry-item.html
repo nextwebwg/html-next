@@ -15,27 +15,27 @@
     <event name="adjust" type="object({ id: string, delta: integer })">Stock was adjusted by the row.</event>
     <event name="remove" type="string">The row asked to be removed; detail is its id.</event>
 
-    <handler name="increase"><dispatch event="adjust" :value="{ id: itemId, delta: 1 }"></dispatch></handler>
+    <handler name="increase"><dispatch event="adjust" expr:value="{ id: itemId, delta: 1 }"></dispatch></handler>
     <handler name="decrease">
-      <dispatch event="adjust" :value="{ id: itemId, delta: -1 }" $if="quantity > 0"></dispatch>
+      <dispatch event="adjust" expr:value="{ id: itemId, delta: -1 }" $if="quantity > 0"></dispatch>
     </handler>
-    <handler name="discard"><dispatch event="remove" :value="itemId"></dispatch></handler>
+    <handler name="discard"><dispatch event="remove" expr:value="itemId"></dispatch></handler>
   </defs>
 
-  <li class="item" :data-low="low">
+  <li class="item" from:data-low="low">
     <span class="item__label" $value="label"></span>
-    <span class="item__count" $value="format('%s %s', quantity, unit)"></span>
+    <span class="item__count" $value="concat(quantity, ' ', unit)"></span>
     <template $match>
       <ui-badge $when="low" label="Low" tone="warning"></ui-badge>
       <ui-badge $else label="Stocked" tone="neutral"></ui-badge>
     </template>
     <span class="item__controls">
-      <button type="button" class="item__step" on:click="decrease" :disabled="quantity <= 0"
-        :aria-label="format('Remove one %s', label)">−</button>
+      <button type="button" class="item__step" on:click="decrease" from:disabled="quantity <= 0"
+ from:aria-label="concat('Remove one ', label)">−</button>
       <button type="button" class="item__step" on:click="increase"
-        :aria-label="format('Add one %s', label)">+</button>
+ from:aria-label="concat('Add one ', label)">+</button>
       <button type="button" class="item__discard" on:click="discard"
-        :aria-label="format('Discard %s', label)">Discard</button>
+ from:aria-label="concat('Discard ', label)">Discard</button>
     </span>
   </li>
 

@@ -3,7 +3,8 @@
  *
  * A style block applies to its component's region: from the root (`[data-component~="tag"]`) down
  * to nested component roots and projected content. `:host` selects the root, `:host-state()` the root
- * while resolved props and state match, and `:slotted()` projected content at any depth.
+ * while resolved state matches, `:host([prop])` resolved props, and `:slotted()` projected content
+ * at any depth.
  *
  * The browser needs no CSS parser: the three pseudo-classes are renamed into selectors it accepts, it
  * parses the block twice (the component's own markup, and projected content), each copy drops the
@@ -12,6 +13,7 @@
  */
 import { fail } from "./diagnostics.js";
 import type { ComponentDefinition } from "./template.js";
+import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
 
 /** Names a component on its root, and only its root. Delegated roots list every owner. */
@@ -29,7 +31,7 @@ export function markProjectedRoot(node: Node): void {
   if (node.nodeType === 1) (node as Element).setAttribute(PROJECTED_ATTRIBUTE, "");
 }
 
-/** The attribute carrying the resolved values a definition's `:host-state()` rules test. */
+/** The attribute carrying the resolved prop and state values a definition's rules test. */
 export function stateAttribute(tag: string): string {
   return `data-${tag}-state`;
 }
@@ -67,18 +69,27 @@ function closingParenthesis(value: string, open: number): number {
   return value.length;
 }
 
-const STATE_TEST = /\[\s*([\w-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\]\s]+))\s*)?\]/g;
+const ATTRIBUTE_TEST = /\[(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]"'])*\]/g;
+const STATE_TEST = /^\[\s*([\w-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\]\s]+))\s*)?\]$/;
+type StyleTestKind = "prop" | "state";
+type StyleNameResolver = (name: string, kind: StyleTestKind) => string;
 
 /** `[name]` and `[name="value"]` tests as tokens of the state attribute. */
-function stateTokens(tests: string, tag: string, names: Set<string>, canonical: (name: string) => string): string {
-  let output = "";
-  for (const match of tests.matchAll(STATE_TEST)) {
-    const name = canonical(match[1]!);
+function stateTokens(tests: string, tag: string, names: Set<string>, canonical: StyleNameResolver,
+  kind: StyleTestKind): string {
+  const selector = kind === "prop" ? ":host()" : ":host-state()";
+  if (kind === "state" && tests.replace(ATTRIBUTE_TEST, "").trim() !== "") {
+    fail("HY002", `\`${selector}\` supports only presence and equality tests on declared values.`);
+  }
+  const output = tests.replace(ATTRIBUTE_TEST, (test) => {
+    const match = STATE_TEST.exec(test);
+    if (match === null) fail("HY002", `\`${selector}\` supports only presence and equality tests on declared values.`);
+    const name = canonical(match[1]!, kind);
     const value = match[2] ?? match[3] ?? match[4];
     names.add(name);
-    output += `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
-  }
-  return output;
+    return `[${stateAttribute(tag)}~="${value === undefined ? name : `${name}=${encodeURIComponent(value)}`}"]`;
+  });
+  return kind === "state" ? output.replace(/\s+/g, "") : output;
 }
 
 /** Type selectors naming components, outside brackets and strings. */
@@ -116,62 +127,82 @@ export function rewriteComponentSelector(
   tag: string,
   host: string,
   names: Set<string>,
-  canonical: (name: string) => string = (name) => name,
+  canonical: StyleNameResolver = (name) => name,
+  projected: string = `[${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *`,
 ): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
   }
   let output = "";
   let index = 0;
-  const state = /:where\(\s*\[--state\]\s*\):is\(/g;
-  for (let match = state.exec(selector); match !== null; match = state.exec(selector)) {
+  const resolved = /:where\(\s*\[--state\]\s*\):is\(|:host\(/g;
+  for (let match = resolved.exec(selector); match !== null; match = resolved.exec(selector)) {
     const open = match.index + match[0].length - 1;
     const close = closingParenthesis(selector, open);
-    output += `${selector.slice(index, match.index)}${host}${stateTokens(selector.slice(open + 1, close), tag, names, canonical)}`;
+    const kind = match[0] === ":host(" ? "prop" : "state";
+    output += `${selector.slice(index, match.index)}${host}${stateTokens(selector.slice(open + 1, close), tag, names, canonical, kind)}`;
     index = close + 1;
-    state.lastIndex = index;
+    resolved.lastIndex = index;
   }
   output += selector.slice(index);
   output = output
-    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where([${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *):is(`)
+    .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where(${projected}):is(`)
     .replace(/:host(?![\w-])/g, host);
   return rewriteComponentTags(rewriteValiditySelectors(output));
 }
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
-export function assembleComponentStyles(tag: string, own: string, slotted: string, hoisted: string): string {
+export function assembleComponentStyles(tag: string, own: string, slotted: string, hoisted: string,
+  projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`): string {
   const root = `[${COMPONENT_ATTRIBUTE}~="${tag}"]`;
   return [
     hoisted,
-    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]) {\n${own}\n}`,
+    own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], ${projectedBoundary}) {\n${own}\n}`,
     slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
   ].filter((part) => part !== "").join("\n");
 }
 
-/** Scalars, keywords, enums, and unions of them can be tested; lists, records, and objects cannot. */
+/** Scalars, keywords, and unions of them can be tested; lists, records, and objects cannot. */
 function stylableType(type: unknown): boolean {
-  if (typeof type === "string") return true;
+  if (typeof type === "string") return !["event", "function", "unknown", "trusted-html", "trusted-script"].includes(type);
   if (type === null || typeof type !== "object") return false;
-  if ("enum" in type) return true;
-  const node = type as { kind?: string; members?: readonly unknown[] };
+  const node = type as { kind?: string; name?: string; members?: readonly unknown[]; options?: readonly { type: unknown }[] };
+  if (node.kind === "terminal") return stylableType(node.name);
   if (node.kind === "union") return (node.members ?? []).every(stylableType);
-  return node.kind !== "list" && node.kind !== "record" && node.kind !== "object";
+  if (node.kind === "constrained") return stylableType((type as { base: unknown }).base);
+  if (node.kind === "selected") return (node.options ?? []).every((option) => stylableType(option.type));
+  return node.kind === "keyword";
 }
 
-/** Rejects `:host-state()` tests on names that are not declared props or state of a stylable type. */
-export function validateStateNames(definition: ComponentDefinition, names: ReadonlySet<string>, source?: string): void {
-  const states = new Set((definition.declarations ?? [])
-    .filter((declaration) => declaration.kind === "state")
-    .map((declaration) => declaration.name));
-  for (const name of names) {
-    const prop = definition.contract.props[name];
-    if (prop === undefined && !states.has(name)) {
-      fail("HY001", `\`:host-state()\` tests \`${name}\`, which is not a declared prop or state.`, source);
-    }
-    if (prop !== undefined && !stylableType(prop.type)) {
-      fail("HY002", `\`:host-state()\` cannot test \`${name}\`, whose type is structured.`, source);
+/** Resolves declared-value tests and checks their prop/state namespace and scalar type. */
+export function componentStyleNameResolver(definition: ComponentDefinition, source?: string,
+  ignoreCase = false): StyleNameResolver {
+  const states = new Map<string, unknown>();
+  for (const declaration of definition.declarations ?? []) {
+    if (declaration.kind === "state" || declaration.kind === "computed") {
+      const expression = declaration.expression?.ast;
+      const structure = expression?.kind === "array" || expression?.kind === "object" ? expression : undefined;
+      states.set(declaration.name, declaration.shape ?? declaration.type ?? structure);
     }
   }
+  // CSSOM serializes attribute names in lowercase; resolve them back to their authored names.
+  const declared = ignoreCase ? new Map([
+    ...Object.keys(definition.contract.props), ...states.keys(),
+  ].map((name) => [name.toLowerCase(), name])) : undefined;
+  return (input, kind) => {
+    const name = declared?.get(input.toLowerCase()) ?? input;
+    const selector = kind === "prop" ? ":host()" : ":host-state()";
+    const prop = definition.contract.props[name];
+    if (kind === "prop" ? prop === undefined : !states.has(name)) {
+      const hint = kind === "state" && prop !== undefined ? ` Select the prop with \`:host([${name}])\`.` : "";
+      fail("HY001", `\`${selector}\` tests \`${name}\`, which is not a declared ${kind === "prop" ? "prop" : "mutable or computed state"}.${hint}`, source);
+    }
+    const type = kind === "prop" ? prop!.type : states.get(name);
+    if (type !== undefined && !stylableType(typeof type === "string" ? parseTypeExpression(type) : type)) {
+      fail("HY002", `\`${selector}\` cannot test \`${name}\`, whose type is not scalar.`, source);
+    }
+    return name;
+  };
 }
 
 export interface CompiledComponentStyles {
@@ -199,13 +230,7 @@ export function compileComponentStyles(
   const view = document.defaultView ?? globalThis;
   const StyleRule = view.CSSStyleRule;
   const GroupingRule = view.CSSGroupingRule;
-  // The Object Model serializes attribute names in lowercase, so `[validationStatus]` comes back as
-  // `[validationstatus]`; state tests resolve against the declared names without regard to case.
-  const declared = new Map([
-    ...Object.keys(definition.contract.props),
-    ...(definition.declarations ?? []).filter((declaration) => declaration.kind === "state").map((declaration) => declaration.name),
-  ].map((name) => [name.toLowerCase(), name]));
-  const canonical = (name: string): string => declared.get(name.toLowerCase()) ?? name;
+  const canonical = componentStyleNameResolver(definition, source, true);
   const rewriteNested = (rule: CSSStyleRule): void => {
     rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, ":scope", names, canonical);
     for (const child of Array.from(rule.cssRules ?? [])) {
@@ -241,8 +266,7 @@ export function compileComponentStyles(
   };
   const own = compile("own");
   const slotted = compile("slotted");
-  validateStateNames(definition, names, source);
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: [...names] };
+  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
 }
 
 /** The state attribute's tokens for the current values: `name` while truthy, `name=value` for text. */

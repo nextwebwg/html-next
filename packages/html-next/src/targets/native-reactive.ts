@@ -7,6 +7,8 @@ import type {
   ReactiveDeclaration,
   TemplateNode,
 } from "../template.js";
+import { definitionMayInvokeComponents } from "../template.js";
+import { parseTypeExpression } from "../type-system.js";
 
 export interface NativeState {
   readonly name: string;
@@ -61,7 +63,7 @@ export function nativeDispatch(
 ): NativeDispatch | undefined {
   const declaration = events.find(({ name }) => name === step.event);
   const detail = step.value === undefined ? "undefined" : nativeExpression(step.value.ast, values);
-  if (declaration === undefined || detail === undefined) return undefined;
+  if (declaration === undefined || detail === undefined || declaration.shape !== undefined) return undefined;
   return {
     event: step.event,
     type: declaration.type,
@@ -93,7 +95,7 @@ export function nativeExpression(
   values: ReadonlyMap<string, string>,
 ): string | undefined {
   if (node.kind === "literal") {
-    if (typeof node.value === "symbol" || typeof node.value === "object" && node.value !== null) return undefined;
+    if (node.dimension !== undefined || typeof node.value === "symbol" || typeof node.value === "object" && node.value !== null) return undefined;
     return JSON.stringify(node.value);
   }
   if (node.kind === "id") return values.get(node.name);
@@ -113,10 +115,14 @@ export function nativeExpression(
   if (node.kind === "call" && ["abs", "round", "min", "max", "clamp"].includes(node.fn)) {
     const args = node.args.map((argument) => nativeExpression(argument, values));
     if (args.some((argument) => argument === undefined)) return undefined;
-    if ((node.fn === "abs" || node.fn === "round") && args.length !== 1) return undefined;
+    if (node.fn === "abs" && args.length !== 1) return undefined;
+    if (node.fn === "round" && (args.length < 1 || args.length > 2)) return undefined;
+    if (node.fn === "round" && args.length === 2 &&
+      (node.args[1]?.kind !== "literal" || typeof node.args[1].value !== "number" || node.args[1].value === 0)) return undefined;
     if ((node.fn === "min" || node.fn === "max") && args.length === 0) return undefined;
     if (node.fn === "clamp" && args.length !== 3) return undefined;
-    if (node.fn === "clamp") return `Math.min(Math.max(${args[0]}, ${args[1]}), ${args[2]})`;
+    if (node.fn === "clamp") return `Math.max(${args[0]}, Math.min(${args[1]}, ${args[2]}))`;
+    if (node.fn === "round" && args.length === 2) return `(Math.round(${args[0]} / Math.abs(${args[1]})) * Math.abs(${args[1]}))`;
     return `Math.${node.fn}(${args.join(", ")})`;
   }
   return undefined;
@@ -127,7 +133,8 @@ function templateSupported(
   values: ReadonlyMap<string, string>,
   handlers: ReadonlySet<string>,
 ): boolean {
-  if (node.kind === "text") return true;
+  if (node.kind === "text") return (node.segments ?? [node]).every((segment) => segment.expressionPlan === undefined
+    || nativeExpression(segment.expressionPlan.ast, values) !== undefined);
   if (node.kind === "slot") {
     return node.nameExpression === undefined &&
       (node.fallback ?? []).every((child) => templateSupported(child, values, handlers));
@@ -156,7 +163,15 @@ export function nativeReactivePlan(
   if (definition.controller !== undefined) return undefined;
   const declarations = definition.declarations ?? [];
   if (declarations.length === 0) return undefined;
+  // Native numeric operators would concatenate or produce NaN for dimensional strings.
+  const dimensional = (type: string | { readonly kind: string; readonly name?: string } | undefined): boolean => {
+    const parsed = typeof type === "string" ? parseTypeExpression(type) : type;
+    return parsed?.kind === "terminal" && ["length", "percentage", "duration"].includes(parsed.name ?? "");
+  };
+  if (Object.values(definition.contract.props).some((prop) => dimensional(prop.type)) ||
+    declarations.some((declaration) => declaration.kind === "state" && dimensional(declaration.type))) return undefined;
   if (declarations.some((declaration) =>
+    (declaration.kind === "state" && definitionMayInvokeComponents(definition)) ||
     declaration.kind !== "state" && declaration.kind !== "computed" &&
     declaration.kind !== "event" && declaration.kind !== "handler"
   )) return undefined;

@@ -1,7 +1,7 @@
 # Pantry — one application, two delivery modes
 
 A small data-driven application: a pantry stock list with search, restocking, discarding, an add
-form, and a declared public method. It exists to prove the whole path end to end, not one feature
+form, and controller event requests. It exists to prove the whole path end to end, not one feature
 at a time, and to keep the two browser delivery modes honest about producing the same result.
 
 ## The components
@@ -13,7 +13,7 @@ at a time, and to keep the two browser delivery modes honest about producing the
 | `pantry-shell` | no | Pure layout: every region is a named slot. |
 | `pantry-item` | no | A row that owns no data: it declares events and dispatches them. |
 | `pantry-suggestion` | no | One catalog hit; dispatches what the user chose. |
-| `pantry-app` | yes | The one stateful component: declared request, state, computed values, and a public method. |
+| `pantry-app` | yes | The one stateful component: declared request, state, computed values, and controller event requests. |
 
 The split is the point. Only `pantry-app` has JavaScript, and it drives state, never the DOM. Rows
 never mutate the list; they dispatch `adjust` and `remove`, and the controller decides what those
@@ -27,8 +27,8 @@ The app declares two reads. The first runs once on connection; the second is a r
 <!-- Sent as query parameters, re-requested whenever catalogQuery changes. -->
 <data name="catalog" src="/api/catalog" debounce="150ms"
   type="list(object({ id: string, label: string, unit: string }))">
-  <param name="q" :value="catalogQuery"></param>
-  <param name="limit" :value="5"></param>
+  <param name="q" from:value="catalogQuery"></param>
+  <param name="limit" from:value="5"></param>
 </data>
 ```
 
@@ -56,7 +56,7 @@ list. The template then renders straight from the result:
 <p class="notice" $if="catalog.pending">Searching the catalog…</p>
 <ul class="suggestions">
   <pantry-suggestion $each="hit of catalog.value" $key="hit.id"
-    :item-id="hit.id" :label="hit.label" :unit="hit.unit"></pantry-suggestion>
+ from:item-id="hit.id" from:label="hit.label" from:unit="hit.unit"></pantry-suggestion>
 </ul>
 ```
 
@@ -68,7 +68,7 @@ re-runs the read with an empty `q`, because the request is a function of state.
 The example ships a dev server so the declared reads have a real JSON endpoint:
 
 ```sh
-pnpm --filter @nextwebwg/html-next build   # live mode loads dist/browser-loader.bundle.js
+pnpm --filter @nextwebwg/html-next build   # live mode loads dist/browser.js
 node server.mjs                            # http://localhost:8799/
 # pre-compiled: npx vite build --config compiled/vite.config.mjs, then serve compiled/dist
 ```
@@ -82,14 +82,14 @@ rest of the graph at runtime. No build step, and definitions may arrive later.
 build and emits the already-parsed definitions, so the browser fetches no component sources.
 
 `tests/pantry-app.test.ts` drives one scenario against both and requires every step to observe the
-same DOM, the agreement the [proposal](https://nextwebwg.org/html-next/) demands of delivery modes.
+same DOM, the agreement the [proposal](https://nextwebwg.org/declarative-components/) demands of delivery modes.
 
 ## Known gaps this example documents
 
 - `@nextwebwg/html-next-unplugin` compiles components to native DOM factories, which is smaller
   again. A component the general runtime renders may now invoke others (the build registers their
-  definitions), but a *factory-compiled* invocation still cannot carry inputs, projected children,
-  events, refs, or flow (`HN009`, `HN014`), so a graph of purely presentational components does not
+  definitions), but a *factory-compiled* invocation still cannot carry dynamic inputs or dynamic
+  projected content, events, refs, or flow (`HN009`, `HN014`), so a graph of purely presentational components does not
   yet compile all the way down.
 - A write-side `<data>` (`method` plus `send="change"`, the proposal's synchronization half) is not
   implemented yet, so this example only reads.

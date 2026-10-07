@@ -1,6 +1,6 @@
 # `@nextwebwg/html-next`
 
-Reference implementation for the [Declarative HTML Components proposal](https://nextwebwg.org/html-next/)
+Reference implementation for the [Declarative HTML Components proposal](https://nextwebwg.org/declarative-components/)
 and the [HTML Forms proposal](https://nextwebwg.org/html-forms/): the validity model
 (`@nextwebwg/html-next/validation`) and native form request construction
 (`@nextwebwg/html-next/forms`). It replaces `@nextwebwg/declarative-components`. It provides three
@@ -21,7 +21,7 @@ lowers instances, and runs reactivity. It carries no component parser, so a buil
 nothing for one (about 6 KB gzip on a representative app).
 
 `@nextwebwg/html-next/live` is the same runtime plus the parser that reads `<template component>`
-definitions authored in a document. `startBrowserComponents()` already installs it; import `live`
+definitions authored in a document. The browser entry (`@nextwebwg/html-next/browser`) already installs it; import `live`
 directly when calling `lowerDocument()` or `observeDocument()` against a page that authors
 definitions in HTML. Reading a definition from a document without that parser is a stable `HR007`
 diagnostic rather than a silent no-op.
@@ -31,7 +31,7 @@ successful-control, validation, encoding, and cancellation semantics. It accepts
 and imports nothing else from this package, so a consumer that only wants HTML Forms pays only for
 that subpath.
 
-See the [proposal](https://nextwebwg.org/html-next/) and
+See the [proposal](https://nextwebwg.org/declarative-components/) and
 [independent goal ledger](docs/delivery-goals.md).
 
 The package is experimental and is not published yet. From the repository root:

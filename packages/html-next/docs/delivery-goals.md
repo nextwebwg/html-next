@@ -8,12 +8,12 @@ completion criteria, measurements, and next evidence separate.
 **Current work.** Minimize the full-capability browser entry by composing Web Platform facilities
 and removing universally redundant runtime machinery.
 
-- Contract: [live browser distributable](https://nextwebwg.org/html-next/)
+- Contract: [live browser distributable](https://nextwebwg.org/declarative-components/)
 - Input boundary: any conforming component graph introduced during the document lifetime
 - Current baseline: 103,125 minified raw bytes and 33,199 gzip bytes
 - Current result: 76,223 minified raw bytes and 25,854 gzip bytes
 - Primary metrics: reactive-matrix execution time and production-minified bytes for the public
-  browser-loader entry; gzip remains a reported transport metric
+  browser entry; gzip remains a reported transport metric
 - Required evidence: complete-capability assertion, module attribution, cross-browser conformance,
   and representative runtime measurements
 - Current audit: [native runtime audit](native-runtime-audit.md)
@@ -26,12 +26,18 @@ attribution. All 20 contributing modules are classified into six audited respons
 new unclassified dependency fails the gate. Next work runs measured parser, execution, lifecycle,
 compatibility, and policy reductions against this complete entry.
 
+The general runtime also has a [Node rendering entry](server-rendering.md). Its
+Node-to-browser tests cover instance restoration and subsequent updates in Chromium, Firefox and
+WebKit, including declared state, explicit props, slots, shared context, keyed rows and native
+control edits. This is separate evidence from specialized native factories and converter hydration;
+the incomplete hydration milestones below refer to those delivery products.
+
 ## Native application or library build
 
 **Tracked goal.** Compile a complete application or library graph to native DOM with one
 graph-scoped support plan.
 
-- Contract: [native application or library build](https://nextwebwg.org/html-next/)
+- Contract: [native application or library build](https://nextwebwg.org/declarative-components/)
 - Input boundary: application entries or a concrete public library entry set
 - Primary metrics: whole application output; full library output; representative consumer subsets
 - Attribution metrics: isolated capability fixtures, reported separately from product output
@@ -57,19 +63,25 @@ use target-native rendering, reactivity, lifecycle, lists, and hydration.
 - Input boundary: application or library entries plus a target framework and supported version
 - Primary metrics: generated output, HTML Next bridge cost, target framework/runtime cost, and total
   production output
-- Required evidence: cross-target observable conformance, SSR/hydration identity, controller-host
+- Required evidence: cross-target appearance and runtime conformance, successful hydration, controller-host
   parity, request cleanup, and representative consumer bundles
 - Current evidence: conversion has explicit application and library modes, version and collision
   diagnostics, stable entry files and output inventories, and target-native state, computed values,
-  updates, and declared event dispatch across React, Vue, and Svelte. Data/resources/effects,
-  controllers, richer handler operations, flow and keyed lists, two-way bindings, dynamic slots,
-  HTML injection, SSR/hydration, executable application bootstraps, and complete publishable
-  library metadata remain incomplete.
+  updates, and declared event dispatch across React, Vue, and Svelte. Three-engine fixtures cover
+  data reads and cancellation, controllers and refs, handler operations, context, flow and keyed
+  updates, two-way native controls, named/scoped slots, safe HTML, SSR, hydration, and diagnostics.
+  Converted libraries have dependency inventories and independent installed-consumer checks;
+  Vite can convert source imports and generate consumer declarations for all three frameworks.
+  Entries export components for consumers to mount or hydrate with the framework's public APIs.
+  Svelte's remaining audit includes focus and event behavior during keyed movement and the final
+  runtime, hydration, compatibility, and performance gates. Controller projection checks exercise
+  rendered interactions and lifecycle cleanup. Framework-owned node objects and SSR markup may
+  differ; passing feature fixtures alone does not prove every feature combination.
 - Completion: all supported capabilities map to target-native primitives or measured semantic
   bridges, and application and library outputs satisfy the framework conversion spec
 
-The next implementation milestone extends the shared conversion plan through lifecycle and flow,
-then proves server rendering and hydration identity for all three targets.
+The next framework milestone closes or explicitly resolves the remaining Svelte semantic gaps,
+then completes the full compatibility, performance, and delivery gates.
 
 ## Measurement rule
 

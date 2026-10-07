@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
+import { renderComponents } from "../src/server.js";
+import { parseComponent } from "../src/source-parser.js";
 
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
@@ -39,6 +41,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
       outfile: runtimeOnlyBundlePath,
       platform: "browser",
       target: ["es2022"],
+      // Test-only export shares the runtime's actual class; no production ABI is added.
+      plugins: [{ name: "observe-runtime-effect-ownership", setup(builder) {
+        builder.onLoad({ filter: /[/\\]runtime\.ts$/ }, async args => ({
+          contents: `${await readFile(args.path, "utf8")}\nexport { ReactiveEffect as TestReactiveEffect } from "./reactivity.js";\n`,
+          loader: "ts",
+          resolveDir: dirname(args.path),
+        }));
+      } }],
     });
     await build({
       entryPoints: [runtimeUrl.pathname],
@@ -60,6 +70,1703 @@ describe.skipIf(!enabled)("browser runtime", () => {
     });
   });
 
+  for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
+    it(`${engine} releases removed row owners and stops descendants created by later branches`, async () => {
+      const definition = parseComponent(`<template component="row-owner-release"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }]"></state>
+        <state name="shown" type="boolean" value="false"></state>
+        <state name="n" type="number" value="0"></state>
+        <state name="calls" type="number" value="0"></state>
+        <handler name="activate"><set name="calls" expr:value="calls + 1"></set></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $if="shown" on:click="activate" $value="n"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", error => pageErrors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const prototype = runtime.TestReactiveEffect.prototype;
+          const originalPause = prototype.pause;
+          const originalResume = prototype.resume;
+          let stoppedPauses = 0;
+          let stoppedResumes = 0;
+          // Observe lifecycle visits directly; a stopped effect's execute() is deliberately a no-op.
+          prototype.pause = function() { if (this.stopped) stoppedPauses += 1; return originalPause.call(this); };
+          prototype.resume = function() { if (this.stopped) stoppedResumes += 1; return originalResume.call(this); };
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          try {
+            // The row originally captures only the $if effect. Its child effects arrive later.
+            host.state.shown = true;
+            await settle();
+            const removed = root.querySelector("span")!;
+            host.state.rows = [];
+            await settle();
+            host.state.n = 9;
+            await settle();
+            removed.click();
+            await settle();
+            const removedState = [removed.textContent, host.state.calls];
+            for (let index = 0; index < 12; index += 1) {
+              host.state.rows = [{ id: index * 2 + 10 }, { id: index * 2 + 11 }];
+              await settle();
+              host.state.rows = [];
+              await settle();
+            }
+            host.state.rows = [{ id: 42 }, { id: 43 }];
+            await settle();
+            const first = root.querySelector("li");
+            host.state.rows = [{ id: 43 }, { id: 42 }];
+            await settle();
+            const retained = root.querySelectorAll("li")[1] === first;
+            const survivor = root.querySelector("span")!;
+            survivor.click();
+            await settle();
+            root.remove();
+            await settle();
+            host.state.n = 20;
+            await settle();
+            survivor.click();
+            await settle();
+            const detachedState = [survivor.textContent, host.state.calls];
+            document.body.append(root);
+            await settle();
+            // Reconnecting a conditional region renders its body again; the keyed li survives.
+            const reconnected = root.querySelector("span")!;
+            reconnected.click();
+            await settle();
+            const reconnectedState = [reconnected.textContent, host.state.calls, runtime.getComponentHost(root) === host];
+            stop();
+            stop();
+            return { removedState, retained, detachedState, reconnectedState, stoppedPauses, stoppedResumes };
+          } finally {
+            stop();
+            prototype.pause = originalPause;
+            prototype.resume = originalResume;
+          }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removedState: ["0", 0], retained: true, detachedState: ["9", 1],
+          reconnectedState: ["20", 2, true], stoppedPauses: 0, stoppedResumes: 0 });
+        assert.deepEqual(pageErrors, []);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} releases later descendants when an outer conditional region disappears`, async () => {
+      const definition = parseComponent(`<template component="nested-owner-release"><defs>
+        <state name="outer" type="boolean" value="true"></state>
+        <state name="inner" type="boolean" value="false"></state>
+        <state name="rows" type="list(number)" value="[1]"></state>
+        <state name="n" type="number" value="0"></state>
+        </defs><section><div $if="outer"><ul $if="inner"><li $each="row of rows" $value="n"></li></ul></div></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const stop = runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+          try {
+            host.state.inner = true;
+            await settle();
+            host.state.rows = [1, 2];
+            await settle();
+            const oldRows = Array.from(root.querySelectorAll("li"));
+            host.state.outer = false;
+            await settle();
+            host.state.n = 7;
+            host.state.rows = [1, 2, 3];
+            await settle();
+            const removed = oldRows.map(row => row.textContent);
+            host.state.outer = true;
+            await settle();
+            return { removed, restored: Array.from(root.querySelectorAll("li"), row => row.textContent) };
+          } finally { stop(); }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { removed: ["0", "0"], restored: ["7", "7", "7"] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} clones keyed native rows and preserves bindings, events, identity and guards`, async () => {
+      const definition = parseComponent(`<template component="native-clone-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="selected" type="number" value="2"></state>
+        <computed name="snapshot" from="rows"></computed>
+        <event name="activate" type="number"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event.detail"></dispatch></handler>
+        </defs><section><ul><li class="clone-row literal" $each="row of rows" $key="row.id"
+        from:data-id="row.id" from:aria-selected="row.id = selected" class:chosen="row.id = selected"
+        style:opacity="row.id = selected ? '1' : '0.5'">
+        <a class="activate" on:click.prevent="activate"><span class="mixed">Label: {row.label} / {selected}</span></a>
+        <span class="leaf" $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const originalClone = Node.prototype.cloneNode;
+          let rowClones = 0;
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.matches("li.clone-row")) rowClones += 1;
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+            const host = runtime.getComponentHost(root);
+            const events: number[] = [];
+            host.on("activate", (event: CustomEvent<number>) => events.push(event.detail));
+            const originals = Array.from(root.querySelectorAll("li"));
+            const mixedText = originals[0]!.querySelector(".mixed")!.firstChild;
+            const initial = originals.map(row => [row.getAttribute("data-id"), row.classList.contains("chosen"),
+              row.getAttribute("aria-selected"), (row as HTMLElement).style.opacity, row.querySelector(".mixed")!.textContent,
+              row.querySelector(".leaf")!.textContent]);
+            const clonesAfterMount = rowClones;
+            host.state.rows[0].label = "A2";
+            host.state.selected = 1;
+            await Promise.resolve();
+            const updated = [originals[0]!.querySelector(".mixed")!.textContent, originals[0]!.querySelector(".leaf")!.textContent,
+              originals[0]!.classList.contains("chosen"), originals[1]!.classList.contains("chosen"),
+              originals[0]!.querySelector(".mixed")!.firstChild === mixedText];
+            host.state.rows[0].label = 99;
+            host.state.snapshot[0].label = "readonly";
+            await Promise.resolve();
+            const guarded = [host.state.rows[0].label, originals[0]!.querySelector(".leaf")!.textContent];
+            const firstLink = originals[0]!.querySelector("a")!;
+            const prevented = !firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+            host.state.rows = [host.state.rows[2], host.state.rows[0], host.state.rows[1]];
+            await Promise.resolve();
+            const reordered = Array.from(root.querySelectorAll("li"));
+            const retained = reordered[0] === originals[2] && reordered[1] === originals[0] && reordered[2] === originals[1];
+            const removedLink = reordered[2]!.querySelector("a")!;
+            host.state.rows = host.state.rows.filter((row: any) => row.id !== 2);
+            await Promise.resolve();
+            removedLink.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            host.state.rows = host.state.rows.concat([{ id: 4, label: "D" }]);
+            await Promise.resolve();
+            const clonesAfterAppend = rowClones;
+            root.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            host.state.selected = 4;
+            host.state.rows[0].label = "C2";
+            document.body.append(root);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+            const finalRows = Array.from(root.querySelectorAll("li"));
+            return { initial, clonesAfterMount, updated, guarded, prevented, retained, clonesAfterAppend,
+              finalClones: rowClones, events, final: finalRows.map(row => [row.getAttribute("data-id"),
+                row.querySelector(".mixed")!.textContent, row.querySelector(".leaf")!.textContent, row.classList.contains("chosen")]),
+              identityAfterReconnect: finalRows[0] === originals[2] && finalRows[1] === originals[0] };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: [["1", false, "false", "0.5", "Label: A / 2", "A"], ["2", true, "true", "1", "Label: B / 2", "B"],
+            ["3", false, "false", "0.5", "Label: C / 2", "C"]],
+          clonesAfterMount: 3, updated: ["Label: A2 / 1", "A2", true, false, true], guarded: ["A2", "A2"],
+          prevented: true, retained: true, clonesAfterAppend: 4, finalClones: 4, events: [1, 1],
+          final: [["3", "Label: C2 / 4", "C2", false], ["1", "Label: A2 / 4", "A2", false], ["4", "Label: D / 4", "D", true]],
+          identityAfterReconnect: true,
+        });
+        assert.equal(warnings.filter(warning => warning.includes("does not satisfy")).length, 1);
+        assert.equal(warnings.filter(warning => warning.includes("read-only")).length, 1);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} preserves native-clone fallbacks for refs, properties, controls, flows, SVG, components and slots`, async () => {
+      const definition = parseComponent(`<template component="native-clone-fallbacks"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        <state name="text" type="string" value="start"></state><state name="shown" type="boolean" value="true"></state>
+        </defs><section>
+        <ul><li class="fallback-ref" $each="row of rows" $key="row.id" $ref="rowRefs" from:data-id="row.id"><span $value="row.label"></span></li></ul>
+        <ul><li class="fallback-property" $each="row of rows" $key="row.id" from:data-id="row.id"><span .title="row.label" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-control" $each="row of rows" $key="row.id" from:data-id="row.id"><input bind:value="text"></li></ul>
+        <ul><li class="fallback-flow" $each="row of rows" $key="row.id" from:data-id="row.id"><span $if="shown" $value="row.label"></span></li></ul>
+        <ul><li class="fallback-svg" $each="row of rows" $key="row.id" from:data-id="row.id"><svg viewBox="0 0 10 10"><text $value="row.label"></text></svg></li></ul>
+        <ul><li class="fallback-component" $each="row of rows" $key="row.id" from:data-id="row.id"><clone-child from:label="row.label"></clone-child></li></ul>
+        <ul><li class="fallback-slot" $each="row of rows" $key="row.id" from:data-id="row.id"><slot name="sample"><span $value="row.label"></span></slot></li></ul>
+        </section></template>`);
+      const child = parseComponent(`<template component="clone-child"><defs><prop name="label" type="string">Label.</prop></defs><strong class="child" $value="label"></strong></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinitions => {
+          const runtime = (window as any).BareRuntime;
+          const [definition, child] = JSON.parse(serializedDefinitions);
+          const originalClone = Node.prototype.cloneNode;
+          const clonedFallbackRows: string[] = [];
+          Node.prototype.cloneNode = function(this: Node, deep?: boolean): Node {
+            if (this instanceof Element && this.localName === "li" && this.className.startsWith("fallback-")) clonedFallbackRows.push(this.className);
+            return originalClone.call(this, deep);
+          };
+          try {
+            const root = document.querySelector("#case")!;
+            runtime.registerComponentDefinitions([child]);
+            runtime.manageComponentLifecycle(root, definition);
+            runtime.lowerDocument();
+            const host = runtime.getComponentHost(root);
+            const originals = Array.from(root.querySelectorAll("li"));
+            const input = root.querySelector("input")!;
+            input.value = "edited";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            await Promise.resolve();
+            const twoWay = host.state.text;
+            host.state.rows[0].label = "A2";
+            host.state.shown = false;
+            await Promise.resolve();
+            const hidden = root.querySelectorAll(".fallback-flow span").length;
+            host.state.shown = true;
+            host.state.rows = [host.state.rows[1], host.state.rows[0]];
+            await Promise.resolve();
+            runtime.lowerDocument();
+            const rows = Array.from(root.querySelectorAll("li"));
+            return { clonedFallbackRows, twoWay, hidden, retained: rows.every((row, index) => row === originals[index % 2 === 0 ? index + 1 : index - 1]),
+              ids: rows.map(row => row.getAttribute("data-id")), refCount: host.refs.rowRefs.length,
+              property: Array.from(root.querySelectorAll(".fallback-property span"), element => element.getAttribute("title")),
+              inputs: Array.from(root.querySelectorAll("input"), element => element.value),
+              flow: Array.from(root.querySelectorAll(".fallback-flow span"), element => element.textContent),
+              svg: Array.from(root.querySelectorAll(".fallback-svg text"), element => [element.namespaceURI, element.textContent]),
+              children: Array.from(root.querySelectorAll(".fallback-component .child"), element => element.textContent),
+              slots: Array.from(root.querySelectorAll(".fallback-slot span"), element => element.textContent) };
+          } finally { Node.prototype.cloneNode = originalClone; }
+        }, JSON.stringify([definition, child]));
+        assert.deepEqual(actual, { clonedFallbackRows: [], twoWay: "edited", hidden: 0, retained: true,
+          ids: ["2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1"], refCount: 2,
+          property: ["B", "A2"], inputs: ["edited", "edited"], flow: ["B", "A2"],
+          svg: [["http://www.w3.org/2000/svg", "B"], ["http://www.w3.org/2000/svg", "A2"]],
+          children: ["B", "A2"], slots: ["B", "A2"] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} removes owned block groups while preserving foreign siblings and cleanup`, async () => {
+      const definition = parseComponent(`<template component="owned-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>
+        <event name="activate" type="event"></event>
+        <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><button on:click="activate" $value="row.label"></button></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const anchors = [list.firstChild!, list.lastChild!];
+          const rows = Array.from(list.querySelectorAll("li"));
+          const removedButton = rows[0]!.querySelector("button")!;
+          const removedValue = host.state.rows[0];
+          const retained = rows[3]!;
+          const events: number[] = [];
+          host.on("activate", (event: CustomEvent) => events.push(Number(event.detail.target.parentElement.getAttribute("data-id"))));
+          const before = document.createElement("i");
+          const between = document.createElement("i");
+          const after = document.createElement("i");
+          list.prepend(before);
+          rows[1]!.nextSibling!.after(between);
+          list.append(after);
+          removedButton.click();
+          host.state.rows = host.state.rows.filter((row: any) => row.id === 4)
+            .concat([{ id: 6, label: "F" }]);
+          await Promise.resolve();
+          const mixed = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id"));
+          const identity = list.querySelector("li") === retained;
+          removedButton.click();
+          removedValue.label = "stale";
+          await Promise.resolve();
+          const stoppedContent = removedButton.textContent === "A";
+          retained.querySelector("button")!.click();
+          host.state.rows = [];
+          await Promise.resolve();
+          const foreignKept = [before, between, after].every(node => node.parentNode === list);
+          before.remove(); between.remove(); after.remove();
+          host.state.rows = [{ id: 7, label: "G" }, { id: 8, label: "H" }, { id: 9, label: "I" }];
+          await Promise.resolve();
+          const bulkButton = list.querySelector("button")!;
+          host.state.rows = [];
+          await Promise.resolve();
+          bulkButton.click();
+          const sameAnchors = list.childNodes.length === 2 && list.firstChild === anchors[0] && list.lastChild === anchors[1];
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 10, label: "J" }];
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          removedButton.click(); bulkButton.click();
+          const reconnected = Array.from(list.querySelectorAll("li"), row => row.textContent);
+          list.querySelector("button")!.click();
+          return { mixed, identity, stoppedContent, foreignKept, sameAnchors, reconnected, events };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { mixed: ["4", "6"], identity: true, stoppedContent: true,
+          foreignKept: true, sameAnchors: true, reconnected: ["J"], events: [1, 4, 10] });
+        assert.equal(warnings.length, 0);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} reruns a keyed list exactly for index, length and order changes`, async () => {
+      const definition = parseComponent(`<template component="list-rerun-count"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id"><span $value="row.label"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          // Each list run evaluates every row key once, so key reads count runs times rows.
+          let reads = 0;
+          const row = (id: number, label: string) => ({ get id() { reads += 1; return id; }, label });
+          const step = async (change: () => void) => {
+            reads = 0;
+            change();
+            await Promise.resolve();
+            return [reads, Array.from(root.querySelectorAll("span"), span => span.textContent).join("")];
+          };
+          return [
+            await step(() => { host.state.rows = [row(1, "a"), row(2, "b"), row(3, "c")]; }),
+            // Storage stays plain, so writing a row's proxy over the row itself is no change.
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => { host.state.rows[0] = host.state.rows[0]; }),
+            await step(() => {
+              const first = host.state.rows[0];
+              host.state.rows[0] = host.state.rows[2];
+              host.state.rows[2] = first;
+            }),
+            await step(() => { host.state.rows.push(row(4, "d")); }),
+            await step(() => { host.state.rows.length = 2; }),
+            await step(() => { host.state.rows[1].label = "z"; }),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [[3, "abc"], [0, "abc"], [0, "abc"], [3, "cba"], [4, "cbad"], [2, "cb"], [0, "cz"]]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} updates a list and another component's index reader in subscription order`, async () => {
+      const list = parseComponent(`<template component="order-list"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $value="row"></li></ul></section></template>`);
+      const first = parseComponent(`<template component="order-first"><defs>
+        <state name="rows" type="list(number)" value="[]"></state>
+        </defs><section><output $value="rows[0]"></output></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="list"></section><section id="first"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async ([listDefinition, firstDefinition]) => {
+          const runtime = (window as any).BareRuntime;
+          const listRoot = document.querySelector("#list")!;
+          const firstRoot = document.querySelector("#first")!;
+          runtime.manageComponentLifecycle(listRoot, JSON.parse(listDefinition!));
+          runtime.manageComponentLifecycle(firstRoot, JSON.parse(firstDefinition!));
+          const listHost = runtime.getComponentHost(listRoot);
+          const firstHost = runtime.getComponentHost(firstRoot);
+          // The list reads every index before the other component, in its own scheduler, reads index 0.
+          listHost.state.rows = [1, 2, 3];
+          await new Promise(resolve => setTimeout(resolve, 0));
+          firstHost.state.rows = listHost.state.rows;
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const records: MutationRecord[] = [];
+          new MutationObserver(batch => { records.push(...batch); })
+            .observe(document.body, { childList: true, characterData: true, subtree: true });
+          // Each component flushes in its own microtask; the first one queued renders first.
+          const step = async (change: () => void) => {
+            change();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const order: string[] = [];
+            for (const record of records.splice(0)) {
+              const target = record.target as Node;
+              const id = (target instanceof Element ? target : target.parentElement)!.closest("section[id]")!.id;
+              if (order.at(-1) !== id) order.push(id);
+            }
+            return order;
+          };
+          return [
+            await step(() => { listHost.state.rows[0] = 9; }),
+            await step(() => { listHost.state.rows.reverse(); }),
+            [listRoot.textContent, firstRoot.textContent],
+          ];
+        }, [JSON.stringify(list), JSON.stringify(first)]);
+        assert.deepEqual(actual, [["list", "first"], ["list", "first"], ["329", "3"]]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} renews each loop record on every list run`, async () => {
+      const definition = parseComponent(`<template component="loop-record-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-index="loop.index" from:data-edge="loop.first ? 'first' : loop.last ? 'last' : ''">
+        <span $value="loop.count"></span></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const read = () => Array.from(list.querySelectorAll("li"), row =>
+            [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
+          const initial = read();
+          // An equal-keyed replacement reruns the list without changing any row's loop fields. Each
+          // run still gives every row a new loop record, so loop readers rerun and write again.
+          const observer = new MutationObserver(() => undefined);
+          observer.observe(list, { attributes: true, subtree: true });
+          host.state.rows[1] = { id: 2 };
+          await Promise.resolve();
+          const indexWrites = observer.takeRecords().filter(record => record.attributeName === "data-index").length;
+          observer.disconnect();
+          host.state.rows = [host.state.rows[2], host.state.rows[0]];
+          await Promise.resolve();
+          return { initial, indexWrites, reordered: read() };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, {
+          initial: ["0 first 3", "1  3", "2 last 3"],
+          indexWrites: 3,
+          reordered: ["0 first 2", "1 last 2"],
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} moves the same keyed blocks across reorders and after a duplicate-key failure`, async () => {
+      const definition = parseComponent(`<template component="keyed-move-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const rows = (ids: number[]) => ids.map(id => ({ id }));
+          // Reports the resulting order and which retained rows the reconcile moved.
+          const update = async (ids: number[]) => {
+            const before = new Map<Node, string | null>(Array.from(list.querySelectorAll("li"), row => [row, row.getAttribute("data-id")]));
+            const moved: string[] = [];
+            const observer = new MutationObserver(records => {
+              for (const record of records) {
+                for (const node of record.addedNodes) if (before.has(node)) moved.push(before.get(node)!);
+              }
+            });
+            observer.observe(list, { childList: true });
+            host.state.rows = rows(ids);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            observer.disconnect();
+            const order = Array.from(list.querySelectorAll("li"), row => row.getAttribute("data-id")).join("");
+            const kept = Array.from(list.querySelectorAll("li")).filter(row => before.has(row)).length;
+            return [order, moved.join(""), kept];
+          };
+          return [
+            await update([1, 2, 3, 4, 5, 6]),
+            await update([1, 5, 3, 4, 2, 6]),
+            await update([6, 5, 1, 1]),
+            await update([2, 3, 4, 5, 6, 1]),
+            await update([4, 7, 5, 6, 2]),
+            await update([8, 9]),
+          ];
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, [
+          ["123456", "", 0],
+          // The reverse pass moves the blocks outside the longest already-ordered run, last first.
+          ["153426", "25", 6],
+          ["153426", "", 6],
+          // The failed run left the previous order's positions intact.
+          ["234561", "152", 6],
+          ["47562", "2", 4],
+          ["89", "", 0],
+        ]);
+        assert.deepEqual(errors.map(message => message.includes("HR004")), [true]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} removes a stale group whose boundary comments a foreign move reversed block by block`, async () => {
+      const definition = parseComponent(`<template component="reversed-removal-list"><defs>
+        <state name="rows" type="list(object({ id: number }))" value="[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]"></state>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          const list = root.querySelector("ul")!;
+          const describe = (node: Node): string => node instanceof Element
+            ? `li:${node.getAttribute("data-id")}` : node instanceof Comment ? node.data.replace("html-next:", "") : node.nodeName;
+          // A foreign move puts block 1's start after block 2's end. Adjacency still joins blocks 1
+          // and 2 into one stale group, but the group's first start now follows its last end.
+          const [first, second] = Array.from(list.querySelectorAll("li"));
+          second!.nextSibling!.after(first!.previousSibling!);
+          list.append(document.createElement("i"));
+          host.state.rows = host.state.rows.filter((row: any) => row.id > 2);
+          await Promise.resolve();
+          return Array.from(list.childNodes, describe);
+        }, JSON.stringify(definition));
+        // Each block is removed through its own start-to-end walk, as before the group bulk path.
+        assert.deepEqual(actual, ["each-start", "li:1", "item-end"]);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} canonicalizes writable controller aliases without losing destination guards`, async () => {
+      const definition = parseComponent(`<template component="controller-alias-list"><defs>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }]"></state>
+        <state name="left" type="object({ value: number })" value="{ value: 1 }"></state>
+        <state name="right" type="object({ value: string })" value="{ value: 'old' }"></state>
+        <state name="alias" type="object({ id: number, label: string })" value="{ id: 0, label: 'unused' }"></state>
+        <computed name="locked" type="object({ id: number, label: string })" from="rows[0]"></computed>
+        </defs><section><ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", message => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent('<section id="case"></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const crossPath = await page.evaluate(async serializedDefinition => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          runtime.manageComponentLifecycle(root, JSON.parse(serializedDefinition));
+          const host = runtime.getComponentHost(root);
+          host.state.right = host.state.left;
+          host.state.right.value = "right-text";
+          await Promise.resolve();
+          return { right: host.state.right.value, left: host.state.left.value };
+        }, JSON.stringify(definition));
+        // This fails before repeated writes on the old implementation: the source guard rejects
+        // a value that is valid at the destination, and every assignment adds another wrapper.
+        assert.deepEqual(crossPath, { right: "right-text", left: "right-text" });
+        assert.equal(warnings.length, 0);
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector("#case")!;
+          const host = runtime.getComponentHost(root);
+          const originals = new Map(Array.from(root.querySelectorAll("li"), node => [node.getAttribute("data-id"), node]));
+          host.state.right.value = 7;
+          const invalidDestination = host.state.right.value;
+          host.state.alias = host.state.locked;
+          host.state.alias.label = "blocked";
+          const readonlyAlias = host.state.alias.label;
+          const readonlySource = host.state.rows[0].label;
+          for (let index = 0; index < 32; index += 1) {
+            host.state.rows = host.state.rows.filter(() => true).concat([]);
+            const first = host.state.rows[0];
+            host.state.rows[0] = host.state.rows[2];
+            host.state.rows[2] = first;
+            host.state.rows[0].label = `label-${index}`;
+            await Promise.resolve();
+          }
+          host.state.rows = host.state.rows.filter((row: any) => row.id !== 2).concat([{ id: 4, label: "new" }]);
+          host.state.rows[0].label = "final";
+          await Promise.resolve();
+          const nodes = Array.from(root.querySelectorAll("li"));
+          const retained = nodes.filter(node => node.getAttribute("data-id") !== "4")
+            .every(node => originals.get(node.getAttribute("data-id")) === node);
+          return { invalidDestination, readonlyAlias, readonlySource, retained,
+            ids: nodes.map(node => node.getAttribute("data-id")), labels: nodes.map(node => node.textContent) };
+        });
+        assert.deepEqual(actual, { invalidDestination: "right-text", readonlyAlias: "A", readonlySource: "A",
+          retained: true, ids: ["1", "3", "4"], labels: ["final", "label-30", "new"] });
+        assert.equal(warnings.length, 2);
+        assert.ok(warnings.some(message => message.includes("right.value") && message.includes("declared type")));
+        assert.ok(warnings.some(message => message.includes("locked.label") && message.includes("read-only")));
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} manages native structural bindings and reconnects the same state`, async () => {
+      const definition = parseComponent(`<template component="native-owned-list"><defs>
+        <state name="shown" type="boolean" value="true"></state>
+        <state name="rows" type="list(object({ id: number, label: string }))" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }]"></state>
+        </defs><section><ul $if="shown"><li $each="row of rows" $key="row.id" $value="row.label"></li></ul></section></template>`);
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The ordinary native factory emits a static skeleton before lifecycle attachment.
+        await page.setContent('<section id="case"><ul><li></li></ul></section>');
+        await page.addScriptTag({ path: runtimeOnlyBundlePath });
+        const actual = await page.evaluate(async (serializedDefinition) => {
+          const definition = JSON.parse(serializedDefinition);
+          const runtime = (window as any).BareRuntime;
+          const root = document.querySelector('#case')!;
+          const stop = runtime.manageComponentLifecycle(root, definition);
+          const host = runtime.getComponentHost(root);
+          const snapshot = () => Array.from(root.querySelectorAll('li'), row => row.textContent);
+          const initial = snapshot();
+          const first = root.querySelector('li');
+          host.state.rows = [{ id: 2, label: 'B' }, { id: 1, label: 'A' }];
+          await Promise.resolve();
+          const reordered = snapshot();
+          const retained = root.querySelectorAll('li')[1] === first;
+          root.remove();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          host.state.rows = [{ id: 3, label: 'C' }];
+          await Promise.resolve();
+          const detached = snapshot();
+          document.body.append(root);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const reconnected = snapshot();
+          const sameHost = runtime.getComponentHost(root) === host;
+          host.state.shown = false;
+          await Promise.resolve();
+          const hidden = root.querySelector('ul') === null;
+          host.state.shown = true;
+          await Promise.resolve();
+          const restored = snapshot();
+          stop();
+          return { initial, reordered, retained, detached, reconnected, sameHost, hidden, restored };
+        }, JSON.stringify(definition));
+        assert.deepEqual(actual, { initial: ['A', 'B'], reordered: ['B', 'A'], retained: true,
+          detached: ['B', 'A'], reconnected: ['C'], sameHost: true, hidden: true, restored: ['C'] });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} targets local refs across repeated instances and collection changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-ref-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="check" type="number" bubbles="false" cancelable="true"></event>
+          <handler name="send"><dispatch event="check" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $key="row" $ref="fields" from:data-row="row"></button></section></template>
+          <x-ref-dispatch id="first"></x-ref-dispatch><x-ref-dispatch id="second"></x-ref-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const first = document.querySelector('#first')!;
+          const second = document.querySelector('#second')!;
+          const observed: Array<[string, string | null, unknown, boolean]> = [];
+          const events: Event[] = [];
+          const listen = (root: Element) => { for (const field of root.querySelectorAll('button')) field.addEventListener('check', event => {
+            events.push(event); event.preventDefault();
+            observed.push([root.id, field.getAttribute('data-row'), (event as CustomEvent).detail, event.defaultPrevented]);
+          }); };
+          listen(first); listen(second);
+          first.dispatchEvent(new CustomEvent('send', { detail: 3 }));
+          runtime.getComponentHost(first).state.rows = [2,1];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 4 }));
+          runtime.getComponentHost(first).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          first.dispatchEvent(new CustomEvent('send', { detail: 5 }));
+          second.dispatchEvent(new CustomEvent('send', { detail: 6 }));
+          return { observed, distinct: new Set(events).size === events.length };
+        });
+        assert.deepEqual(actual, { observed: [['first','1',3,true],['first','2',3,true],['first','2',4,true],['first','1',4,true],['second','1',6,true],['second','2',6,true]], distinct: true });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} validates a broadcast payload once, including empty collections`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-shared-dispatch"><defs>
+          <state name="rows" type="list(number)" value="[1,2]"></state>
+          <event name="share" type="object({ n: number })"></event>
+          <handler name="send"><dispatch event="share" target="fields" expr:value="$$event.detail"></dispatch></handler>
+          </defs><section on:send="send"><button $each="row of rows" $ref="fields"></button></section></template>
+          <x-shared-dispatch></x-shared-dispatch>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('section')!;
+          const [first, second] = [...root.querySelectorAll('button')];
+          const values: unknown[] = [];
+          const errors: string[] = [];
+          window.addEventListener('error', event => { errors.push(String(event.error?.message ?? event.message)); event.preventDefault(); });
+          first!.addEventListener('share', event => {
+            const detail = (event as CustomEvent).detail; values.push(detail.n); detail.n = 'changed';
+          });
+          second!.addEventListener('share', event => values.push((event as CustomEvent).detail.n));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 1 } }));
+          runtime.getComponentHost(root).state.rows = [];
+          await new Promise<void>(resolve => queueMicrotask(resolve));
+          root.dispatchEvent(new CustomEvent('send', { detail: { n: 'invalid' } }));
+          return { values, errors: errors.length };
+        });
+        assert.deepEqual(actual, { values: [1, 'changed'], errors: 1 });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} exposes handler events and separates validated state from readonly data`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-event-contract"><defs>
+          <state name="count" type="number" value="1"></state>
+          <computed name="doubled" from="$count * 2"></computed>
+          <data name="search" src="/search"></data>
+          <event name="activate" type="event"></event>
+          <handler name="activate"><dispatch event="activate" expr:value="$$event"></dispatch></handler>
+          </defs><button on:click="activate">{$doubled}</button></template><x-event-contract></x-event-contract>`);
+        await page.route('**/search', route => route.fulfill({ json: { title: 'Result' } }));
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as any).HtmlRuntime;
+          runtime.lowerDocument(document);
+          const root = document.querySelector('button')!;
+          const host = runtime.getComponentHost(root);
+          const warnings: string[] = [];
+          console.warn = (message: unknown) => warnings.push(String(message));
+          host.state.count = 2;
+          host.state.count = 'bad';
+          host.state.count = 'bad';
+          host.state.doubled = 9;
+          await Promise.resolve();
+          let source: Event | undefined;
+          const stop = host.on('activate', (event: CustomEvent) => { source = event.detail; });
+          const event = new MouseEvent('click', { bubbles: true });
+          root.dispatchEvent(event);
+          stop();
+          const firstSource = source;
+          source = undefined;
+          root.dispatchEvent(new MouseEvent('click'));
+          return { count: host.state.count, doubled: host.state.doubled,
+            separateData: host.state.search === undefined && host.data.search !== undefined,
+            sameEvent: firstSource === event, unsubscribed: source === undefined,
+            warnings: warnings.length, text: root.textContent };
+        });
+        assert.deepEqual(actual, { count: 2, doubled: 4, separateData: true, sameEvent: true, unsubscribed: true, warnings: 2, text: '4' });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} updates braced inline expressions without replacing siblings or retained keyed rows`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(String.raw`<template component="x-inline"><defs>
+          <state name="rows" type="list(object({ id: number, name: string }))" value="[{ id: 1, name: 'Ada' }, { id: 2, name: 'Bea' }]"></state>
+          <state name="Name" type="string" value="Upper"></state><state name="name" type="string" value="lower"></state>
+          </defs><section><p>Hello {$rows.0.name}! <b>Kept</b> $literal costs $1.15; {$Name}/{$name}.</p>
+          <table><tbody><tr $each="r of $rows" $key="$r.id"><td>{$r.name}</td></tr></tbody></table></section></template>
+          <x-inline id="case"></x-inline>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void; getComponentHost(element: Element): { state: Record<string, unknown> };
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#case")!;
+          const p = root.querySelector("p")!;
+          const bold = p.querySelector("b")!;
+          const initialText = p.textContent;
+          const firstRow = root.querySelector("tr")!;
+          const text = firstRow.querySelector("td")!.firstChild;
+          const host = runtime.getComponentHost(root);
+          host.state.rows = [{ id: 2, name: "Bea" }, { id: 1, name: "<i>Lin</i>" }];
+          host.state.Name = "Changed";
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { initialText, afterText: p.textContent, boldKept: p.querySelector("b") === bold,
+            rowKept: root.querySelectorAll("tr")[1] === firstRow, textKept: firstRow.querySelector("td")!.firstChild === text,
+            rows: Array.from(root.querySelectorAll("td"), (td) => td.textContent), markup: root.querySelector("i") !== null };
+        });
+        assert.deepEqual(actual, { initialText: "Hello Ada! Kept $literal costs $1.15; Upper/lower.",
+          afterText: "Hello Bea! Kept $literal costs $1.15; Changed/lower.", boldKept: true, rowKept: true,
+          textKept: true, rows: ["Bea", "<i>Lin</i>"], markup: false });
+      } finally { await browser.close(); }
+    });
+    it(`${engine} keeps a typed binding's last accepted value through invalid updates`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-reading-default"><defs>
+          <prop name="amount" type="number" default="5">Reading.</prop>
+        </defs><output from:data-amount="amount"></output></template>
+        <template component="x-reading-empty"><defs>
+          <prop name="amount" type="number">Reading.</prop>
+        </defs><output from:data-amount="amount"></output></template>
+        <template component="x-reading-owner"><defs>
+          <prop name="incoming" type="number" max="100">Source value.</prop>
+        </defs><main from:data-incoming="incoming"><x-reading-default id="with-default" from:amount="incoming"></x-reading-default>
+          <x-reading-empty id="without-default" from:amount="incoming"></x-reading-empty>
+          <x-reading-default id="from-function" from:amount="concat(incoming)"></x-reading-default>
+        </main></template>
+        <x-reading-owner id="owner" incoming="oops"></x-reading-owner>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown; validity: ValidityState; validate(): ValidityState }> } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const owner = document.querySelector("#owner") as Element & { validity: ValidityState };
+          const read = () => {
+            const defaulted = document.querySelector("#with-default")!;
+            const empty = document.querySelector("#without-default")!;
+            const fromFunction = document.querySelector("#from-function")!;
+            const ownerHost = runtime.getComponentHost(owner)!;
+            return {
+              incoming: ownerHost.props.incoming!.value,
+              stateHasIncoming: "incoming" in ownerHost.state,
+              inputValue: ownerHost.props.incoming!.inputValue,
+              propValue: ownerHost.props.incoming!.value,
+              propBadInput: ownerHost.props.incoming!.validity.badInput,
+              checkedBadInput: ownerHost.props.incoming!.validate().badInput,
+              defaultInput: runtime.getComponentHost(defaulted)?.props.amount?.inputValue,
+              defaultValid: runtime.getComponentHost(defaulted)?.props.amount?.validity.valid,
+              defaulted: runtime.getComponentHost(defaulted)?.props.amount?.value,
+              empty: runtime.getComponentHost(empty)?.props.amount?.value,
+              fromFunction: runtime.getComponentHost(fromFunction)?.props.amount?.value,
+              rendered: [defaulted, empty].map((element) => element.getAttribute("data-amount")),
+              boundRoot: owner.getAttribute("data-incoming"),
+              badInput: owner.validity.badInput,
+              rangeOverflow: owner.validity.rangeOverflow,
+            };
+          };
+          const flush = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+          const initial = read();
+          runtime.updateComponentProps(owner, { incoming: 2 });
+          await flush();
+          const valid = read();
+          runtime.updateComponentProps(owner, { incoming: "oops" });
+          await flush();
+          const rejected = read();
+          runtime.updateComponentProps(owner, { incoming: 7 });
+          await flush();
+          const recovered = read();
+          runtime.updateComponentProps(owner, { incoming: 130 });
+          await flush();
+          return { initial, valid, rejected, recovered, constrained: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { incoming: null, stateHasIncoming: false, inputValue: "oops", propValue: null, propBadInput: true, checkedBadInput: true, defaultInput: null, defaultValid: true, defaulted: 5, empty: null, fromFunction: 5,
+            rendered: ["5", null], boundRoot: null, badInput: true, rangeOverflow: false },
+          valid: { incoming: 2, stateHasIncoming: false, inputValue: 2, propValue: 2, propBadInput: false, checkedBadInput: false, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
+            rendered: ["2", "2"], boundRoot: "2", badInput: false, rangeOverflow: false },
+          rejected: { incoming: 2, stateHasIncoming: false, inputValue: "oops", propValue: 2, propBadInput: true, checkedBadInput: true, defaultInput: 2, defaultValid: true, defaulted: 2, empty: 2, fromFunction: 5,
+            rendered: ["2", "2"], boundRoot: "2", badInput: true, rangeOverflow: false },
+          recovered: { incoming: 7, stateHasIncoming: false, inputValue: 7, propValue: 7, propBadInput: false, checkedBadInput: false, defaultInput: 7, defaultValid: true, defaulted: 7, empty: 7, fromFunction: 5,
+            rendered: ["7", "7"], boundRoot: "7", badInput: false, rangeOverflow: false },
+          constrained: { incoming: 130, stateHasIncoming: false, inputValue: 130, propValue: 130, propBadInput: false, checkedBadInput: false, defaultInput: 130, defaultValid: true, defaulted: 130, empty: 130, fromFunction: 5,
+            rendered: ["130", "130"], boundRoot: "130", badInput: false, rangeOverflow: true },
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} retains a user's invalid edit while a typed downstream binding stays unchanged`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-email-display"><defs>
+          <prop name="address" type="email">Address.</prop>
+        </defs><output from:data-address="address"></output></template>
+        <template component="x-email-editor"><defs>
+          <state name="address" type="email" value="ada@example.org"></state>
+        </defs><section><input type="email" bind:value="address">
+          <x-email-display id="display" from:address="address"></x-email-display>
+        </section></template><x-email-editor id="editor"></x-email-editor>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const editor = document.querySelector("#editor")!;
+          const display = document.querySelector("#display")!;
+          const input = editor.querySelector("input")!;
+          const read = () => ({ input: input.value, nativeMismatch: input.validity.typeMismatch,
+            source: runtime.getComponentHost(editor)?.state.address,
+            downstream: runtime.getComponentHost(display)?.props.address?.value });
+          const initial = read();
+          input.value = "oops";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          const invalid = read();
+          input.value = "grace@example.org";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, invalid, recovered: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { input: "ada@example.org", nativeMismatch: false,
+            source: "ada@example.org", downstream: "ada@example.org" },
+          invalid: { input: "oops", nativeMismatch: true,
+            source: "oops", downstream: "ada@example.org" },
+          recovered: { input: "grace@example.org", nativeMismatch: false,
+            source: "grace@example.org", downstream: "grace@example.org" },
+        });
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0]!, /HR007.*Reference `address` must satisfy email/);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} skips a handler write when its expression result has the wrong type`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-handler-type"><defs>
+          <state name="count" type="number" value="2"></state>
+          <handler name="bad"><set name="count" expr:value="concat(count)"></set></handler>
+          <handler name="good"><set name="count" value="7"></set></handler>
+        </defs><section><button class="bad" on:click="bad">Bad</button>
+          <button class="good" on:click="good">Good</button>
+          <output from:data-count="count"></output></section></template>
+        <x-handler-type id="handler-test"></x-handler-type>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, unknown> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#handler-test")!;
+          const read = () => ({ count: runtime.getComponentHost(root)?.state.count,
+            rendered: root.querySelector("output")?.getAttribute("data-count") });
+          const initial = read();
+          root.querySelector<HTMLButtonElement>("button.bad")!.click();
+          await Promise.resolve();
+          const rejected = read();
+          root.querySelector<HTMLButtonElement>("button.good")!.click();
+          await Promise.resolve();
+          return { initial, rejected, recovered: read(), noPropHandleForState: runtime.getComponentHost(root)?.props.count === undefined };
+        });
+        assert.deepEqual(actual, {
+          noPropHandleForState: true,
+          initial: { count: 2, rendered: "2" },
+          rejected: { count: 2, rendered: "2" },
+          recovered: { count: 7, rendered: "7" },
+        });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} checks the selected field type for dynamic handler paths`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-dynamic-handler"><defs>
+          <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
+          <state name="index" type="integer" value="0"></state>
+          <handler name="bad"><set name="items[$index].name" expr:value="7"></set></handler>
+          <handler name="good"><set name="items[$index].name" value="Bea"></set></handler>
+        </defs><main><button class="bad" on:click="bad"></button>
+          <button class="good" on:click="good"></button><output $value="$items.0.name"></output></main>
+        </template><x-dynamic-handler id="dynamic-handler"></x-dynamic-handler>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#dynamic-handler")!;
+          const read = () => root.querySelector("output")?.textContent;
+          const initial = read();
+          root.querySelector<HTMLButtonElement>("button.bad")!.click();
+          await Promise.resolve();
+          const rejected = read();
+          root.querySelector<HTMLButtonElement>("button.good")!.click();
+          await Promise.resolve();
+          return { initial, rejected, recovered: read() };
+        });
+        assert.deepEqual(actual, { initial: "Ada", rejected: "Ada", recovered: "Bea" });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} writes a correctly typed value even when it fails a values constraint`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-choice-state"><defs>
+          <state name="size" type="keyword" values="sm, md" value="sm"></state>
+        </defs><section><input bind:value="size"><output from:data-size="size"></output></section></template>
+        <x-choice-state id="choice-state"></x-choice-state>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#choice-state")!;
+          const input = root.querySelector("input")!;
+          const output = root.querySelector("output")!;
+          const initial = output.getAttribute("data-size");
+          input.value = "lg";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          return { initial, source: runtime.getComponentHost(root)?.state.size,
+            current: output.getAttribute("data-size") };
+        });
+        assert.deepEqual(actual, { initial: "sm", source: "lg", current: "lg" });
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} reports authored prop bounds through the root validity state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-bounds"><defs>
+          <prop name="amount" type="number" min="1" max="5">Amount.</prop>
+          <prop name="code" type="string" minlength="2" maxlength="4">Code.</prop>
+        </defs><div from:data-amount="amount" from:data-code="code"></div></template>
+        <x-bounds id="bounded" amount="0" code="x"></x-bounds>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#bounded") as HTMLDivElement & { validity: ValidityState };
+          const initial = { amount: runtime.getComponentHost(root)?.props.amount?.value,
+            rangeUnderflow: root.validity.rangeUnderflow, tooShort: root.validity.tooShort };
+          runtime.updateComponentProps(root, { amount: 6, code: "abcde" });
+          await Promise.resolve();
+          const changed = { rangeOverflow: root.validity.rangeOverflow, tooLong: root.validity.tooLong };
+          runtime.updateComponentProps(root, { amount: 3, code: "abc" });
+          await Promise.resolve();
+          return { initial, changed, valid: root.validity.valid };
+        });
+        assert.deepEqual(actual, {
+          initial: { amount: 0, rangeUnderflow: true, tooShort: true },
+          changed: { rangeOverflow: true, tooLong: true }, valid: true,
+        });
+        assert.deepEqual(warnings, []);
+      } finally { await browser.close(); }
+    });
+
+    it(`${engine} updates from: attributes when a prop or state changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-from-reactive"><defs>
+          <prop name="label" type="string">Label.</prop>
+          <state type="number" name="count" value="0"></state>
+          <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        </defs><button from:data-label="label" from:data-count="count" on:click="increment">Go</button></template>
+        <x-from-reactive id="test" label="First"></x-from-reactive>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const button = document.querySelector<HTMLButtonElement>("#test")!;
+          const read = () => [button.getAttribute("data-label"), button.getAttribute("data-count")];
+          const initial = read();
+          runtime.updateComponentProps(button, { label: "Second" });
+          await Promise.resolve();
+          const afterProp = read();
+          button.click();
+          await Promise.resolve();
+          return { initial, afterProp, afterState: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: ["First", "0"], afterProp: ["Second", "0"], afterState: ["Second", "1"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} reselects a prop type when its named state changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-state-selected"><defs>
+          <state name="mode" type="keyword" values="text, number" value="text"></state>
+          <prop name="value">Value.<type from="mode">
+            <option value="text" type="string"></option>
+            <option value="number" type="number"></option>
+          </type></prop>
+          <handler name="toggle"><set name="mode" expr:value="mode = 'text' ? 'number' : 'text'"></set></handler>
+        </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>
+        <x-state-selected id="test"></x-state-selected>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const button = document.querySelector<HTMLButtonElement>("#test")!;
+          const read = () => ({ mode: runtime.getComponentHost(button)?.state.mode, value: runtime.getComponentHost(button)?.props.value?.value });
+          runtime.updateComponentProps(button, { value: "2.5" });
+          const textValue = read();
+          runtime.updateComponentProps(button, { value: undefined });
+          button.click();
+          await Promise.resolve();
+          runtime.updateComponentProps(button, { value: 2.5 });
+          const numberValue = read();
+          let rejected = false;
+          try { runtime.updateComponentProps(button, { value: "2.5" }); }
+          catch (error) { rejected = String(error).includes("HR002"); }
+          return { textValue, numberValue, rejected };
+        });
+        assert.deepEqual(actual, {
+          textValue: { mode: "text", value: "2.5" },
+          numberValue: { mode: "number", value: 2.5 },
+          rejected: false,
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} reselects a child type from a parent state-bound prop`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-selected-child"><defs>
+          <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
+          <prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
+        </defs><input from:type="type" from:value="value"></template>
+        <template component="x-parent-source"><defs>
+          <state name="mode" type="keyword" values="text, number" value="text"></state>
+          <state name="entry" type="number"></state><state name="draft" type="number" value="2.5"></state>
+          <handler name="switch"><set name="mode" value="number"></set><set name="entry" value="2.5"></set></handler>
+        </defs><div><button on:click="switch">Switch</button><x-selected-child id="child" from:type="mode" from:value="entry"></x-selected-child><x-selected-child id="unchanged-from" from:type="mode" from:value="draft"></x-selected-child><x-selected-child id="unchanged-bind" from:type="mode" bind:value="draft"></x-selected-child></div></template>
+        <x-parent-source id="parent"></x-parent-source>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const parent = document.querySelector("#parent")!;
+          const child = document.querySelector("#child")!;
+          const read = () => ({ type: runtime.getComponentHost(child)?.props.type?.value, value: runtime.getComponentHost(child)?.props.value?.value,
+            unchanged: ["unchanged-from", "unchanged-bind"].map((id) => {
+              const host = runtime.getComponentHost(document.querySelector(`#${id}`)!)!;
+              return { type: host.props.type!.value, value: host.props.value!.value, input: host.props.value!.inputValue };
+            }),
+          });
+          const initial = read();
+          parent.querySelector("button")!.click();
+          await Promise.resolve();
+          return { initial, changed: read() };
+        });
+        assert.deepEqual(actual, {
+          initial: { type: "text", value: null, unchanged: [{ type: "text", value: "2.5", input: "2.5" }, { type: "text", value: "2.5", input: "2.5" }] },
+          changed: { type: "number", value: 2.5, unchanged: [{ type: "number", value: 2.5, input: 2.5 }, { type: "number", value: 2.5, input: 2.5 }] },
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} writes structured child props without subscribing to its own output`, async () => {
+      const browser = await browserType.launch();
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      try {
+        await page.setContent(`<template component="x-structured-child"><defs>
+          <state name="mode" type="keyword" values="list, object" value="list"></state>
+          <prop name="value">Value.<type from="mode"><option value="list" type="list(number)"></option><option value="object" type="object({ count: number })"></option></type></prop>
+        </defs><output $value="value"></output></template>
+        <template component="x-list-child"><defs><prop name="value" type="list(number)">Value.</prop></defs><output $value="value"></output></template>
+        <template component="x-structured-parent"><defs><state name="box" type="object({ value: unknown })" value="{ value: [1, 2] }"></state></defs>
+          <section><x-structured-child id="from" from:value="box.value"></x-structured-child><x-structured-child id="bind" bind:value="box.value"></x-structured-child><x-list-child id="fixed-from" from:value="box.value"></x-list-child><x-list-child id="fixed-bind" bind:value="box.value"></x-list-child></section></template><x-structured-parent></x-structured-parent>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> };
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const host = (id: string) => runtime.getComponentHost(document.getElementById(id)!);
+          const read = () => ["from", "bind", "fixed-from", "fixed-bind"].map((id) => host(id).props.value!.value);
+          const initial = read();
+          const parent = runtime.getComponentHost(document.querySelector("section")!);
+          parent.state.box = { value: [3, 4] };
+          await Promise.resolve();
+          const changed = read();
+          (parent.state.box as { value: number[] }).value[1] = 6;
+          await Promise.resolve();
+          const inPlace = read();
+          host("from").state.mode = "object";
+          host("bind").state.mode = "object";
+          await Promise.resolve();
+          parent.state.box = { value: { count: 3 } };
+          await Promise.resolve();
+          const object = read();
+          (parent.state.box as { value: { count: number } }).value.count = 5;
+          await Promise.resolve();
+          return { initial, changed, inPlace, object, objectInPlace: read() };
+        });
+        assert.deepEqual(actual, { initial: [[1, 2], [1, 2], [1, 2], [1, 2]], changed: [[3, 4], [3, 4], [3, 4], [3, 4]], inPlace: [[3, 6], [3, 6], [3, 6], [3, 6]], object: [{ count: 3 }, { count: 3 }, [3, 6], [3, 6]], objectInPlace: [{ count: 5 }, { count: 5 }, [3, 6], [3, 6]] });
+        assert.deepEqual(errors, []);
+      } finally { await browser.close(); }
+    });
+
+    for (const form of ["inline", "named"] as const) {
+      it(`${engine} selects a ${form} prop type before parsing an HTML value`, async () => {
+        const browser = await browserType.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          const definition = form === "inline"
+            ? `<prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>`
+            : `<type name="input-value" from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type><prop name="value" type="input-value">Value.</prop>`;
+          await page.setContent(`<template component="x-dependent"><defs>
+            <prop name="type" type="keyword" values="text, number" default="text">Control mode.</prop>
+            ${definition}</defs><input from:type="type" from:value="value"></template>
+            <x-dependent id="numeric" value="2.5" type="number"></x-dependent>
+            <x-dependent id="text" value="2.5"></x-dependent>
+            <x-dependent id="empty"></x-dependent>`);
+          await page.addScriptTag({ path: bundlePath });
+          const actual = await page.evaluate(() => {
+            const runtime = (window as unknown as { HtmlRuntime: {
+              lowerDocument(): void;
+              getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+              updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            } }).HtmlRuntime;
+            runtime.lowerDocument();
+            const numeric = document.querySelector("#numeric")!;
+            const text = document.querySelector("#text")!;
+            const empty = document.querySelector("#empty")!;
+            const initial = [numeric, text, empty].map((element) => runtime.getComponentHost(element)?.props.value?.value);
+            runtime.updateComponentProps(numeric, { type: "text", value: "2.5" });
+            const changed = runtime.getComponentHost(numeric)?.props.value?.value;
+            let rejected = false;
+            try { runtime.updateComponentProps(numeric, { type: "number", value: "2.5" }); }
+            catch (error) { rejected = String(error).includes("HR002"); }
+            return { initial, changed, rejected, typeAfterRejection: runtime.getComponentHost(numeric)?.props.type?.value };
+          });
+          assert.deepEqual(actual, { initial: [2.5, "2.5", null], changed: "2.5", rejected: false, typeAfterRejection: "number" });
+        } finally {
+          await browser.close();
+        }
+      });
+    }
+
+    it(`${engine} warns and ignores an invalid values constraint in a live definition`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const warnings: string[] = [];
+        page.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+        await page.setContent(`<template component="x-choices"><defs>
+          <prop name="size" type="keyword" values="sm, two words">Size.</prop>
+          <prop name="count" type="number" min="oops">Count.</prop>
+        </defs><output from:data-size="size" from:data-count="count"></output></template><x-choices id="choice" size="lg" count="3"></x-choices>`);
+        await page.addScriptTag({ path: bundlePath });
+        const size = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { size: unknown }; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          return runtime.getComponentHost(document.querySelector("#choice")!)?.props.size?.value;
+        });
+        assert.equal(size, "lg");
+        assert.ok(warnings.some((message) => message.includes("HC013") && message.includes("values constraint")));
+        assert.ok(warnings.some((message) => message.includes("HC013") && message.includes("min constraint")));
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} parses the supported types at an HTML component boundary`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const cases: ReadonlyArray<[string, string, unknown]> = [
+          ["string", "Save", "Save"], ["keyword", "size-2", "size-2"],
+          ["boolean", "false", false], ["integer", "-2", -2], ["number", "0.3", 0.3],
+          ["url", "https://example.org/", "https://example.org/"], ["email", "ada@example.org", "ada@example.org"],
+          ["email", "a@b", "a@b"],
+          ["date", "2026-09-29", "2026-09-29"], ["month", "2026-09", "2026-09"],
+          ["week", "2026-W40", "2026-W40"], ["time", "13:45", "13:45"],
+          ["datetime-local", "2026-09-29T13:45", "2026-09-29T13:45"],
+          ["datetime", "2026-09-29T13:45Z", "2026-09-29T13:45Z"],
+          ["color", "rebeccapurple", "rebeccapurple"], ["color", "rgb(102 51 153)", "rgb(102 51 153)"],
+          ["color-hex", "#663399cc", "#663399cc"],
+          ["length", "1rem", "1rem"], ["percentage", "25%", "25%"], ["duration", "200ms", "200ms"],
+          ["keyword+", "red blue", ["red", "blue"]], ["keyword#", "red, blue", ["red", "blue"]],
+          ["object({ x: number, y: number })", "{ x: 3, y: 5 }", { x: 3, y: 5 }],
+        ];
+        const declarations = cases.map(([type], index) =>
+          `<prop name="v${index}" type="${type}">Value ${index}.</prop>`).join("");
+        const bindings = cases.map((_, index) => ` from:data-v${index}="v${index}"`).join("");
+        const attributes = cases.map(([, written], index) => ` v${index}="${written}"`).join("");
+        await page.setContent(`<template component="x-types"><defs>${declarations}</defs><output${bindings}></output></template><x-types id="typed"${attributes}></x-types>`);
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate((count) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const props = runtime.getComponentHost(document.querySelector("#typed")!)!.props;
+          return Array.from({ length: count }, (_, index) => props[`v${index}`]?.value);
+        }, cases.length);
+        assert.deepEqual(actual, cases.map(([, , expected]) => expected));
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} follows native email format cases at the component boundary`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-email"><defs>
+          <prop name="address" type="email">Email address.</prop>
+        </defs><output from:data-address="address"></output></template><x-email id="valid" address="a@b"></x-email>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const native = document.createElement("input");
+          native.type = "email";
+          native.value = "a@b";
+          const nativeValid = native.validity.valid;
+          native.value = "a@-b";
+          const nativeInvalid = native.validity.typeMismatch;
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            getComponentHost(element: Element): { props: Record<string, { value: unknown; inputValue: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#valid")!;
+          let rejected = false;
+          try { runtime.updateComponentProps(root, { address: "a@-b" }); }
+          catch (error) { rejected = String(error).includes("HR002"); }
+          const address = runtime.getComponentHost(root)?.props.address;
+          return { nativeValid, nativeInvalid, reflected: root.getAttribute("data-address"),
+            accepted: address?.value, inputValue: address?.inputValue, rejected };
+        });
+        assert.deepEqual(result, { nativeValid: true, nativeInvalid: true, reflected: "a@b",
+          accepted: "a@b", inputValue: "a@-b", rejected: false });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} parses constrained numeric values and preserves invalid framework input`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-current"><defs>
+          <prop name="current" type="integer" values="1, 2, 3">Current location.</prop>
+        </defs><div from:data-current="current"></div></template><x-current id="current" current="2"></x-current>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { current: unknown }; props: { current: { inputValue: unknown; value: unknown; validity: ValidityState } } } | undefined;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#current")!;
+          const fromHtml = runtime.getComponentHost(root)?.props.current.value;
+          runtime.updateComponentProps(root, { current: "2" });
+          const invalidValue = runtime.getComponentHost(root)?.props.current.value;
+          const invalidInput = runtime.getComponentHost(root)?.props.current.inputValue;
+          const propBadInput = runtime.getComponentHost(root)?.props.current.validity.badInput;
+          const invalidValidity = (root as HTMLDivElement & { checkValidity(): boolean }).checkValidity();
+          runtime.updateComponentProps(root, { current: 3 });
+          return { fromHtml, invalidValue, invalidInput, propBadInput, invalidValidity, fromValue: runtime.getComponentHost(root)?.props.current.value };
+        });
+        assert.deepEqual(result, { fromHtml: 2, invalidValue: 2, invalidInput: "2", propBadInput: true, invalidValidity: false, fromValue: 3 });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} reports a declared pattern through validity on typed prop values`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-sku"><defs>
+          <prop name="sku" type="string" pattern="[A-Z]{3}-[0-9]{4}">Stock code.</prop>
+        </defs><div from:data-sku="sku"></div></template><x-sku id="valid" sku="ABC-1234"></x-sku>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            updateComponentProps(element: Element, props: Record<string, unknown>): void;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#valid") as HTMLDivElement & { validity: ValidityState };
+          const initial = root.getAttribute("data-sku");
+          runtime.updateComponentProps(root, { sku: "xABC-1234" });
+          await Promise.resolve();
+          return { initial, patternMismatch: root.validity.patternMismatch, after: root.getAttribute("data-sku") };
+        });
+        assert.deepEqual(result, { initial: "ABC-1234", patternMismatch: true, after: "xABC-1234" });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} uses an explicit null before framework root selection`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const definition = parseComponent(`<template component="x-null-choice" status="early" summary="Null root.">
+          <defs><prop name="choice" type="keyword" values="on, off" default="on">Choice.</prop></defs>
+          <template $match><article $when="choice = null"><output $value="choice"></output></article><section $else><output $value="choice"></output></section></template>
+        </template>`, "null-choice.html");
+        const page = await browser.newPage();
+        await page.setContent(`<article id="null"></article><section id="default"></section>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate((parsed) => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            attachComponent(element: Element, definition: unknown, options?: { props?: Record<string, unknown> }): () => void;
+            getComponentHost(element: Element): { state: { choice: unknown }; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          const nullRoot = document.querySelector("#null")!;
+          const defaultRoot = document.querySelector("#default")!;
+          const disposeNull = runtime.attachComponent(nullRoot, parsed, { props: { choice: null } });
+          const disposeDefault = runtime.attachComponent(defaultRoot, parsed);
+          const values = [runtime.getComponentHost(nullRoot)?.props.choice?.value, runtime.getComponentHost(defaultRoot)?.props.choice?.value];
+          disposeNull();
+          disposeDefault();
+          return values;
+        }, JSON.parse(JSON.stringify(definition)) as Record<string, unknown>);
+        assert.deepEqual(result, [null, "on"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} exposes an omitted optional prop as null to the host`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-null-prop"><defs>
+          <prop name="value" type="number">Optional count.</prop>
+        </defs><output from:data-value="value"></output></template><x-null-prop id="missing"></x-null-prop>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          const runtime = (window as unknown as { HtmlRuntime: {
+            lowerDocument(): void;
+            getComponentHost(element: Element): { state: { value: unknown }; props: Record<string, { value: unknown }> } | undefined;
+          } }).HtmlRuntime;
+          runtime.lowerDocument();
+          const root = document.querySelector("#missing")!;
+          return runtime.getComponentHost(root)?.props.value?.value;
+        });
+        assert.equal(result, null);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} ignores malformed serialized form-default records during hydration`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-form-record"><input value="authored"></template>
+          <input id="primitive" data-component="x-form-record" value="server" data-html-next-form-defaults="null">
+          <input id="syntax" data-component="x-form-record" value="server" data-html-next-form-defaults="not-json">`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(() => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument();
+          return Array.from(document.querySelectorAll<HTMLInputElement>("#primitive, #syntax"), (control) => ({
+            value: control.value,
+            defaultValue: control.defaultValue,
+            marker: control.hasAttribute("data-html-next-form-defaults"),
+          }));
+        });
+        assert.deepEqual(result, [
+          { value: "server", defaultValue: "authored", marker: false },
+          { value: "server", defaultValue: "authored", marker: false },
+        ]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} repeats scoped projection with reactive slot props`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-list"><defs>
+          <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          </defs><section><button type="button" on:click="add">Add</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index">
+          <li class="fallback" $value="row.name"></li></slot></ul></section></template>
+          <x-scoped-list id="filled"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-list>
+          <x-scoped-list id="empty"></x-scoped-list>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        const read = () => page.evaluate(() => ({
+          filled: Array.from(document.querySelectorAll("#filled li"), (row) => row.textContent),
+          fallback: Array.from(document.querySelectorAll("#empty li"), (row) => row.textContent),
+        }));
+        assert.deepEqual(await read(), { filled: ["Ada0"], fallback: ["Ada"] });
+        await page.locator("#filled button").click();
+        await page.locator("#empty button").click();
+        await page.waitForFunction(() => document.querySelectorAll("#filled li").length === 2);
+        assert.deepEqual(await read(), { filled: ["Ada0", "Bea1"], fallback: ["Ada", "Bea"] });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} hydrates scoped projection in place and reconnects its row bindings`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-hydrate"><defs>
+          <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          <handler name="rename"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
+          </defs><section><button class="add" type="button" on:click="add">Add</button><button class="rename" type="button" on:click="rename">Rename</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"></slot>
+          </ul></section></template><main><x-scoped-hydrate id="source"><template slot="row"><li><b $value="item.name"></b><em $value="index"></em></li></template></x-scoped-hydrate></main>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const R = window.HtmlRuntime;
+          R.lowerDocument();
+          const source = document.querySelector('#source');
+          const server = document.createElement('main');
+          server.setHTMLUnsafe(R.serializeRenderedForm(source.parentElement));
+          const hydrated = server.querySelector('#source');
+          hydrated.id = 'hydrated';
+          const originalRow = hydrated.querySelector('li');
+          document.body.append(server);
+          R.lowerDocument();
+          const initial = { rootKept: document.querySelector('#hydrated') === hydrated,
+            rowKept: hydrated.querySelector('li') === originalRow,
+            source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+          source.querySelector('.rename').click();
+          hydrated.querySelector('.rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const renamed = { source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+          source.querySelector('.add').click();
+          hydrated.querySelector('.add').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          return { initial,
+            renamed,
+            source: [...source.querySelectorAll('li')].map(row => row.textContent),
+            hydrated: [...hydrated.querySelectorAll('li')].map(row => row.textContent) };
+        })()`);
+        assert.deepEqual(result, {
+          initial: { rootKept: true, rowKept: true, source: ["Ada0"], hydrated: ["Ada0"] },
+          renamed: { source: ["Ann0"], hydrated: ["Ann0"] },
+          source: ["Ada0", "Bea1"], hydrated: ["Ada0", "Bea1"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} retains the consumer's lexical scope in a nested scoped slot`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-scoped-rows"><defs>
+          <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
+          </defs><section><button class="add" type="button" on:click="add">Add</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>
+          <template component="x-scoped-consumer"><defs><state name="heading" value="People"></state>
+          <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
+          <main><button class="rename" type="button" on:click="rename">Rename</button><x-scoped-rows>
+          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          </x-scoped-rows></main></template><x-scoped-consumer id="parent"></x-scoped-consumer>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        const rows = () => page.locator("#parent li").allTextContents();
+        assert.deepEqual(await rows(), ["AdaPeople"]);
+        await page.locator("#parent .rename").click();
+        await page.waitForFunction(() => document.querySelector("#parent li")?.textContent === "AdaTeam");
+        await page.locator("#parent .add").click();
+        await page.waitForFunction(() => document.querySelectorAll("#parent li").length === 2);
+        assert.deepEqual(await rows(), ["AdaTeam", "BeaTeam"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${engine} restores nested scoped-slot ownership after hydration`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-hydrated-rows"><defs>
+          <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
+          <handler name="renameRow"><set name="rows.0.name" expr:value="'Ann'"></set></handler>
+          </defs><section><button class="row-rename" type="button" on:click="renameRow">Row</button><ul>
+          <slot $each="row of rows" $key="row.id" name="row" from:item="row"></slot></ul></section></template>
+          <template component="x-hydrated-consumer"><defs><state name="heading" value="People"></state>
+          <handler name="rename"><set name="heading" expr:value="'Team'"></set></handler></defs>
+          <main><button class="rename" type="button" on:click="rename">Rename</button><x-hydrated-rows>
+          <template slot="row"><li><b $value="item.name"></b><i $value="heading"></i></li></template>
+          </x-hydrated-rows></main></template><div><x-hydrated-consumer id="source"></x-hydrated-consumer></div>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const R = window.HtmlRuntime;
+          R.lowerDocument();
+          const source = document.querySelector('#source');
+          const server = document.createElement('div');
+          server.setHTMLUnsafe(R.serializeRenderedForm(source.parentElement));
+          const hydrated = server.querySelector('#source');
+          hydrated.id = 'hydrated';
+          const originalChild = hydrated.querySelector('section');
+          const originalRow = hydrated.querySelector('li');
+          document.body.append(server);
+          R.lowerDocument();
+          const read = () => [source.querySelector('li')?.textContent, hydrated.querySelector('li')?.textContent];
+          const initial = { rows: read(), childKept: hydrated.querySelector('section') === originalChild,
+            rowKept: hydrated.querySelector('li') === originalRow };
+          source.querySelector('.rename').click();
+          hydrated.querySelector('.rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          const heading = read();
+          source.querySelector('.row-rename').click();
+          hydrated.querySelector('.row-rename').click();
+          await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          return { initial, heading, row: read() };
+        })()`);
+        assert.deepEqual(result, {
+          initial: { rows: ["AdaPeople", "AdaPeople"], childKept: true, rowKept: true },
+          heading: ["AdaTeam", "AdaTeam"], row: ["AnnTeam", "AnnTeam"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
   afterAll(async () => {
     if (temporaryDirectory !== "") {
       await rm(temporaryDirectory, { recursive: true, force: true });
@@ -79,28 +1786,25 @@ describe.skipIf(!enabled)("browser runtime", () => {
         try {
           const page = await browser.newPage();
           const first = `<template component="x-styled-ssr" status="early" summary="Style hydration.">` +
-            `<defs><prop name="active" type="boolean" default="false">Active.</prop></defs>` +
+            `<defs><state name="active" type="boolean" value="false"></state></defs>` +
             `<article></article><style>:host { color: rgb(10, 20, 30) }` +
             `:host-state([active]) { color: rgb(40, 50, 60) }</style></template>`;
           const second = `<template component="x-other-ssr" status="early" summary="Second bundled component.">` +
             `<aside></aside><style>:host { padding: 7px }</style></template>`;
           const definitions = first + second;
-          await page.setContent(definitions + `<x-styled-ssr></x-styled-ssr><x-other-ssr></x-other-ssr>`);
-          await page.addScriptTag({ path: bundlePath });
-          const serverHTML = await page.evaluate((delivery) => {
-            (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
-            const styles = [...document.head.querySelectorAll("style")];
+          const rendered = await renderComponents(`<x-styled-ssr></x-styled-ssr><x-other-ssr></x-other-ssr>`, {
+            definitions: [parseComponent(first), parseComponent(second)],
+          });
+          const serverHTML = await page.evaluate(({ delivery, rendered }) => {
             const carrier = delivery === "inline" ? document.createElement("style") : document.createElement("link");
-            const css = styles.map(style => style.textContent).join("\n");
             if (carrier instanceof HTMLLinkElement) {
               carrier.rel = "stylesheet";
-              carrier.href = "data:text/css," + encodeURIComponent(css);
-            } else carrier.textContent = css;
-            carrier.setAttribute("data-html-next-component-styles", styles.map(style => style.getAttribute("data-html-next-component-styles")).join(" "));
-            carrier.setAttribute("data-html-next-style-states", JSON.stringify(Object.assign({},
-              ...styles.map(style => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}")))));
-            return { styles: carrier.outerHTML, roots: document.body.innerHTML };
-          }, delivery);
+              carrier.href = "data:text/css," + encodeURIComponent(rendered.css);
+            } else carrier.textContent = rendered.css;
+            carrier.setAttribute("data-html-next-component-styles", Object.keys(rendered.styleOwnership).join(" "));
+            carrier.setAttribute("data-html-next-style-states", JSON.stringify(rendered.styleOwnership));
+            return { styles: carrier.outerHTML, roots: rendered.html };
+          }, { delivery, rendered });
           // A fresh document/runtime consumes the server's bundled CSS and native roots.
           await page.setContent(serverHTML.styles + definitions + serverHTML.roots);
           await page.addScriptTag({ path: bundlePath });
@@ -113,7 +1817,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             window.HtmlRuntime.lowerDocument();
             const root = document.querySelector('article');
             const before = getComputedStyle(root).color;
-            window.HtmlRuntime.updateComponentProps(root, { active: true });
+            window.HtmlRuntime.getComponentHost(root).state.active = true;
             await new Promise(resolve => setTimeout(resolve, 0));
             CSSStyleSheet.prototype.replaceSync = replace;
             return { compilations, styles: document.head.querySelectorAll('style,link[rel=stylesheet]').length,
@@ -176,7 +1880,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           '<template component="icon-close" status="early" summary="SVG namespace fixture.">' +
           '<button type="button"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">' +
-          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" :gradientUnits="\'userSpaceOnUse\'"></linearGradient>' +
+          '<path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="\'userSpaceOnUse\'"></linearGradient>' +
           '<foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button></template>' +
           '<main><icon-close></icon-close></main>',
         );
@@ -221,9 +1925,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<span class="chip" $value="label"></span></template>' +
           '<template component="x-row" status="early" summary="Row.">' +
           '<defs><prop name="tone" type="string" default="a">Tone.</prop></defs>' +
-          '<li class="row"><x-chip :label="tone"></x-chip><slot></slot></li></template>' +
+          '<li class="row"><x-chip from:label="tone"></x-chip><slot></slot></li></template>' +
           '<template component="x-bar" status="early" summary="Bar.">' +
-          '<main><ul><x-row $each="index of [1, 2]" :tone="format(\'t%s\', index)">' +
+          '<main><ul><x-row $each="index of [1, 2]" from:tone="concat(\'t\', index)">' +
           '<b>projected</b></x-row></ul></main></template>' +
           '<x-bar></x-bar>',
         );
@@ -245,6 +1949,59 @@ describe.skipIf(!enabled)("browser runtime", () => {
           projected: ["projected", "projected"],
           pending: 0,
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} lets slotted descendants react to their logical provider's state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-steps"><defs>` +
+          `<state type="number" name="current" value="1"></state>` +
+          `<handler name="next"><set name="current" expr:value="current + 1"></set></handler>` +
+          `</defs><section><button type="button" on:click="next">Next</button><ol><slot></slot></ol></section></template>` +
+          `<template component="x-step"><defs>` +
+          `<prop name="index" type="number" required>Step index.</prop>` +
+          `<context name="current" from="x-steps" as="activeStep"></context>` +
+          `</defs><li from:aria-current="activeStep = index ? 'step' : null"><slot></slot></li></template>` +
+          `<x-steps><x-step index="1">Account</x-step><x-step index="2">Payment</x-step></x-steps>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+          const read = () => Array.from(document.querySelectorAll("ol > li"), (step) => step.getAttribute("aria-current"));
+          const before = read();
+          (document.querySelector("section > button") as HTMLButtonElement).click();
+          await Promise.resolve();
+          await Promise.resolve();
+          return { before, after: read(), roots: document.querySelectorAll("[data-component]").length };
+        });
+        assert.deepEqual(result, { before: ["step", null], after: [null, "step"], roots: 3 });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} rejects a context reader without an ancestor state`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-reader"><defs>` +
+          `<context name="current" from="x-steps"></context></defs>` +
+          `<span $value="current"></span></template><x-reader></x-reader>`);
+        await page.addScriptTag({ path: bundlePath });
+        const message = await page.evaluate(() => {
+          try {
+            (window as unknown as { HtmlRuntime: { lowerDocument(): number } }).HtmlRuntime.lowerDocument();
+            return "no error";
+          } catch (error) {
+            return String(error);
+          }
+        });
+        assert.match(message, /HR009.*requires context `current` from <x-steps>/);
       } finally {
         await browser.close();
       }
@@ -327,8 +2084,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<handler name="choose"><dispatch event="picked" value="olives"></dispatch></handler></defs>' +
           '<button type="button" class="pick" on:click="choose">pick</button></template>' +
           '<template component="x-collect" status="early" summary="Collector.">' +
-          '<defs><state name="taken" :value="0"></state>' +
-          '<handler name="count"><set name="taken" :value="taken + 1"></set></handler></defs>' +
+          '<defs><state type="number" name="taken" value="0"></state>' +
+          '<handler name="count"><set name="taken" expr:value="taken + 1"></set></handler></defs>' +
           '<main><x-emit on:picked="count"></x-emit><i class="taken" $value="taken"></i></main>' +
           '</template><x-collect></x-collect>',
         );
@@ -365,10 +2122,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<slot name="body"></slot></section></template>' +
           '<template component="x-outer" status="early" summary="Outer.">' +
           '<defs><prop name="label" type="string" default="none">Label.</prop>' +
-          '<state name="count" :value="1"></state>' +
+          '<state type="number" name="count" value="1"></state>' +
           '<data name="feed" src="https://api.example/feed" type="object({ label: string })"></data>' +
-          '<handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>' +
-          '<x-frame :heading="format(\'count %s\', count)">' +
+          '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
+          '<x-frame from:heading="concat(\'count \', count)">' +
           '<span slot="body"><button type="button" class="bump" on:click="bump"></button>' +
           '<i class="own" $value="count"></i>' +
           '<output class="feed" $value="feed.value.label"></output></span></x-frame></template>' +
@@ -390,12 +2147,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
           // gets the outer component's host and state, not the component it delegates to.
           hostState: (() => {
             const runtime = (window as unknown as { HtmlRuntime: unknown }).HtmlRuntime as {
-              getComponentHost(element: Element): { root: Element; state: Record<string, unknown> } | undefined;
+              getComponentHost(element: Element): { root: Element; element: Element; state: Record<string, unknown>; props: Record<string, { value: unknown }> } | undefined;
             };
             const host = runtime.getComponentHost(document.querySelector("section.frame")!);
             return host === undefined
               ? "no host"
-              : `${host.root.localName}:count=${String(host.state.count)}:label=${String(host.state.label)}`;
+              : `${host.element === host.root}:${host.root.localName}:count=${String(host.state.count)}:label=${String(host.props.label?.value)}`;
           })(),
         }));
         assert.deepEqual(result, {
@@ -403,7 +2160,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           heading: "count 2",
           feed: "from the endpoint",
           lineage: "x-outer x-frame",
-          hostState: "section:count=2:label=reflected",
+          hostState: "true:section:count=2:label=reflected",
         });
       } finally {
         await browser.close();
@@ -459,8 +2216,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           '<template component="x-rows" status="early" summary="Rows.">' +
-          "<defs><state name=\"items\" :value=\"['a', 'b', 'c']\"></state>" +
-          "<handler name=\"drop\"><set name=\"items\" :value=\"['a', 'c']\"></set></handler></defs>" +
+          "<defs><state name=\"items\" type=\"list(string)\" value=\"['a', 'b', 'c']\"></state>" +
+          "<handler name=\"drop\"><set name=\"items\" value=\"['a', 'c']\"></set></handler></defs>" +
           '<div class="panel" $ref="panel">' +
           '<ul><li $each="n of items" $key="n" $ref="rows" $value="n"></li></ul>' +
           '<button type="button" class="drop" on:click="drop"></button>' +
@@ -506,10 +2263,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><prop name="label" type="string" default="none">Label.</prop></defs>' +
           '<p class="child" $value="label"></p></template>' +
           '<template component="x-parent" status="early" summary="Parent.">' +
-          '<defs><state name="count" :value="1"></state>' +
-          '<handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>' +
+          '<defs><state type="number" name="count" value="1"></state>' +
+          '<handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>' +
           '<main><button type="button" class="bump" on:click="bump"></button>' +
-          '<x-child :label="format(\'count %s\', count)"></x-child></main></template>' +
+          '<x-child from:label="concat(\'count \', count)"></x-child></main></template>' +
           '<x-parent></x-parent>',
         );
         await page.addScriptTag({ path: bundlePath });
@@ -549,13 +2306,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           '<defs><prop name="open" type="boolean" default="false">Open.</prop></defs>' +
           '<div><section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-toggle" status="early" summary="Rendered form fixture."><defs>' +
-          '<state name="open" :value="false"></state>' +
-          '<handler name="toggle"><set name="open" :value="not open"></set></handler></defs>' +
+          '<state type="boolean" name="open" value="false"></state>' +
+          '<handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>' +
           '<div><button type="button" on:click="toggle">More</button>' +
           '<section $if="open"><slot name="extra">none</slot></section><slot></slot></div></template>' +
           '<template component="rf-list" status="early" summary="Rendered form fixture.">' +
           '<defs><prop name="rows" type="list(string)" default="[]">Rows.</prop></defs>' +
-          `<ul><li $each="row of rows" $key="row"><slot :name="format('row-%s', row)">Unnamed</slot></li></ul></template>` +
+          `<ul><li $each="row of rows" $key="row"><slot from:name="concat('row-', row)">Unnamed</slot></li></ul></template>` +
           '<template component="rf-wrap" status="early" summary="Rendered form fixture.">' +
           '<section><rf-card><span slot="title"><slot name="heading"></slot></span><slot></slot></rf-card></section></template>',
         );
@@ -742,8 +2499,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const host = window.HtmlRuntime.getComponentHost(first);
           const privateState = first[Symbol.for("@nextwebwg/html-next.runtime.v1")] === undefined;
           const frozenHost = Object.isFrozen(host);
-          host.on("connect", () => events.push("connect"));
-          host.on("disconnect", () => events.push("disconnect"));
+          let received = 0;
+          const stopProbe = host.on("probe", event => { if (event.target === first) received += 1; });
+          first.dispatchEvent(new Event("probe"));
+          stopProbe();
+          first.dispatchEvent(new Event("probe"));
+          const nativeSubscriptions = received === 1;
+          first.addEventListener("connect", () => events.push("connect"));
+          first.addEventListener("disconnect", () => events.push("disconnect"));
           first.remove();
           await tick();
           document.querySelector("main").append(first);
@@ -751,14 +2514,15 @@ describe.skipIf(!enabled)("browser runtime", () => {
           stopDocument();
           stopFirst();
           stopSecond();
-          return { documentObservers, connected, events, privateState, frozenHost };
+          return { documentObservers, connected, events, privateState, frozenHost, nativeSubscriptions };
         })()`);
         assert.deepEqual(result, {
           documentObservers: 1,
           connected: true,
-          events: ["connect", "disconnect", "connect", "disconnect"],
+          events: [],
           privateState: true,
           frozenHost: true,
+          nativeSubscriptions: true,
         });
       } finally {
         await browser.close();
@@ -825,6 +2589,133 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} disconnects removed light-DOM roots in tree order from small and large connection sets`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-order" status="early" summary="Removal order fixture."><button><slot></slot></button></template>' +
+          '<main><section id="one"></section><section id="two"></section></main><aside id="many"></aside>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const events = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onConnect(element) {
+              events.push("connect:" + element.id);
+              return () => events.push("dispose:" + element.id);
+            },
+          });
+          const add = async (parent, id, before) => {
+            const element = document.createElement("demo-order");
+            element.id = id;
+            if (before === undefined) parent.append(element);
+            else parent.insertBefore(element, before);
+            await tick();
+            return document.getElementById(id);
+          };
+          const one = document.querySelector("#one");
+          const two = document.querySelector("#two");
+          // Connection order differs from tree order in each section.
+          const b = await add(one, "b");
+          await add(one, "a", b);
+          const d = await add(two, "d");
+          await add(two, "c", d);
+          // A moved root stays connected; a removed subtree without roots disposes nothing.
+          const moved = document.querySelector("#a");
+          moved.remove();
+          one.append(moved);
+          document.querySelector("main").append(document.createElement("p"));
+          await tick();
+          const small = events.splice(0);
+          document.querySelector("main").replaceChildren();
+          await tick();
+          const removedSmall = events.splice(0);
+          const many = document.querySelector("#many");
+          const tail = await add(many, "z");
+          for (let index = 0; index < 18; index += 1) await add(many, "m" + index, tail);
+          events.splice(0);
+          const late = document.createElement("div");
+          many.prepend(late);
+          await add(late, "y");
+          await add(late, "x", document.querySelector("#y"));
+          events.splice(0);
+          late.remove();
+          many.replaceChildren(...Array.from(many.children).filter(element => element.id !== "m3" && element.id !== "z"));
+          await tick();
+          const removedLarge = events.splice(0);
+          stop();
+          return { small, removedSmall, removedLarge };
+        })()`);
+        assert.deepEqual(result, {
+          small: ["connect:b", "connect:a", "connect:d", "connect:c"],
+          removedSmall: ["dispose:b", "dispose:a", "dispose:c", "dispose:d"],
+          removedLarge: ["dispose:x", "dispose:y", "dispose:m3", "dispose:z"],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} discovers what a foreign script puts on or into a freshly rendered list row`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<template component="demo-cell" status="early" summary="Row content fixture."><b><slot></slot></b></template>' +
+          '<template component="demo-rows" status="early" summary="Row list fixture."><defs>' +
+          '<state name="rows" type="list(number)" value="[1]"></state></defs>' +
+          '<ul><li $each="row of rows" $key="row" from:data-id="row"><span $value="row"></span></li></ul></template>' +
+          '<demo-rows id="rows"></demo-rows>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+          const errors = [];
+          const stop = window.HtmlRuntime.observeDocument(document, {
+            onError(error) { errors.push(error.diagnostic?.code ?? error.message); },
+          });
+          await tick();
+          const root = document.querySelector("#rows");
+          const host = window.HtmlRuntime.getComponentHost(root);
+          const cell = text => {
+            const element = document.createElement("demo-cell");
+            element.textContent = text;
+            return element;
+          };
+          // The list renders in one microtask and observation runs in a later one, so these
+          // foreign changes land on fresh rows before observation first sees them.
+          host.state.rows = [1, 2];
+          await Promise.resolve();
+          root.querySelectorAll("li")[1].append(cell("inserted"));
+          await tick();
+          const inserted = errors.length;
+          host.state.rows = [1, 2, 3];
+          await Promise.resolve();
+          root.querySelectorAll("li")[2].setAttribute("data-component", "demo-cell");
+          await tick();
+          const marked = errors.splice(0);
+          root.querySelector("li").append(cell("later"));
+          await tick();
+          const lowered = Array.from(root.querySelectorAll("li"), row => [row.getAttribute("data-id"),
+            Array.from(row.querySelectorAll("b"), element => element.textContent).join(",")]);
+          stop();
+          return { inserted, marked, lowered, errors };
+        })()`);
+        assert.deepEqual(result, {
+          inserted: 0,
+          // Discovery treats the marked row as server markup to hydrate. The row is not that
+          // component's markup, so hydration reports it.
+          marked: ["HR005"],
+          lowered: [["1", "later"], ["2", "inserted"], ["3", ""]],
+          errors: [],
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} can stop observation from a connection callback without leaking cleanup`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -846,40 +2737,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return events;
         })()`);
         assert.deepEqual(result, ["connect:one", "dispose:one"]);
-      } finally {
-        await browser.close();
-      }
-    });
-
-    it(`${name} runs declarative lifecycle handlers again after reconnect`, async () => {
-      const browser = await browserType.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.setContent(
-          `<template component="x-life" status="early" summary="Lifecycle.">` +
-            `<defs><state name="count" :value="0"></state>` +
-            `<handler name="connected"><set name="count" :value="count + 1"></set></handler>` +
-            `<handler name="disconnected"><set name="count" :value="count + 10"></set></handler></defs>` +
-            `<section on:connect="connected" on:disconnect="disconnected"><output $value="count"></output></section>` +
-            `</template><x-life id="life"></x-life><aside></aside>`,
-        );
-        await page.addScriptTag({ path: bundlePath });
-        const result = await page.evaluate(`(async () => {
-          const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-          const stop = window.HtmlRuntime.observeDocument();
-          await tick();
-          const root = document.querySelector('#life');
-          const initial = root.textContent;
-          root.remove();
-          await tick();
-          document.querySelector('aside').append(root);
-          await tick();
-          await Promise.resolve();
-          const reconnected = root.textContent;
-          stop();
-          return { initial, reconnected };
-        })()`);
-        assert.deepEqual(result, { initial: "1", reconnected: "12" });
       } finally {
         await browser.close();
       }
@@ -948,29 +2805,31 @@ describe.skipIf(!enabled)("browser runtime", () => {
           document.body.append(content);
           await tick();
           const contentOnly = document.querySelector("#content-only");
-          document.body.append(contentOnly);
+          if (contentOnly !== null) document.body.append(contentOnly);
           await tick();
           stop();
           return { errors, executed: window.executed ?? false,
             definitions: document.querySelectorAll("template[component]").length,
-            contentName: contentOnly.localName };
+            contentName: contentOnly?.localName ?? null,
+            sanitizedContent: document.querySelector("article")?.innerHTML };
         })()`);
         assert.deepEqual(result, {
-          errors: ["HT009", "HL001"], executed: false, definitions: 0, contentName: "demo-safe",
+          errors: ["HT009", "HL001"], executed: false, definitions: 0,
+          contentName: null, sanitizedContent: "",
         });
       } finally {
         await browser.close();
       }
     });
 
-    it(`${name} preserves the document when a later invocation is invalid`, async () => {
+    it(`${name} lowers a missing required prop and reports validity`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
         const definitionMarkup =
           `<template component="demo-transactional-button" id="definition" status="early" summary="Transactional test component.">` +
           `<defs><prop name="label" type="string" required>Button label.</prop></defs>` +
-          `<button :data-label="label"><slot></slot></button>` +
+          `<button from:data-label="label"><slot></slot></button>` +
           `<style id="definition-style">button { color: red; }</style></template>`;
         await page.setContent(`${definitionMarkup}<main><demo-transactional-button id="first" label="first"><strong id="kept-child">First</strong></demo-transactional-button><demo-transactional-button id="second"></demo-transactional-button></main>`);
         await page.addScriptTag({ path: bundlePath });
@@ -979,51 +2838,29 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const definition = document.querySelector("#definition");
           // A <template>'s <style> lives in its inert content fragment, not the light DOM.
           const style = definition.content.querySelector("#definition-style");
-          const first = document.querySelector("#first");
-          const second = document.querySelector("#second");
           const keptChild = document.querySelector("#kept-child");
-          let diagnostic = "";
-          try {
-            window.HtmlRuntime.lowerDocument();
-          } catch (error) {
-            diagnostic = error.diagnostic.code;
-          }
-          const unchanged = {
-            diagnostic,
-            definitionConnected: definition.isConnected,
-            styleStillInDefinition: definition.content.contains(style),
-            firstUnchanged: document.querySelector("#first") === first,
-            secondUnchanged: document.querySelector("#second") === second,
-            keptChildUnchanged: document.querySelector("#kept-child") === keptChild,
-          };
-
-          second.setAttribute("label", "second");
           const lowered = window.HtmlRuntime.lowerDocument();
           const loweredFirst = document.querySelector("#first");
+          const loweredSecond = document.querySelector("#second");
           return {
-            unchanged,
             lowered,
             definitionRemoved: !definition.isConnected,
             styleMovedToHead: style.parentElement === document.head,
             firstIsButton: loweredFirst instanceof HTMLButtonElement,
             childIdentityPreserved: loweredFirst.querySelector("#kept-child") === keptChild,
+            secondIsButton: loweredSecond instanceof HTMLButtonElement,
+            secondInvalid: !loweredSecond.validity.valid,
           };
         })()`);
 
         assert.deepEqual(result, {
-          unchanged: {
-            diagnostic: "HC020",
-            definitionConnected: true,
-            styleStillInDefinition: true,
-            firstUnchanged: true,
-            secondUnchanged: true,
-            keptChildUnchanged: true,
-          },
           lowered: 2,
           definitionRemoved: true,
           styleMovedToHead: true,
           firstIsButton: true,
           childIdentityPreserved: true,
+          secondIsButton: true,
+          secondInvalid: true,
         });
       } finally {
         await browser.close();
@@ -1052,7 +2889,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const iframeMarkup =
           `<template component="demo-unsafe-frame" status="early" summary="Unsafe test component.">` +
           `<defs><prop name="markup" type="string">Embedded markup.</prop></defs>` +
-          `<iframe :srcdoc="markup"></iframe></template>`;
+          `<iframe from:srcdoc="markup"></iframe></template>`;
 
         assert.equal(await diagnostic(buttonMarkup), "HT010");
         assert.equal(await diagnostic(iframeMarkup), "HT007");
@@ -1071,7 +2908,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<prop name="label" type="string" default="Note">Label.</prop></defs>` +
             `<article><h3 $value="label"></h3><div class="body" $html="body"></div></article>` +
             `</template>` +
-            `<x-note id="n" label="Hi" body="<b>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
+            `<x-note id="n" label="Hi" body="<b class='unsafe-class' id='unsafe-id' title='safe'>ok</b><script>window.__x=1</script><img src=x onerror=window.__x=2><a href='java&#x0A;script:window.__x=3' target='_blank'>bad</a><iframe srcdoc='&lt;script>window.parent.__x=4&lt;/script>'></iframe>"></x-note>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(() => {
@@ -1081,6 +2918,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           return {
             heading: note.querySelector("h3").textContent,
             hasBold: body.querySelector("b") !== null,
+            markup: body.innerHTML,
             scriptCount: body.querySelectorAll("script").length,
             onerror: body.querySelector("img")?.hasAttribute("onerror") ?? null,
             dangerousHref: body.querySelector("a")?.hasAttribute("href") ?? null,
@@ -1091,12 +2929,42 @@ describe.skipIf(!enabled)("browser runtime", () => {
         assert.deepEqual(result, {
           heading: "Hi",
           hasBold: true,
+          markup: '<b title="safe">ok</b><a>bad</a>',
           scriptCount: 0,
-          onerror: false,
+          onerror: null,
           dangerousHref: false,
           iframeCount: 0,
           xflag: "unset",
         });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} updates inline template $html when state changes`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<template component="x-inline-html" status="early" summary="Inline HTML.">` +
+            `<defs><state name="body" type="string" value="<b>One</b>"></state>` +
+            `<handler name="update"><set name="body" expr:value="'<i>Two</i>'"></set></handler></defs>` +
+            `<p>Before <template $html="body"></template> after <button on:click="update">Update</button></p>` +
+            `</template><x-inline-html id="inline"></x-inline-html>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate<{ before: string; after: string }>(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector("#inline");
+          const before = root.innerHTML;
+          root.querySelector("button").click();
+          await Promise.resolve();
+          const after = root.innerHTML;
+          return { before, after };
+        })()`);
+        assert.match(result.before, /<b>One<\/b>/);
+        assert.doesNotMatch(result.after, /<b>One<\/b>/);
+        assert.match(result.after, /<i>Two<\/i>/);
       } finally {
         await browser.close();
       }
@@ -1109,7 +2977,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-link" status="early" summary="Link.">` +
             `<defs><prop name="destination" type="string">Destination.</prop></defs>` +
-            `<a :href="destination"><slot></slot></a></template>` +
+            `<a from:href="destination"><slot></slot></a></template>` +
             `<x-link id="link" destination="java&#x0A;script:alert(1)">Open</x-link>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -1131,11 +2999,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-demo" status="early" summary="Control flow.">` +
             `<defs>` +
-            `<prop name="tier" type="free | pro" default="free">Plan.</prop>` +
+            `<prop name="tier" type="keyword" values="free, pro" default="free">Plan.</prop>` +
             `<prop name="show" type="boolean" default="false">Show.</prop>` +
             `</defs>` +
             `<div>` +
-            `<ul class="nums"><li $each="n, i of [10, 20, 30]" $where="n > 10" :data-i="i" $value="n"></li></ul>` +
+            `<ul class="nums"><li $each="n, i of [10, 20, 30]" $where="n > 10" from:data-i="i" $value="n"></li></ul>` +
             `<p class="maybe" $if="show">extra</p>` +
             `<template $match="tier as t">` +
             `<span class="tier" $when="t = 'pro'">Pro</span>` +
@@ -1169,14 +3037,14 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} coerces explicit boolean invocation strings in both runtimes`, async () => {
+    it(`${name} parses boolean HTML attributes and checks typed generated updates`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-boolean" status="early" summary="Boolean attributes.">` +
             `<defs><prop name="enabled" type="boolean" default="true">Enabled.</prop></defs>` +
-            `<output :data-enabled="enabled"></output></template>` +
+            `<output from:data-enabled="enabled"></output></template>` +
             `<x-boolean id="bare" enabled></x-boolean>` +
             `<x-boolean id="explicit-true" enabled="true"></x-boolean>` +
             `<x-boolean id="explicit-false" enabled="false"></x-boolean>` +
@@ -1196,17 +3064,23 @@ describe.skipIf(!enabled)("browser runtime", () => {
             name: "enabled", attribute: "data-enabled", value: false, type: "boolean", required: false
           }], (_name, value) => { applied = value; });
           const values = [];
-          for (const value of ["", "true", "false"]) {
+          for (const value of [true, false]) {
             window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: value });
             await new Promise(resolve => setTimeout(resolve, 0));
             values.push(applied);
           }
-          return { interpreted, generated: values };
+          let invalid = false;
+          try { window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: "false" }); }
+          catch (error) { invalid = String(error).includes("HR002"); }
+          await new Promise(resolve => setTimeout(resolve, 0));
+          return { interpreted, generated: values, invalid, typeMismatch: generated.validity.typeMismatch };
         })()`);
 
         assert.deepEqual(result, {
           interpreted: ["true", "true", "false", "true"],
-          generated: [true, true, false],
+          generated: [true, false],
+          invalid: false,
+          typeMismatch: true,
         });
       } finally {
         await browser.close();
@@ -1220,20 +3094,19 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-counter" status="early" summary="Counter.">` +
             `<defs>` +
-            `<prop name="start" type="number" default="3">Start.</prop>` +
-            `<state name="count" :value="start"></state>` +
+            `<state name="count" type="number" value="5"></state>` +
             `<computed name="doubled" from="count * 2"></computed>` +
             `<data name="feed"></data>` +
-            `<handler name="inc"><set name="count" :value="count + 1"></set></handler>` +
+            `<handler name="inc"><set name="count" expr:value="count + 1"></set></handler>` +
             `<handler name="ready"></handler>` +
             `</defs>` +
-            `<div :data-count="count" :data-doubled="doubled">` +
+            `<div from:data-count="count" from:data-doubled="doubled">` +
             `<button on:click="inc" $value="count"></button>` +
             `<output bind:value="count"></output>` +
             `<i $value="feed.pending"></i>` +
-            `<span on:connect="ready"></span>` +
+            `<span on:mouseover="ready"></span>` +
             `</div></template>` +
-            `<x-counter id="c" start="5"></x-counter>`,
+            `<x-counter id="c"></x-counter>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(`(async () => {
@@ -1253,7 +3126,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             after: snapshot(),
             buttonHasOnClick: root.querySelector("button").hasAttribute("on:click"),
             pending: root.querySelector("i").textContent,
-            spanHasOnConnect: root.querySelector("span").hasAttribute("on:connect"),
+            spanHasOnMouseover: root.querySelector("span").hasAttribute("on:mouseover"),
           };
         })()`);
         assert.deepEqual(result, {
@@ -1261,7 +3134,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           after: { count: "6", doubled: "12", buttonText: "6", boundValue: "6" },
           buttonHasOnClick: false, // on: consumed, never emitted
           pending: "true", // data seeded in its pending shape
-          spanHasOnConnect: false, // lifecycle consumed
+          spanHasOnMouseover: false, // event binding consumed
         });
       } finally {
         await browser.close();
@@ -1281,17 +3154,18 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const result = await page.evaluate(`(async () => {
           window.HtmlRuntime.lowerDocument();
           const root = document.querySelector('#controller-reactivity');
-          const { computed, dispatch, effect, on, signal } = window.HtmlRuntime.getComponentHost(root);
+          const { computed, dispatch, effect, signal } = window.HtmlRuntime.getComponentHost(root);
           const source = signal(0);
           let computedRuns = 0;
           let effectRuns = 0;
           let observed = '';
           let eventTotal = 0;
-          const stopListening = on('controller-value', (event) => {
+          const onControllerValue = (event) => {
             eventTotal += event.detail.value;
-          });
+          };
+          root.addEventListener('controller-value', onControllerValue);
           const dispatched = dispatch('controller-value', { value: 2 });
-          stopListening();
+          root.removeEventListener('controller-value', onControllerValue);
           dispatch('controller-value', { value: 10 });
           let parentSawLocal = false;
           document.querySelector('#controller-parent').addEventListener('local-change', () => { parentSawLocal = true; });
@@ -1430,7 +3304,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-form" status="early" summary="Bindings.">` +
-            `<defs><state name="form" :value="{ text: 'a', checked: false, radio: false, choice: 'a', count: 1 }"></state></defs>` +
+            `<defs><state type="object({ text: string, checked: boolean, radio: boolean, choice: string, count: number })" name="form" value="{ text: 'a', checked: false, radio: false, choice: 'a', count: 1 }"></state></defs>` +
             `<form>` +
             `<input class="text" bind:value="form.text">` +
             `<input class="check" type="checkbox" bind:checked="form.checked">` +
@@ -1470,19 +3344,19 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-structure" status="early" summary="Structure.">` +
             `<defs>` +
-            `<state name="show" :value="true"></state>` +
-            `<state name="rows" :value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>` +
-            `<state name="mode" :value="'a'"></state>` +
-            `<state name="person" :value="{ name: 'Ada' }"></state>` +
+            `<state type="boolean" name="show" value="true"></state>` +
+            `<state type="list(unknown)" name="rows" value="[{ id: 1, label: 'A' }, { id: 2, label: 'B' }, { id: 3, label: 'C' }, { id: 4, label: 'D' }, { id: 5, label: 'E' }]"></state>` +
+            `<state type="string" name="mode" value="a"></state>` +
+            `<state type="object({ name: string })" name="person" value="{ name: 'Ada' }"></state>` +
             `<handler name="change">` +
-            `<set name="show" :value="false"></set>` +
-            `<set name="rows" :value="[{ id: 1, label: 'A' }, { id: 5, label: 'E' }, { id: 3, label: 'C2' }, { id: 4, label: 'D' }, { id: 2, label: 'B' }]"></set>` +
-            `<set name="mode" :value="'b'"></set>` +
-            `<set name="person" :value="{ name: 'Grace' }"></set>` +
+            `<set name="show" value="false"></set>` +
+            `<set name="rows" expr:value="[{ id: 1, label: 'A' }, { id: 5, label: 'E' }, { id: 3, label: 'C2' }, { id: 4, label: 'D' }, { id: 2, label: 'B' }]"></set>` +
+            `<set name="mode" expr:value="'b'"></set>` +
+            `<set name="person" expr:value="{ name: 'Grace' }"></set>` +
             `</handler></defs>` +
             `<main><button on:click="change">change</button>` +
             `<i class="conditional" $if="show">shown</i>` +
-            `<ul><li $each="row of rows" $key="row.id" :data-id="row.id" $value="row.label"></li></ul>` +
+            `<ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.label"></li></ul>` +
             `<div $match="mode as current"><span class="a" $when="current = 'a'">A</span><span class="b" $else>B</span></div>` +
             `<p $with="person as current" class="person" $value="current.name"></p>` +
             `</main></template><x-structure id="s"></x-structure>`,
@@ -1554,8 +3428,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-key-order" status="early" summary="Key order.">` +
-            `<defs><state name="rows" :value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state></defs>` +
-            `<ul><li $each="row of rows" $key="row.id" :data-id="row.id" $value="row.id"></li></ul>` +
+            `<defs><state type="list(unknown)" name="rows" value="[{ id: 1 }, { id: 2 }, { id: 3 }]"></state></defs>` +
+            `<ul><li $each="row of rows" $key="row.id" from:data-id="row.id" $value="row.id"></li></ul>` +
             `</template><x-key-order id="keys"></x-key-order>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -1618,9 +3492,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         });
         await page.setContent(
           `<template component="x-data" status="early" summary="Data.">` +
-            `<defs><state name="query" :value="'hello'"></state>` +
+            `<defs><state type="string" name="query" value="hello"></state>` +
             `<data name="result" src="https://api.example/search" type="object({ label: string })">` +
-            `<param name="q" :value="query"></param></data></defs>` +
+            `<param name="q" from:value="query"></param></data></defs>` +
             `<main><i class="pending" $value="result.pending"></i>` +
             `<output class="label" $value="result.value.label"></output></main>` +
             `</template><x-data id="data"></x-data>`,
@@ -1640,6 +3514,78 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} samples expr:value data params without subscribing to them`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        await page.route("https://api.example/**", async (route) => {
+          const url = new URL(route.request().url());
+          requests.push(url.search);
+          await route.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: `${url.searchParams.get("q")}:${url.searchParams.get("token")}` }) });
+        });
+        await page.setContent(`<template component="x-param-modes"><defs>
+          <state name="query" type="string" value="first"></state>
+          <state name="token" type="string" value="a"></state>
+          <data name="result" src="https://api.example/search" type="object({ label: string })">
+            <param name="q" from:value="query"></param>
+            <param name="token" expr:value="token"></param>
+          </data>
+          <handler name="changeToken"><set name="token" value="b"></set></handler>
+          <handler name="changeQuery"><set name="query" value="second"></set></handler>
+        </defs><section><button class="token" on:click="changeToken">Token</button>
+          <button class="query" on:click="changeQuery">Query</button>
+          <output $value="result.value.label"></output></section></template><x-param-modes id="case"></x-param-modes>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "first:a");
+        await page.locator("#case .token").click();
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        assert.equal(requests.length, 1);
+        await page.locator("#case .query").click();
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "second:b");
+        assert.deepEqual(requests, ["?q=first&token=a", "?q=second&token=b"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} keeps the accepted data request when a calculated parameter becomes invalid`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const requests: string[] = [];
+        await page.route("https://api.example/**", async (route) => {
+          const query = new URL(route.request().url()).searchParams.get("width") ?? "";
+          requests.push(query);
+          await route.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify({ label: query }) });
+        });
+        await page.setContent(`<template component="x-data-unit"><defs>
+          <state name="width" type="length" value="8.8px"></state>
+          <state name="step" type="length" value="1px"></state>
+          <data name="result" src="https://api.example/search" type="object({ label: string })">
+            <param name="width" from:value="round(width, step)"></param>
+          </data>
+          <handler name="bad"><set name="step" value="1rem"></set></handler>
+          <handler name="good"><set name="step" value="2px"></set></handler>
+        </defs><section><button class="bad" on:click="bad">Bad</button><button class="good" on:click="good">Good</button>
+          <output $value="result.value.label"></output></section></template><x-data-unit id="case"></x-data-unit>`);
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(() => (window as unknown as { HtmlRuntime: { lowerDocument(): void } }).HtmlRuntime.lowerDocument());
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "9px");
+        await page.locator("#case .bad").click();
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        assert.deepEqual(requests, ["9px"]);
+        await page.locator("#case .good").click();
+        await page.waitForFunction(() => document.querySelector("#case output")?.textContent === "8px");
+        assert.deepEqual(requests, ["9px", "8px"]);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} checks a typed reference read by index, as ui-combobox reads its first item`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -1649,11 +3595,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-first" status="early" summary="Indexed reads.">` +
             `<defs><state name="items" type="list(object({ name: string, 'odd key': string }))"` +
-            ` :value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
-            `<state name="byId" type="record(object({ name: string }))" :value="{ '42': { name: 'Ann' } }"></state>` +
-            `<handler name="swap"><set name="items" :value="[{ name: 7, 'odd key': 'y' }]"></set>` +
-            `<set name="byId" :value="{ '42': { name: 7 } }"></set></handler></defs>` +
-            `<main><output $value="items[0].name"></output><b $value="items[0]['odd key']"></b><i $value="byId['42'].name"></i>` +
+            ` value="[{ name: 'Apple', 'odd key': 'x' }]"></state>` +
+            `<state name="byId" type="object({ '42': object({ name: string }) })" value="{ '42': { name: 'Ann' } }"></state>` +
+            `<handler name="swap"><set name="items" expr:value="[{ name: 7, 'odd key': 'y' }]"></set>` +
+            `<set name="byId" expr:value="{ '42': { name: 7 } }"></set></handler></defs>` +
+            `<main><output $value="$items.0.name"></output><b $value="$items.0['odd key']"></b><i $value="$byId.42.name"></i>` +
             `<button type="button" on:click="swap"></button></main>` +
             `</template><x-first id="first"></x-first>`,
         );
@@ -1669,11 +3615,12 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const initial = await read();
         await page.click("#first button");
         await page.waitForTimeout(50);
-        // A dependency path names a list index and a record key alike (items.0.name, byId.42.name);
+        // A dependency path names a list index and an object key alike (items.0.name, byId.42.name);
         // reading it must not fail, and a value that breaks its declared type leaves only that
-        // reference inert, whether a list or a record holds it.
+        // reference inert, whether a list or an object holds it.
         assert.deepEqual({ initial, swapped: await read() }, { initial: ["Apple", "x", "Ann"], swapped: ["Apple", "y", "Ann"] });
         assert.deepEqual(messages.filter((text) => /SyntaxError/.test(text)), []);
+        assert.deepEqual(messages.filter((text) => text.includes("declared type")), []);
       } finally {
         await browser.close();
       }
@@ -1683,8 +3630,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
-        // Two responses: the first satisfies the declared type, the second breaks `label` and adds
-        // a field the declaration never mentioned.
+        // The second response breaks `label`; the third shows the typed reference can recover.
         let read = 0;
         await page.route("https://api.example/**", async (route) => {
           read += 1;
@@ -1693,17 +3639,19 @@ describe.skipIf(!enabled)("browser runtime", () => {
             headers: { "access-control-allow-origin": "*" },
             body: read === 1
               ? JSON.stringify({ label: "first", note: "kept" })
-              : JSON.stringify({ label: 42, note: "second", addedByServer: true }),
+              : read === 2
+                ? JSON.stringify({ label: 42, note: "second", addedByServer: true })
+                : JSON.stringify({ label: "third", note: "third note" }),
           });
         });
         await page.setContent(
           `<template component="x-typed" status="early" summary="Typed data.">` +
-            `<defs><state name="round" :value="1"></state>` +
+            `<defs><state type="number" name="round" value="1"></state>` +
             `<data name="result" src="https://api.example/search"` +
             ` type="object({ label: string, note: string, ... })">` +
-            `<param name="round" :value="round"></param></data>` +
-            `<computed name="shouted" from="format('%s!', result.value.label)"></computed>` +
-            `<handler name="again"><set name="round" :value="round + 1"></set></handler></defs>` +
+            `<param name="round" from:value="round"></param></data>` +
+            `<computed name="shouted" from="concat(result.value.label, '!')"></computed>` +
+            `<handler name="again"><set name="round" expr:value="round + 1"></set></handler></defs>` +
             `<main><output class="label" $value="result.value.label"></output>` +
             `<output class="note" $value="result.value.note"></output>` +
             `<output class="shouted" $value="shouted"></output>` +
@@ -1718,21 +3666,28 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.waitForFunction(() => document.querySelector("#typed .label")?.textContent === "first");
         await page.click("button.again");
         await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "second");
-        const result = await page.evaluate(() => ({
+        const afterInvalid = await page.evaluate(() => ({
           label: document.querySelector("#typed .label")?.textContent,
           note: document.querySelector("#typed .note")?.textContent,
           shouted: document.querySelector("#typed .shouted")?.textContent,
           ok: document.querySelector("#typed .ok")?.textContent,
         }));
-        assert.deepEqual(result, {
+        assert.deepEqual(afterInvalid, {
           // `label` broke its declared type, so the binding kept what it had...
           label: "first",
           // ...while the sibling reference, and the request itself, carried on.
           note: "second",
           ok: "true",
-          // A computed that reads the offending reference does not recompute either.
           shouted: "first!",
         });
+        await page.click("button.again");
+        await page.waitForFunction(() => document.querySelector("#typed .note")?.textContent === "third note");
+        const recovered = await page.evaluate(() => ({
+          label: document.querySelector("#typed .label")?.textContent,
+          note: document.querySelector("#typed .note")?.textContent,
+          shouted: document.querySelector("#typed .shouted")?.textContent,
+        }));
+        assert.deepEqual(recovered, { label: "third", note: "third note", shouted: "third!" });
       } finally {
         await browser.close();
       }
@@ -1744,7 +3699,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-slug" status="early" summary="Slug editor.">` +
-            `<defs><state name="slug" :value="''"></state></defs>` +
+            `<defs><state type="string" name="slug" value=""></state></defs>` +
             `<fieldset><input name="slug" required pattern="[a-z-]+" bind:value="slug">` +
             `<output $value="slug"></output></fieldset></template>` +
             `<form id="post" action="/posts" method="post"><x-slug></x-slug>` +
@@ -1904,11 +3859,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         // A root `$match` chooses the native root, and each arm declares the same slots.
         const panelBody = `<header><slot name="title"><h2 class="title-fallback">Untitled</h2></slot></header>` +
           `<output class="label" $value="label"></output><main><slot><p class="body-fallback">Empty</p></slot></main>` +
-          `<ul><li $each="row of rows" $key="row.id"><slot :name="format('row-%s', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
+          `<ul><li $each="row of rows" $key="row.id"><slot from:name="concat('row-', row.id)"><span class="row-fallback" $value="row.id"></span></slot></li></ul>`;
         await page.setContent(
           `<template component="x-panel" status="early" summary="Panel.">` +
-            `<defs><state name="rows" :value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
-            `<prop name="as" type="section | article" default="section">Root.</prop></defs>` +
+            `<defs><state type="list(unknown)" name="rows" value="[{ id: 'a' }, { id: 'b' }]"></state><prop name="label" type="string" default="Panel">Label.</prop>` +
+            `<prop name="as" type="keyword" values="section, article" default="section">Root.</prop></defs>` +
             `<template $match><article $when="as = 'article'">${panelBody}</article><section $else>${panelBody}</section></template>` +
           `</template>` +
           `<x-panel id="filled" as="article" label="Initial"><h1 id="title-node" slot="title">Title</h1><p id="body-node">Body</p><strong id="row-node" slot="row-a">A</strong></x-panel>` +
@@ -1988,6 +3943,47 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} keeps a real-element root \`$match\` wrapper while switching its child`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`<template component="x-root-choice" status="early" summary="Root choice."><defs>
+          <state name="kind" value="a"></state>
+          <handler name="toggle"><set name="kind" expr:value="kind = 'a' ? 'b' : 'a'"></set></handler></defs>
+          <section $match="kind as choice" class="choice" from:data-kind="kind" on:click="toggle">
+            <p $when="choice = 'a'">First</p><p $else>Second</p>
+          </section></template><main><x-root-choice id="case"></x-root-choice></main>`);
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          window.HtmlRuntime.lowerDocument();
+          const root = document.querySelector('#case');
+          const before = [root.localName, root.getAttribute('data-kind'), root.querySelector('p')?.textContent];
+          const server = document.createElement('main');
+          server.setHTMLUnsafe(window.HtmlRuntime.serializeRenderedForm(root.parentElement));
+          document.body.append(server);
+          const adoptedRoot = server.querySelector('#case');
+          const adoptedChild = adoptedRoot.querySelector('p');
+          window.HtmlRuntime.lowerDocument();
+          const hydration = { rootKept: server.querySelector('#case') === adoptedRoot,
+            childKept: adoptedRoot.querySelector('p') === adoptedChild,
+            child: adoptedRoot.querySelector('p')?.textContent };
+          root.click();
+          adoptedRoot.click();
+          await new Promise((resolve) => setTimeout(resolve));
+          const after = [root.localName, root.getAttribute('data-kind'), root.querySelector('p')?.textContent];
+          return { before, after, kept: document.querySelector('#case') === root,
+            host: window.HtmlRuntime.getComponentHost(root)?.root === root, hydration,
+            hydratedAfter: adoptedRoot.querySelector('p')?.textContent };
+        })()`);
+        assert.deepEqual(result, {
+          before: ["section", "a", "First"], after: ["section", "b", "Second"], kept: true, host: true,
+          hydration: { rootKept: true, childKept: true, child: "First" }, hydratedAfter: "Second",
+        });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} replaces a root \`$match\` arm's element when its props choose another`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
@@ -1997,9 +3993,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const body = `<slot></slot><output $value="count"></output>`;
         await page.setContent(
           `<template component="x-action" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="button | a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
-            `<state name="count" :value="0"></state><handler name="bump"><set name="count" :value="count + 1"></set></handler></defs>` +
-            `<template $match><a $when="as = 'a'" class="action" :href="href" on:click="bump" $ref="control">${body}</a>` +
+            `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop><prop name="href" type="string">Link.</prop>` +
+            `<state type="number" name="count" value="0"></state><handler name="bump"><set name="count" expr:value="count + 1"></set></handler></defs>` +
+            `<template $match><a $when="as = 'a'" class="action" from:href="href" on:click="bump" $ref="control">${body}</a>` +
             `<button $else class="action" type="button" .title="'Save'" style="cursor: pointer; margin: 1px" style:--tone="as" on:click="bump" $ref="control">${body}</button></template>` +
           `</template>` +
           `<x-action id="action" class="consumer" style="color: rgb(255, 0, 0)" href="#next"><b id="label">Go</b></x-action>`,
@@ -2027,6 +4023,16 @@ describe.skipIf(!enabled)("browser runtime", () => {
             host: runtime.getComponentHost(element)?.root === element,
           });
           const button = document.querySelector('#action');
+          const stopObservation = runtime.observeDocument();
+          const host = runtime.getComponentHost(button);
+          let nativeClicks = 0;
+          const stopListening = host.effect(() => {
+            const root = host.root;
+            const onClick = () => { nativeClicks += 1; };
+            root.addEventListener('click', onClick);
+            return () => root.removeEventListener('click', onClick);
+          });
+          await settle();
           button.click();
           await settle();
           const before = describe(button);
@@ -2038,7 +4044,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const linked = { ...describe(link), replaced: !button.isConnected, dataAs: link.getAttribute('data-as') };
           runtime.updateComponentProps(link, { as: undefined });
           await settle();
-          return { before, linked, back: describe(document.querySelector('#action')) };
+          const back = document.querySelector('#action');
+          back.click();
+          await settle();
+          const final = describe(back);
+          stopListening();
+          stopObservation();
+          return { before, linked, back: final, nativeClicks };
         })()`);
 
         const common = { id: "action", className: "action consumer", component: "x-action", dataHref: "#next", label: true, host: true };
@@ -2046,7 +4058,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
           before: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "1", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
           // State, the handler, slot content, invocation attributes, and the instance all move to the new root.
           linked: { ...common, tag: "a", href: "#next", type: null, title: null, count: "2", replaced: true, dataAs: "a", style: ["rgb(255, 0, 0)", "", "", ""] },
-          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "2", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          back: { ...common, tag: "button", href: null, type: "button", title: "Save", count: "3", style: ["rgb(255, 0, 0)", "pointer", "1px", "button"] },
+          nativeClicks: 3,
         });
         assert.deepEqual(pageErrors, []);
       } finally {
@@ -2061,7 +4074,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
         await page.setContent(
           `<template component="x-disclosure" status="early" summary="Disclosure.">` +
-            `<defs><state name="open" :value="false"></state><handler name="toggle"><set name="open" :value="not open"></set></handler></defs>` +
+            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>` +
             `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<x-disclosure id="disclosure"><p id="body">Body</p></x-disclosure>`,
@@ -2100,13 +4113,13 @@ describe.skipIf(!enabled)("browser runtime", () => {
         page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.setContent(
           `<template component="x-choice" status="early" summary="Button or link.">` +
-            `<defs><prop name="as" type="button | a" default="button">Root.</prop></defs>` +
+            `<defs><prop name="as" type="keyword" values="button, a" default="button">Root.</prop></defs>` +
             `<template $match><a $when="as = 'a'" href="#next"><slot></slot></a><button $else type="button"><slot></slot></button></template>` +
           `</template>` +
           `<template component="x-host" status="early" summary="Parent.">` +
-            `<defs><state name="linked" :value="false"></state><state name="clicks" :value="0"></state>` +
-            `<handler name="flip"><set name="clicks" :value="clicks + 1"></set><set name="linked" :value="not linked"></set></handler></defs>` +
-            `<section><x-choice id="choice" type="submit" :as="{ true: 'a', false: 'button' }[format('%s', linked)]" on:click="flip">Go</x-choice>` +
+            `<defs><state type="boolean" name="linked" value="false"></state><state type="number" name="clicks" value="0"></state>` +
+            `<handler name="flip"><set name="clicks" expr:value="clicks + 1"></set><set name="linked" expr:value="not linked"></set></handler></defs>` +
+            `<section><x-choice id="choice" type="submit" from:as="{ true: 'a', false: 'button' }[concat(linked)]" on:click="flip">Go</x-choice>` +
             `<output $value="clicks"></output></section>` +
           `</template>` +
           `<x-host></x-host>`,
@@ -2150,10 +4163,9 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const arm = `<i $if="show" $value="n"></i>`;
         await page.setContent(
           `<template component="x-owned" status="early" summary="Ownership.">` +
-            `<defs><state name="linked" :value="false"></state><state name="show" :value="true"></state>` +
-            `<state name="n" :value="0"></state><state name="hits" :value="0"></state>` +
-            `<handler name="hit"><set name="hits" :value="hits + 1"></set></handler></defs>` +
-            `<template $match><a $when="linked" href="#x" on:connect="hit">${arm}</a><div $else on:connect="hit">${arm}</div></template>` +
+            `<defs><state type="boolean" name="linked" value="false"></state><state type="boolean" name="show" value="true"></state>` +
+            `<state type="number" name="n" value="0"></state></defs>` +
+            `<template $match><a $when="linked" href="#x">${arm}</a><div $else>${arm}</div></template>` +
           `</template>` +
           `<main><x-owned id="owned"></x-owned></main>`,
         );
@@ -2177,16 +4189,10 @@ describe.skipIf(!enabled)("browser runtime", () => {
           const values = [old.textContent, root().querySelector('i').textContent];
           state.linked = false;
           await settle();
-          const connected = state.hits;
-          const current = root();
-          current.remove();
-          await settle();
-          document.querySelector('main').append(current);
-          await settle();
-          return { values, connected, reconnected: state.hits };
+          return { values, root: root().localName };
         })()`);
-        // The detached <i> stops updating, and only the current arm's on:connect runs on reconnect.
-        assert.deepEqual(result, { values: ["0", "42"], connected: 1, reconnected: 2 });
+        // The detached <i> stops updating while the newly selected arm takes ownership.
+        assert.deepEqual(result, { values: ["0", "42"], root: "div" });
       } finally {
         await browser.close();
       }
@@ -2201,11 +4207,11 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const toggle = (label: string) => `<button type="button" on:click="toggle">${label}</button><slot></slot>`;
         await page.setContent(
           `<template component="x-fold" status="early" summary="Polymorphic.">` +
-            `<defs><state name="open" :value="false"></state><handler name="toggle"><set name="open" :value="not open"></set></handler></defs>` +
+            `<defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>` +
             `<template $match><section $when="open">${toggle("Close")}</section><div $else>${toggle("Open")}</div></template>` +
           `</template>` +
           `<template component="x-card" status="early" summary="Delegates.">` +
-            `<defs><prop name="tone" type="warm | cool" default="warm">Tone.</prop></defs>` +
+            `<defs><prop name="tone" type="keyword" values="warm, cool" default="warm">Tone.</prop></defs>` +
             `<x-fold><output $value="tone"></output></x-fold>` +
           `</template>` +
           `<x-card id="card" tone="warm"></x-card>`,
@@ -2234,6 +4240,84 @@ describe.skipIf(!enabled)("browser runtime", () => {
           tone: ["cool", "cool"],
           host: true,
         });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} applies a delegate's invocation bindings before its parent's on their shared root`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-in" status="early" summary="Native root."><button type="button"><slot></slot></button></template>` +
+          `<template component="x-mid" status="early" summary="Delegates its root.">` +
+            `<defs><state name="pressed" type="boolean" value="false"></state><handler name="press"><set name="pressed" expr:value="true"></set></handler></defs>` +
+            `<x-in from:title="'inner'" on:click.prevent="press"><slot></slot></x-in>` +
+          `</template>` +
+          `<template component="x-out" status="early" summary="Binds the delegating invocation.">` +
+            `<defs><state name="prevented" type="boolean" value="false"></state><handler name="read"><set name="prevented" expr:value="$$event.defaultPrevented"></set></handler></defs>` +
+            `<section><x-mid from:title="'outer'" on:click="read">Go</x-mid><output $value="prevented"></output></section>` +
+          `</template>` +
+          `<x-out id="out"></x-out>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          window.HtmlRuntime.lowerDocument();
+          await settle();
+          const button = document.querySelector('#out button');
+          const title = button.title;
+          button.click();
+          await settle();
+          return { title, prevented: document.querySelector('#out output').textContent };
+        })()`);
+        // The outer invocation's value wins, and the inner listener runs before the outer one.
+        assert.deepEqual(result, { title: "outer", prevented: "true" });
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} attaches a parent's bindings to a component whose definition arrives after the parent renders`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        await page.setContent(
+          `<template component="x-p" status="early" summary="Renders a later component.">` +
+            `<defs><state name="n" type="number" value="1"></state><handler name="inc"><set name="n" expr:value="n + 1"></set></handler></defs>` +
+            `<main><x-k $ref="k" from:title="n" on:click="inc"></x-k><output $value="n"></output></main>` +
+          `</template>` +
+          `<x-p id="p"></x-p>`,
+        );
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(`(async () => {
+          const settle = () => new Promise((resolve) => setTimeout(resolve));
+          const stop = window.HtmlRuntime.observeDocument(document);
+          await settle();
+          const pending = document.querySelector('#p x-k') !== null;
+          const definition = document.createElement('template');
+          definition.setAttribute('component', 'x-k');
+          definition.setAttribute('status', 'early');
+          definition.setAttribute('summary', 'Defined later.');
+          definition.innerHTML = '<button type="button">K</button>';
+          document.body.append(definition);
+          await settle();
+          const button = document.querySelector('#p button');
+          button.click();
+          await settle();
+          const host = window.HtmlRuntime.getComponentHost(document.querySelector('#p'));
+          const outcome = { pending, output: document.querySelector('#p output').textContent, title: button.title, ref: host.refs.k === button };
+          stop();
+          return outcome;
+        })()`);
+        assert.deepEqual(result, { pending: true, output: "2", title: "2", ref: true });
         assert.deepEqual(pageErrors, []);
       } finally {
         await browser.close();
@@ -2295,7 +4379,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         await page.setContent(
           `<template component="x-camel" status="early" summary="Camel-case props.">` +
             `<defs><prop name="defaultValue" type="string" default="fallback">Default value.</prop></defs>` +
-            `<output :data-default="defaultValue"></output></template>` +
+            `<output from:data-default="defaultValue"></output></template>` +
           `<x-camel id="camel" default-value="authored"></x-camel>`,
         );
         await page.addScriptTag({ path: bundlePath });
@@ -2352,8 +4436,8 @@ describe.skipIf(!enabled)("browser runtime", () => {
         const page = await browser.newPage();
         await page.setContent(
           `<template component="x-openable" status="early" summary="Openable.">` +
-            `<defs><prop name="open" type="boolean?">Open state.</prop><event name="open" type="boolean"></event></defs>` +
-            `<section :data-open="open"></section></template><x-openable id="openable" open></x-openable>`,
+            `<defs><prop name="open" type="boolean">Open state.</prop><event name="open" type="boolean"></event></defs>` +
+            `<section from:data-open="open"></section></template><x-openable id="openable" open></x-openable>`,
         );
         await page.addScriptTag({ path: bundlePath });
         const result = await page.evaluate(() => {

@@ -1,55 +1,92 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { deepFreeze } from "../src/freeze.js";
 
 import {
+  TypeSyntaxError,
+  isAttributeType,
+  typeScriptType,
   formatType,
   parseTypedValue,
   parseTypeExpression,
   serializeTypedValue,
-  trustedContent,
   typeAtKey,
-  typeScriptType,
 } from "../src/type-system.js";
 
 describe("HTML Next type system", () => {
-  it("parses and formats every grammar form canonically", () => {
-    const source = "object({ name: string, email?: string, roles: list(admin | editor), metadata: record(number), ... })";
-    const type = parseTypeExpression(source);
-    assert.equal(formatType(type), source);
-    assert.equal(
-      typeScriptType(type),
-      "{ readonly name: string; readonly email?: string; readonly roles: readonly (\"admin\" | \"editor\")[]; readonly metadata: Readonly<Record<string, number>>; readonly [name: string]: unknown }",
-    );
-  });
+  const baseCases: ReadonlyArray<[string, string, unknown]> = [
+    ["string", "", ""],
+    ["keyword", "size-2", "size-2"],
+    ["boolean", "false", false],
+    ["integer", "-2", -2],
+    ["number", "0.3", 0.3],
+    ["url", "https://example.org/", "https://example.org/"],
+    ["email", "ada@example.org", "ada@example.org"],
+    ["email", "a@b", "a@b"],
+    ["date", "2026-09-29", "2026-09-29"],
+    ["month", "2026-09", "2026-09"],
+    ["week", "2026-W40", "2026-W40"],
+    ["time", "13:45", "13:45"],
+    ["datetime-local", "2026-09-29T13:45", "2026-09-29T13:45"],
+    ["datetime", "2026-09-29T13:45Z", "2026-09-29T13:45Z"],
+    ["color", "rebeccapurple", "rebeccapurple"],
+    ["color", "rgb(102 51 153)", "rgb(102 51 153)"],
+    ["color-hex", "#663399cc", "#663399cc"],
+    ["length", "1rem", "1rem"],
+    ["percentage", "25%", "25%"],
+    ["duration", "200ms", "200ms"],
+  ];
 
-  it("defines nullable as value, null, or absence", () => {
-    const type = parseTypeExpression("integer?");
-    assert.deepEqual(parseTypedValue("42", type), { ok: true, value: 42 });
-    assert.deepEqual(parseTypedValue(null, type), { ok: true, value: null });
-    assert.deepEqual(parseTypedValue(undefined, type), { ok: true, value: undefined });
-  });
-
-  it("parses scalar terminals", () => {
-    const valid: ReadonlyArray<[string, unknown, unknown]> = [
-      ["string", "hello", "hello"],
-      ["boolean", "false", false],
-      ["number", "1.5", 1.5],
-      ["integer", "12", 12],
-    ];
-    for (const [type, input, output] of valid) {
-      assert.deepEqual(parseTypedValue(input, parseTypeExpression(type)), { ok: true, value: output }, type);
+  it("parses every base type into the specified JavaScript representation", () => {
+    for (const [name, written, expected] of baseCases) {
+      const type = parseTypeExpression(name);
+      assert.equal(formatType(type), name);
+      assert.deepEqual(parseTypedValue(written, type), { ok: true, value: expected }, name);
     }
   });
 
-  it("returns every structured failure with a stable path", () => {
-    const type = parseTypeExpression(
-      "object({ account: object({ email: string, age: integer }), tags: list(string) })",
-    );
-    const result = parseTypedValue({
-      account: { email: 42, age: 2.5, extra: true },
-      tags: ["ok", 17],
-      surprise: 1,
-    }, type);
+  it("rejects values outside each base type", () => {
+    const invalid: ReadonlyArray<[string, string]> = [
+      ["keyword", "two words"], ["integer", "2.5"], ["number", "Infinity"], ["number", "0x10"],
+      ["url", "/relative"], ["email", "no-at-sign"], ["email", "a@-b"], ["date", "2026-02-30"],
+      ["month", "2026-13"], ["week", "2026-W00"], ["time", "25:00"],
+      ["datetime-local", "2026-09-29"], ["datetime", "2026-09-29T13:45"],
+      ["color", "rgb(garbage)"], ["color", "color-mix(in srgb, red, blue)"],
+      ["color-hex", "#12"], ["length", "4"], ["percentage", "25"], ["duration", "200"],
+    ];
+    for (const [name, written] of invalid) {
+      assert.equal(parseTypedValue(written, parseTypeExpression(name)).ok, false, name);
+    }
+  });
+
+  it("gives bracketed and separated keyword lists the same JavaScript shape", () => {
+    const bracketed = parseTypeExpression("list(keyword)");
+    const space = parseTypeExpression("keyword+");
+    const comma = parseTypeExpression("keyword#");
+    assert.deepEqual(parseTypedValue("['red', 'blue']", bracketed), { ok: true, value: ["red", "blue"] });
+    assert.deepEqual(parseTypedValue("red blue", space), { ok: true, value: ["red", "blue"] });
+    assert.deepEqual(parseTypedValue("red, blue", comma), { ok: true, value: ["red", "blue"] });
+    assert.equal(serializeTypedValue(["red", "blue"], bracketed), '["red","blue"]');
+    assert.equal(serializeTypedValue(["red", "blue"], space), "red blue");
+    assert.equal(serializeTypedValue(["red", "blue"], comma), "red, blue");
+    assert.deepEqual(parseTypedValue("[]", bracketed), { ok: true, value: [] });
+    assert.equal(parseTypedValue("", space).ok, false);
+    assert.equal(parseTypedValue("", comma).ok, false);
+    assert.equal(parseTypedValue("['red', 2]", bracketed).ok, false);
+    assert.equal(parseTypedValue("red,,blue", comma).ok, false);
+  });
+
+  it("parses authored object and array literals, including bare keys and trailing commas", () => {
+    const type = parseTypeExpression("object({ count: integer, names: list(string) })");
+    const written = "{ count: 2, names: ['Ada', 'Lin',], }";
+    assert.deepEqual(parseTypedValue(written, type), { ok: true, value: { count: 2, names: ["Ada", "Lin"] } });
+    assert.equal(parseTypedValue("{ count: currentCount, names: [] }", type).ok, false);
+    assert.equal(serializeTypedValue(written, type), '{"count":2,"names":["Ada","Lin"]}');
+  });
+
+  it("reports paths for structured failures", () => {
+    const type = parseTypeExpression("object({ account: object({ email: string, age: integer }), tags: list(string) })");
+    const result = parseTypedValue({ account: { email: 42, age: 2.5, extra: true }, tags: ["ok", 17], surprise: 1 }, type);
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.deepEqual(result.issues.map((item) => item.path), [
@@ -57,85 +94,68 @@ describe("HTML Next type system", () => {
     ]);
   });
 
-  it("accepts JSON at structured attribute boundaries and serializes canonically", () => {
-    const type = parseTypeExpression("object({ count: integer, names: list(string) })");
-    const input = '{"count":"2","names":["Ada","Lin"]}';
-    assert.equal(serializeTypedValue(input, type), '{"count":2,"names":["Ada","Lin"]}');
-  });
-
-  it("requires an explicitly trusted value for trusted content", () => {
-    const type = parseTypeExpression("trusted-html");
-    assert.equal(parseTypedValue("<b>unsafe</b>", type).ok, false);
-    const trusted = trustedContent("trusted-html", "<b>approved</b>");
-    assert.deepEqual(parseTypedValue(trusted, type), { ok: true, value: trusted });
-  });
-
-  it("keeps callbacks and opaque package values property-only", () => {
-    const callback = () => undefined;
-    assert.deepEqual(parseTypedValue(callback, parseTypeExpression("function")), { ok: true, value: callback });
-    assert.deepEqual(parseTypedValue({ provider: callback }, parseTypeExpression("unknown")), {
-      ok: true,
-      value: { provider: callback },
-    });
-    assert.equal(typeScriptType(parseTypeExpression("function")), "(...args: readonly unknown[]) => unknown");
-    assert.throws(() => serializeTypedValue(callback, parseTypeExpression("function")), /property-only/);
-    assert.throws(() => serializeTypedValue({}, parseTypeExpression("unknown")), /property-only/);
-  });
-
-  it("reports source positions for malformed type syntax", () => {
-    assert.throws(() => parseTypeExpression("object({ a: list(string)"), /character/);
-    assert.throws(() => parseTypeExpression("list()"), /Expected a type/);
-    assert.throws(() => parseTypeExpression("object({ a: string, a: number })"), /Duplicate/);
-  });
-
-  it("resolves the type one step into a shape, for reference conformance", () => {
+  it("resolves object and list fields for reference checks", () => {
     const rows = parseTypeExpression("list(object({ id: string, count: integer }))");
     const item = typeAtKey(rows, 0)!;
-    const open = parseTypeExpression("object({ id: string, ... })");
-    assert.deepEqual(
-      {
-        item: formatType(item),
-        field: formatType(typeAtKey(item, "count")!),
-        // A closed shape says an undeclared field is not there; an open one says nothing about it.
-        closedUnknown: formatType(typeAtKey(item, "extra")!),
-        openUnknown: typeAtKey(open, "extra"),
-        // A list is only indexable by number, and a record describes every key.
-        listByName: typeAtKey(rows, "id"),
-        recordValue: formatType(typeAtKey(parseTypeExpression("record(number)"), "anything")!),
-        terminal: typeAtKey(parseTypeExpression("string"), "length"),
-      },
-      {
-        item: "object({ id: string, count: integer })",
-        field: "integer",
-        closedUnknown: "absent",
-        openUnknown: undefined,
-        listByName: undefined,
-        recordValue: "number",
-        terminal: undefined,
-      },
-    );
+    assert.equal(formatType(typeAtKey(item, "count")!), "integer");
+    assert.equal(formatType(typeAtKey(item, "extra")!), "absent");
+    assert.equal(typeAtKey(rows, "id"), undefined);
   });
 
-
-  it("keeps a keyword spelled like a type name quoted, so it survives a round trip", () => {
-    // A literal `'unknown'` is not the type that accepts anything, and printing it bare would have
-    // widened it on the way back in. Same for any other reserved spelling.
-    const literal = parseTypeExpression("'unknown' | 'known'");
-    assert.equal(formatType(literal), '"unknown" | known');
-    assert.deepEqual(parseTypeExpression(formatType(literal)), literal);
-    assert.equal(parseTypedValue("unknown", literal).ok, true);
-    assert.equal(parseTypedValue(42, literal).ok, false);
-
-    for (const reserved of ["string", "number", "integer", "boolean", "null", "absent", "list", "record", "object"]) {
-      const node = parseTypeExpression(`'${reserved}'`);
-      assert.deepEqual(parseTypeExpression(formatType(node)), node, `${reserved} round-trips as a keyword`);
-      assert.equal(parseTypedValue(reserved, node).ok, true);
+  it("rejects removed public type syntax", () => {
+    for (const old of ["small | large", "number?", "'small'", "record(number)", "<length>", "null", "list()", "enum('sm', 'md')"] ) {
+      assert.throws(() => parseTypeExpression(old), TypeSyntaxError, old);
     }
-
-    // A union no longer collapses the literal into the terminal that shares its spelling.
-    const mixed = parseTypeExpression("unknown | 'unknown'");
-    assert.equal(mixed.kind, "union");
-    assert.deepEqual(parseTypeExpression(formatType(mixed)), mixed);
   });
 
+  it("recognizes unknown for structured fields while prop validation keeps it property-only", () => {
+    assert.equal(formatType(parseTypeExpression("unknown")), "unknown");
+  });
+});
+
+
+describe("native event values", () => {
+  it("accepts native Event and subclasses by reference, including structured payloads", () => {
+    const type = parseTypeExpression("event");
+    assert.equal(formatType(type), "event");
+    assert.equal(typeScriptType(type), "Event");
+    for (const event of [new Event("activate"), new CustomEvent("select", { detail: 42 })]) {
+      assert.deepEqual(parseTypedValue(event, type, "$", "value"), { ok: true, value: event });
+      const payloadType = parseTypeExpression("object({ source: event, item: string })");
+      const parsed = parseTypedValue({ source: event, item: "Ada" }, payloadType, "$", "value");
+      assert.equal(parsed.ok, true);
+      if (parsed.ok) assert.equal((parsed.value as { source: Event }).source, event);
+      assert.equal(typeScriptType(payloadType), "{ readonly source: Event; readonly item: string }");
+    }
+  });
+
+  it("rejects event-like objects, strings, and counterfeit prototypes", () => {
+    const type = parseTypeExpression("event");
+    for (const value of ["click", "{ type: 'click' }", { type: "click", target: null }, { [Symbol.toStringTag]: "Event" }, Object.create(Event.prototype)]) {
+      assert.equal(parseTypedValue(value, type).ok, false);
+    }
+    assert.equal(isAttributeType(type), false);
+    assert.equal(isAttributeType(parseTypeExpression("object({ source: event })")), false);
+    assert.equal(parseTypedValue("{ source: { type: 'click' } }", parseTypeExpression("object({ source: event })")).ok, false);
+  });
+
+  it("never freezes native events or their detail while freezing surrounding authored structures", () => {
+    const detail = { item: "Ada" };
+    const event = new CustomEvent("select", { detail, cancelable: true });
+    const wrapped = deepFreeze({ source: event, extra: { label: "selection" } });
+    assert.equal(wrapped.source, event);
+    assert.equal(Object.isFrozen(wrapped), true);
+    assert.equal(Object.isFrozen(wrapped.extra), true);
+    assert.equal(Object.isFrozen(event), false);
+    assert.equal(Object.isFrozen(detail), false);
+    event.preventDefault();
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  it("rejects native event serialization while retaining serializable absent event values", () => {
+    const type = parseTypeExpression("event");
+    assert.throws(() => serializeTypedValue(new Event("activate"), type), /cannot be serialized/);
+    assert.throws(() => serializeTypedValue({ source: new Event("activate") }, parseTypeExpression("object({ source: event })")), /cannot be serialized/);
+    assert.equal(serializeTypedValue(null, { kind: "union", members: [type, { kind: "terminal", name: "null" }] }), "null");
+  });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.7",
+  "version": "1.0.0-alpha.31",
   "description": "Reference runtime and tools for HTML Next: Declarative HTML Components, validity on any element, and HTML Forms request construction.",
   "license": "MIT",
   "keywords": [
@@ -47,10 +47,6 @@
       "types": "./dist/validation.d.ts",
       "import": "./dist/validation.js"
     },
-    "./browser-loader": {
-      "types": "./dist/browser-loader.d.ts",
-      "import": "./dist/browser-loader.bundle.js"
-    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js"
@@ -58,6 +54,10 @@
     "./node-loader": {
       "types": "./dist/node-loader.d.ts",
       "import": "./dist/node-loader.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     }
   },
   "files": [
@@ -65,7 +65,7 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "next",
+    "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {
@@ -75,15 +75,19 @@
     "audit:native": "tsx scripts/audit-native-features.ts",
     "build": "pnpm clean && tsc -p tsconfig.build.json && tsx scripts/build-browser-loader.ts",
     "build:example": "tsx src/cli.ts build examples/x-button.html --out-dir examples/generated",
-    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/check-example-generated.ts",
+    "check:generated": "tsx scripts/generate-dom-properties.ts --check && tsx scripts/generate-literal-source.ts --check && tsx scripts/check-example-generated.ts",
     "check:release": "tsx scripts/check-release.ts",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
     "measure:hydration": "tsx scripts/measure-hydration.ts",
+    "measure:list-memory": "tsx scripts/measure-list-memory.ts",
     "measure:performance": "tsx scripts/measure-performance.ts",
     "measure:reactivity": "tsx scripts/measure-reactivity-matrix.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
+    "setup:frameworks": "tsx scripts/framework-benchmark.ts setup",
+    "measure:frameworks": "tsx scripts/framework-benchmark.ts measure",
+    "smoke:frameworks": "tsx scripts/framework-benchmark.ts smoke",
     "prepack": "pnpm check:release && pnpm build",
     "release:dry-run": "npm pack --dry-run --json",
     "report:performance": "tsx scripts/measure-performance.ts --html",
@@ -91,13 +95,18 @@
     "test:browser": "vitest run --config ../../vitest.browser.config.ts",
     "test:consumer": "vitest run --config ../../vitest.consumer.config.ts",
     "test:targets": "vitest run --config ../../vitest.targets.config.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "verify:performance": "tsx scripts/check-reactivity-performance.ts",
+    "verify:frameworks": "tsx scripts/framework-benchmark.ts compare",
+    "report:reactivity:suite": "tsx scripts/report-reactive-suite.ts"
   },
   "dependencies": {
     "@dprint/formatter": "^0.5.1",
     "@dprint/typescript": "^0.96.1",
+    "@formatjs/intl-durationformat": "0.11.1",
     "dprint-plugin-malva": "^0.16.0",
-    "dprint-plugin-markup": "^0.27.3",
+    "dprint-plugin-markup": "^0.27.5",
+    "jsdom": "27.4.0",
     "parse5": "catalog:",
     "postcss": "catalog:",
     "typescript-compiler": "npm:@typescript/typescript6@6.0.2"
@@ -110,6 +119,7 @@
     "@reactively/core": "catalog:",
     "@reatom/core": "catalog:",
     "@solidjs/signals": "catalog:",
+    "@types/jsdom": "27.0.0",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

@@ -1,6 +1,6 @@
 /**
  * `data-<tag>-state` exists for the names a definition's own stylesheet tests with
- * `:host-state()`, and for nothing else: a definition that styles no state carries no state
+ * `:host([prop])` or `:host-state()`, and for nothing else: a definition that styles neither carries no state
  * attribute at all, in any target. See nextwebwg.org/html-next/styling.
  */
 import assert from "node:assert/strict";
@@ -16,8 +16,8 @@ function generated(source: string): Map<string, string> {
 }
 
 const declarations = `<defs>
-    <prop name="size" type="sm | md" default="md">Size.</prop>
-    <state name="open" :value="false"></state>
+    <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
+    <state type="boolean" name="open" value="false"></state>
   </defs>
   <section class="panel"><slot></slot></section>`;
 

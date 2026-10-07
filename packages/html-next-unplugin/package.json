@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-unplugin",
-  "version": "1.0.0-alpha.0",
+  "version": "1.0.0-alpha.31",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -30,22 +30,50 @@
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",
-    "unplugin": "catalog:"
+    "@nextwebwg/html-next-converter": "workspace:*",
+    "css-tree": "catalog:",
+    "cssstyle": "catalog:",
+    "parse5": "catalog:",
+    "svelte2tsx": "0.7.61",
+    "typescript": "5.9.3",
+    "unplugin": "catalog:",
+    "vue-tsc": "catalog:"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-vue": "6.0.9",
+    "playwright": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "4.7.6",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "typescript": "catalog:"
+    "vue": "catalog:"
   },
   "publishConfig": {
     "access": "public",
-    "tag": "next",
+    "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nextwebwg/html-next.git",
     "directory": "packages/html-next-unplugin"
+  },
+  "bin": {
+    "html-next-sync": "./dist/cli.js"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   }
 }

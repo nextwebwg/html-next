@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,43 @@ async function assemble() {
 }
 
 describe("component package assembler", () => {
+  it("packages every component from one source and preserves their declared names", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-multi-package-"));
+    temporary.push(root);
+    const source = '<template component="ui-button" status="early" summary="Button."><button>Save</button></template>' +
+      '<template component="ui-dialog" status="early" summary="Dialog."><section>Dialog</section></template>';
+    await writeFile(join(root, "library.html"), source);
+    const outDirectory = join(root, "output");
+    const result = await assembleComponentPackage({ name: "@example/library", version: "1.0.0", outDirectory,
+      components: [{ source: join(root, "library.html") }] });
+    assert.deepEqual(result.components, ["ui-button", "ui-dialog"]);
+    assert.equal(await readFile(join(outDirectory, "components/library.html"), "utf8"), source);
+    const entry = await readFile(join(outDirectory, "vue/index.js"), "utf8");
+    assert.match(entry, /default as UiButton/);
+    assert.match(entry, /default as UiDialog/);
+    assert.match(entry, /default as Button/);
+    assert.match(entry, /default as Dialog/);
+    assert.doesNotMatch(entry, /export default/);
+    assert.match(await readFile(join(outDirectory, "vue/index.d.ts"), "utf8"), /const UiButton/);
+    assert.match(await readFile(join(outDirectory, "vue/index.d.ts"), "utf8"), /const Button/);
+    const manifest = JSON.parse(await readFile(join(outDirectory, "package.json"), "utf8"));
+    assert.equal(manifest.exports["."]["html-next"], "./html-next/index.js");
+    assert.match(await readFile(join(outDirectory, "html-next/index.js"), "utf8"), /export \{ UiButton \} from "\.\.\/components\/library\.html"/);
+  });
+
+  it("can publish only HTML sources and a named source entry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-source-package-"));
+    temporary.push(root);
+    const result = await assembleComponentPackage({ name: "@example/source-library", version: "1.0.0", outDirectory: root,
+      sourceOnly: true, components: [{ source: `${fixture}/ui-button.html` }] });
+    assert.ok(result.files.includes("html-next/index.js"));
+    assert.ok(result.files.includes("components/ui-button.html"));
+    assert.ok(!result.files.some((path) => /^(vue|vanilla|dist|styles)\//.test(path)));
+    const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+    assert.deepEqual(manifest.exports["."], { "html-next": "./html-next/index.js" });
+    assert.ok(!(manifest.peerDependencies ?? {})["@nextwebwg/html-next"]);
+  });
+
   it("emits deterministic generated, registration, inventory, and pass-through edges", async () => {
     const first = await assemble();
     const second = await assemble();
@@ -50,7 +87,7 @@ describe("component package assembler", () => {
     assert.match(await readFile(`${first.outDirectory}/components/ui-overlay.js`, "utf8"), /\.\/overlay-helper\.js/);
     // A source keeps its dependency links, which resolve beside it.
     assert.match(await readFile(`${first.outDirectory}/components/ui-overlay.html`, "utf8"), /<link rel="component" href="\.\/ui-button\.html">/);
-    assert.match(await readFile(`${first.outDirectory}/vue/UiOverlay.vue`, "utf8"), /from '\.\.\/components\/ui-overlay\.js'/);
+    assert.match(await readFile(`${first.outDirectory}/vue/UiOverlay.vue`, "utf8"), /\(\) => import\('\.\.\/components\/ui-overlay\.js'\)/);
     assert.equal(await readFile(`${first.outDirectory}/tokens.css`, "utf8"), ":root { --component-accent: rebeccapurple; }\n");
 
     const entry = await readFile(`${first.outDirectory}/dist/index.js`, "utf8");

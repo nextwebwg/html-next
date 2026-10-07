@@ -17,9 +17,13 @@ interface SizeMeasurement {
 interface GeneratedMeasurement extends SizeMeasurement {
   readonly fullRuntimeModules: number;
   readonly parserModules: number;
+  /** Modules a compiled bundle must never contribute: the interpreter, parsers and type system. */
+  readonly forbiddenModules: readonly string[];
   readonly targetGzip: number;
   readonly targetMet: boolean;
 }
+
+const forbiddenModule = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
 
 const runtimePath = fileURLToPath(new URL("../src/runtime.ts", import.meta.url));
 const generatedRuntimePath = fileURLToPath(new URL("../src/generated-runtime.ts", import.meta.url));
@@ -75,11 +79,11 @@ function moduleBytes(result: BuildResult): Readonly<Record<string, number>> {
   );
 }
 
-async function generatedFixture(name: string, targetGzip: number): Promise<GeneratedMeasurement> {
+async function generatedFixture(name: string, targetGzip: number, directExtend = false): Promise<GeneratedMeasurement> {
   const sourceURL = new URL(`../benchmarks/fixtures/${name}.html`, import.meta.url);
   const source = await readFile(sourceURL, "utf8");
   const definition = parseComponent(source, sourceURL.href);
-  const module = generateComponent(definition)
+  const module = generateComponent(definition, { directExtend })
     .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)?.content;
   if (module === undefined) throw new Error(`The ${name} fixture produced no Vanilla module.`);
   const result = await bundle({
@@ -96,13 +100,15 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
     },
   });
   const measured = size(result);
-  const inputs = Object.keys(result.metafile?.inputs ?? {});
+  // Modules that contribute output; a module esbuild parsed and shook out entirely does not count.
+  const inputs = Object.entries(moduleBytes(result)).filter(([, bytes]) => bytes > 0).map(([path]) => path);
   return {
     ...measured,
     fullRuntimeModules: inputs.filter((path) => path.endsWith("/src/runtime.ts")).length,
     parserModules: inputs.filter((path) =>
       path.endsWith("/src/parser.ts") || path.endsWith("/src/source-parser.ts")
     ).length,
+    forbiddenModules: inputs.filter((path) => forbiddenModule.test(path)),
     targetGzip,
     targetMet: measured.gzip <= targetGzip,
   };
@@ -115,9 +121,12 @@ const computedGenerated = await generatedFixture("computed-counter", 5_000);
 const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
 const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
 const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
+// The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
+// Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 7_754, true);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),
@@ -159,6 +168,7 @@ const nativeBuild = {
     keyed: keyedGenerated,
     data: dataGenerated,
     controller: controllerGenerated,
+    controllerKeyed: controllerKeyedGenerated,
   },
 } as const;
 
@@ -185,7 +195,8 @@ process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 if (
   generatedTargets.some((measurement) =>
-    !measurement.targetMet || measurement.fullRuntimeModules > 0 || measurement.parserModules > 0
+    !measurement.targetMet || measurement.fullRuntimeModules > 0 || measurement.parserModules > 0 ||
+    measurement.forbiddenModules.length > 0
   ) ||
   missingLiveCapabilityModules.length > 0 ||
   liveSubsystemInventory.unclassifiedModules.length > 0 ||

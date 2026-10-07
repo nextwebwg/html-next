@@ -21,33 +21,32 @@
          travel as serialized query parameters; the JSON that comes back renders below. -->
     <data name="catalog" src="/api/catalog" debounce="150ms"
       type="list(object({ id: string, label: string, unit: string }))">
-      <param name="q" :value="catalogQuery"></param>
-      <param name="limit" :value="5"></param>
+      <param name="q" from:value="catalogQuery"></param>
+      <param name="limit" from:value="5"></param>
     </data>
 
     <!-- The controller keeps these in step with the fetched data and the search box. -->
-    <state name="rows" :value="[]"></state>
-    <state name="lowCount" :value="0"></state>
-    <state name="visible" :value="0"></state>
-    <state name="query" :value="''"></state>
-    <state name="catalogQuery" :value="''"></state>
-    <state name="draftLabel" :value="''"></state>
-    <state name="draftQuantity" :value="1"></state>
+    <state type="list(unknown)" name="rows" value="[]"></state>
+    <state type="number" name="lowCount" value="0"></state>
+    <state type="number" name="visible" value="0"></state>
+    <state type="string" name="query" value=""></state>
+    <state type="string" name="catalogQuery" value=""></state>
+    <state type="string" name="draftLabel" value=""></state>
+    <state type="number" name="draftQuantity" value="1"></state>
 
-    <state name="total" :value="0"></state>
+    <state type="number" name="total" value="0"></state>
     <computed name="loading" from="stock.pending"></computed>
     <computed name="failed" from="not stock.pending and not stock.ok"></computed>
 
-    <method name="restockAll" export="restockAll" returns="undefined">Refill every low item.</method>
   </defs>
 
   <!-- The shell is a child here, so this component keeps its own <main> root. It could equally
        delegate its root to pantry-shell and add no wrapper. -->
   <main class="page">
-    <pantry-shell :heading="heading">
+    <pantry-shell from:heading="heading">
       <span slot="summary">
-        <ui-stat label="Items" :value="total"></ui-stat>
-        <ui-stat label="Low" :value="lowCount"></ui-stat>
+        <ui-stat label="Items" from:value="total"></ui-stat>
+        <ui-stat label="Low" from:value="lowCount"></ui-stat>
       </span>
 
       <span slot="toolbar">
@@ -76,7 +75,7 @@
           <p class="notice notice--error" $if="catalog.error">The catalog search failed.</p>
           <ul class="suggestions">
             <pantry-suggestion $each="hit of catalog.value" $key="hit.id"
-              :item-id="hit.id" :label="hit.label" :unit="hit.unit"></pantry-suggestion>
+ from:item-id="hit.id" from:label="hit.label" from:unit="hit.unit"></pantry-suggestion>
           </ul>
         </section>
 
@@ -84,8 +83,8 @@
         <p $if="failed" class="notice notice--error">The pantry list could not be loaded.</p>
         <ul class="items" $if="not loading">
           <pantry-item $each="row of rows" $key="row.id" $where="row.matches" $sort="label"
-            :item-id="row.id" :label="row.label" :quantity="row.quantity" :unit="row.unit"
-            :threshold="row.threshold"></pantry-item>
+ from:item-id="row.id" from:label="row.label" from:quantity="row.quantity" from:unit="row.unit"
+ from:threshold="row.threshold"></pantry-item>
         </ul>
         <p class="notice" $if="not loading and visible = 0">Nothing matches that search.</p>
       </span>

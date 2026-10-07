@@ -5,17 +5,22 @@ import {
   generateComponent,
   HtmlDiagnosticError,
   loadNodeComponents,
+  parseTypedValue,
   type ComponentDefinition,
   type ComponentGraphNode,
   type ElementNode,
   type TemplateNode,
 } from "@nextwebwg/html-next";
 import { createUnplugin } from "unplugin";
+import { frameworkVitePlugin, type FrameworkPluginOptions } from "./framework.js";
+import { componentSources, sourcePackages } from "./source-packages.js";
+export { syncHtmlNext, type FrameworkPluginOptions, type FrameworkSyncResult } from "./framework.js";
 
 export const componentsModule = "virtual:html-next/components";
 export const supportModule = "virtual:html-next/support";
 const resolvedComponentsModule = "\0html-next:components";
 const resolvedSupportModule = "\0html-next:support";
+const resolvedPackagePrefix = "\0html-next:package:";
 const publicComponentPrefix = `${componentsModule}/`;
 const resolvedPublicComponentPrefix = "\0html-next:public-component:";
 const componentPrefix = "html-next:component:";
@@ -23,13 +28,23 @@ const resolvedComponentPrefix = `\0${componentPrefix}`;
 const stylePrefix = "html-next:style:";
 const resolvedStylePrefix = `\0${stylePrefix}`;
 
-export interface HtmlNextPluginOptions {
-  readonly entries: readonly string[];
+export interface HtmlNextNativePluginOptions {
+  /** Local entries; installed HTML source folders are discovered automatically. */
+  readonly entries?: readonly string[];
   readonly root?: string;
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
+  /**
+   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
+   * DOM updates instead of the general runtime. Until the direct path covers every feature, a graph
+   * with any component that still needs the general runtime builds exactly as without this option
+   * (its direct helpers would only add bytes); the manifest names those components.
+   */
+  readonly experimentalDirectExtend?: boolean;
 }
+
+export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
 
 export interface HtmlNextDynamicBoundary {
   readonly tag: string;
@@ -65,10 +80,18 @@ export interface HtmlNextBuildManifest {
     readonly strategy: "external-custom-element";
     readonly usedBy: readonly string[];
   }[];
+  /** Present when `experimentalDirectExtend` was requested. */
+  readonly directExtend?: {
+    /** Whether the graph was compiled on the direct path. */
+    readonly applied: boolean;
+    /** Components that still need the general runtime; any one keeps the whole graph off the direct path. */
+    readonly runtimeComponents: readonly string[];
+  };
 }
 
 interface CompiledGraph {
   readonly entry: string;
+  readonly packages: ReadonlyMap<string, string>;
   readonly components: ReadonlyMap<string, string>;
   readonly publicComponents: ReadonlyMap<string, string>;
   readonly styles: ReadonlyMap<string, string>;
@@ -87,6 +110,10 @@ function diagnostic(code: string, message: string, source?: string): never {
 
 function escapePattern(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function propAttributeName(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 function visitComponentNodes(node: TemplateNode, visit: (node: ElementNode) => void): void {
@@ -128,12 +155,13 @@ function collectInvocationEdges(
       const boundary = dynamicBoundaries.get(tag);
       if (boundary !== undefined) {
         const uses = dynamicUses.get(tag) ?? new Set<string>();
-        uses.add(node.url);
+        uses.add(node.id);
         dynamicUses.set(tag, uses);
         return;
       }
       const target = tags.get(tag);
-      if (target === undefined || !node.dependencies.includes(target)) {
+      // Siblings share their resource scope without materializing every possible sibling edge.
+      if (target === undefined || (!node.dependencies.includes(target) && nodes.get(target)?.url !== node.url)) {
         diagnostic(
           "HN001",
           `Component invocation <${tag}> is not a declared static dependency or dynamic boundary.`,
@@ -142,7 +170,7 @@ function collectInvocationEdges(
       }
       invoked.set(tag, target);
     });
-    edges.set(node.url, invoked);
+    edges.set(node.id, invoked);
   }
 
   const visiting = new Set<string>();
@@ -161,9 +189,79 @@ function collectInvocationEdges(
 }
 
 /**
+ * The generated factory can carry literal invocation data. Its prop values are parsed at build
+ * time with the same declared contract the runtime uses; the remaining attributes use the
+ * factory's existing root-attribute path (including class/style merging). Nothing here needs a
+ * parent-to-child update channel.
+ */
+interface FactoryInvocationOptions {
+  readonly attributes: readonly [string, string][];
+  readonly props: readonly [string, unknown][];
+  /** The authored attribute spelling, used to remove the parent emitter's duplicate write. */
+  readonly literals: readonly [string, string][];
+  /** The declared slot each static projected child targets; `""` is the default slot. */
+  readonly projectedSlots: readonly string[];
+}
+
+function staticProjectionSupported(node: TemplateNode, root = true): boolean {
+  if (node.kind === "text") return true;
+  if (node.kind === "slot") return false;
+  const staticComponent = node.name.includes("-") && node.children.length === 0 && node.attributes.every((attribute) =>
+    attribute.kind === "literal" && attribute.name !== "data-component"
+  );
+  return (!node.name.includes("-") || staticComponent) && node.flow === undefined && node.ref === undefined &&
+    (node.events?.length ?? 0) === 0 && node.attributes.every((attribute) =>
+      attribute.kind === "literal" && (root || attribute.name !== "slot")
+    ) && node.children.every((child) => staticProjectionSupported(child, false));
+}
+
+function projectedSlotName(node: TemplateNode): string {
+  if (node.kind !== "element") return "";
+  for (const attribute of node.attributes) {
+    if (attribute.kind === "literal" && attribute.name === "slot") return attribute.value;
+  }
+  return "";
+}
+
+function factoryInvocationOptions(
+  invocation: ElementNode,
+  definition: ComponentDefinition,
+): FactoryInvocationOptions | undefined {
+  if (invocation.flow !== undefined || invocation.ref !== undefined || (invocation.events?.length ?? 0) > 0) return undefined;
+  const projectedSlots = invocation.children.map(projectedSlotName);
+  const declaredSlots = new Set((definition.slots ?? []).map((slot) => slot.name ?? ""));
+  if (projectedSlots.length > 0 && (
+    !invocation.children.every((child) => staticProjectionSupported(child)) ||
+    projectedSlots.some((slot) => !declaredSlots.has(slot))
+  )) return undefined;
+  const propAttributes = new Map(Object.keys(definition.contract.props).map((name) => [propAttributeName(name), name]));
+  const attributes: [string, string][] = [];
+  const props: [string, unknown][] = [];
+  const literals: [string, string][] = [];
+  for (const attribute of invocation.attributes) {
+    if (attribute.kind !== "literal" || attribute.name === "data-component") return undefined;
+    literals.push([attribute.name, attribute.value]);
+    const propName = propAttributes.get(attribute.name.toLowerCase());
+    if (propName === undefined) {
+      attributes.push([attribute.name, attribute.value]);
+      continue;
+    }
+    // Factory options reserve these keys for invocation data, not component props.
+    if (propName === "attributes" || propName === "children" || propName === "slots") return undefined;
+    const contract = definition.contract.props[propName]!;
+    const input = contract.type === "boolean" && attribute.value === "" ? true : attribute.value;
+    const parsed = parseTypedValue(input, contract.type);
+    if (!parsed.ok) return undefined;
+    props.push([propName, parsed.value]);
+  }
+  return { attributes, props, literals, projectedSlots };
+}
+
+/**
  * Checks the invocations a factory-compiled parent contains. Such a parent emits plain DOM, so an
- * invocation becomes a bare factory call with nothing to carry inputs or projected content. A
- * parent the general runtime renders has no such limit: it renders the invocation itself.
+ * invocation becomes a factory call carrying static invocation data and projected nodes grouped by
+ * the child's declared slots. A parent the general runtime renders has no such limit: it renders
+ * the invocation itself.
  */
 function assertCompilableInvocations(
   node: ComponentGraphNode,
@@ -173,23 +271,22 @@ function assertCompilableInvocations(
   visitComponentNodes(node.definition.template, (invocation) => {
     const target = invoked.get(invocation.name);
     if (target === undefined) return;
-    if (
-      invocation.attributes.length > 0 || invocation.children.length > 0 ||
-      invocation.flow !== undefined || invocation.ref !== undefined ||
-      (invocation.events?.length ?? 0) > 0
-    ) {
+    const options = factoryInvocationOptions(invocation, nodes.get(target)!.definition);
+    if (options === undefined) {
       diagnostic(
         "HN009",
-        `Compiled invocation <${invocation.name}> cannot yet carry attributes, projected children, ` +
-          "events, refs, or structural flow. A component the general runtime renders can.",
+        `Compiled invocation <${invocation.name}> cannot yet carry dynamic or unsupported attributes, projected children, ` +
+        "events, refs, or structural flow. A component the general runtime renders can.",
         node.url,
       );
     }
-    if (Object.values(nodes.get(target)!.definition.contract.props).some((prop) => prop.required)) {
+    if (Object.entries(nodes.get(target)!.definition.contract.props).some(([name, prop]) =>
+      prop.required && !options.props.some(([provided]) => provided === name)
+    )) {
       diagnostic(
         "HN014",
-        `Compiled invocation <${invocation.name}> requires inputs, but a compiled invocation ` +
-          "cannot pass them yet. A component the general runtime renders can.",
+        `Compiled invocation <${invocation.name}> requires an input that the compiled invocation did not provide. ` +
+          "A component the general runtime renders can.",
         node.url,
       );
     }
@@ -201,11 +298,10 @@ function supportSource(
   runtimeRendered: ReadonlyMap<string, ComponentDefinition>,
 ): string {
   const lines: string[] = [];
-  if (imports.has("@nextwebwg/html-next/generated-runtime")) {
-    lines.push('export { manageGeneratedProps } from "@nextwebwg/html-next/generated-runtime";');
-  }
-  if (imports.has("@nextwebwg/html-next/runtime")) {
-    lines.push('export { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";');
+  // Generated modules import whichever helpers their features use; re-exporting the whole entry
+  // keeps every one of them resolvable, and the bundler still drops what nothing imports.
+  for (const source of ["@nextwebwg/html-next/generated-runtime", "@nextwebwg/html-next/runtime"]) {
+    if (imports.has(source)) lines.push(`export * from ${JSON.stringify(source)};`);
   }
   if (runtimeRendered.size > 0) {
     // Components another component's template invokes, where the general runtime renders that
@@ -284,19 +380,59 @@ function routeComponentInvocations(
     const factory = `create${target.definition.contract.name}`;
     imports.push(`import { ${factory} } from ${JSON.stringify(componentId(url))};`);
     const creation = `document.createElement(${JSON.stringify(tag)})`;
-    const variables: string[] = [];
-    routed = routed.split("\n").map((line) => {
+    const options: Array<ReturnType<typeof factoryInvocationOptions>> = [];
+    visitComponentNodes(node.definition.template, (invocation) => {
+      if (invocation.name !== tag) return;
+      options.push(factoryInvocationOptions(invocation, target.definition));
+    });
+    let invocation = 0;
+    const removeAttributeLines = new Set<string>();
+    const variables = new Map<string, FactoryInvocationOptions>();
+    routed = routed.split("\n").flatMap((line) => {
       const match = line.match(
         new RegExp(`^(\\s*)const ([A-Za-z_$][A-Za-z0-9_$]*) = ${escapePattern(creation)};$`),
       );
-      if (match === null) return line;
-      variables.push(match[2]!);
-      return `${match[1]}const ${match[2]} = ${factory}();`;
+      if (match === null) return removeAttributeLines.has(line) ? [] : [line];
+      const literalOptions = options[invocation++]!;
+      if (literalOptions === undefined) return [line];
+      variables.set(match[2]!, literalOptions);
+      for (const [name, value] of literalOptions.literals) {
+        removeAttributeLines.add(`${match[1]}${match[2]}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(value)});`);
+      }
+      const properties = [
+        ...(literalOptions.attributes.length === 0 ? [] : [`attributes: ${JSON.stringify(Object.fromEntries(literalOptions.attributes))}`]),
+        ...literalOptions.props.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`),
+      ];
+      const factoryOptions = properties.length === 0 ? "" : `({ ${properties.join(", ")} })`;
+      return literalOptions.projectedSlots.length > 0 ? [line] : [`${match[1]}const ${match[2]} = ${factory}(${factoryOptions});`];
     }).join("\n");
-    if (variables.length === 0) {
+    if (variables.size === 0) {
       diagnostic("HN013", `The native generator did not expose compiled invocation <${tag}>.`, node.url);
     }
-    for (const variable of variables) {
+    for (const [variable, invocationOptions] of variables) {
+      if (invocationOptions.projectedSlots.length > 0) {
+        const content = `${variable}Children`;
+        const slotEntries = new Map<string, string[]>();
+        for (const [index, slot] of invocationOptions.projectedSlots.entries()) {
+          const nodes = slotEntries.get(slot) ?? [];
+          nodes.push(`${content}[${index}]`);
+          slotEntries.set(slot, nodes);
+        }
+        const properties = [
+          ...(invocationOptions.attributes.length === 0 ? [] : [`attributes: ${JSON.stringify(Object.fromEntries(invocationOptions.attributes))}`]),
+          ...invocationOptions.props.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`),
+          ...(slotEntries.get("") === undefined ? [] : [`children: [${slotEntries.get("")!.join(", ")}]`]),
+          ...(slotEntries.size === (slotEntries.has("") ? 1 : 0) ? [] : [
+            `slots: { ${[...slotEntries.entries()].filter(([slot]) => slot !== "").map(([slot, nodes]) =>
+              `${JSON.stringify(slot)}: [${nodes.join(", ")}]`).join(", ")} }`,
+          ]),
+        ];
+        const compiled = `${variable}Projected`;
+        routed = routed.replace(
+          new RegExp(`^(\\s*)([A-Za-z_$][A-Za-z0-9_$]*)\\.append\\(${escapePattern(variable)}\\);$`, "m"),
+          `$1const ${content} = Array.from(${variable}.childNodes);\n$1const ${compiled} = ${factory}({ ${properties.join(", ")} });\n$1$2.append(${compiled});`,
+        );
+      }
       // A delegated root carries every owner's token.
       const tag = JSON.stringify(node.definition.contract.tag);
       routed = routed.replace(
@@ -343,17 +479,27 @@ function displayPath(root: string, url: string): string {
   return relative(root, path).split(sep).join("/");
 }
 
-async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGraph> {
-  if (options.entries.length === 0) throw new Error("HTML Next requires at least one component entry.");
+async function compileGraph(options: HtmlNextNativePluginOptions): Promise<CompiledGraph> {
   const root = resolve(options.root ?? process.cwd());
+  const installed = await sourcePackages(root);
+  const packageEntries = new Map<string, string[]>();
+  for (const library of installed) {
+    for (const { specifier, source } of library.exports) {
+      const files = await componentSources(source, library.directory);
+      // Authored JS/TS barrels remain a framework-adapter feature.
+      if (files.length > 0) packageEntries.set(specifier, files);
+    }
+  }
   const delivery = options.mode ?? "application";
   if (delivery !== "application" && delivery !== "library") {
     diagnostic("HN012", `Unknown native build mode \`${String(delivery)}\`.`);
   }
-  const entryURLs = options.entries.map((entry) => pathToFileURL(resolve(root, entry)).href);
-  if (new Set(entryURLs).size !== entryURLs.length) {
+  const localURLs = (options.entries ?? []).map((entry) => pathToFileURL(resolve(root, entry)).href);
+  if (new Set(localURLs).size !== localURLs.length) {
     diagnostic("HN004", "A component entry may be configured only once.");
   }
+  const entryURLs = [...new Set([...localURLs, ...[...packageEntries.values()].flat().map((file) => pathToFileURL(file).href)])];
+  if (entryURLs.length === 0) throw new Error("HTML Next requires at least one component entry or an installed HTML source package.");
   const graph = await loadNodeComponents(entryURLs, { baseURL: pathToFileURL(`${root}${sep}`).href });
   const components = new Map<string, string>();
   const publicComponents = new Map<string, string>();
@@ -369,10 +515,10 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
   for (const node of graph.nodes.values()) {
     const name = node.definition.contract.name;
     const prior = generatedNames.get(name);
-    if (prior !== undefined && prior !== node.url) {
+    if (prior !== undefined && prior !== node.id) {
       diagnostic("HN010", `Generated factory name \`${name}\` collides with ${prior}.`, node.url);
     }
-    generatedNames.set(name, node.url);
+    generatedNames.set(name, node.id);
   }
 
   for (const boundary of options.dynamicBoundaries ?? []) {
@@ -388,23 +534,45 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
     dynamicBoundaries.set(boundary.tag, Object.freeze({ ...boundary }));
   }
   const invocations = collectInvocationEdges(graph.nodes, graph.tags, dynamicBoundaries);
+  const contextProviders = new Set(
+    [...graph.nodes.values()].flatMap((node) =>
+      (node.definition.declarations ?? [])
+        .filter((declaration) => declaration.kind === "context")
+        .map((declaration) => declaration.from),
+    ),
+  );
 
-  for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
+  const sortedNodes = [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url));
+  const generateGraph = (directExtend: boolean) => sortedNodes.map((node) => {
     const definition: ComponentDefinition = node.controller === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
-    const artifacts = generateComponent(definition);
+    const artifacts = generateComponent(definition, {
+      noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+      directExtend,
+    });
     const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
-    const stylesheet = artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
-    if (stylesheet === undefined) throw new Error(`No stylesheet was generated for ${definition.contract.tag}.`);
-    const encodedURL = encodeURIComponent(node.url);
+    return { node, definition, artifacts, artifact };
+  });
+  const requested = options.experimentalDirectExtend === true;
+  let generated = generateGraph(requested);
+  // ponytail: all or nothing per graph. Direct helpers next to the general runtime only add bytes,
+  // so one component the direct path does not cover yet keeps the graph on today's output.
+  const runtimeComponents = requested
+    ? generated.filter(({ artifact }) => artifact.content.includes('"@nextwebwg/html-next/runtime"'))
+      .map(({ definition }) => definition.contract.tag).sort()
+    : [];
+  if (runtimeComponents.length > 0) generated = generateGraph(false);
+
+  for (const { node, definition, artifacts, artifact } of generated) {
+    const encodedURL = encodeURIComponent(node.id);
     const styleId = `${stylePrefix}${encodedURL}.css`;
     let module = artifact.content.replace(
       `../styles/${definition.contract.tag}.css`,
       styleId,
     );
-    const invoked = invocations.edges.get(node.url) ?? new Map<string, string>();
+    const invoked = invocations.edges.get(node.id) ?? new Map<string, string>();
     if (invoked.size > 0 && module.includes("manageComponentLifecycle")) {
       // The general runtime renders this template, so it renders the invocations too.
       module = routeRenderedInvocations(module, invoked, graph.nodes, renderedComponents);
@@ -413,8 +581,8 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
       module = routeComponentInvocations(module, node, invoked, graph.nodes);
     }
     module = routeSupportImports(module, supportImports);
-    components.set(resolvedComponentId(node.url), module);
-    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, stylesheet.content);
+    components.set(resolvedComponentId(node.id), module);
+    styles.set(`${resolvedStylePrefix}${encodedURL}.css`, artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`)!.content);
     const capabilities = componentCapabilities(definition);
     for (const capability of capabilities) allCapabilities.add(capability);
     manifestComponents.push(Object.freeze({
@@ -447,6 +615,14 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
       delivery === "library" ? componentModule(item.tag) : componentId(graph.tags.get(item.tag)!),
     )};`
   ).join("\n") + "\n";
+  const packages = new Map<string, string>();
+  for (const [specifier, files] of packageEntries) {
+    const urls = new Set(files.map((file) => pathToFileURL(file).href));
+    packages.set(specifier, graph.roots.filter((id) => urls.has(graph.nodes.get(id)!.url)).map((id) => {
+      const node = graph.nodes.get(id)!;
+      return `export { create${node.definition.contract.name} } from ${JSON.stringify(componentId(id))};`;
+    }).join("\n") + "\n");
+  }
   const dynamicManifest = [...dynamicBoundaries.values()].sort((left, right) => left.tag.localeCompare(right.tag))
     .map((boundary) => Object.freeze({
       ...boundary,
@@ -461,11 +637,12 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
 
   return Object.freeze({
     entry,
+    packages,
     components,
     publicComponents,
     styles,
     support: supportSource(supportImports, renderedComponents),
-    sourceFiles: Object.freeze([...graph.nodes.keys()].map((url) => fileURLToPath(url))),
+    sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
       delivery,
@@ -480,23 +657,35 @@ async function compileGraph(options: HtmlNextPluginOptions): Promise<CompiledGra
         capabilities: sortedCapabilities,
       }),
       dynamicBoundaries: Object.freeze(dynamicManifest),
+      ...(requested ? {
+        directExtend: Object.freeze({ applied: runtimeComponents.length === 0, runtimeComponents: Object.freeze(runtimeComponents) }),
+      } : {}),
     }),
   });
 }
 
-export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
+export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((options = {}, meta) => {
+  if ("target" in options) {
+    if (meta.framework !== "vite") throw new Error("Automatic framework conversion currently requires the Vite adapter.");
+    return { name: "html-next-framework", vite: frameworkVitePlugin(options) };
+  }
   let compiled: Promise<CompiledGraph> | undefined;
-  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph(options);
+  let root = options.root ?? process.cwd();
+  const graph = (): Promise<CompiledGraph> => compiled ??= compileGraph({ ...options, root });
 
   return {
     name: "html-next",
     enforce: "pre",
+    vite: { configResolved(config) { root = options.root ?? config.root; } },
     async buildStart() {
-      compiled = compileGraph(options);
+      compiled = compileGraph({ ...options, root });
       const current = await compiled;
       for (const file of current.sourceFiles) this.addWatchFile(file);
     },
-    resolveId(id) {
+    async resolveId(id, importer) {
+      if (importer === resolvedSupportModule && (id === "@nextwebwg/html-next/generated-runtime" || id === "@nextwebwg/html-next/runtime")) {
+        return fileURLToPath(import.meta.resolve(id));
+      }
       if (id === componentsModule) return resolvedComponentsModule;
       if (id === supportModule) return resolvedSupportModule;
       if (id.startsWith(publicComponentPrefix)) {
@@ -504,6 +693,7 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
       }
       if (id.startsWith(componentPrefix)) return `\0${id}`;
       if (id.startsWith(stylePrefix)) return `\0${id}`;
+      if ((await graph()).packages.has(id)) return `${resolvedPackagePrefix}${id}`;
       return null;
     },
     load(id) {
@@ -512,11 +702,13 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions>((options) => {
         id !== resolvedSupportModule &&
         !id.startsWith(resolvedPublicComponentPrefix) &&
         !id.startsWith(resolvedComponentPrefix) &&
-        !id.startsWith(resolvedStylePrefix)
+        !id.startsWith(resolvedStylePrefix) &&
+        !id.startsWith(resolvedPackagePrefix)
       ) return null;
       return graph().then((current) => {
         if (id === resolvedComponentsModule) return current.entry;
         if (id === resolvedSupportModule) return current.support;
+        if (id.startsWith(resolvedPackagePrefix)) return current.packages.get(id.slice(resolvedPackagePrefix.length)) ?? null;
         if (id.startsWith(resolvedPublicComponentPrefix)) {
           if (current.manifest.delivery !== "library") {
             diagnostic("HN008", "Stable public component modules are available only in library mode.");

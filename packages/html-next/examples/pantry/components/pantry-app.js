@@ -5,10 +5,8 @@
 // The authoritative list lives here, in an ordinary variable. Declared state holds only what the
 // template renders, so no effect ever writes a value it also reads.
 
-/** Declared public methods are module exports, so each instance registers its operations here. */
-const instances = new WeakMap();
-
-export default function controller({ effect, element, on, refs, state }) {
+export default function controller(host) {
+  const { effect, data, state } = host;
   let pantry = [];
 
   const search = () => String(state.query ?? "").trim().toLowerCase();
@@ -29,7 +27,7 @@ export default function controller({ effect, element, on, refs, state }) {
   // here so this effect reruns for either, and it writes only state it does not read.
   let seeded = false;
   effect(() => {
-    const request = state.stock;
+    const request = data.stock;
     const needle = search();
     if (!seeded && request?.ok && Array.isArray(request.value)) {
       pantry = request.value.map((row) => ({ ...row }));
@@ -43,26 +41,30 @@ export default function controller({ effect, element, on, refs, state }) {
     publish();
   };
 
-  on("adjust", (event) => {
+  const adjust = (event) => {
     const { id, delta } = event.detail;
     apply((row) => (row.id === id ? [{ ...row, quantity: Math.max(0, row.quantity + delta) }] : [row]));
-  });
+  };
+  host.on("adjust", adjust);
 
-  on("remove", (event) => {
+  const remove = (event) => {
     apply((row) => (row.id === event.detail ? [] : [row]));
-  });
+  };
+  host.on("remove", remove);
 
   // A catalog hit carries what the endpoint returned; stock and threshold are local decisions.
-  on("add", (event) => {
+  const add = (event) => {
     const { id, label, unit } = event.detail;
     if (pantry.some((row) => row.id === id)) return;
     pantry = [...pantry, { id, label, quantity: 1, unit, threshold: 1 }];
     publish();
     state.catalogQuery = "";
-  });
+  };
+  host.on("add", add);
 
   // The add form is a native <form>: required, minlength, and min/max are the browser's job.
-  const form = refs.addForm;
+  host.on("connect", () => {
+  const form = host.refs.addForm;
   const submit = (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -81,18 +83,9 @@ export default function controller({ effect, element, on, refs, state }) {
   };
   form.addEventListener("submit", submit);
 
-  instances.set(element, {
-    restockAll: () => apply((row) =>
-      [row.quantity <= row.threshold ? { ...row, quantity: row.threshold + 1 } : row]),
+  return () => form.removeEventListener("submit", submit);
   });
 
-  return () => {
-    instances.delete(element);
-    form.removeEventListener("submit", submit);
-  };
-}
-
-/** Declared public method: refill every low row to one above its threshold. */
-export function restockAll({ element }) {
-  instances.get(element)?.restockAll();
+  host.on("restock-request", () => apply((row) =>
+    [row.quantity <= row.threshold ? { ...row, quantity: row.threshold + 1 } : row]));
 }

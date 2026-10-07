@@ -1,15 +1,262 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
-import { evaluate } from "../src/expression.js";
+import { evaluate, NONCONFORMING, type Value } from "../src/expression.js";
 import {
   createComputed,
   createEffect,
   createSignal,
+  notifyPropertyDelete,
+  notifyPropertySet,
+  type ReactiveEffect,
   ReactiveScope,
+  readItems,
+  readKey,
+  registerReactiveAlias,
+  trackProperty,
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
+  it("keeps paused registrations reconnectable and releases permanent stops once", () => {
+    const scope = new ReactiveScope([["n", 0]]);
+    const live = new Set<ReactiveEffect>();
+    let runs = 0;
+    let cleanups = 0;
+    const effect = createEffect(scope.scheduler, () => {
+      scope.get("n");
+      runs += 1;
+      return () => { cleanups += 1; };
+    });
+    live.add(effect);
+    effect.registration = { release(owner) { live.delete(owner); } };
+    effect.pause();
+    effect.pause();
+    assert.equal(live.size, 1);
+    assert.equal(cleanups, 1);
+    scope.set("n", 1);
+    scope.scheduler.flush();
+    assert.equal(runs, 1);
+    effect.resume();
+    assert.equal(runs, 2);
+    effect.stop();
+    effect.stop();
+    effect.resume();
+    assert.equal(live.size, 0);
+    assert.equal(cleanups, 2);
+    assert.equal(runs, 2);
+  });
+
+  it("releases a stopped owner even when cleanup throws or reenters stop", () => {
+    for (const throws of [false, true]) {
+      const scope = new ReactiveScope([["n", 0]]);
+      const live = new Set<ReactiveEffect>();
+      const failure = new Error("cleanup failed");
+      let cleanups = 0;
+      let releases = 0;
+      let effect: ReactiveEffect;
+      effect = createEffect(scope.scheduler, () => {
+        scope.get("n");
+        return () => {
+          cleanups += 1;
+          effect.stop();
+          if (throws) throw failure;
+        };
+      });
+      live.add(effect);
+      effect.registration = { release(owner) { releases += 1; live.delete(owner); } };
+      if (throws) assert.throws(() => effect.stop(), error => error === failure);
+      else effect.stop();
+      effect.stop();
+      scope.set("n", 1);
+      scope.scheduler.flush();
+      assert.equal(cleanups, 1);
+      assert.equal(releases, 1);
+      assert.equal(live.size, 0);
+      assert.equal(effect.dependencies, undefined);
+    }
+  });
+
+  it("runs cleanup only once when pausing synchronously stops the same owner", () => {
+    const scope = new ReactiveScope();
+    let effect: ReactiveEffect;
+    let cleanups = 0;
+    let releases = 0;
+    effect = createEffect(scope.scheduler, () => () => {
+      cleanups += 1;
+      effect.stop();
+    });
+    effect.registration = { release() { releases += 1; } };
+    effect.pause();
+    effect.stop();
+    assert.equal(cleanups, 1);
+    assert.equal(releases, 1);
+  });
+
+  it("keeps one subscription per dependency when reordered reads repeat", () => {
+    for (const width of [3, 96]) {
+      const scheduler = new ReactiveScope().scheduler;
+      const reversed = createSignal(false);
+      const values = Array.from({ length: width }, (_, index) => createSignal(index));
+      let runs = 0;
+      const effect = createEffect(scheduler, () => {
+        runs += 1;
+        const order = reversed.get() ? [values[width - 1]!, ...values.slice(0, -1)] : values;
+        for (const value of order) value.get();
+        values[width - 1]!.get();
+      });
+      const subscriptions = (owner: ReactiveEffect): number => {
+        let count = 0;
+        for (let link = owner.dependencies; link !== undefined; link = link.nextDependency) count += 1;
+        return count;
+      };
+      assert.equal(subscriptions(effect), width + 1);
+      reversed.set(true);
+      scheduler.flush();
+      assert.equal(subscriptions(effect), width + 1);
+      values[0]!.set(-1);
+      scheduler.flush();
+      assert.equal(runs, 3);
+      assert.equal(subscriptions(effect), width + 1);
+      effect.stop();
+      assert.equal(subscriptions(effect), 0);
+    }
+  });
+
+  it("releases wide conditional dependencies and reconnects nested computed readers", () => {
+    const scheduler = new ReactiveScope().scheduler;
+    const wide = createSignal(true);
+    const values = Array.from({ length: 96 }, (_, index) => createSignal(index));
+    const derived = createComputed(scheduler, () => values[0]!.get() * 2);
+    const seen: number[] = [];
+    let cleanups = 0;
+    const effect = createEffect(scheduler, () => {
+      let total = 0;
+      for (const value of wide.get() ? values : values.slice(0, 1)) total += value.get();
+      // A nested owner shares the first dependency; the outer duplicate remains deduplicated.
+      seen.push(total + derived.get() + values[0]!.get());
+      return () => { cleanups += 1; };
+    });
+    assert.deepEqual(seen, [4560]);
+    wide.set(false);
+    scheduler.flush();
+    values[95]!.set(500);
+    scheduler.flush();
+    assert.deepEqual(seen, [4560, 0]);
+    values[0]!.set(2);
+    scheduler.flush();
+    assert.deepEqual(seen, [4560, 0, 8]);
+    effect.pause();
+    wide.set(true);
+    values[0]!.set(3);
+    scheduler.flush();
+    assert.equal(seen.length, 3);
+    effect.resume();
+    assert.equal(seen.at(-1), 4977);
+    effect.stop();
+    derived.stop();
+    values[0]!.set(4);
+    scheduler.flush();
+    assert.equal(seen.length, 4);
+    assert.equal(cleanups, 4);
+  });
+
+  it("reads frozen nested values without violating native proxy invariants", () => {
+    const source = Object.freeze({ nested: Object.freeze({ value: 7 }) });
+    const scope = new ReactiveScope([["source", source]]);
+    assert.equal(evaluate("source.nested.value", scope), 7);
+  });
+  it("stores native events without proxying them, including inside reactive structures", () => {
+    const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
+    const scope = new ReactiveScope([["event", event], ["selection", { source: event, item: "Ada" }]]);
+    assert.equal(scope.get("event"), event);
+    assert.equal((scope.get("selection") as { source: Value }).source, event);
+    assert.equal(evaluate("$event.detail.item", scope), "Ada");
+    assert.equal(evaluate("$selection.source.type", scope), "select");
+    const seen: Value[] = [];
+    createEffect(scope.scheduler, () => { seen.push(scope.get("event")!); });
+    event.preventDefault();
+    scope.scheduler.flush();
+    assert.equal(evaluate("$event.defaultPrevented", scope), true);
+    assert.deepEqual(seen, [event]);
+    scope.set("event", event);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event]);
+    const next = new Event("next");
+    scope.set("event", next);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [event, next]);
+  });
+
+  it("keeps a computed null until its first valid result, then retains its last valid result", () => {
+    const scope = new ReactiveScope([["source", "oops"]]);
+    const seen: unknown[] = [];
+    scope.defineComputed("derived", () => {
+      const source = scope.get("source");
+      return typeof source === "number" ? source * 2 : NONCONFORMING as unknown as Value;
+    });
+    createEffect(scope.scheduler, () => { seen.push(scope.get("derived")); });
+    assert.deepEqual(seen, [null]);
+
+    scope.set("source", 2);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [null, 4]);
+
+    scope.set("source", "oops");
+    scope.scheduler.flush();
+    assert.equal(scope.get("derived"), 4);
+    assert.deepEqual(seen, [null, 4]);
+
+    scope.set("source", 7);
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [null, 4, 14]);
+  });
+
+  it("updates serialized arrays when index writes extend their length", () => {
+    const scope = new ReactiveScope([["items", ["a"]]]);
+    const items = scope.get("items") as string[];
+    const seen: string[] = [];
+    createEffect(scope.scheduler, () => { seen.push(String(scope.get("items"))); });
+    assert.deepEqual(seen, ["a"]);
+
+    items.push("b");
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b"]);
+
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "a,b", "a,b,,d"]);
+    items[3] = "d";
+    scope.scheduler.flush();
+    assert.equal(seen.length, 3);
+  });
+
+  it("notifies deleted array indices when length shrinks without notifying retained indices", () => {
+    const scope = new ReactiveScope([["items", ["a", "b", "c"]]]);
+    const items = scope.get("items") as string[];
+    const deleted: unknown[] = [];
+    const retained: unknown[] = [];
+    const lengths: unknown[] = [];
+    createEffect(scope.scheduler, () => { deleted.push((scope.get("items") as string[])[2]); });
+    createEffect(scope.scheduler, () => { retained.push((scope.get("items") as string[])[0]); });
+    createEffect(scope.scheduler, () => { lengths.push((scope.get("items") as string[]).length); });
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined]);
+    assert.deepEqual(retained, ["a"]);
+    assert.deepEqual(lengths, [3, 1]);
+
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.equal(deleted.length, 2);
+    assert.equal(lengths.length, 2);
+
+    items[2] = "next";
+    scope.scheduler.flush();
+    assert.deepEqual(deleted, ["c", undefined, "next"]);
+    assert.deepEqual(lengths, [3, 1, 3]);
+  });
+
   it("does not notify consumers for Object.is-equal signal writes", () => {
     const scheduler = new ReactiveScope().scheduler;
     const object = {};
@@ -396,6 +643,34 @@ describe("reactive scope", () => {
     assert.equal(runs, 400);
   });
 
+  it("stores an object plain and gives JavaScript its canonical proxy", () => {
+    const record = { n: 1 };
+    const scope = new ReactiveScope();
+    scope.set("record", record);
+    assert.equal(scope.read("record"), record);
+    const seen: unknown[] = [];
+    createEffect(scope.scheduler, () => { seen.push((scope.get("record") as typeof record).n); });
+    // Every scope hands JavaScript the same canonical proxy for the record.
+    const proxy = scope.get("record") as typeof record;
+    assert.equal(new ReactiveScope([["record", record]]).get("record"), proxy);
+    proxy.n = 2;
+    scope.scheduler.flush();
+    // Writing the value it already holds is still no change, read or not.
+    scope.set("record", proxy);
+    scope.scheduler.flush();
+    const next = { n: 3 };
+    scope.set("record", next);
+    scope.scheduler.flush();
+    scope.set("record", { n: 4 });
+    scope.set("record", new ReactiveScope([["other", next]]).get("other")!);
+    scope.scheduler.flush();
+    const frozen = Object.freeze({ n: 5 });
+    scope.set("record", frozen);
+    scope.scheduler.flush();
+    assert.equal(scope.get("record"), frozen);
+    assert.deepEqual(seen, [1, 2, 3, 3, 5]);
+  });
+
   it("falls back without duplicating effects when one dependency spans schedulers", async () => {
     const shared = { value: 0 };
     const first = new ReactiveScope([["shared", shared]]);
@@ -416,5 +691,184 @@ describe("reactive scope", () => {
 
     assert.equal(firstRuns, 2);
     assert.equal(secondRuns, 2);
+  });
+});
+
+describe("reactive proxies", () => {
+  it("shares target dependencies when a foreign proxy reenters wrapping before cache publication", () => {
+    const nested = new ReactiveScope();
+    let entered = false;
+    const foreign = new Proxy({ value: 1 }, {
+      isExtensible(target) {
+        if (!entered) {
+          entered = true;
+          nested.set("record", foreign);
+        }
+        return Reflect.isExtensible(target);
+      },
+    });
+    const outer = new ReactiveScope([["record", foreign]]);
+    const outerRecord = outer.get("record") as { value: number };
+    const nestedRecord = nested.get("record") as { value: number };
+    // Object.isFrozen's trap stores the record during wrapping; storage is plain, so the nested
+    // write cannot publish a second wrapper and both scopes get the one canonical proxy.
+    assert.equal(outerRecord, nestedRecord);
+    const outerSeen: number[] = [];
+    const nestedSeen: number[] = [];
+    const outerReader = createEffect(outer.scheduler, () => { outerSeen.push(outerRecord.value); });
+    const nestedReader = createEffect(nested.scheduler, () => { nestedSeen.push(nestedRecord.value); });
+    outerRecord.value = 2;
+    outer.scheduler.flush();
+    nested.scheduler.flush();
+    nestedRecord.value = 3;
+    outer.scheduler.flush();
+    nested.scheduler.flush();
+    assert.deepEqual(outerSeen, [1, 2, 3]);
+    assert.deepEqual(nestedSeen, [1, 2, 3]);
+    outerReader.stop(); nestedReader.stop();
+  });
+
+  it("tracks plain reads against writes through the object's proxy", () => {
+    const row = { label: "a" };
+    const rows: { label: string }[] = [row];
+    const scope = new ReactiveScope([["rows", rows]]);
+    const seen: string[] = [];
+    createEffect(scope.scheduler, () => {
+      seen.push(readItems(scope.read("rows") as Value[]).map((item) => readKey(item as object, "label")).join());
+    });
+    const proxy = scope.get("rows") as typeof rows;
+    proxy[0]!.label = "b";
+    scope.scheduler.flush();
+    proxy.push({ label: "c" });
+    scope.scheduler.flush();
+    // One object at two indices: a write through either path reaches both reads.
+    proxy[1] = proxy[0]!;
+    scope.scheduler.flush();
+    proxy[1]!.label = "d";
+    scope.scheduler.flush();
+    assert.deepEqual(seen, ["a", "b", "b,c", "b,b", "d,d"]);
+    // Storage never holds a proxy.
+    assert.equal(scope.read("rows"), rows);
+    assert.equal(rows[1], row);
+  });
+
+  it("shares property subscriptions across scopes and registered writable aliases", () => {
+    const source = { value: 1 };
+    const left = new ReactiveScope([["record", source]]);
+    const right = new ReactiveScope([["record", source]]);
+    const record = left.get("record") as { value: number };
+    assert.equal(right.get("record"), record);
+    const alias = new Proxy(record, {});
+    registerReactiveAlias(alias, record);
+    left.set("alias", alias);
+    assert.equal(left.get("alias"), record);
+    const leftSeen: number[] = [];
+    const rightSeen: number[] = [];
+    const leftEffect = createEffect(left.scheduler, () => {
+      leftSeen.push((left.get("record") as { value: number }).value + (left.get("alias") as { value: number }).value);
+    });
+    const rightEffect = createEffect(right.scheduler, () => {
+      rightSeen.push((right.get("record") as { value: number }).value);
+    });
+    (right.get("record") as { value: number }).value = 2;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    (left.get("alias") as { value: number }).value = 3;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    assert.deepEqual(leftSeen, [2, 4, 6]);
+    assert.deepEqual(rightSeen, [1, 2, 3]);
+    leftEffect.stop();
+    record.value = 4;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    assert.deepEqual(leftSeen, [2, 4, 6]);
+    assert.deepEqual(rightSeen, [1, 2, 3, 4]);
+    rightEffect.stop();
+  });
+
+  it("notifies a property reader first installed by the property's native setter", () => {
+    let current = 1;
+    let scope!: ReactiveScope;
+    let reader: ReactiveEffect | undefined;
+    const seen: number[] = [];
+    const source = {
+      get value(): number { return current; },
+      set value(next: number) {
+        current = next;
+        reader ??= createEffect(scope.scheduler, () => {
+          seen.push((scope.get("record") as { value: number }).value);
+        });
+      },
+    };
+    scope = new ReactiveScope([["record", source]]);
+    const record = scope.get("record") as { value: number };
+    // No property reader exists on entry to the set trap; Reflect.set creates the first one.
+    record.value = 2;
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [2, 2]);
+    record.value = 3;
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [2, 2, 3]);
+    reader!.stop();
+  });
+
+  it("tracks symbol reads and array iteration after unobserved writes and deletion", () => {
+    const symbol = Symbol("value");
+    const source = { [symbol]: 1 };
+    const scope = new ReactiveScope([["record", source as unknown as Value], ["items", ["a", "b", "c"]]]);
+    const record = scope.get("record") as object;
+    const items = scope.get("items") as string[];
+    Reflect.set(record, symbol, 2);
+    items.push("d");
+    const symbols: unknown[] = [];
+    const snapshots: (string | undefined)[][] = [];
+    const lengths: number[] = [];
+    const symbolReader = createEffect(scope.scheduler, () => { symbols.push(Reflect.get(record, symbol)); });
+    const iterator = createEffect(scope.scheduler, () => { snapshots.push([...items]); });
+    const lengthReader = createEffect(scope.scheduler, () => { lengths.push(items.length); });
+    Reflect.set(record, symbol, 3);
+    delete items[2];
+    scope.scheduler.flush();
+    assert.deepEqual(symbols, [2, 3]);
+    assert.deepEqual(snapshots, [["a", "b", "c", "d"], ["a", "b", undefined, "d"]]);
+    assert.deepEqual(lengths, [4]);
+    Reflect.deleteProperty(record, symbol);
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.deepEqual(symbols, [2, 3, undefined]);
+    assert.deepEqual(snapshots.at(-1), ["a"]);
+    assert.deepEqual(lengths, [4, 1]);
+    items[3] = "z";
+    scope.scheduler.flush();
+    assert.deepEqual(snapshots.at(-1), ["a", undefined, undefined, "z"]);
+    assert.deepEqual(lengths, [4, 1, 4]);
+    symbolReader.stop(); iterator.stop(); lengthReader.stop();
+  });
+
+  it("lets raw-target owners share property dependencies with reactive proxies", () => {
+    // Compiled controller facades track and notify raw targets directly, through the same registry.
+    const scope = new ReactiveScope([["rows", ["a", "b"]]]);
+    const rows = scope.get("rows") as Value[];
+    const raw = ["x"];
+    const scheduler = scope.scheduler;
+    const seen: unknown[] = [];
+    const reader = createEffect(scheduler, () => { seen.push((rows as Value[]).length); });
+    const rawReader = createEffect(scheduler, () => { trackProperty(raw, "0"); seen.push(raw[0]); });
+    const target = rows as unknown as { [key: string]: Value };
+    target[2] = "c";
+    scheduler.flush();
+    raw[0] = "y";
+    notifyPropertySet(raw, "0", "x", "y", 1);
+    scheduler.flush();
+    notifyPropertySet(raw, "0", "y", "y", 1);
+    scheduler.flush();
+    delete raw[0];
+    notifyPropertyDelete(raw, "0", true);
+    scheduler.flush();
+    notifyPropertyDelete(raw, "0", false);
+    scheduler.flush();
+    assert.deepEqual(seen, [2, "x", 3, "y", undefined]);
+    reader.stop(); rawReader.stop();
   });
 });

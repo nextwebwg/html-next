@@ -1,3 +1,8 @@
+import { isNativeEvent } from "./freeze.js";
+import { parseExpression } from "./expression-parser.js";
+import { formatValue, formattingType } from "./format.js";
+import type { TypeNode } from "./type-system.js";
+
 /** A missing read or an operation on missing/typed-invalid data. */
 export const ABSENT = Symbol("absent");
 /**
@@ -14,12 +19,24 @@ export type Value =
   | boolean
   | null
   | Absent
+  | Event
+  | typeof NONCONFORMING
   | readonly Value[]
   | { readonly [key: string]: Value };
 
 /** Expressions only look names up, so any `Map` or reactive scope layer can supply them. */
 export interface Scope {
   get(name: string): Value | undefined;
+  /**
+   * A reactive scope evaluates on plain objects: `read` and `readKey` track what they read, and
+   * `reveal` turns an object leaving the engine into the proxy that JavaScript reads and writes.
+   */
+  read?(name: string): Value | undefined;
+  readKey?(object: object, key: string | number): Value | undefined;
+  reveal?(value: Value): Value;
+  typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
+  /** Declared type of a reference, when the host has one. */
+  typeOfPath?: ((path: string) => "length" | "percentage" | "duration" | undefined) | undefined;
 }
 
 export class UndeclaredName extends Error {
@@ -30,12 +47,13 @@ export class UndeclaredName extends Error {
 }
 
 export type ExpressionNode =
-  | { kind: "literal"; value: Value }
+  | { kind: "literal"; value: Value; dimension?: "length" | "percentage" | "duration" }
   | { kind: "id"; name: string }
   | { kind: "member"; object: ExpressionNode; key: string }
   | { kind: "index"; object: ExpressionNode; index: ExpressionNode }
   | { kind: "unary"; op: "not" | "-"; operand: ExpressionNode }
   | { kind: "binary"; op: string; left: ExpressionNode; right: ExpressionNode }
+  | { kind: "conditional"; test: ExpressionNode; consequent: ExpressionNode; alternate: ExpressionNode }
   | { kind: "call"; fn: string; args: ExpressionNode[] }
   | { kind: "object"; pairs: { key: string; value: ExpressionNode }[] }
   | { kind: "array"; items: ExpressionNode[] };
@@ -52,253 +70,109 @@ export type WritablePathSegment =
   | { readonly kind: "index"; readonly expression: ExpressionNode };
 export type WritablePath = readonly WritablePathSegment[];
 
-type TokenKind = 0 | 1 | 2 | 3 | 4;
-
-const TOKEN = /\s*(?:(<=|>=|!=|\^=|\$=|\*=)|(\d+(?:\.\d*)?|\.\d+)|("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|([A-Za-z_$][A-Za-z0-9_$]*)|([=<>+*/%(),.:{}[\]-])|$)/y;
-const ESCAPE = /\\([\s\S])/g;
-const FORMAT_TOKEN = /%s/g;
-
-const PRECEDENCE: Readonly<Record<string, number>> = {
-  or: 1, and: 2,
-  "=": 3, "!=": 3, "^=": 3, "$=": 3, "*=": 3,
-  "<": 4, "<=": 4, ">": 4, ">=": 4,
-  "+": 5, "-": 5,
-  "*": 6, "/": 6, "%": 6,
-};
-
-function precedence(token: string | number): number {
-  return PRECEDENCE[token as string] ?? 0;
-}
-
-function isFunction(name: string): boolean {
-  return name === "round"
-    || name === "clamp"
-    || name === "min"
-    || name === "max"
-    || name === "abs"
-    || name === "format";
-}
-
-/** Scans directly into the AST: no token array and no token objects. */
-function parse(source: string): ExpressionNode {
-  let offset = 0;
-  let kind: TokenKind = 0;
-  let token: string | number = "";
-
-  function next(): void {
-    TOKEN.lastIndex = offset;
-    const match = TOKEN.exec(source);
-    if (match === null) {
-      const character = source.slice(offset).trimStart()[0]!;
-      if (character === '"' || character === "'") {
-        throw new SyntaxError("Unterminated string literal.");
-      }
-      throw new SyntaxError(`Unexpected character \`${character}\`.`);
-    }
-    offset = TOKEN.lastIndex;
-    if (match[1] !== undefined || match[5] !== undefined) {
-      kind = 4;
-      token = match[1] ?? match[5]!;
-    } else if (match[2] !== undefined) {
-      kind = 1;
-      token = Number(match[2]);
-    } else if (match[3] !== undefined) {
-      kind = 2;
-      token = match[3].slice(1, -1).replace(ESCAPE, "$1");
-    } else if (match[4] !== undefined) {
-      kind = 3;
-      token = match[4]!;
-    } else {
-      kind = 0;
-      token = "";
-    }
-  }
-
-  function eat(value: string): boolean {
-    if (token !== value) return false;
-    next();
-    return true;
-  }
-
-  function expect(value: string): void {
-    if (!eat(value)) throw new SyntaxError(`Expected \`${value}\`.`);
-  }
-
-  function binary(minimum: number): ExpressionNode {
-    let left = unary();
-    let power = precedence(token);
-    while (power >= minimum) {
-      const op = token as string;
-      next();
-      left = { kind: "binary", op, left, right: binary(power + 1) };
-      power = precedence(token);
-    }
-    return left;
-  }
-
-  function unary(): ExpressionNode {
-    if (kind === 3 && token === "not") {
-      next();
-      return { kind: "unary", op: "not", operand: unary() };
-    }
-    if (eat("-")) return { kind: "unary", op: "-", operand: unary() };
-
-    let object = primary();
-    while (kind === 4) {
-      if (eat(".")) {
-        if ((kind as TokenKind) !== 3) {
-          throw new SyntaxError("Expected a property name after `.`.");
-        }
-        const key = token as string;
-        next();
-        object = { kind: "member", object, key };
-      } else if (eat("[")) {
-        const index = binary(1);
-        expect("]");
-        object = { kind: "index", object, index };
-      } else {
-        break;
-      }
-    }
-    return object;
-  }
-
-  function primary(): ExpressionNode {
-    const currentKind = kind;
-    const currentToken = token;
-    if (currentKind === 1 || currentKind === 2) {
-      next();
-      return { kind: "literal", value: currentToken };
-    }
-    if (currentKind === 4 && currentToken === "(") {
-      next();
-      const node = binary(1);
-      expect(")");
-      return node;
-    }
-    if (currentKind === 4 && currentToken === "{") {
-      next();
-      const pairs: { key: string; value: ExpressionNode }[] = [];
-      if (!eat("}")) {
-        do {
-          if (token === "}") break;
-          if (kind !== 3 && kind !== 2) {
-            throw new SyntaxError("Object keys must be identifiers or strings.");
-          }
-          const key = token as string;
-          next();
-          expect(":");
-          pairs.push({ key, value: binary(1) });
-        } while (eat(","));
-        expect("}");
-      }
-      return { kind: "object", pairs };
-    }
-    if (currentKind === 4 && currentToken === "[") {
-      next();
-      const items: ExpressionNode[] = [];
-      if (!eat("]")) {
-        do {
-          if (token === "]") break;
-          items.push(binary(1));
-        } while (eat(","));
-        expect("]");
-      }
-      return { kind: "array", items };
-    }
-    if (currentKind === 3) {
-      const name = currentToken as string;
-      next();
-      if (name === "true") return { kind: "literal", value: true };
-      if (name === "false") return { kind: "literal", value: false };
-      if (name === "null") return { kind: "literal", value: null };
-      if (token === "(" && isFunction(name)) {
-        next();
-        const args: ExpressionNode[] = [];
-        if (!eat(")")) {
-          do args.push(binary(1)); while (eat(","));
-          expect(")");
-        }
-        return { kind: "call", fn: name, args };
-      }
-      return { kind: "id", name };
-    }
-    throw new SyntaxError("Unexpected end of expression.");
-  }
-
-  next();
-  const node = binary(1);
-  if (kind !== 0) throw new SyntaxError("Unexpected trailing input in expression.");
-  return node;
-}
 
 function isAbsent(value: Value): boolean {
-  return value === ABSENT || value === null;
+  return value === ABSENT || value === NONCONFORMING || value === null;
 }
 
 /** Truthiness follows the empty value of each type. */
 export function truthy(value: Value): boolean {
-  if (value === ABSENT || value === null || value === false) return false;
+  if (value === ABSENT || value === NONCONFORMING || value === null || value === false) return false;
   if (value === true) return true;
   if (typeof value === "string") return value.length > 0;
   if (typeof value === "number") return value !== 0 && value === value;
   if (Array.isArray(value)) return value.length > 0;
   for (const key in value) if (Object.hasOwn(value, key)) return true;
-  return false;
+  // Only empty objects need a platform brand check. Ordinary records (including records with
+  // a `type` field) stay on the inexpensive enumerable-property path.
+  return value instanceof Error || isNativeEvent(value);
 }
 
 function asNumber(value: Value): number | Absent {
-  return typeof value === "number" && value === value ? value : ABSENT;
+  return typeof value === "number" && Number.isFinite(value) ? value : ABSENT;
+}
+
+/** A tracked property read; a missing property is absent, while `null` stays a value. */
+function readKey(scope: Scope, object: object, key: string | number): Value {
+  const value = scope.readKey === undefined
+    ? (object as { readonly [key: string]: Value | undefined })[key]
+    : scope.readKey(object, key);
+  return value === undefined ? ABSENT : value;
+}
+
+/** Truthiness inside the engine, where a list is plain and its length must be read tracked. */
+function truthyIn(value: Value, scope: Scope): boolean {
+  return Array.isArray(value) ? (readKey(scope, value, "length") as number) > 0 : truthy(value);
+}
+
+/** Hand an object leaving the engine back as the value JavaScript reads. */
+function reveal(value: Value, scope: Scope): Value {
+  return scope.reveal === undefined || value === null || typeof value !== "object" ? value : scope.reveal(value);
 }
 
 function evalNode(node: ExpressionNode, scope: Scope): Value {
   switch (node.kind) {
     case "literal": return node.value;
     case "id": {
-      const value = scope.get(node.name);
+      const value = scope.read === undefined ? scope.get(node.name) : scope.read(node.name);
       if (value === undefined) throw new UndeclaredName(node.name);
       return value;
     }
     case "member": {
       const object = evalNode(node.object, scope);
+      if (object === NONCONFORMING) return NONCONFORMING;
       // A list's or string's `length` is its count, as `cart.items.length` reads in the proposal.
-      if (node.key === "length" && (Array.isArray(object) || typeof object === "string")) return object.length;
+      if (node.key === "length" && typeof object === "string") return object.length;
+      if (node.key === "length" && Array.isArray(object)) return readKey(scope, object, "length");
       if (isAbsent(object) || typeof object !== "object" || Array.isArray(object)) {
         return ABSENT;
       }
-      const value = (object as { readonly [key: string]: Value })[node.key];
-      return value === undefined ? ABSENT : value;
+      return readKey(scope, object as object, node.key);
     }
     case "index": {
       const object = evalNode(node.object, scope);
       const index = evalNode(node.index, scope);
+      if (object === NONCONFORMING || index === NONCONFORMING) return NONCONFORMING;
       if (isAbsent(object) || isAbsent(index)) return ABSENT;
-      if (Array.isArray(object) && typeof index === "number") {
-        const value = object[index];
-        return value === undefined ? ABSENT : value;
-      }
-      if (typeof object === "object" && typeof index === "string") {
-        const value = (object as { readonly [key: string]: Value })[index];
-        return value === undefined ? ABSENT : value;
+      if (Array.isArray(object) && typeof index === "number") return readKey(scope, object, index);
+      if (typeof object === "object" && (typeof index === "string" || typeof index === "number")) {
+        return readKey(scope, object as object, String(index));
       }
       return ABSENT;
     }
     case "unary": {
       const operand = evalNode(node.operand, scope);
-      if (node.op === "not") return !truthy(operand);
+      if (operand === NONCONFORMING) return NONCONFORMING;
+      if (node.op === "not") return !truthyIn(operand, scope);
+      if (dimensionType(node.operand, scope) !== undefined && typeof operand === "string") {
+        const quantity = parseQuantity(operand);
+        return quantity === undefined ? ABSENT : `${-quantity.value}${quantity.unit}`;
+      }
       const number = asNumber(operand);
       return number === ABSENT ? ABSENT : -number;
     }
     case "binary": return evalBinary(node, scope);
+    case "conditional": {
+      const test = evalNode(node.test, scope);
+      return test === NONCONFORMING ? NONCONFORMING : evalNode(truthyIn(test, scope) ? node.consequent : node.alternate, scope);
+    }
     case "call": return evalCall(node, scope);
     case "object": {
       const value: Record<string, Value> = {};
-      for (const pair of node.pairs) value[pair.key] = evalNode(pair.value, scope);
+      for (const pair of node.pairs) {
+        const item = evalNode(pair.value, scope);
+        if (item === NONCONFORMING) return NONCONFORMING;
+        value[pair.key] = item;
+      }
       return value;
     }
     case "array": {
       const value: Value[] = [];
-      for (const item of node.items) value.push(evalNode(item, scope));
+      for (const item of node.items) {
+        const result = evalNode(item, scope);
+        if (result === NONCONFORMING) return NONCONFORMING;
+        value.push(result);
+      }
       return value;
     }
   }
@@ -306,11 +180,18 @@ function evalNode(node: ExpressionNode, scope: Scope): Value {
 
 function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Scope): Value {
   const { op } = node;
-  if (op === "and") return truthy(evalNode(node.left, scope)) && truthy(evalNode(node.right, scope));
-  if (op === "or") return truthy(evalNode(node.left, scope)) || truthy(evalNode(node.right, scope));
+  if (op === "and" || op === "or") {
+    const left = evalNode(node.left, scope);
+    if (left === NONCONFORMING) return NONCONFORMING;
+    if (op === "and" && !truthyIn(left, scope)) return false;
+    if (op === "or" && truthyIn(left, scope)) return true;
+    const right = evalNode(node.right, scope);
+    return right === NONCONFORMING ? NONCONFORMING : truthyIn(right, scope);
+  }
 
   const left = evalNode(node.left, scope);
   const right = evalNode(node.right, scope);
+  if (left === NONCONFORMING || right === NONCONFORMING) return NONCONFORMING;
   if (op === "=") return left === right;
   if (op === "!=") return left !== right;
   if (op === "^=" || op === "$=" || op === "*=") {
@@ -318,6 +199,39 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
     if (op === "^=") return left.startsWith(right);
     if (op === "$=") return left.endsWith(right);
     return left.includes(right);
+  }
+
+  if ((op === "+" || op === "-" || op === "*" || op === "/") &&
+    (typeof left !== "number" || typeof right !== "number")) {
+    const leftDimension = dimensionType(node.left, scope);
+    const rightDimension = dimensionType(node.right, scope);
+    if (leftDimension !== undefined || rightDimension !== undefined) {
+      if (isAbsent(left) || isAbsent(right)) return ABSENT;
+      const leftQuantity = leftDimension !== undefined && typeof left === "string" ? parseQuantity(left) : undefined;
+      const rightQuantity = rightDimension !== undefined && typeof right === "string" ? parseQuantity(right) : undefined;
+      if (leftDimension !== undefined && leftQuantity?.dimension !== leftDimension ||
+        rightDimension !== undefined && rightQuantity?.dimension !== rightDimension) return NONCONFORMING;
+      let result: number;
+      let unit: string;
+      if (op === "+" || op === "-") {
+        if (leftQuantity === undefined || rightQuantity === undefined ||
+          leftQuantity.dimension !== rightQuantity.dimension || leftQuantity.unit !== rightQuantity.unit) return NONCONFORMING;
+        result = op === "+" ? leftQuantity.value + rightQuantity.value : leftQuantity.value - rightQuantity.value;
+        unit = leftQuantity.unit;
+      } else if (op === "*") {
+        const quantity = leftQuantity ?? rightQuantity;
+        const factor = leftQuantity === undefined ? asNumber(left) : asNumber(right);
+        if (quantity === undefined || leftQuantity !== undefined && rightQuantity !== undefined || factor === ABSENT) return NONCONFORMING;
+        result = quantity.value * factor;
+        unit = quantity.unit;
+      } else {
+        const divisor = asNumber(right);
+        if (leftQuantity === undefined || rightDimension !== undefined || divisor === ABSENT || divisor === 0) return NONCONFORMING;
+        result = leftQuantity.value / divisor;
+        unit = leftQuantity.unit;
+      }
+      return Number.isFinite(result) ? `${result}${unit}` : NONCONFORMING;
+    }
   }
 
   const a = asNumber(left);
@@ -339,34 +253,165 @@ function evalBinary(node: Extract<ExpressionNode, { kind: "binary" }>, scope: Sc
 
 function evalCall(node: Extract<ExpressionNode, { kind: "call" }>, scope: Scope): Value {
   const { args, fn } = node;
-  const values: Value[] = [];
-  for (const argument of args) values.push(evalNode(argument, scope));
-  if (fn === "format") {
-    const pattern = values[0];
-    if (typeof pattern !== "string") return ABSENT;
-    let index = 1;
-    return pattern.replace(FORMAT_TOKEN, () => index < values.length ? toText(values[index++]!) : "%s");
+  if (fn === "format" || fn === "formatRange" || fn === "formatParts") {
+    const values = args.map((argument) => reveal(evalNode(argument, scope), scope));
+    if (values.includes(NONCONFORMING)) return NONCONFORMING;
+    if (values.includes(ABSENT)) return ABSENT;
+    if (args.length < (fn === "formatRange" ? 2 : 1)) return NONCONFORMING;
+    const result = formatValue(values[0], expressionFormattingType(args[0]!, scope), fn, ...values.slice(1));
+    return result === Symbol.for("html-next.invalid-result") ? NONCONFORMING : result === undefined ? ABSENT : result;
+  }
+  if (fn === "default") {
+    if (args.length !== 2) return NONCONFORMING;
+    const value = evalNode(args[0]!, scope);
+    if (value === NONCONFORMING) return NONCONFORMING;
+    return value === ABSENT || value === null ? evalNode(args[1]!, scope) : value;
+  }
+  if (fn === "concat" || fn === "join") {
+    const values: Value[] = [];
+    for (const argument of args) values.push(reveal(evalNode(argument, scope), scope));
+    if (values.includes(NONCONFORMING)) return NONCONFORMING;
+    if (fn === "concat") {
+      if (values.some((value) => value === ABSENT)) return ABSENT;
+      if (values.length === 0 || values.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
+      return values.map((value) => value === null ? "" : String(value)).join("");
+    }
+    if (values.some((value) => value === ABSENT)) return ABSENT;
+    if (values.length !== 2 || !Array.isArray(values[0]) || typeof values[1] !== "string") return NONCONFORMING;
+    const items = values[0];
+    if (items.some((value) => value === ABSENT)) return ABSENT;
+    if (items.some((value) => typeof value === "object" && value !== null)) return NONCONFORMING;
+    if (new Set(items.filter((value) => value !== null).map((value) => typeof value)).size > 1) return NONCONFORMING;
+    return items.map((value) => value === null ? "" : String(value)).join(values[1]);
   }
 
-  for (let index = 0; index < values.length; index += 1) {
-    const number = asNumber(values[index]!);
-    if (number === ABSENT) return ABSENT;
-    values[index] = number;
+  const isRound = fn === "round";
+  if (fn === "abs" && args.length !== 1 || isRound && (args.length < 1 || args.length > 2)
+    || (fn === "min" || fn === "max") && args.length === 0 || fn === "clamp" && args.length !== 3) return NONCONFORMING;
+  const dimension = dimensionType(args[0]!, scope);
+  let unit: string | undefined;
+  const numbers: number[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = evalNode(args[index]!, scope);
+    if (value === NONCONFORMING) return NONCONFORMING;
+    if (value === ABSENT) return ABSENT;
+    if (dimension === undefined) {
+      const number = asNumber(value);
+      if (number === ABSENT) return NONCONFORMING;
+      numbers.push(number);
+      continue;
+    }
+    if (dimensionType(args[index]!, scope) !== dimension || typeof value !== "string") return NONCONFORMING;
+    const quantity = parseQuantity(value);
+    if (quantity === undefined || quantity.dimension !== dimension) return NONCONFORMING;
+    if (unit !== undefined && quantity.unit !== unit) return NONCONFORMING;
+    unit = quantity.unit;
+    numbers.push(quantity.value);
   }
-  const numbers = values as number[];
+  let result: number;
   switch (fn) {
-    case "abs": return numbers.length === 1 ? Math.abs(numbers[0]!) : ABSENT;
-    case "round": return numbers.length === 1 ? Math.round(numbers[0]!) : ABSENT;
-    case "min": return numbers.length > 0 ? Math.min(...numbers) : ABSENT;
-    case "max": return numbers.length > 0 ? Math.max(...numbers) : ABSENT;
-    case "clamp": return numbers.length === 3
-      ? Math.min(Math.max(numbers[0]!, numbers[1]!), numbers[2]!)
-      : ABSENT;
-    default: return ABSENT;
+    case "abs": result = Math.abs(numbers[0]!); break;
+    case "round": {
+      const step = Math.abs(numbers[1] ?? 1);
+      if (step === 0) return NONCONFORMING;
+      result = Math.round(numbers[0]! / step) * step;
+      break;
+    }
+    case "min": result = Math.min(...numbers); break;
+    case "max": result = Math.max(...numbers); break;
+    case "clamp": result = Math.max(numbers[0]!, Math.min(numbers[1]!, numbers[2]!)); break;
+    default: return NONCONFORMING;
   }
+  return Number.isFinite(result) ? unit === undefined ? result : `${result}${unit}` : NONCONFORMING;
+}
+
+const QUANTITY = /^(-?(?:\d+(?:\.\d+)?|\.\d+))(vmin|vmax|rem|px|em|vw|vh|ch|ex|cm|mm|in|pt|pc|q|ms|s|%)$/;
+
+function parseQuantity(value: string): { value: number; unit: string; dimension: "length" | "percentage" | "duration" } | undefined {
+  const match = QUANTITY.exec(value);
+  if (match === null) return undefined;
+  const unit = match[2]!;
+  const number = Number(match[1]);
+  return Number.isFinite(number)
+    ? { value: number, unit, dimension: unit === "%" ? "percentage" : unit === "ms" || unit === "s" ? "duration" : "length" }
+    : undefined;
+}
+
+/** The dimensional type an expression carries into a later math call. */
+export function dimensionType(node: ExpressionNode | undefined, scope: Scope): "length" | "percentage" | "duration" | undefined {
+  if (node === undefined) return undefined;
+  if (node.kind === "literal") return node.dimension;
+  if (node.kind === "unary" && node.op === "-") return dimensionType(node.operand, scope);
+  if (node.kind === "binary") {
+    const left = dimensionType(node.left, scope);
+    const right = dimensionType(node.right, scope);
+    if (node.op === "+" || node.op === "-") return left !== undefined && left === right ? left : undefined;
+    if (node.op === "*") return left === undefined ? right : right === undefined ? left : undefined;
+    if (node.op === "/") return right === undefined ? left : undefined;
+  }
+  if (node.kind === "conditional") {
+    const consequent = dimensionType(node.consequent, scope);
+    const alternate = dimensionType(node.alternate, scope);
+    if (node.consequent.kind === "literal" && node.consequent.value === null) return alternate;
+    if (node.alternate.kind === "literal" && node.alternate.value === null) return consequent;
+    return consequent !== undefined && consequent === alternate ? consequent : undefined;
+  }
+  if (node.kind === "call" && (node.fn === "round" || node.fn === "min" || node.fn === "max" ||
+    node.fn === "clamp" || node.fn === "abs")) {
+    return dimensionType(node.args[node.fn === "clamp" ? 1 : 0]!, scope);
+  }
+  if (node.kind === "call" && node.fn === "default") {
+    return dimensionType(node.args[0]!, scope) ?? dimensionType(node.args[1]!, scope);
+  }
+  const name = path(node);
+  return name === undefined ? undefined : scope.typeOfPath?.(name);
 }
 
 const cache = new Map<string, CompiledExpression>();
+
+/** Formatting inference uses declared identities and typed operators, never string contents. */
+function expressionFormattingType(node: ExpressionNode, scope: Scope): string | undefined {
+  const collection = (type: TypeNode | undefined): boolean => {
+    if (type?.kind === "constrained") return collection(type.base);
+    if (type?.kind === "union") return type.members.every((member) =>
+      member.kind === "terminal" && ["null", "absent"].includes(member.name) || collection(member));
+    if (type?.kind === "selected") return type.options.every((option) => collection(option.type));
+    return type?.kind === "list" || type?.kind === "separated-list" || type?.kind === "record";
+  };
+  const formattingPath = (part: ExpressionNode): string | undefined => {
+    if (part.kind === "member") {
+      const parent = formattingPath(part.object);
+      return parent === undefined ? undefined : `${parent}.${part.key}`;
+    }
+    if (part.kind === "index") {
+      const parent = formattingPath(part.object);
+      if (part.index.kind !== "literal" && (parent === undefined || !collection(scope.typeOfDeclaredPath?.(parent)))) return undefined;
+      const key = part.index.kind === "literal" ? part.index.value : 0;
+      return parent === undefined || typeof key !== "number" && typeof key !== "string" ? undefined : `${parent}.${key}`;
+    }
+    return path(part);
+  };
+  const name = formattingPath(node);
+  if (name !== undefined) return formattingType(scope.typeOfDeclaredPath?.(name));
+  const dimension = dimensionType(node, scope);
+  if (dimension !== undefined) return dimension;
+  if (node.kind === "literal") return typeof node.value === "number" ? "number" : typeof node.value === "string" ? "string" : undefined;
+  if (node.kind === "array" && node.items.every((item) => ["string", "keyword"].includes(expressionFormattingType(item, scope) ?? ""))) return "list";
+  if (node.kind === "binary" && ["+", "-", "*", "/", "%"].includes(node.op) || node.kind === "unary" && node.op === "-") return "number";
+  if (node.kind === "call" && ["min", "max", "abs", "round", "clamp"].includes(node.fn)) return "number";
+  if (node.kind === "call" && ["concat", "join", "format", "formatRange"].includes(node.fn)) return "string";
+  if (node.kind === "call" && node.fn === "default" && node.args.length === 2) {
+    if (node.args[0]?.kind === "literal" && node.args[0].value === null) return expressionFormattingType(node.args[1]!, scope);
+    return expressionFormattingType(node.args[0]!, scope);
+  }
+  if (node.kind === "conditional") {
+    const left = expressionFormattingType(node.consequent, scope);
+    const right = expressionFormattingType(node.alternate, scope);
+    return left === right ? left : node.consequent.kind === "literal" && node.consequent.value === null ? right
+      : node.alternate.kind === "literal" && node.alternate.value === null ? left : undefined;
+  }
+  return undefined;
+}
 
 function path(node: ExpressionNode): string | undefined {
   if (node.kind === "id") return node.name;
@@ -402,6 +447,11 @@ function collectDependencies(node: ExpressionNode, dependencies: string[]): void
       collectDependencies(node.left, dependencies);
       collectDependencies(node.right, dependencies);
       return;
+    case "conditional":
+      collectDependencies(node.test, dependencies);
+      collectDependencies(node.consequent, dependencies);
+      collectDependencies(node.alternate, dependencies);
+      return;
     case "call":
       for (const argument of node.args) collectDependencies(argument, dependencies);
       return;
@@ -411,6 +461,14 @@ function collectDependencies(node: ExpressionNode, dependencies: string[]): void
     case "array":
       for (const item of node.items) collectDependencies(item, dependencies);
   }
+}
+
+/** References checked against declared types before evaluating an expression. */
+export function typeCheckedDependencies(expression: string | CompiledExpression): readonly string[] {
+  const ast = typeof expression === "string" ? compileExpression(expression).ast : expression.ast;
+  const dependencies: string[] = [];
+  collectDependencies(ast, dependencies);
+  return dependencies.sort();
 }
 
 function appendWritable(node: ExpressionNode, result: WritablePathSegment[]): boolean {
@@ -436,7 +494,7 @@ function appendWritable(node: ExpressionNode, result: WritablePathSegment[]): bo
 export function compileExpression(source: string): CompiledExpression {
   let compiled = cache.get(source);
   if (compiled !== undefined) return compiled;
-  const ast = parse(source);
+  const ast = parseExpression(source);
   const dependencies: string[] = [];
   collectDependencies(ast, dependencies);
   dependencies.sort();
@@ -452,7 +510,7 @@ export function getWritablePath(
 ): WritablePath | undefined {
   const result: WritablePathSegment[] = [];
   if (!appendWritable(compileExpression(source).ast, result)
-    || !writableRoots.has(result[0] as string)) return undefined;
+    || result[0] === "$$event" || !writableRoots.has(result[0] as string)) return undefined;
   return result;
 }
 
@@ -461,14 +519,153 @@ export function checkExpression(source: string): void {
   compileExpression(source);
 }
 
+/** Reject operations whose known literal types make them invalid at authoring time. */
+export function checkExpressionSemantics(node: ExpressionNode): void {
+  type Known = { kind: "number" | "string" | "boolean" | "length" | "percentage" | "duration" | "list" | "object" | "null"; unit?: string | undefined };
+  const dimensional = (type: Known | undefined): boolean => type !== undefined &&
+    (type.kind === "length" || type.kind === "percentage" || type.kind === "duration");
+  const arithmetic = (op: string, left: Known, right: Known): Known | undefined => {
+    if (op === "+" || op === "-") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && left.kind === right.kind &&
+        (left.unit === undefined || right.unit === undefined || left.unit === right.unit)) {
+        return { kind: left.kind, unit: left.unit ?? right.unit };
+      }
+    }
+    if (op === "*") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && right.kind === "number") return left;
+      if (left.kind === "number" && dimensional(right)) return right;
+    }
+    if (op === "/") {
+      if (left.kind === "number" && right.kind === "number") return { kind: "number" };
+      if (dimensional(left) && right.kind === "number") return left;
+    }
+    if (op === "%" && left.kind === "number" && right.kind === "number") return { kind: "number" };
+    return undefined;
+  };
+  const known = (value: ExpressionNode): Known | undefined => {
+    if (value.kind === "literal") {
+      if (value.dimension !== undefined) return { kind: value.dimension, unit: parseQuantity(value.value as string)?.unit };
+      return { kind: value.value === null ? "null" : typeof value.value === "number" ? "number" : typeof value.value === "boolean" ? "boolean" : "string" };
+    }
+    if (value.kind === "unary" && value.op === "-") return known(value.operand);
+    if (value.kind === "binary" && ["+", "-", "*", "/", "%"].includes(value.op)) {
+      const left = known(value.left);
+      const right = known(value.right);
+      return left === undefined || right === undefined ? undefined : arithmetic(value.op, left, right);
+    }
+    if (value.kind === "array") return { kind: "list" };
+    if (value.kind === "object") return { kind: "object" };
+    if (value.kind === "call") {
+      if (value.fn === "concat" || value.fn === "join" || value.fn === "format" || value.fn === "formatRange") return { kind: "string" };
+      if (value.fn === "formatParts") return { kind: "list" };
+      if (value.fn === "default") {
+        const first = known(value.args[0]!);
+        return first?.kind === "null" ? known(value.args[1]!) : first ?? known(value.args[1]!);
+      }
+      return known(value.args[value.fn === "clamp" ? 1 : 0]!);
+    }
+    return undefined;
+  };
+  const visit = (value: ExpressionNode): void => {
+    switch (value.kind) {
+      case "call": {
+        for (const argument of value.args) visit(argument);
+        const { fn, args } = value;
+        const formatting = fn === "format" || fn === "formatRange" || fn === "formatParts";
+        const validCount = formatting ? args.length >= (fn === "formatRange" ? 2 : 1) && args.length <= (fn === "formatRange" ? 5 : 4)
+          : fn === "abs" ? args.length === 1
+          : fn === "round" ? args.length === 1 || args.length === 2
+          : fn === "min" || fn === "max" || fn === "concat" ? args.length > 0
+          : fn === "clamp" ? args.length === 3 : args.length === 2;
+        if (!validCount) throw new SyntaxError(`${fn}() has the wrong number of arguments.`);
+        const types = args.map(known);
+        if (fn === "concat" && types.some((type) => type?.kind === "list" || type?.kind === "object")) {
+          throw new SyntaxError("concat() accepts scalar values only.");
+        }
+        if (fn === "join" && (types[0] !== undefined && types[0].kind !== "list" && types[0].kind !== "null"
+          || types[1] !== undefined && types[1].kind !== "string")) {
+          throw new SyntaxError("join() requires a list and a string separator.");
+        }
+        if (fn === "join" && args[0]?.kind === "array") {
+          const items = args[0].items.map(known).filter((type): type is Known => type !== undefined && type.kind !== "null");
+          if (items.some((type) => type.kind === "list" || type.kind === "object" || type.kind !== items[0]?.kind)) {
+            throw new SyntaxError("join() requires one scalar item type.");
+          }
+        }
+        if (fn === "default" && types[0] !== undefined && types[1] !== undefined &&
+          types[0].kind !== "null" && types[1].kind !== "null" && types[0].kind !== types[1].kind) {
+          throw new SyntaxError("default() requires values of one type.");
+        }
+        if (["abs", "round", "min", "max", "clamp"].includes(fn)) {
+          const typed = types.filter((type): type is Known => type !== undefined);
+          if (typed.some((type) => type.kind !== "number" && !dimensional(type))) {
+            throw new SyntaxError(`${fn}() requires numeric or dimensional values.`);
+          }
+          const first = typed[0];
+          if (first !== undefined && typed.some((type) => type.kind !== first.kind ||
+            dimensional(first) && first.unit !== undefined && type.unit !== undefined && type.unit !== first.unit)) {
+            throw new SyntaxError(`${fn}() requires matching types and written units.`);
+          }
+          if (fn === "round" && args[1] !== undefined && args[1]!.kind === "literal" &&
+            (args[1]!.value === 0 || parseQuantity(String(args[1]!.value))?.value === 0)) {
+            throw new SyntaxError("round() step must be nonzero.");
+          }
+        }
+        return;
+      }
+      case "unary": visit(value.operand); return;
+      case "binary": {
+        visit(value.left);
+        visit(value.right);
+        if (["+", "-", "*", "/", "%"].includes(value.op)) {
+          const left = known(value.left);
+          const right = known(value.right);
+          if (value.op === "/" && dimensional(left) && value.right.kind === "literal" && value.right.value === 0) {
+            throw new SyntaxError("A dimension cannot be divided by zero.");
+          }
+          if (left !== undefined && right !== undefined && arithmetic(value.op, left, right) === undefined) {
+            throw new SyntaxError(`${value.op} has incompatible operand types or written units.`);
+          }
+        }
+        return;
+      }
+      case "conditional": visit(value.test); visit(value.consequent); visit(value.alternate); return;
+      case "member": visit(value.object); return;
+      case "index": visit(value.object); visit(value.index); return;
+      case "array": for (const item of value.items) visit(item); return;
+      case "object": for (const pair of value.pairs) visit(pair.value); return;
+      default: return;
+    }
+  };
+  visit(node);
+}
+
+/** Whether a bound expression may yield an invalid built-in result that must not be written. */
+export function hasBuiltinCall(node: ExpressionNode): boolean {
+  switch (node.kind) {
+    case "call": return true;
+    case "unary": return hasBuiltinCall(node.operand);
+    case "binary": return hasBuiltinCall(node.left) || hasBuiltinCall(node.right);
+    case "conditional": return hasBuiltinCall(node.test) || hasBuiltinCall(node.consequent) || hasBuiltinCall(node.alternate);
+    case "member": return hasBuiltinCall(node.object);
+    case "index": return hasBuiltinCall(node.object) || hasBuiltinCall(node.index);
+    case "array": return node.items.some(hasBuiltinCall);
+    case "object": return node.pairs.some((pair) => hasBuiltinCall(pair.value));
+    default: return false;
+  }
+}
+
 /** Evaluate an expression against a scope. */
 export function evaluate(source: string, scope: Scope): Value {
-  return evalNode(compileExpression(source).ast, scope);
+  const result = evalNode(compileExpression(source).ast, scope);
+  return result === NONCONFORMING ? ABSENT : reveal(result, scope);
 }
 
 /** Evaluate a previously compiled expression without reparsing its source. */
 export function evaluateCompiled(expression: CompiledExpression | ExpressionNode, scope: Scope): Value {
-  return evalNode("ast" in expression ? expression.ast : expression, scope);
+  return reveal(evalNode("ast" in expression ? expression.ast : expression, scope), scope);
 }
 
 /** Escaped-text form: absence and null render as empty text. */

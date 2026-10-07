@@ -137,7 +137,7 @@ that hydration needs.
 
 The runtime now emits explicit component ownership and per-component state-name metadata. A
 marked inline sheet or stylesheet link can contain several components. Hydration restores the
-metadata, reuses the carrier, and does not recompile or inject. Cross-browser regression tests use
+metadata, reuses the carrier, and does not recompile or inject. Cross-browser regression tests consume Node render results in
 fresh documents, bundle two components into one inline sheet or linked sheet, and verify zero
 compilations, one retained carrier, and working state-driven colors. Unmarked CSS cannot establish
 ownership. See [delivery metadata and integration responsibilities](style-scoping.md#delivery-and-hydration).
@@ -159,9 +159,12 @@ Chromium, 16 ms in Firefox, and 13 ms in WebKit, comparable to the baseline's 11
 
 The Vite plugin already extracts CSS into an early head link, but its virtual CSS module used raw
 `definition.css` rather than the generated artifact. A built-page probe showed `:host` did not style
-the root and an inner selector leaked into unrelated page markup. The plugin now serves generated
-scoped CSS. The same browser probe verifies the root background, correct inner color, and unchanged
+the root and an inner selector leaked into unrelated page markup. Current main already serves generated
+scoped CSS; this branch retains a regression assertion. The same browser probe verifies the root background, correct inner color, and unchanged
 outside color. Generated definitions carry empty CSS, so the extracted build does not reinject it.
+
+The Node render result now also returns `styleOwnership`, so extracting or combining the CSS does
+not discard the tag/state records needed to mark its final style or link.
 
 ## Reproduce and inspect
 

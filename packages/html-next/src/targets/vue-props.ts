@@ -1,0 +1,526 @@
+/** Typed prop boundaries shared by Vue output that declares props; other components do not import this. */
+import { CSS_COLOR_KEYWORDS } from "../css-color-keywords.js";
+import { HTML_EMAIL_PATTERN } from "../type-system.js";
+export const VUE_PROPS_PATH = "vue/props.ts";
+export const VUE_PROPS_SPECIFIER = "./props";
+
+export function importsVueProps(source: string): boolean {
+  return new RegExp(`from ['"]${VUE_PROPS_SPECIFIER}['"]`).test(source);
+}
+
+const SOURCE = `
+const CSS_NAMED_COLOR_SET = new Set<string>(${JSON.stringify(CSS_COLOR_KEYWORDS)});
+const HTML_EMAIL_PATTERN = ${HTML_EMAIL_PATTERN.toString()};
+const eventType = typeof Event === "undefined" ? undefined : Object.getOwnPropertyDescriptor(Event.prototype, "type")!.get!;
+const eventBrands = new WeakMap<object, boolean>();
+function nativeEvent(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("type" in value) || eventType === undefined) return false;
+  const known = eventBrands.get(value);
+  if (known !== undefined) return known;
+  let accepted = false;
+  try { eventType.call(value); accepted = true; } catch {}
+  eventBrands.set(value, accepted);
+  return accepted;
+}
+type TypeNode =
+  | { readonly kind: "terminal"; readonly name: string }
+  | { readonly kind: "separated-list"; readonly item: TypeNode; readonly separator: "space" | "comma" }
+  | { readonly kind: "keyword"; readonly value: string }
+  | { readonly kind: "union"; readonly members: readonly TypeNode[] }
+  | { readonly kind: "constrained"; readonly base: TypeNode; readonly values?: readonly (string | number | boolean)[]; readonly min?: number | string; readonly max?: number | string; readonly minLength?: number; readonly maxLength?: number; readonly pattern?: string }
+  | { readonly kind: "list"; readonly item: TypeNode }
+  | { readonly kind: "record"; readonly value: TypeNode }
+  | { readonly kind: "object"; readonly fields: readonly { readonly name: string; readonly type: TypeNode; readonly optional: boolean }[]; readonly open: boolean };
+
+type Parsed = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly issues: readonly string[] };
+
+function issue(path: string, message: string): Parsed {
+  return { ok: false, issues: [path + ": " + message] };
+}
+
+function pathAt(path: string, key: string | number): string {
+  if (typeof key === "number") return path + "[" + key + "]";
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? path + "." + key : path + "[" + JSON.stringify(key) + "]";
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function structured(value: unknown): unknown {
+  return value;
+}
+
+function trusted(value: unknown, name: "trusted-html" | "trusted-script"): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  if ((value as { kind?: unknown }).kind === name && "value" in value) return true;
+  const expected = name === "trusted-html" ? "TrustedHTML" : "TrustedScript";
+  return (value as { constructor?: { name?: string } }).constructor?.name === expected ||
+    Object.prototype.toString.call(value) === "[object " + expected + "]";
+}
+
+function validDate(value: string): boolean {
+  const match = /^([0-9]{4,})-([0-9]{2})-([0-9]{2})$/.exec(value);
+  if (match === null || match[1] === "0000") return false;
+  const year = Number(match[1]);
+  const date = new Date(0);
+  date.setUTCFullYear(year, Number(match[2]) - 1, Number(match[3]));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
+}
+
+function validTime(value: string): boolean {
+  const match = /^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\\.([0-9]{1,3}))?)?$/.exec(value);
+  return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60 && Number(match[3] ?? 0) < 60;
+}
+
+function validFunctionalColor(value: string): boolean {
+  const match = /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\\((.*)\\)$/i.exec(value);
+  if (match === null) return false;
+  const body = match[2]!.trim();
+  const parts = body.replaceAll(",", " ").replaceAll("/", " ").split(/\\s+/);
+  const colorSpace = match[1]!.toLowerCase() === "color";
+  if (colorSpace && !/^(?:srgb|srgb-linear|display-p3|a98-rgb|prophoto-rgb|rec2020|xyz|xyz-d50|xyz-d65)$/.test(parts.shift() ?? "")) return false;
+  if (parts.length < 3 || parts.length > 4) return false;
+  if (parts.length === 4 && !body.includes("/") && !body.includes(",")) return false;
+  return parts.every((part) => part === "none" || /^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:%|deg|rad|grad|turn)?$/.test(part));
+}
+
+function validFormat(value: string, name: string): boolean {
+  switch (name) {
+    case "keyword": return /^[A-Za-z0-9_-]+$/.test(value);
+    case "url": { try { return new URL(value).protocol !== ""; } catch { return false; } }
+    case "email": return HTML_EMAIL_PATTERN.test(value);
+    case "date": return validDate(value);
+    case "month": return /^(?!0000)[0-9]{4,}-(?:0[1-9]|1[0-2])$/.test(value);
+    case "week": {
+      const match = /^([0-9]{4,})-W([0-9]{2})$/.exec(value);
+      if (match === null || match[1] === "0000") return false;
+      const year = Number(match[1]);
+      const week = Number(match[2]);
+      const jan1 = new Date(0);
+      jan1.setUTCFullYear(year, 0, 1);
+      const jan1Day = jan1.getUTCDay();
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      return week >= 1 && (week < 53 || (week === 53 && (jan1Day === 4 || (jan1Day === 3 && leap))));
+    }
+    case "time": return validTime(value);
+    case "datetime-local": {
+      const match = /^([0-9]{4,}-[0-9]{2}-[0-9]{2})[T ](.+)$/.exec(value);
+      return match !== null && validDate(match[1]!) && validTime(match[2]!);
+    }
+    case "datetime": {
+      const match = /^([0-9]{4,}-[0-9]{2}-[0-9]{2})T([0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\\.[0-9]{1,3})?)?)(Z|[+-](?:0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$/.exec(value);
+      return match !== null && validDate(match[1]!) && validTime(match[2]!);
+    }
+    case "color-hex": return /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{1}|[0-9a-fA-F]{3}(?:[0-9a-fA-F]{2})?)?$/.test(value);
+    case "color": return validFormat(value, "color-hex") || CSS_NAMED_COLOR_SET.has(value.toLowerCase()) ||
+      validFunctionalColor(value);
+    case "length": return /^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:px|em|rem|vw|vh|vmin|vmax|ch|ex|cm|mm|in|pt|pc|q)$/.test(value) || value === "0";
+    case "percentage": return /^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)%$/.test(value);
+    case "duration": return /^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:ms|s)$/.test(value);
+    default: return false;
+  }
+}
+
+function typeName(node: TypeNode): string {
+  switch (node.kind) {
+    case "terminal": return node.name;
+    case "separated-list": return "keyword" + (node.separator === "space" ? "+" : "#");
+    case "keyword": return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(node.value) &&
+      !["string", "boolean", "number", "integer", "null", "absent", "trusted-html", "trusted-script", "function", "unknown", "list", "record", "object"].includes(node.value)
+      ? node.value : JSON.stringify(node.value);
+    case "union": return node.members.map(typeName).join(" | ");
+    case "constrained": return typeName(node.base) + (node.values === undefined ? "" : " with values " + node.values.map(String).join(", "));
+    case "list": return "list(" + typeName(node.item) + ")";
+    case "record": return "record(" + typeName(node.value) + ")";
+    case "object": return "object({ " + [...node.fields.map((field) => field.name + (field.optional ? "?" : "") + ": " + typeName(field.type)), ...(node.open ? ["..."] : [])].join(", ") + " })";
+  }
+}
+
+function parse(value: unknown, node: TypeNode, path: string): Parsed {
+  switch (node.kind) {
+    case "terminal": {
+      switch (node.name) {
+        case "string": return typeof value === "string" ? { ok: true, value } : issue(path, "Must be a string.");
+        case "keyword":
+        case "url":
+        case "email":
+        case "date":
+        case "month":
+        case "week":
+        case "time":
+        case "datetime-local":
+        case "datetime":
+        case "color":
+        case "color-hex":
+        case "length":
+        case "percentage":
+        case "duration":
+          return typeof value === "string" && validFormat(value, node.name)
+            ? { ok: true, value } : issue(path, "Must be a valid " + node.name + " value.");
+        case "boolean": return typeof value === "boolean" ? { ok: true, value } : issue(path, "Must be true or false.");
+        case "number":
+        case "integer": {
+          const number = typeof value === "number" ? value : Number.NaN;
+          if (!Number.isFinite(number)) return issue(path, node.name === "integer" ? "Must be an integer." : "Must be a finite number.");
+          if (node.name === "integer" && !Number.isInteger(number)) return issue(path, "Must be an integer.");
+          return { ok: true, value: number };
+        }
+        case "null": return value === null ? { ok: true, value } : issue(path, "Must be null.");
+        case "absent": return value === undefined ? { ok: true, value } : issue(path, "Must be absent.");
+        case "trusted-html":
+        case "trusted-script": return trusted(value, node.name) ? { ok: true, value } :
+          issue(path, "Must be a " + (node.name === "trusted-html" ? "TrustedHTML" : "TrustedScript") + " value.");
+        case "event": return nativeEvent(value) ? { ok: true, value } : issue(path, "Must be a native Event value.");
+        case "function": return typeof value === "function" ? { ok: true, value } : issue(path, "Must be a function supplied through a property.");
+        case "unknown": return { ok: true, value };
+      }
+      return issue(path, "Unknown declared type.");
+    }
+    case "separated-list": {
+      const input = typeof value === "string" ? value.split(node.separator === "space" ? /\\s+/ : /\\s*,\\s*/) : value;
+      return Array.isArray(input) && input.length > 0 && input.every((item) => typeof item === "string" && /^[A-Za-z0-9_-]+$/.test(item))
+        ? { ok: true, value: input } : issue(path, "Must be a nonempty keyword list.");
+    }
+    case "keyword": return value === node.value ? { ok: true, value } : issue(path, "Must be " + JSON.stringify(node.value) + ".");
+    case "union": {
+      for (const member of node.members) {
+        const result = parse(value, member, path);
+        if (result.ok) return result;
+      }
+      return issue(path, "Must match " + typeName(node) + ".");
+    }
+    case "constrained": {
+      const parsed = parse(value, node.base, path);
+      if (!parsed.ok) return parsed;
+      if (node.values !== undefined && !node.values.some((choice) => choice === parsed.value)) {
+        return issue(path, "Must be one of " + node.values.map(String).join(", ") + ".");
+      }
+      const problem = boundProblem(parsed.value, node.base.kind === "terminal" ? node.base.name : "", node);
+      return problem === undefined ? parsed : issue(path, problem);
+    }
+    case "list": {
+      const input = structured(value);
+      if (!Array.isArray(input)) return issue(path, "Must be a list.");
+      const output: unknown[] = [];
+      const issues: string[] = [];
+      input.forEach((item, index) => {
+        const result = parse(item, node.item, pathAt(path, index));
+        if (result.ok) output.push(result.value);
+        else issues.push(...result.issues);
+      });
+      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
+    }
+    case "record": {
+      const input = structured(value);
+      if (!plainObject(input)) return issue(path, "Must be a string-keyed record.");
+      const output: Record<string, unknown> = {};
+      const issues: string[] = [];
+      for (const [key, item] of Object.entries(input)) {
+        const result = parse(item, node.value, pathAt(path, key));
+        if (result.ok) output[key] = result.value;
+        else issues.push(...result.issues);
+      }
+      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
+    }
+    case "object": {
+      const input = structured(value);
+      if (!plainObject(input)) return issue(path, "Must be an object.");
+      const output: Record<string, unknown> = {};
+      const issues: string[] = [];
+      const fields = new Map(node.fields.map((field) => [field.name, field]));
+      for (const field of node.fields) {
+        if (!(field.name in input)) {
+          if (!field.optional) issues.push(pathAt(path, field.name) + ": Required field is absent.");
+          continue;
+        }
+        const result = parse(input[field.name], field.type, pathAt(path, field.name));
+        if (result.ok) output[field.name] = result.value;
+        else issues.push(...result.issues);
+      }
+      for (const [key, item] of Object.entries(input)) {
+        if (fields.has(key)) continue;
+        if (node.open) output[key] = item;
+        else issues.push(pathAt(path, key) + ": Field is not declared by this closed object type.");
+      }
+      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
+    }
+  }
+}
+
+/** Return the actual selected destination, without a validation fallback. */
+export function selectedBindingNode(
+  selector: unknown,
+  options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[],
+): TypeNode | null {
+  if (selector === null || selector === undefined) return null;
+  return options.find((candidate) => candidate.value === selector)?.type ?? null;
+}
+
+export function selectedPropNode(
+  selector: unknown,
+  options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[],
+): TypeNode {
+  return selectedBindingNode(selector, options) ?? { kind: "terminal", name: "null" };
+}
+
+interface Bounds { readonly min?: number | string; readonly max?: number | string; readonly minLength?: number; readonly maxLength?: number; readonly pattern?: string }
+
+function comparable(value: unknown, type: string): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  const date = /^([0-9]{4,})-([0-9]{2})-([0-9]{2})$/.exec(value);
+  const month = /^([0-9]{4,})-([0-9]{2})$/.exec(value);
+  const week = /^([0-9]{4,})-W([0-9]{2})$/.exec(value);
+  const time = /^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\\.([0-9]+))?)?$/.exec(value);
+  switch (type) {
+    case "number": case "integer": return Number.isFinite(Number(value)) ? Number(value) : undefined;
+    case "date": return date === null ? undefined : Number(date[1]) * 372 + Number(date[2]) * 31 + Number(date[3]);
+    case "month": return month === null ? undefined : Number(month[1]) * 12 + Number(month[2]);
+    case "week": return week === null ? undefined : Number(week[1]) * 53 + Number(week[2]);
+    case "time": return time === null ? undefined : Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3] ?? 0) + Number("0." + (time[4] ?? "0"));
+    case "datetime-local": { const parsed = Date.parse(value.replace(" ", "T") + "Z"); return Number.isFinite(parsed) ? parsed : undefined; }
+    case "datetime": { const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : undefined; }
+    default: return undefined;
+  }
+}
+
+function boundProblem(value: unknown, type: string, bounds: Bounds): string | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const actual = comparable(value, type);
+  if (actual !== undefined) {
+    const min = comparable(bounds.min, type);
+    const max = comparable(bounds.max, type);
+    if (min !== undefined && actual < min) return "Value is below its minimum.";
+    if (max !== undefined && actual > max) return "Value is above its maximum.";
+  }
+  if (typeof value === "string") {
+    if (bounds.minLength !== undefined && value.length < bounds.minLength) return "Value is too short.";
+    if (bounds.maxLength !== undefined && value.length > bounds.maxLength) return "Value is too long.";
+    if (bounds.pattern !== undefined) {
+      let expression: RegExp;
+      try { expression = new RegExp("^(?:" + bounds.pattern + ")$", "v"); }
+      catch { expression = new RegExp("^(?:" + bounds.pattern + ")$", "u"); }
+      if (!expression.test(value)) return "Value does not match its pattern.";
+    }
+  }
+  return undefined;
+}
+
+export function checkedProp<T>(value: unknown, type: TypeNode, required: true, name: string, accepted?: Record<string, unknown>, inputAccepted?: Record<string, boolean>, htmlBoolean?: boolean): T;
+export function checkedProp<T>(value: unknown, type: TypeNode, required: false, name: string, accepted?: Record<string, unknown>, inputAccepted?: Record<string, boolean>, htmlBoolean?: boolean): T | null;
+export function checkedProp<T>(value: unknown, type: TypeNode, _required: boolean, name: string, accepted?: Record<string, unknown>, inputAccepted?: Record<string, boolean>, htmlBoolean = true): T | null {
+  if (value === undefined || value === null) {
+    if (inputAccepted !== undefined) inputAccepted[name] = true;
+    if (accepted !== undefined) accepted[name] = null;
+    return null;
+  }
+  // Vue passes a bare boolean attribute as an empty string. HTML reads its presence as true.
+  if (htmlBoolean && value === "" && type.kind === "terminal" && type.name === "boolean") value = true;
+  const result = parse(value, type, "$");
+  if (inputAccepted !== undefined) inputAccepted[name] = result.ok;
+  if (result.ok) {
+    if (accepted !== undefined) accepted[name] = result.value;
+    return result.value as T;
+  }
+  return (accepted?.[name] ?? null) as T | null;
+}
+
+type ValidityReason = "valueMissing" | "typeMismatch" | "patternMismatch" | "tooLong" | "tooShort" |
+  "rangeUnderflow" | "rangeOverflow" | "stepMismatch" | "badInput" | "customError" | "schemaMismatch" | "untrustedValue";
+type ValidityError = { readonly reason: ValidityReason; readonly message: string; readonly path?: string };
+type PropValidity = { readonly valid: boolean; readonly errors: readonly ValidityError[] };
+type ValidatedProp = {
+  readonly type: TypeNode | { readonly kind: "selected"; readonly from: string; readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[] };
+  readonly required: boolean;
+  readonly values?: readonly (string | number | boolean)[];
+  readonly select?: { readonly from: string; readonly options: readonly { readonly value: string | number | boolean; readonly type: TypeNode }[] };
+  readonly min?: number | string;
+  readonly max?: number | string;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
+};
+type PropValidityBinding = {
+  readonly contract: { readonly props: Readonly<Record<string, ValidatedProp>> };
+  readonly values: Readonly<Record<string, unknown>>;
+};
+
+function propValidity(binding: PropValidityBinding): PropValidity {
+  const errors: ValidityError[] = [];
+  for (const [name, prop] of Object.entries(binding.contract.props)) {
+    const selected = prop.select === undefined ? prop.type as TypeNode : selectedPropNode(binding.values[prop.select.from], prop.select.options);
+    const incoming = binding.values[name];
+    const value = incoming === "" && selected.kind === "terminal" && selected.name === "boolean" ? true : incoming;
+    if (value === null || value === undefined || value === "") {
+      if (prop.required) errors.push({ reason: "valueMissing", message: "This field is required.", path: name });
+      continue;
+    }
+    if (selected.kind === "terminal" && selected.name === "null") {
+      errors.push({ reason: "typeMismatch", message: "No type option matches the selector.", path: name });
+      continue;
+    }
+    const result = parse(value, selected, name);
+    if (!result.ok) {
+      const terminal = selected.kind === "terminal" ? selected.name : "";
+      errors.push(...result.issues.map((message) => ({
+        reason: terminal === "email" || terminal === "url" ? "typeMismatch" : "badInput",
+        message,
+        path: name,
+      } as ValidityError)));
+    }
+    if (prop.values !== undefined && !prop.values.some((choice) => choice === value)) {
+      errors.push({ reason: "typeMismatch", message: "Value must be one of " + prop.values.map(String).join(", ") + ".", path: name });
+    }
+    const type = selected.kind === "terminal" ? selected.name : "";
+    const actual = comparable(value, type);
+    const min = comparable(prop.min, type);
+    const max = comparable(prop.max, type);
+    if (actual !== undefined && min !== undefined && actual < min) {
+      errors.push({ reason: "rangeUnderflow", message: "Value must be at least " + prop.min + ".", path: name });
+    }
+    if (actual !== undefined && max !== undefined && actual > max) {
+      errors.push({ reason: "rangeOverflow", message: "Value must be at most " + prop.max + ".", path: name });
+    }
+    if (typeof value === "string") {
+      if (prop.minLength !== undefined && value.length < prop.minLength) errors.push({ reason: "tooShort", message: "Use at least " + prop.minLength + " characters.", path: name });
+      if (prop.maxLength !== undefined && value.length > prop.maxLength) errors.push({ reason: "tooLong", message: "Use at most " + prop.maxLength + " characters.", path: name });
+      if (prop.pattern !== undefined) {
+        let pattern: RegExp | undefined;
+        try { pattern = new RegExp("^(?:" + prop.pattern + ")$", "v"); }
+        catch { try { pattern = new RegExp("^(?:" + prop.pattern + ")$", "u"); } catch { /* invalid patterns are ignored */ } }
+        if (pattern !== undefined && !pattern.test(value)) errors.push({ reason: "patternMismatch", message: "Value does not match the required format.", path: name });
+      }
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export function propValidityState(binding: PropValidityBinding, name: string) {
+  const errors = propValidity(binding).errors.filter((error) => error.path === name);
+  return validityFromErrors(errors);
+}
+
+type ManagedValidity = { current: PropValidityBinding; validity: PropValidity; external: readonly ValidityError[]; interacted: boolean; cleanup: () => void };
+const validityStates = new WeakMap<Element, ManagedValidity>();
+const ariaMirrors = new WeakSet<Element>();
+// Elements given a validity API by vPropValidity. Their setCustomValidity reflects through
+// reflectValidity, so only the native one may be called from it.
+const managedValidityApis = new WeakSet<Element>();
+const REASONS: readonly ValidityReason[] = ["valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow", "rangeOverflow", "stepMismatch", "badInput", "customError", "schemaMismatch", "untrustedValue"];
+function reflectValidity(el: Element, state: ManagedValidity): void {
+  const errors = [...state.validity.errors, ...state.external];
+  const valid = errors.length === 0;
+  if (["button", "fieldset", "input", "object", "output", "select", "textarea"].includes(el.localName) &&
+      !managedValidityApis.has(el) && "setCustomValidity" in el && typeof el.setCustomValidity === "function") {
+    el.setCustomValidity(valid ? "" : errors[0]!.message);
+    return;
+  }
+  el.toggleAttribute("data-valid", valid);
+  el.toggleAttribute("data-invalid", !valid);
+  el.toggleAttribute("data-user-invalid", state.interacted && !valid);
+  if (valid) {
+    if (ariaMirrors.has(el)) {
+      el.removeAttribute("aria-invalid");
+      ariaMirrors.delete(el);
+    }
+  } else if (!el.hasAttribute("aria-invalid") || ariaMirrors.has(el)) {
+    el.setAttribute("aria-invalid", "true");
+    ariaMirrors.add(el);
+  }
+}
+function validityFromErrors(errors: readonly ValidityError[]) {
+  const reasons = new Set(errors.map((error) => error.reason));
+  return Object.freeze({
+    valid: errors.length === 0,
+    ...Object.fromEntries(REASONS.map((reason) => [reason, reasons.has(reason)])),
+    errors,
+  });
+}
+function validityState(state: ManagedValidity) {
+  return validityFromErrors([...state.validity.errors, ...state.external]);
+}
+export const vPropValidity = {
+  mounted(el: Element, binding: { value: PropValidityBinding }): void {
+    const state: ManagedValidity = { current: binding.value, validity: propValidity(binding.value), external: [], interacted: false, cleanup: () => {} };
+    validityStates.set(el, state);
+    if (!("validity" in el)) {
+      managedValidityApis.add(el);
+      const target = el as Element & Record<string, unknown>;
+      Object.defineProperties(target, {
+        validity: { configurable: true, get: () => validityState(state) },
+        validationMessage: { configurable: true, get: () => validityState(state).errors[0]?.message ?? "" },
+        willValidate: { configurable: true, get: () => true },
+        checkValidity: { configurable: true, value: () => { const valid = validityState(state).valid; if (!valid) el.dispatchEvent(new Event("invalid", { cancelable: true })); return valid; } },
+        reportValidity: { configurable: true, value: () => { state.interacted = true; reflectValidity(el, state); return (target.checkValidity as () => boolean)(); } },
+        setCustomValidity: { configurable: true, value: (message: string) => { state.external = message === "" ? [] : [{ reason: "customError", message }]; reflectValidity(el, state); } },
+      });
+    }
+    const interacted = () => { state.interacted = true; reflectValidity(el, state); };
+    el.addEventListener("input", interacted);
+    el.addEventListener("change", interacted);
+    el.addEventListener("blur", interacted, true);
+    state.cleanup = () => {
+      el.removeEventListener("input", interacted);
+      el.removeEventListener("change", interacted);
+      el.removeEventListener("blur", interacted, true);
+    };
+    reflectValidity(el, state);
+  },
+  updated(el: Element, binding: { value: PropValidityBinding }): void {
+    const state = validityStates.get(el);
+    if (state === undefined) return;
+    state.current = binding.value;
+    state.validity = propValidity(state.current);
+    reflectValidity(el, state);
+  },
+  unmounted(el: Element): void {
+    const state = validityStates.get(el);
+    state?.cleanup();
+    validityStates.delete(el);
+  },
+};
+
+/** Framework-neutral lifecycle entry points for a converted component root. */
+export function mountPropValidity(el: Element, value: PropValidityBinding): () => void {
+  vPropValidity.mounted(el, { value });
+  return () => vPropValidity.unmounted(el);
+}
+
+export function updatePropValidity(el: Element, value: PropValidityBinding): void {
+  vPropValidity.updated(el, { value });
+}
+`;
+
+const CONTROLLER_WRITE_SOURCE = `
+/** Controller writes use immediate destination checks, including declared nested paths. */
+export function acceptsControllerWrite(value: unknown, type: TypeNode | undefined, keys: readonly string[]): boolean {
+  if (type === undefined) return true;
+  if (keys.length === 0) {
+    if (value === undefined) return true;
+    if (value === null) return parse(value, type, "$").ok;
+    if (type.kind === "list") return Array.isArray(value);
+    if (type.kind === "object" || type.kind === "record") return typeof value === "object" && !Array.isArray(value);
+    if (type.kind === "union") return type.members.some((member) => acceptsControllerWrite(value, member, keys));
+    if (type.kind === "constrained") return acceptsControllerWrite(value, type.base, keys);
+    return parse(value, type, "$").ok;
+  }
+  if (type.kind === "union") return type.members.some((member) => acceptsControllerWrite(value, member, keys));
+  if (type.kind === "constrained") return acceptsControllerWrite(value, type.base, keys);
+  const key = keys[0]!;
+  if (type.kind === "object" && !type.open && !type.fields.some(field => field.name === key)) return value === undefined;
+  const child = type.kind === "object" ? type.fields.find((field) => field.name === key)?.type
+    : type.kind === "list" ? (/^\\d+$/.test(key) ? type.item : undefined) : type.kind === "record" ? type.value : undefined;
+  return acceptsControllerWrite(value, child, keys.slice(1));
+}
+`;
+
+export function typedPropsModule(version: string): string {
+  return `// Generated by HTML Next ${version}. Do not edit.\n${SOURCE.trim()}\n${CONTROLLER_WRITE_SOURCE}`;
+}
+
+export function vuePropsModule(version: string): string {
+  return typedPropsModule(version);
+}

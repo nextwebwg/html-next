@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType } from "playwright";
 
 import { parseSourceComponent } from "../src/source.js";
+import { parseComponentResource } from "../src/source-graph.js";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -42,6 +43,27 @@ describe.skipIf(!enabled)("source adapters", () => {
   ];
 
   for (const [name, browserType] of engines) {
+    it(`${name} parses all definitions in a resource with the same names as the source parser`, async () => {
+      const source = `<link rel="component" href="./shared.html">
+        <template component="ui-button" status="early" summary="Button."><title $value="missing">Button title</title><meta name="description" content="Button metadata"><button>Save</button></template>
+        <template component="ui-select" status="early" summary="Select."><link rel="canonical" href="/select/"><select><slot></slot></select></template>`;
+      const expected = JSON.parse(JSON.stringify(parseComponentResource(source, "library.html")));
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.addScriptTag({ path: bundlePath });
+        const actual = await page.evaluate((source) => {
+          const api = (window as unknown as { HtmlBrowserSource: {
+            parseBrowserComponentResource(source: string, url: string, document: Document): unknown;
+          } }).HtmlBrowserSource;
+          return api.parseBrowserComponentResource(source, "library.html", document);
+        }, source);
+        assert.deepEqual(actual, expected);
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} serializes the same normalized IR using native element and property introspection`, async () => {
       const fixture = await readFile(fixtureUrl, "utf8");
       const property = `<template component="x-check" status="experimental" summary="Check.">

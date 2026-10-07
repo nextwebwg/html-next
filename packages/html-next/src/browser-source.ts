@@ -1,6 +1,7 @@
 import { fail } from "./diagnostics.js";
+import { isIgnoredResourceMetadata } from "./resource-metadata.js";
 import type { ParsedComponentResource } from "./graph.js";
-import { parseComponentNodes } from "./parser.js";
+import { parseComponentNodes, parseProjectedSlotContent } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
 const platforms = new WeakMap<Document, ReturnType<typeof browserPlatform>>();
@@ -21,6 +22,9 @@ function browserPlatform(root: Document) {
   };
   return {
     isNativeElement,
+    warnInvalidDeclaration(message: string, source: string) {
+      root.defaultView?.console.warn(`${source}: HC013: ${message}`);
+    },
     resolveDomProperty(tagName: string, propertyName: string): string | undefined {
       if (!isNativeElement(tagName)) return undefined;
       const key = `${tagName}:${propertyName}`;
@@ -62,6 +66,20 @@ export function parseBrowserComponent(
   return parseComponentNodes([carrier], source, platform);
 }
 
+export function parseBrowserProjectedSlot(
+  template: HTMLTemplateElement,
+  definition: ComponentDefinition,
+  names: readonly string[],
+): readonly import("./template.js").TemplateNode[] {
+  const document = template.ownerDocument;
+  let platform = platforms.get(document);
+  if (platform === undefined) {
+    platform = browserPlatform(document);
+    platforms.set(document, platform);
+  }
+  return parseProjectedSlotContent(template, definition, names, document.URL, platform);
+}
+
 /** Parses a fetched component resource with the browser's inert HTML fragment parser. */
 export function parseBrowserComponentResource(
   sourceText: string,
@@ -70,30 +88,29 @@ export function parseBrowserComponentResource(
 ): ParsedComponentResource {
   const container = root.createElement("template");
   container.innerHTML = sourceText;
-  let carrier: HTMLTemplateElement | undefined;
+  const carriers: HTMLTemplateElement[] = [];
   for (const node of container.content.childNodes) {
     if (
       node.nodeType === 1 && (node as Element).localName === "template" &&
       (node as Element).hasAttribute("component")
     ) {
-      if (carrier !== undefined) {
-        fail("HS001", "A component resource must contain exactly one <template component>.", source);
-      }
-      carrier = node as HTMLTemplateElement;
+      carriers.push(node as HTMLTemplateElement);
     }
   }
-  if (carrier === undefined) {
-    fail("HS001", "A component resource must contain exactly one <template component>.", source);
+  if (carriers.length === 0) {
+    fail("HS001", "A component resource requires at least one <template component>.", source);
   }
+  const carrierSet = new Set<Node>(carriers);
   const dependencies: string[] = [];
   for (const node of container.content.childNodes) {
-    if (node === carrier || node.nodeType === 8 ||
+    if (carrierSet.has(node) || node.nodeType === 8 ||
       (node.nodeType === 3 && (node.nodeValue ?? "").trim() === "")) continue;
+    if (node.nodeType === 1 && isIgnoredResourceMetadata((node as Element).localName, Array.from((node as Element).attributes))) continue;
     if (
       node.nodeType !== 1 || (node as Element).localName !== "link" ||
       (node as Element).getAttribute("rel") !== "component"
     ) {
-      fail("HT009", "A component resource may contain only dependency links and one inert carrier.", source);
+      fail("HT009", "A component resource may contain only dependency links, inert component carriers, and non-policy-changing metadata.", source);
     }
     const href = (node as Element).getAttribute("href");
     if (href === null || href.trim() === "") {
@@ -101,8 +118,10 @@ export function parseBrowserComponentResource(
     }
     dependencies.push(href);
   }
-  return {
-    definition: parseBrowserComponent(carrier, source),
-    dependencies,
-  };
+  const definitions = Object.freeze(carriers.map((carrier) => parseBrowserComponent(carrier, source)));
+  return Object.freeze({
+    definition: definitions[0]!,
+    definitions,
+    dependencies: Object.freeze(dependencies),
+  });
 }

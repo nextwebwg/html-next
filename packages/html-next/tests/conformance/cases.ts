@@ -19,6 +19,7 @@
 export interface SuccessExpect {
   readonly probe: string;
   readonly result: unknown;
+  readonly after?: readonly { readonly action: string; readonly result: unknown }[];
 }
 
 export interface DiagnosticExpect {
@@ -59,11 +60,92 @@ function scene(parts: {
 
 const successes: ConformanceCase[] = [
   {
+    name: "HTML parser recovery keeps the first duplicate attribute",
+    source: scene({
+      root: `<article class="first" class="second">Ready</article>`,
+      use: `<x-t id="recovered"></x-t>`,
+    }),
+    expect: {
+      probe: `const e = q('#recovered'); return { tag: e.localName, className: e.getAttribute('class'), text: e.textContent };`,
+      result: { tag: "article", className: "first", text: "Ready" },
+    },
+  },
+  {
+    name: "preserves SVG namespaces and camelCase attributes inside a native root",
+    source: scene({
+      tag: "icon-close",
+      defs: `<state name="box" value="0 0 24 24"></state>`,
+      root: `<button type="button"><svg from:viewBox="box" width="24" height="24" fill="none" stroke="currentColor">
+        <path d="M6 6l12 12M18 6 6 18"></path><linearGradient id="g" from:gradientUnits="'userSpaceOnUse'"></linearGradient>
+        <foreignObject width="10" height="10"><span>html</span></foreignObject></svg></button>`,
+      use: `<icon-close id="icon"></icon-close>`,
+    }),
+    expect: {
+      probe: `const svg = q('#icon svg'); return {
+        root: q('#icon').localName,
+        svgNamespace: svg.namespaceURI,
+        viewBox: svg.getAttribute('viewBox'),
+        pathNamespace: svg.querySelector('path').namespaceURI,
+        gradientNamespace: svg.querySelector('linearGradient').namespaceURI,
+        gradientUnits: svg.querySelector('linearGradient').getAttribute('gradientUnits'),
+        foreignChildNamespace: svg.querySelector('foreignObject > span').namespaceURI,
+      };`,
+      result: {
+        root: "button",
+        svgNamespace: "http://www.w3.org/2000/svg",
+        viewBox: "0 0 24 24",
+        pathNamespace: "http://www.w3.org/2000/svg",
+        gradientNamespace: "http://www.w3.org/2000/svg",
+        gradientUnits: "userSpaceOnUse",
+        foreignChildNamespace: "http://www.w3.org/1999/xhtml",
+      },
+    },
+  },
+  {
+    name: "keeps a single native root when $with scopes the root",
+    source: scene({
+      tag: "x-root-with",
+      defs: `<state name="label" value="Ada"></state><handler name="rename"><set name="label" expr:value="'Bea'"></set></handler>`,
+      root: `<section $with="label as display" from:data-label="display"><strong $value="display"></strong><button type="button" on:click="rename">Rename</button></section>`,
+      use: `<x-root-with id="person"></x-root-with>`,
+    }),
+    expect: {
+      probe: `return snapshot(q('#person'));`,
+      result: {
+        tag: "section",
+        attributes: [
+          ["data-component", "x-root-with"],
+          ["data-label", "Ada"],
+          ["id", "person"],
+        ],
+        children: [
+          { tag: "strong", attributes: [], children: [{ text: "Ada" }] },
+          { tag: "button", attributes: [["type", "button"]], children: [{ text: "Rename" }] },
+        ],
+      },
+      after: [{
+        action: `document.querySelector('#person button').click();`,
+        result: {
+          tag: "section",
+          attributes: [
+            ["data-component", "x-root-with"],
+            ["data-label", "Bea"],
+            ["id", "person"],
+          ],
+          children: [
+            { tag: "strong", attributes: [], children: [{ text: "Bea" }] },
+            { tag: "button", attributes: [["type", "button"]], children: [{ text: "Rename" }] },
+          ],
+        },
+      }],
+    },
+  },
+  {
     name: "lowers to native root with prop :attr, passthrough attrs, and default slot",
     source: scene({
       tag: "x-btn",
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button type="button" :aria-label="label"><slot></slot></button>`,
+      root: `<button type="button" from:aria-label="label"><slot></slot></button>`,
       use: `<x-btn id="b" class="cta" label="Save"><strong>now</strong></x-btn>`,
     }),
     expect: {
@@ -87,7 +169,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-pre",
       defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
-      root: `<button type="button" role="button" class="base" style="color: red" :aria-label="label"></button>`,
+      root: `<button type="button" role="button" class="base" style="color: red" from:aria-label="label"></button>`,
       use: `<x-pre id="p" type="submit" class="cta" style="margin: 0" aria-label="Ignored"></x-pre>`,
     }),
     expect: {
@@ -100,7 +182,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       tag: "x-aria",
       defs: `<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop><prop name="edit" type="boolean" default="false">Edit.</prop>`,
-      root: `<button :aria-expanded="open" :hidden="gone" :contenteditable="edit"></button>`,
+      root: `<button from:aria-expanded="open" from:hidden="gone" from:contenteditable="edit"></button>`,
       use: `<x-aria id="closed"></x-aria><x-aria id="open" open gone edit></x-aria>`,
     }),
     expect: {
@@ -112,9 +194,9 @@ const successes: ConformanceCase[] = [
     name: "styles by camel-case props and state with :host-state()",
     source: scene({
       tag: "x-camel-state",
-      defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state name="toneName" :value="'warm'"></state>`,
+      defs: `<prop name="isWide" type="boolean" default="true">Wide.</prop><state type="string" name="toneName" value="warm"></state>`,
       root: `<div></div>`,
-      style: `:host-state([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
+      style: `:host([isWide]) { width: 123px; } :host-state([toneName="warm"]) { height: 45px; }`,
       use: `<x-camel-state id="c"></x-camel-state>`,
     }),
     expect: {
@@ -128,7 +210,7 @@ const successes: ConformanceCase[] = [
       tag: "x-rail",
       defs: `<prop name="wide" type="boolean" default="false">Wide.</prop>`,
       root: `<div><slot></slot></div>`,
-      style: `:host > :slotted(*) { margin-left: 7px; } :host-state([wide]) > :slotted(p) { width: 55px; }`,
+      style: `:host > :slotted(*) { margin-left: 7px; } :host([wide]) > :slotted(p) { width: 55px; }`,
       use: `<x-rail wide><p id="child"><span id="grandchild">A</span></p></x-rail>`,
     }),
     expect: {
@@ -140,7 +222,7 @@ const successes: ConformanceCase[] = [
     name: "applies a prop default when the invocation omits the prop",
     source: scene({
       defs: `<prop name="label" type="string" default="Hi">Label.</prop>`,
-      root: `<button :data-label="label"></button>`,
+      root: `<button from:data-label="label"></button>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: { probe: `return q('#b').getAttribute('data-label');`, result: "Hi" },
@@ -151,9 +233,9 @@ const successes: ConformanceCase[] = [
       defs:
         `<prop name="n" type="number" default="0">Number.</prop>` +
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>` +
-        `<prop name="kind" type="a | b" default="a">Enum.</prop>` +
+        `<prop name="kind" type="keyword" values="a, b" default="a">Enum.</prop>` +
         `<prop name="s" type="string" default="">String.</prop>`,
-      root: `<div :data-sum="n + 1" :data-flag="flag" :data-kind="kind" :data-s="s"></div>`,
+      root: `<div from:data-sum="n + 1" from:data-flag="flag" from:data-kind="kind" from:data-s="s"></div>`,
       use: `<x-t id="b" n="5" flag kind="b" s="hey"></x-t>`,
     }),
     expect: {
@@ -170,7 +252,7 @@ const successes: ConformanceCase[] = [
       defs:
         `<prop name="missing" type="string">Missing.</prop>` +
         `<prop name="flag" type="boolean" default="false">Boolean.</prop>`,
-      root: `<div :data-missing="missing" :data-off="flag" :data-on="not flag" :data-num="3" :class="['a', 'b']"></div>`,
+      root: `<div from:data-missing="missing" from:data-off="flag" from:data-on="not flag" from:data-num="3" from:class="['a', 'b']"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -201,21 +283,21 @@ const successes: ConformanceCase[] = [
       root:
         `<div><output bind:value="v"></output>` +
         `<button on:click="foo" $value="v"></button>` +
-        `<span on:connect="c" on:disconnect="d"></span></div>`,
+        `<span on:mouseover="c" on:mouseout="d"></span></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
         `const r = q('#b'); const o = r.querySelector('output'), btn = r.querySelector('button'), sp = r.querySelector('span');` +
         `return { bound: o.getAttribute('value'), btnText: btn.textContent, ` +
-        `btnHasOn: btn.hasAttribute('on:click'), spanHasConnect: sp.hasAttribute('on:connect'), ` +
-        `spanHasDisconnect: sp.hasAttribute('on:disconnect') };`,
+        `btnHasOn: btn.hasAttribute('on:click'), spanHasMouseover: sp.hasAttribute('on:mouseover'), ` +
+        `spanHasMouseout: sp.hasAttribute('on:mouseout') };`,
       result: {
         bound: "x",
         btnText: "x",
         btnHasOn: false,
-        spanHasConnect: false,
-        spanHasDisconnect: false,
+        spanHasMouseover: false,
+        spanHasMouseout: false,
       },
     },
   },
@@ -258,15 +340,41 @@ const successes: ConformanceCase[] = [
         `return { hasBold: e.querySelector('b') !== null, scripts: e.querySelectorAll('script').length, ` +
         `imgOnerror: img ? img.hasAttribute('onerror') : null, aHref: a ? a.hasAttribute('href') : null, ` +
         `xflag: window.__x || 'unset' };`,
-      result: { hasBold: true, scripts: 0, imgOnerror: false, aHref: false, xflag: "unset" },
+      result: { hasBold: true, scripts: 0, imgOnerror: null, aHref: false, xflag: "unset" },
     },
   },
   {
-    name: "value semantics: typed equality, numeric-only arithmetic, boolean and/or",
+    name: "invalid $html expressions retain the last sanitized content",
     source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<handler name="invalidate"><set name="width" value="1rem"></set></handler>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="invalidate">Invalidate</button>` +
+        `<button type="button" on:click="restore">Restore</button>` +
+        `<p class="element" $html="concat('&lt;b&gt;', min(width, 5px), '&lt;/b&gt;')"></p>` +
+        `<span class="template"><template $html="concat('&lt;i&gt;', min(width, 5px), '&lt;/i&gt;')"></template></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { element: r.querySelector('.element b')?.textContent ?? null, ` +
+        `template: r.querySelector('.template i')?.textContent ?? null };`,
+      result: { element: "5px", template: "5px" },
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: { element: "5px", template: "5px" } },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: { element: "2px", template: "2px" } },
+      ],
+    },
+  },
+  {
+    name: "value semantics: typed equality, invalid runtime arithmetic, boolean and/or",
+    source: scene({
+      defs: `<state name="textNumber" type="string" value="1"></state>`,
       root:
         `<div><i class="eq" $value="1 = '1'"></i>` +
-        `<i class="arith" $value="'1' + 1"></i>` +
+        `<i class="arith" $value="$textNumber + 1"></i>` +
         `<i class="and" $value="'a' and 0"></i>` +
         `<i class="or" $value="0 or 'x'"></i></div>`,
       use: `<x-t id="b"></x-t>`,
@@ -277,6 +385,36 @@ const successes: ConformanceCase[] = [
         `arith: r.querySelector('.arith').textContent, and: r.querySelector('.and').textContent, ` +
         `or: r.querySelector('.or').textContent };`,
       result: { eq: "false", arith: "", and: "false", or: "true" },
+    },
+  },
+  {
+    name: "dimensional arithmetic scales numeric parts and preserves written units",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<state name="factor" type="number" value="2"></state>` +
+        `<state name="flag" type="boolean" value="true"></state>` +
+        `<computed name="half" from="$width / $factor"></computed>` +
+        `<computed name="padded" from="$width + 2px"></computed>` +
+        `<computed name="chosen" from="($flag ? 1px : 2px) * 2"></computed>` +
+        `<handler name="scale"><set name="factor" value="4"></set><set name="flag" value="false"></set></handler>` +
+        `<handler name="changeUnit"><set name="width" value="8rem"></set></handler>` +
+        `<handler name="restoreUnit"><set name="width" value="12px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="scale">Scale</button>` +
+        `<button type="button" on:click="changeUnit">Change unit</button>` +
+        `<button type="button" on:click="restoreUnit">Restore unit</button>` +
+        `<output $value="concat(round($half), '/', $factor * $width, '/', $padded, '/', $chosen)"></output></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe: `return q('#b output').textContent;`,
+      result: "4px/16px/10px/2px",
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: "2px/32px/10px/4px" },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: "2rem/32rem/10px/4px" },
+        { action: `document.querySelectorAll('#b button')[2].click();`, result: "3px/48px/14px/4px" },
+      ],
     },
   },
   {
@@ -297,10 +435,67 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "invalid structural expressions keep the last rendered region until a valid update",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="8px"></state>` +
+        `<state name="clear" type="boolean" value="false"></state>` +
+        `<handler name="invalidate"><set name="width" value="1rem"></set></handler>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>` +
+        `<handler name="empty"><set name="clear" value="true"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="invalidate">Invalidate</button>` +
+        `<button type="button" on:click="restore">Restore</button>` +
+        `<button type="button" on:click="empty">Empty</button>` +
+        `<i class="conditional" $if="clear ? [] : [min(width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
+        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of (clear ? [] : [min(width, 5px)])" $value="item"></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { conditional: r.querySelector('.conditional')?.textContent ?? null, ` +
+        `alias: r.querySelector('.alias')?.textContent ?? null, match: r.querySelector('b')?.textContent ?? null, ` +
+        `rows: Array.from(r.querySelectorAll('.row'), (row) => row.textContent) };`,
+      result: { conditional: "shown", alias: "5px", match: "five", rows: ["5px"] },
+      after: [
+        { action: `document.querySelectorAll('#b button')[0].click();`, result: { conditional: "shown", alias: "5px", match: "five", rows: ["5px"] } },
+        { action: `document.querySelectorAll('#b button')[1].click();`, result: { conditional: "shown", alias: "2px", match: "other", rows: ["2px"] } },
+        { action: `document.querySelectorAll('#b button')[2].click();`, result: { conditional: null, alias: "2px", match: "other", rows: [] } },
+      ],
+    },
+  },
+  {
+    name: "initially invalid structural expressions render nothing until a valid update",
+    source: scene({
+      defs:
+        `<state name="width" type="length" value="1rem"></state>` +
+        `<handler name="restore"><set name="width" value="2px"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="restore">Restore</button>` +
+        `<i class="conditional" $if="[min(width, 5px)]">shown</i>` +
+        `<u class="alias" $with="min(width, 5px) as chosen" $value="chosen"></u>` +
+        `<template $match="min(width, 5px) as picked"><b $when="picked = '5px'">five</b><b $else>other</b></template>` +
+        `<span class="row" $each="item of [min(width, 5px)]" $value="item"></span></div>`,
+      use: `<x-t id="b"></x-t>`,
+    }),
+    expect: {
+      probe:
+        `const r = q('#b'); return { conditional: r.querySelector('.conditional')?.textContent ?? null, ` +
+        `alias: r.querySelector('.alias')?.textContent ?? null, match: r.querySelector('b')?.textContent ?? null, ` +
+        `rows: Array.from(r.querySelectorAll('.row'), (row) => row.textContent) };`,
+      result: { conditional: null, alias: null, match: null, rows: [] },
+      after: [
+        { action: `document.querySelector('#b button').click();`, result: { conditional: "shown", alias: "2px", match: "other", rows: ["2px"] } },
+      ],
+    },
+  },
+  {
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
-      defs: `<state name="obj" :value="{ a: 1 }"></state>`,
-      root: `<div :data-x="obj.b.c" $value="obj.missing"></div>`,
+      defs: `<state type="object({ a: number })" name="obj" value="{ a: 1 }"></state>`,
+      root: `<div from:data-x="obj.b.c" $value="obj.missing"></div>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -313,7 +508,7 @@ const successes: ConformanceCase[] = [
     source: scene({
       root:
         `<ul><li $each="n, i of [3, 1, 2, 5]" $sort="n" $limit="3" ` +
-        `:data-i="i" :data-last="loop.last" :data-count="loop.count" $value="n"></li></ul>`,
+        ` from:data-i="i" from:data-last="loop.last" from:data-count="loop.count" $value="n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -330,7 +525,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$each $where filters and reindexes the loop",
     source: scene({
-      root: `<ul><li $each="n, i of [10, 20, 30]" $where="n > 10" :data-i="i" $value="n"></li></ul>`,
+      root: `<ul><li $each="n, i of [10, 20, 30]" $where="n > 10" from:data-i="i" $value="n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
@@ -355,7 +550,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$match/$when/$else renders only the winning arm",
     source: scene({
-      defs: `<prop name="tier" type="free | pro" default="free">Tier.</prop>`,
+      defs: `<prop name="tier" type="keyword" values="free, pro" default="free">Tier.</prop>`,
       root:
         `<div><template $match="tier as t">` +
         `<span class="t" $when="t = 'pro'">Pro</span>` +
@@ -370,7 +565,7 @@ const successes: ConformanceCase[] = [
   {
     name: "$match selects a row inside <table><tbody>, falling back to $else",
     source: scene({
-      defs: `<prop name="status" type="ok | bad" default="ok">Status.</prop>`,
+      defs: `<prop name="status" type="keyword" values="ok, bad" default="ok">Status.</prop>`,
       root:
         `<table><tbody><template $match="status as s">` +
         `<tr class="r" $when="s = 'ok'"><td>OK</td></tr>` +
@@ -404,15 +599,14 @@ const successes: ConformanceCase[] = [
     expect: { probe: `return q('#b .who').textContent;`, result: "Ada" },
   },
   {
-    name: "reactive declarations seed once: state reads a prop, computed evaluates, data is pending",
+    name: "reactive declarations seed once: state initializes, computed evaluates, data is pending",
     source: scene({
       defs:
-        `<prop name="start" type="number" default="3">Start.</prop>` +
-        `<state name="count" :value="start"></state>` +
+        `<state name="count" type="number" value="5"></state>` +
         `<computed name="doubled" from="count * 2"></computed>` +
         `<data name="feed"></data>`,
-      root: `<div :data-count="count" :data-doubled="doubled"><i $value="feed.pending"></i></div>`,
-      use: `<x-t id="b" start="5"></x-t>`,
+      root: `<div from:data-count="count" from:data-doubled="doubled"><i $value="feed.pending"></i></div>`,
+      use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
@@ -444,13 +638,35 @@ const successes: ConformanceCase[] = [
 
 const diagnostics: ConformanceCase[] = [
   {
-    name: "HC020: a required prop is not provided",
+    name: "HC003: component summary cannot be empty",
+    source: `<template component="x-t" status="early" summary=""><button></button></template><x-t></x-t>`,
+    expect: { code: "HC003" },
+  },
+  {
+    name: "HP001: property bindings require a native property",
+    source: scene({ root: `<button .notRealProperty="true"></button>`, use: `<x-t></x-t>` }),
+    expect: { code: "HP001" },
+  },
+  {
+    name: "HT005: two-way bindings require declared state",
     source: scene({
-      defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<button :data-l="label"></button>`,
+      defs: `<prop name="label" type="string" default="">Label.</prop>`,
+      root: `<input bind:value="label">`,
       use: `<x-t></x-t>`,
     }),
-    expect: { code: "HC020" },
+    expect: { code: "HT005" },
+  },
+  {
+    name: "an absent required prop lowers with valueMissing validity",
+    source: scene({
+      defs: `<prop name="label" type="string" required>Label.</prop>`,
+      root: `<div from:data-l="label"></div>`,
+      use: `<x-t></x-t>`,
+    }),
+    expect: {
+      probe: `const el = q('div'); return { missing: el.validity.valueMissing, valid: el.validity.valid };`,
+      result: { missing: true, valid: false },
+    },
   },
   {
     name: "HR001: two definitions declare the same tag",
@@ -463,8 +679,8 @@ const diagnostics: ConformanceCase[] = [
   {
     name: "HC020: a name collides in the flat component namespace (prop and state)",
     source: scene({
-      defs: `<prop name="count" type="number" default="0">Count.</prop><state name="count" :value="1"></state>`,
-      root: `<div :data-c="count"></div>`,
+      defs: `<prop name="count" type="number" default="0">Count.</prop><state type="number" name="count" value="1"></state>`,
+      root: `<div from:data-c="count"></div>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HC020" },
@@ -479,9 +695,24 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HC011" },
   },
   {
+    name: "HY002: structured state cannot be tested by :host-state()",
+    source: scene({
+      defs: `<state name="items" type="list(string)" value="[]"></state>`,
+      root: `<div></div>`,
+      style: `:host-state([items]) { color: red; }`,
+      use: `<x-t></x-t>`,
+    }),
+    expect: { code: "HY002" },
+  },
+  {
+    name: "HT021: a guarded root cannot guarantee one element",
+    source: scene({ root: `<button $if="false"></button>`, use: `<x-t></x-t>` }),
+    expect: { code: "HT021" },
+  },
+  {
     name: "HT018: a $match child is neither a $when nor $else arm",
     source: scene({
-      defs: `<prop name="s" type="a | b" default="a">S.</prop>`,
+      defs: `<prop name="s" type="keyword" values="a, b" default="a">S.</prop>`,
       root: `<div $match="s as t"><span $when="t = 'a'">A</span><div>oops</div></div>`,
       use: `<x-t></x-t>`,
     }),
@@ -499,7 +730,7 @@ const diagnostics: ConformanceCase[] = [
     name: "HT007: a :srcdoc binding into a raw content sink",
     source: scene({
       defs: `<prop name="h" type="string" default="">H.</prop>`,
-      root: `<iframe :srcdoc="h"></iframe>`,
+      root: `<iframe from:srcdoc="h"></iframe>`,
       use: `<x-t></x-t>`,
     }),
     expect: { code: "HT007" },
@@ -521,7 +752,7 @@ const diagnostics: ConformanceCase[] = [
   },
   {
     name: "HT013: a malformed expression",
-    source: scene({ root: `<div :data-x="1 +"></div>`, use: `<x-t></x-t>` }),
+    source: scene({ root: `<div from:data-x="1 +"></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT013" },
   },
   {
@@ -562,13 +793,16 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HS002" },
   },
   {
-    name: "HR002: a non-finite number prop invocation value",
+    name: "an unparseable number prop renders its default and reports badInput",
     source: scene({
       defs: `<prop name="n" type="number" default="0">N.</prop>`,
-      root: `<div :data-n="n"></div>`,
+      root: `<div from:data-n="n"></div>`,
       use: `<x-t n="abc"></x-t>`,
     }),
-    expect: { code: "HR002" },
+    expect: {
+      probe: `const el = q('div'); return { value: el.getAttribute('data-n'), badInput: el.validity.badInput };`,
+      result: { value: "0", badInput: true },
+    },
   },
   {
     name: "HT003: an undeclared name in an expression",

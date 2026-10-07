@@ -3,7 +3,7 @@ import { describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import type { FetchedComponent } from "../src/graph.js";
-import { buildComponentGraph } from "../src/source-graph.js";
+import { buildComponentGraph, parseComponentResource } from "../src/source-graph.js";
 import { ResourceResolver } from "../src/resolve.js";
 
 const root = "https://cdn.example/ui/1/";
@@ -36,6 +36,67 @@ async function expectDiagnostic(code: string, run: () => Promise<unknown>): Prom
 }
 
 describe("component graph", () => {
+  it("ignores resource metadata with or without head wrappers while retaining component edges", async () => {
+    const metadata = '<meta name="htmlkit:layout" content="admin">' +
+      '<meta name="description" content="Imported description" from:content="missing">' +
+      '<meta property="og:title" content="Imported social title">' +
+      '<title $value="missing">Imported title</title>' +
+      '<link rel="stylesheet" href="./ignored.css">' +
+      '<link rel="canonical" href="https://other.example/">';
+    for (const prefix of [metadata, `<head>${metadata}</head>`]) {
+      const fixtures = fetcher({
+        [`${root}app.html`]: prefix + component("x-app", '<link rel="component" href="./child.html">'),
+        [`${root}child.html`]: component("x-child"),
+      });
+      const graph = await buildComponentGraph(["@ui/app.html"], {
+        resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+      });
+      assert.deepEqual([...graph.tags.keys()].sort(), ["x-app", "x-child"]);
+      assert.deepEqual([...fixtures.counts.keys()].sort(), [`${root}app.html`, `${root}child.html`]);
+      const parsed = parseComponentResource(prefix + component("x-app"), "page.html");
+      assert.equal(parsed.definitions.length, 1);
+      assert.deepEqual(parsed.dependencies, []);
+      assert.deepEqual(parsed.definition.contract, parseComponentResource(component("x-app"), "page.html").definition.contract);
+    }
+  });
+
+  it("retains the singular parser result as an alias for the first definition", () => {
+    const parsed = parseComponentResource(component("ui-button") + component("ui-dialog"), "library.html");
+    assert.equal(parsed.definition, parsed.definitions[0]);
+    assert.deepEqual(parsed.definitions.map((definition) => definition.contract.tag), ["ui-button", "ui-dialog"]);
+  });
+
+  it("loads every named component in a resource once and connects sibling definitions", async () => {
+    const library = `${root}library.html`;
+    const fixtures = fetcher({
+      [library]: component("ui-button", `<link rel="component" href="./shared.html">`, "./button.js") +
+        component("ui-dialog", "", "./dialog.js"),
+      [`${root}shared.html`]: component("ui-icon", `<link rel="component" href="./library.html">`),
+    });
+    const graph = await buildComponentGraph(["@ui/library.html", "@ui/shared.html"], {
+      resolver: resolver(), fetchComponent: fixtures.fetchComponent,
+    });
+    assert.deepEqual([...graph.nodes.values()].map((node) => node.definition.contract.name).sort(), ["UiButton", "UiDialog", "UiIcon"]);
+    assert.equal(fixtures.counts.get(library), 1);
+    const button = graph.nodes.get(graph.tags.get("ui-button")!)!;
+    const dialog = graph.nodes.get(graph.tags.get("ui-dialog")!)!;
+    assert.notEqual(button.id, dialog.id);
+    assert.equal(button.url, library);
+    assert.equal(dialog.url, library);
+    assert.equal(button.controller?.url, `${root}button.js`);
+    assert.equal(dialog.controller?.url, `${root}dialog.js`);
+    assert.ok(button.dependencies.includes(graph.tags.get("ui-icon")!));
+    assert.ok(graph.roots.includes(button.id));
+    assert.ok(graph.roots.includes(dialog.id));
+  });
+
+  it("rejects duplicate component names within the same resource", async () => {
+    await expectDiagnostic("HL007", () => buildComponentGraph(["@ui/library.html"], {
+      resolver: resolver(),
+      fetchComponent: fetcher({ [`${root}library.html`]: component("ui-button") + component("ui-button") }).fetchComponent,
+    }));
+  });
+
   it("loads a mapped transitive graph, deduplicates a diamond, and records controller entries", async () => {
     const shared = `${root}shared.html`;
     const fixtures = fetcher({
@@ -149,7 +210,7 @@ describe("component graph", () => {
     }));
   });
 
-  it("rejects tag collisions and active or policy-changing resource markup", async () => {
+  it("rejects tag collisions and unsupported, active, or policy-changing resource markup", async () => {
     await expectDiagnostic("HL007", () => buildComponentGraph(["@ui/a.html", "@ui/b.html"], {
       resolver: resolver(),
       fetchComponent: fetcher({
@@ -160,8 +221,18 @@ describe("component graph", () => {
 
     for (const active of [
       `<script type="importmap">{}</script>`,
+      `<script>bad()</script>`,
+      `<script type="application/ld+json">{}</script>`,
+      `<style>body { display: none }</style>`,
+      `<div>Unrelated body content</div>`,
+      `<template><div>Unrelated template</div></template>`,
+      `Unrelated text`,
       `<base href="https://evil.example/">`,
       `<meta http-equiv="content-security-policy" content="default-src *">`,
+      `<meta http-equiv="refresh" content="0;url=https://evil.example/">`,
+      `<meta name="description" content="Ignored" onclick="bad()">`,
+      `<link rel="import" href="https://evil.example/import.html">`,
+      `<link rel="stylesheet" href="./ignored.css" onload="bad()">`,
     ]) {
       await expectDiagnostic("HT009", () => buildComponentGraph(["@ui/app.html"], {
         resolver: resolver(),

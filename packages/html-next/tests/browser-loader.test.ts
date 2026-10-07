@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { chromium, type Browser, type Route } from "playwright";
+import { chromium, firefox, webkit, type Browser, type Route } from "playwright";
 
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const browserLoaderUrl = new URL("../src/browser-loader.ts", import.meta.url);
@@ -15,6 +15,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
   let browser: Browser;
   let bundlePath = "";
   let bundleInputs: readonly string[] = [];
+  let distributablePath = "";
   let temporaryDirectory = "";
 
   beforeAll(async () => {
@@ -31,6 +32,15 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       target: ["es2022"],
     });
     bundleInputs = Object.keys(result.metafile.inputs);
+    distributablePath = join(temporaryDirectory, "browser.js");
+    await build({
+      entryPoints: [browserDistributableUrl.pathname],
+      bundle: true,
+      format: "esm",
+      outfile: distributablePath,
+      platform: "browser",
+      target: ["es2022"],
+    });
     browser = await chromium.launch({ headless: true });
   });
 
@@ -44,17 +54,99 @@ describe.skipIf(!enabled)("browser graph loader", () => {
     assert.equal(bundleInputs.some((path) => path.includes("/generated/dom-properties")), false);
   });
 
+  for (const engine of [chromium, firefox, webkit]) {
+    it(`${engine.name()} loads component resources without promoting their metadata into the document`, async () => {
+      const metadataBrowser = await engine.launch({ headless: true });
+      try {
+        const page = await metadataBrowser.newPage();
+        const requests: string[] = [];
+        await page.route("https://metadata.example/**", async (route) => {
+          const path = new URL(route.request().url()).pathname;
+          requests.push(path);
+          const body = path === "/page.html" ?
+            '<meta name="htmlkit:layout" content="admin"><head>' +
+            '<title $value="missing">Imported title</title>' +
+            '<meta name="description" content="Imported description" from:content="missing">' +
+            '<meta property="og:title" content="Imported social title">' +
+            '<link rel="stylesheet" href="./ignored.css">' +
+            '<link rel="canonical" href="https://other.example/">' +
+            '<link rel="preload" as="script" href="./ignored.js">' +
+            '<link rel="component" href="./child.html"></head>' +
+            '<template component="products-page"><title $value="missing">Carrier title</title>' +
+            '<meta name="htmlkit:layout" content="admin"><meta name="description" from:content="missing">' +
+            '<link rel="stylesheet" href="./carrier.css"><link rel="preload" as="script" href="./carrier.js">' +
+            '<section>Products <product-detail></product-detail></section></template>' :
+            path === "/child.html" ?
+              '<template component="product-detail"><title>Helper title</title><meta property="og:title" content="Helper social title"><b>detail</b></template>' :
+              '<!doctype html><html><head><title>Host title</title>' +
+              '<meta name="description" content="Host description">' +
+              '<link rel="component" href="/page.html"></head>' +
+              '<body><products-page id="page"></products-page></body></html>';
+          await route.fulfill({ contentType: "text/html", body });
+        });
+        await page.goto("https://metadata.example/");
+        await page.addScriptTag({ path: bundlePath });
+        const result = await page.evaluate(async () => {
+          const api = (window as unknown as { HtmlNextLoader: {
+            startBrowserComponents(): Promise<{ graph: { nodes: Map<string, unknown> }; stop(): void }>;
+          } }).HtmlNextLoader;
+          const started = await api.startBrowserComponents();
+          const value = { components: started.graph.nodes.size,
+            tag: document.querySelector("#page")?.localName,
+            text: document.querySelector("#page")?.textContent,
+            title: document.title,
+            description: document.querySelector('meta[name="description"]')?.getAttribute("content"),
+            layouts: document.querySelectorAll('meta[name="htmlkit:layout"]').length,
+            social: document.querySelectorAll('meta[property="og:title"]').length,
+            links: document.querySelectorAll('link[rel="stylesheet"], link[rel="canonical"], link[rel="preload"]').length };
+          started.stop();
+          return value;
+        });
+        assert.deepEqual(result, { components: 2, tag: "section", text: "Products detail",
+          title: "Host title", description: "Host description", layouts: 0, social: 0, links: 0 });
+        assert.deepEqual(requests.sort(), ["/", "/child.html", "/page.html"]);
+      } finally {
+        await metadataBrowser.close();
+      }
+    });
+  }
+
+  it("fetches a multi-component library once and renders both definitions and sibling invocations", async () => {
+    const page = await browser.newPage();
+    let requests = 0;
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("https://library.example/**", async (route) => {
+      const library = route.request().url().endsWith("/library.html");
+      if (library) requests += 1;
+      await route.fulfill({ contentType: "text/html", body: library ? `
+        <template component="ui-button" status="early" summary="Button."><button>Save</button></template>
+        <template component="ui-dialog" status="early" summary="Dialog."><section><ui-button></ui-button></section></template>
+      ` : '<link rel="component" href="/library.html"><ui-button id="button"></ui-button><ui-dialog id="dialog"></ui-dialog>' });
+    });
+    try {
+      await page.goto("https://library.example/");
+      await page.addScriptTag({ path: bundlePath });
+      const result = await page.evaluate(async () => {
+        const api = (window as unknown as { HtmlNextLoader: {
+          startBrowserComponents(): Promise<{ graph: { nodes: Map<string, unknown> }; stop(): void }>;
+        } }).HtmlNextLoader;
+        const started = await api.startBrowserComponents();
+        const value = { count: started.graph.nodes.size, button: document.querySelector("#button")?.localName,
+          dialog: document.querySelector("#dialog")?.localName, child: document.querySelector("#dialog button")?.textContent };
+        started.stop();
+        return value;
+      });
+      assert.deepEqual(result, { count: 2, button: "button", dialog: "section", child: "Save" });
+      assert.equal(requests, 1);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("starts the linkable browser distributable when the module executes", async () => {
     const page = await browser.newPage();
-    const distributablePath = join(temporaryDirectory, "browser.js");
-    await build({
-      entryPoints: [browserDistributableUrl.pathname],
-      bundle: true,
-      format: "esm",
-      outfile: distributablePath,
-      platform: "browser",
-      target: ["es2022"],
-    });
     await page.route("https://distribution.example/**", async (route) => {
       const url = route.request().url();
       if (url.endsWith("/x-ready.html")) {
@@ -76,12 +168,75 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       await ready;
       return {
         exposed: ready instanceof Promise,
+        api: Object.keys((window as unknown as { HTMLNext: object }).HTMLNext),
         tag: document.querySelector("#ready")?.localName,
         text: document.querySelector("#ready")?.textContent,
       };
     });
     await page.close();
-    assert.deepEqual(result, { exposed: true, tag: "output", text: "ready" });
+    // Loading the entry is the whole setup; there is nothing to start by hand.
+    assert.deepEqual(result, { exposed: true, api: ["ready"], tag: "output", text: "ready" });
+  });
+
+  it("loads component links added after start and renders the instances waiting for them", async () => {
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("pageerror", (error) => errors.push(error.message));
+    const components: Record<string, string> = {
+      "/first.html":
+        '<link rel="component" href="./shared.html">' +
+        '<template component="x-first" status="early" summary="First."><output>first <x-shared></x-shared></output></template>',
+      "/late.html":
+        '<link rel="component" href="./shared.html">' +
+        '<template component="x-late" status="early" summary="Late."><output>late <x-shared></x-shared></output></template>',
+      "/shared.html": '<template component="x-shared" status="early" summary="Shared."><b>shared</b></template>',
+    };
+    await page.route("https://late.example/**", async (route) => {
+      const body = components[new URL(route.request().url()).pathname];
+      await route.fulfill({
+        contentType: "text/html",
+        body: body ?? '<link rel="component" href="/first.html"><x-first id="first"></x-first><x-late id="waiting"></x-late>',
+      });
+    });
+    await page.goto("https://late.example/");
+    await page.addScriptTag({ path: distributablePath, type: "module" });
+    const rendered = (id: string) => page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      return element === null ? null : { tag: element.localName, text: element.textContent };
+    }, `#${id}`);
+
+    await page.waitForFunction(() => document.querySelector("#first")?.localName === "output");
+    const beforeLink = await rendered("waiting");
+    await page.evaluate(() => {
+      const link = document.createElement("link");
+      link.rel = "component";
+      link.setAttribute("href", "/late.html");
+      document.head.append(link);
+    });
+    await page.waitForFunction(() => document.querySelector("#waiting")?.localName === "output");
+    await page.evaluate(() => {
+      const fresh = document.createElement("x-late");
+      fresh.id = "fresh";
+      document.body.append(fresh);
+    });
+    await page.waitForFunction(() => document.querySelector("#fresh")?.localName === "output");
+    const result = {
+      first: await rendered("first"),
+      beforeLink,
+      waiting: await rendered("waiting"),
+      fresh: await rendered("fresh"),
+      errors,
+    };
+    await page.close();
+    assert.deepEqual(result, {
+      first: { tag: "output", text: "first shared" },
+      beforeLink: { tag: "x-late", text: "" },
+      // x-late shares x-shared with the first root; only its new definition is added.
+      waiting: { tag: "output", text: "late shared" },
+      fresh: { tag: "output", text: "late shared" },
+      errors: [],
+    });
   });
 
   it("loads a mapped live graph and lazily connects its default-export controller", async () => {
@@ -94,8 +249,8 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           headers: { "access-control-allow-origin": "*" },
           body:
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
-            `<defs><state name="count" :value="1"></state>` +
-            `<method name="focusInput" export="focusInput" returns="promise(undefined)"></method></defs>` +
+            `<defs><state type="number" name="count" value="1"></state>` +
+            `</defs>` +
             `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
         });
       } else if (url.endsWith("/ui/app.js")) {
@@ -103,12 +258,12 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           contentType: "text/javascript",
           headers: { "access-control-allow-origin": "*" },
           body:
-            `export default (host) => {` +
+            `export default (host) => { host.on("connect", () => {` +
             ` const add = () => { host.state.count += 1; };` +
             ` host.refs.button.addEventListener("click", add);` +
             ` const stop = host.effect(() => { host.root.dataset.count = host.state.count; });` +
             ` return () => { stop(); host.refs.button.removeEventListener("click", add); };` +
-            `}; export const focusInput = (host) => { host.refs.button.dataset.focused = "yes"; };`,
+            ` }); host.on("focus-request", () => { host.refs.button.focus(); }); };`,
         });
       } else {
         await route.fulfill({
@@ -134,18 +289,18 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       const root = document.querySelector("#app")!;
       root.querySelector("button")!.click();
       await Promise.resolve();
-      await (root as Element & { focusInput(): Promise<void> }).focusInput();
+      root.dispatchEvent(new Event("focus-request"));
       const value = {
         tag: root.localName,
         count: root.querySelector("output")!.textContent,
         effectCount: (root as HTMLElement).dataset.count,
-        methodCalled: (root.querySelector("button") as HTMLElement).dataset.focused,
+        focused: document.activeElement === root.querySelector("button"),
       };
       started.stop();
       return value;
     });
     await page.close();
-    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", methodCalled: "yes" });
+    assert.deepEqual(result, { tag: "main", count: "2", effectCount: "2", focused: true });
   });
 
   it("does not invoke a controller whose module resolves after disconnection", async () => {

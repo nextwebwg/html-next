@@ -3,7 +3,36 @@ export { HtmlDiagnosticError } from "./diagnostics.js";
 export {
   generateComponent,
   generateVueComponent,
+  generateReactComponent,
+  generateReactConversion,
+  generateSvelteConversion,
   GENERATOR_VERSION,
+  importsVueHost,
+  importsVueHtml,
+  importsVueControl,
+  importsVueProps,
+  vueHostArtifact,
+  vueHtmlArtifact,
+  vueControlArtifact,
+  vuePropsArtifact,
+  reactPropsArtifact,
+  sveltePropsArtifact,
+  svelteHtmlArtifact,
+  svelteEventsArtifact,
+  svelteControlArtifact,
+  svelteDataArtifact,
+  svelteReactivityArtifact,
+  svelteHostArtifact,
+  svelteConnectionArtifact,
+  svelteDecorationsArtifact,
+  svelteStyleArtifacts,
+  reactEventsArtifact,
+  reactControlArtifact,
+  reactDataArtifact,
+  reactHtmlArtifact,
+  reactHostArtifact,
+  reactContextArtifact,
+  reactDepthArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
 export { addControllerGraph } from "./controller-files.js";
@@ -12,12 +41,6 @@ export { parseSourceComponent } from "./source.js";
 export { assembleComponentPackage } from "./package.js";
 export type * from "./package-config.js";
 export { buildComponentGraph, parseComponentResource } from "./source-graph.js";
-export {
-  loadBrowserComponents,
-  loadDocumentComponents,
-  documentComponentRoots,
-  startBrowserComponents,
-} from "./browser-loader.js";
 export { loadNodeComponents } from "./node-loader.js";
 export { ComponentRegistry } from "./registry.js";
 export { ResourceResolver, isWithinTrustRoot } from "./resolve.js";

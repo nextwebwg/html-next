@@ -3,7 +3,7 @@
     ".github/dependabot.yml": "4c835c01213d922e37a495e4c027c9fc5a37afe86939ac216d848f18750b19d2",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
     "LICENSE": "d36b9fbad64a5eb046f984d62952c14ec989c49f4f9c61aee775eb4d4c258053",
-    "threadlabs.config.json": "169923b5910c22d0b4de2743215e55b17cabf34e1aadc176bb7c09d6636b84b7"
+    "threadlabs.config.json": "51656eb366df0a9abc42c01904fe51e97ad59fa43239e188607d211aefee93cc"
   },
   "modules": {
     "agents": "1.0.0",
