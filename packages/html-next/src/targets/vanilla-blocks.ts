@@ -1,9 +1,10 @@
 /**
  * The direct-extend Vanilla planner: components with a controller, declared state, `$if` and keyed
  * `$each` compile to cloned prototypes, compile-time site walks and fused, compare-before-write
- * updates. A component outside the supported subset returns undefined and keeps the general
- * runtime fallback. Each feature lowers on its own, so widening the subset adds cases here without
- * changing the generated shape of components that already qualify.
+ * updates. Every feature the live runtime supports is meant to reach this path; until one does, a
+ * component that uses it returns undefined and keeps the general-runtime fallback, so it still
+ * builds and behaves exactly as live. Each feature lowers on its own, so widening coverage adds
+ * cases here without changing the generated shape of components already on the direct path.
  */
 
 import type { ExpressionNode } from "../expression.js";
@@ -89,10 +90,11 @@ export interface BlockPlan {
   readonly blocks: readonly Block[];
 }
 
-class Ineligible extends Error {}
+/** A feature the direct path does not cover yet; the component keeps the general-runtime fallback. */
+class NotYetDirect extends Error {}
 
-function ineligible(): never {
-  throw new Ineligible();
+function notYetDirect(): never {
+  throw new NotYetDirect();
 }
 
 /** The compact form of a declared type, or undefined for kinds the subset does not check yet. */
@@ -163,24 +165,24 @@ function valueSource(value: unknown): string {
     .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
 }
 
-/** The value of a literal initial-state expression, or ineligible. */
+/** The value of a literal initial-state expression; anything else is not direct yet. */
 function literalValue(node: ExpressionNode): unknown {
   if (node.kind === "literal") {
     const value = node.value;
     if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") return value;
-    ineligible();
+    notYetDirect();
   }
   if (node.kind === "array") return node.items.map(literalValue);
   if (node.kind === "object") {
     const value: Record<string, unknown> = {};
     for (const pair of node.pairs) {
       // ponytail: the interpreter assigns `__proto__` through its setter; leave that to it.
-      if (pair.key === "__proto__") ineligible();
+      if (pair.key === "__proto__") notYetDirect();
       value[pair.key] = literalValue(pair.value);
     }
     return value;
   }
-  ineligible();
+  notYetDirect();
 }
 
 interface Scope {
@@ -193,15 +195,15 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   switch (node.kind) {
     case "literal": {
       const value = node.value;
-      if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") ineligible();
+      if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") notYetDirect();
       return { source: valueSource(value), bits: 0, nested: false, item: false, boolean: typeof value === "boolean", deep: false, contents: false, key };
     }
     case "id": {
       if (node.name === scope.alias) return { source: "o", bits: 0, nested: false, item: true, boolean: false, deep: true, contents: false, key };
       // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
-      if (scope.alias !== undefined && node.name === "loop") ineligible();
+      if (scope.alias !== undefined && node.name === "loop") notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === node.name);
-      if (index < 0) ineligible();
+      if (index < 0) notYetDirect();
       const root = scope.roots[index]!;
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
@@ -220,19 +222,19 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         keys.unshift(object.key);
         object = object.object;
       }
-      if (object.kind !== "id" || object.name === scope.alias) ineligible();
+      if (object.kind !== "id" || object.name === scope.alias) notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === (object as { name: string }).name);
-      if (index < 0) ineligible();
+      if (index < 0) notYetDirect();
       // A declared path is validated where it is read; that prepass is not in this subset yet.
       let type = scope.roots[index]!.type;
       for (const step of keys) type = compactTypeAt(type, step);
-      if (type !== 0) ineligible();
+      if (type !== 0) notYetDirect();
       let source = `v[${index}]`;
       for (const step of keys) source = `readMember(${source}, ${JSON.stringify(step)})`;
       return { source, bits: 1 << index, nested: true, item: false, boolean: false, deep: true, contents: false, key };
     }
     case "unary": {
-      if (node.op !== "not") ineligible();
+      if (node.op !== "not") notYetDirect();
       const operand = truthiness(lower(node.operand, scope));
       return { ...operand, source: `!${operand.source}`, boolean: true, deep: false, key };
     }
@@ -246,7 +248,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
           ...merge(left, right), boolean: true, deep: false, key,
         };
       }
-      if (node.op !== "and" && node.op !== "or") ineligible();
+      if (node.op !== "and" && node.op !== "or") notYetDirect();
       const a = truthiness(left);
       const b = truthiness(right);
       return { source: `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`, ...merge(a, b), boolean: true, deep: false, key };
@@ -261,7 +263,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         boolean: consequent.boolean && alternate.boolean, deep: consequent.deep || alternate.deep, key,
       };
     }
-    default: ineligible();
+    default: notYetDirect();
   }
 }
 
@@ -305,16 +307,16 @@ function outerOf(value: Lowered): number {
 
 function compileRoots(definition: ComponentDefinition): Root[] {
   const declarations = definition.declarations ?? [];
-  if (declarations.length === 0 || declarations.length > 30) ineligible();
+  if (declarations.length === 0 || declarations.length > 30) notYetDirect();
   return declarations.map((declaration) => {
-    if (declaration.kind !== "state") ineligible();
+    if (declaration.kind !== "state") notYetDirect();
     const node = declarationTypeNode(declaration.type, declaration.shape);
     const type = node === undefined ? undefined : compactType(node);
     // A root that may be undefined makes the interpreter fail (HB001) where it is read.
-    if (type === undefined || type === 0 || conforms(undefined, type)) ineligible();
+    if (type === undefined || type === 0 || conforms(undefined, type)) notYetDirect();
     const initial = declaration.expression === undefined ? null : literalValue(declaration.expression.ast);
     // Initial values conform, so reads of a root never need the interpreter's reference check.
-    if (initial !== null && !conforms(initial, type)) ineligible();
+    if (initial !== null && !conforms(initial, type)) notYetDirect();
     return { name: declaration.name, type, initial: valueSource(initial) };
   });
 }
@@ -342,23 +344,23 @@ class Planner {
   }
 
   element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean): unknown[] {
-    if (EXCLUDED.has(node.name) || node.name.includes("-") || node.ref !== undefined || (node.events?.length ?? 0) > 0) ineligible();
+    if (EXCLUDED.has(node.name) || node.name.includes("-") || node.ref !== undefined || (node.events?.length ?? 0) > 0) notYetDirect();
     const literals = node.attributes.filter((attribute) => attribute.kind === "literal");
-    if (literals.some((attribute) => attribute.name === "is")) ineligible();
+    if (literals.some((attribute) => attribute.name === "is")) notYetDirect();
     const literal = (name: string): string | undefined =>
       literals.find((attribute) => attribute.name === name)?.value;
     let content: Lowered | undefined;
     const bound = new Set<string>();
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
-      if (attribute.expressionPlan === undefined) ineligible();
+      if (attribute.expressionPlan === undefined) notYetDirect();
       const expression = lower(attribute.expressionPlan.ast, scope);
       if (attribute.kind === "directive") {
-        if (attribute.name !== "value") ineligible();
+        if (attribute.name !== "value") notYetDirect();
         content = expression;
         continue;
       }
-      if (attribute.kind !== "attribute" || attribute.twoWay === true || attribute.target === "style") ineligible();
+      if (attribute.kind !== "attribute" || attribute.twoWay === true || attribute.target === "style") notYetDirect();
       const site = this.site(block, path);
       if (attribute.target === "class") {
         bound.add("class:");
@@ -367,7 +369,7 @@ class Planner {
         block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
         continue;
       }
-      if (isUrlAttribute(attribute.name) || attribute.name === "data-component") ineligible();
+      if (isUrlAttribute(attribute.name) || attribute.name === "data-component") notYetDirect();
       bound.add(attribute.name);
       const value = literal(attribute.name);
       block.bindings.push({
@@ -376,7 +378,7 @@ class Planner {
       });
     }
     // A bound class attribute would overwrite class toggles the update skips as unchanged.
-    if (bound.has("class") && bound.has("class:")) ineligible();
+    if (bound.has("class") && bound.has("class:")) notYetDirect();
     const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
     if (content !== undefined) {
       // `$value` replaces the element's content, so its authored children never render.
@@ -395,9 +397,9 @@ class Planner {
   }
 
   child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope): unknown {
-    if (node.kind === "slot") ineligible();
+    if (node.kind === "slot") notYetDirect();
     if (node.kind === "text") {
-      if (node.segments !== undefined) ineligible();
+      if (node.segments !== undefined) notYetDirect();
       if (node.expressionPlan === undefined) return node.value;
       const expression = lower(node.expressionPlan.ast, scope);
       block.bindings.push({ site: this.site(block, path), kind: "text", name: "", expression, initial: '""' });
@@ -405,27 +407,27 @@ class Planner {
     }
     const flow = node.flow;
     if (flow === undefined) return this.element(block, node, path, scope, false);
-    if (block.row || SELECTS.has(parent.name)) ineligible();
+    if (block.row || SELECTS.has(parent.name)) notYetDirect();
     const { flow: _flow, ...body } = node;
     const site = this.site(block, path);
     if (flow.kind === "if") {
-      if (flow.testPlan === undefined) ineligible();
+      if (flow.testPlan === undefined) notYetDirect();
       const test = truthiness(lower(flow.testPlan.ast, scope));
       // A test re-renders its body whenever its inputs change, as the live runtime does, so it
       // may read only roots it can name exactly.
-      if (test.nested || test.item) ineligible();
+      if (test.nested || test.item) notYetDirect();
       block.regions.push({ kind: "if", site, block: this.block(body, false, undefined, false), test });
       return 1;
     }
     if (flow.kind !== "each" || flow.key === undefined || flow.keyPlan === undefined || flow.listPlan === undefined ||
       flow.index !== undefined || flow.where !== undefined || flow.sort !== undefined || flow.limit !== undefined ||
-      flow.item === "loop" || this.roots.some((root) => root.name === flow.item)) ineligible();
+      flow.item === "loop" || this.roots.some((root) => root.name === flow.item)) notYetDirect();
     const list = lower(flow.listPlan.ast, scope);
     const rowScope = { roots: this.roots, alias: flow.item };
     const key = lower(flow.keyPlan.ast, rowScope);
     // A key is memoized per item, so it may read only the item, and never a container's contents.
-    if (key.bits !== 0 || key.nested || key.contents) ineligible();
-    if (list.item) ineligible();
+    if (key.bits !== 0 || key.nested || key.contents) notYetDirect();
+    if (list.item) notYetDirect();
     block.regions.push({ kind: "each", site, block: this.block(body, true, flow.item, false), list, key, alias: flow.item });
     return 2;
   }
@@ -446,7 +448,7 @@ export function blockPlan(definition: ComponentDefinition): BlockPlan | undefine
     const root = planner.block(definition.template, false, undefined, true);
     return { roots, root, blocks: planner.blocks };
   } catch (error) {
-    if (error instanceof Ineligible) return undefined;
+    if (error instanceof NotYetDirect) return undefined;
     throw error;
   }
 }
@@ -713,7 +715,7 @@ export function lowerExpression(
   try {
     return lower(node, { roots: roots.map((root) => ({ ...root, initial: "undefined" })), alias }).source;
   } catch (error) {
-    if (error instanceof Ineligible) return undefined;
+    if (error instanceof NotYetDirect) return undefined;
     throw error;
   }
 }

@@ -216,7 +216,7 @@ describe("HTML Next unplugin", () => {
     assert.match(polymorphic, /function manageComponentLifecycle/);
   });
 
-  it("compiles eligible controller components directly with experimentalDirectExtend", async () => {
+  it("compiles controller components directly with experimentalDirectExtend", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-direct-extend-"));
     temporary.push(root);
     await writeFile(join(root, "list.html"), `<template component="x-list" controller="./list.js" status="early" summary="List.">

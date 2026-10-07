@@ -39,8 +39,9 @@ export interface GenerationOptions {
   /** A closed component graph proves no descendant reads this definition's state through <context>. */
   readonly noContextReaders?: boolean;
   /**
-   * Experimental: compile eligible controller components (declared state, `$if`, keyed `$each`)
-   * to direct DOM updates instead of the general-runtime fallback. Off by default.
+   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
+   * DOM updates instead of the general-runtime fallback. A component using a feature the direct
+   * path does not cover yet keeps the fallback. Off by default.
    */
   readonly directExtend?: boolean;
 }

@@ -78,7 +78,7 @@ describe("direct-extend Vanilla generation", () => {
   });
 
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
-  const ineligible: Record<string, string> = {
+  const notYetDirect: Record<string, string> = {
     "no controller": component(state, '<p $value="ready"></p>', false),
     props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
     computed: component(`${state}<computed name="count" from="rows.length"></computed>`, '<p $value="count"></p>'),
@@ -121,8 +121,8 @@ describe("direct-extend Vanilla generation", () => {
     arithmetic: component('<state name="n" type="number" value="1"></state>', '<p $value="n + 1"></p>'),
     "class attribute and toggle": component(state, '<p from:class="rows.length" class:on="ready"></p>'),
   };
-  for (const [name, text] of Object.entries(ineligible)) {
-    it(`keeps today's module for an unsupported shape: ${name}`, () => {
+  for (const [name, text] of Object.entries(notYetDirect)) {
+    it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
       let off: string;
       try {
         off = vanilla(text, false);
@@ -137,7 +137,7 @@ describe("direct-extend Vanilla generation", () => {
     const plan = (text: string) => blockPlan(parseComponent(text, new URL("component.html", fixtures).href));
     assert.notEqual(plan(benchmarkShape), undefined);
     assert.notEqual(plan(component(state, '<p from:data-n="rows.length" class:on="ready and not ready"><b>{ready}</b></p>')), undefined);
-    for (const text of Object.values(ineligible)) {
+    for (const text of Object.values(notYetDirect)) {
       let parsed;
       try { parsed = parseComponent(text, new URL("component.html", fixtures).href); } catch { continue; }
       assert.equal(blockPlan(parsed), undefined, text);
@@ -225,7 +225,7 @@ describe("compact declared types (matrix)", () => {
     });
   }
 
-  it("leaves unchecked kinds ineligible", () => {
+  it("leaves kinds it does not check yet on the fallback", () => {
     for (const text of ["url", "email", "color", "keyword", "keyword+", "event", "list(url)"]) {
       assert.equal(compactType(parseTypeExpression(text)), undefined, text);
     }

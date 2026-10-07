@@ -153,7 +153,9 @@ Firefox, and WebKit tests covering native keyed updates, branch changes, and rec
 
 `GenerationOptions.directExtend` (the unplugin's `experimentalDirectExtend`) compiles components
 with a controller, declared state, `$if` and keyed `$each` to straight-line DOM code instead of the
-general-runtime fallback. Components outside the supported subset keep the fallback unchanged. The
+general-runtime fallback. The direct path is meant to cover every feature the live runtime supports;
+until it covers one, a component using it keeps the fallback unchanged, and the unplugin keeps a
+whole graph on the fallback when any component in it needs the general runtime. The
 generated module imports only the `generated-runtime` helpers its features use; the interpreter,
 parsers, type system and formatter never reach it, and `measure:runtime` fails if they do.
 
