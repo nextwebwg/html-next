@@ -546,11 +546,16 @@ export function emitBlocks(
   /** The update body: guard groups in first-binding order, then regions. */
   const patch = (block: Block): string[] => {
     const lines: string[] = [];
+    // One group per mask, except that writes to one element's attributes and classes keep their
+    // authored order (it decides the order attributes and class tokens are created in).
     const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
+    const ordered = (binding: Binding): boolean => binding.kind === "attribute" || binding.kind === "class";
     for (const binding of block.bindings) {
       const mask = maskOf(finalExpression(binding));
-      const at = groups.findIndex((group) => group.mask === mask);
-      if (at < 0) groups.push({ mask, bindings: [binding] });
+      const at = groups.findLastIndex((group) => group.mask === mask);
+      const later = ordered(binding) && groups.slice(at + 1).some((group) =>
+        group.bindings.some((other) => other.site === binding.site && ordered(other)));
+      if (at < 0 || later) groups.push({ mask, bindings: [binding] });
       else groups[at]!.bindings.push(binding);
     }
     // Rows showing a container are flagged afresh whenever their item bindings all re-run.

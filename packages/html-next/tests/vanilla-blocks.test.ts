@@ -364,4 +364,17 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
     assert.deepEqual(compiled.errors, ["HR004: A keyed list produced duplicate key `1`."]);
   });
+
+  it("creates attributes and class tokens on one element in authored order", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
+      <section><p from:title="ready" from:data-x="rows.length" from:lang="ready" class:a="ready" class:b="rows.length" class:c="ready">rows</p>
+        <ul $if="ready"><li $each="row of rows" $key="row.id" class:x="ready" from:data-id="row.id" class:y="row.label" from:title="ready"></li></ul></section>`);
+    await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "a" }]; },
+      (host) => { host.state.ready = false; },
+      (host) => { host.state.ready = true; host.state.rows = [{ id: 2, label: "" }, { id: 1, label: "a" }]; },
+    ]);
+  });
 });
