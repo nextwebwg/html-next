@@ -25,7 +25,8 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { iteratedRefNames, rootArms, type ComponentDefinition, type ElementNode, type Flow, type TemplateNode } from "../template.js";
+import { iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type Flow, type TemplateNode } from "../template.js";
+import { parseDuration } from "../duration.js";
 import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, typeAtKey, type TypeNode } from "../type-system.js";
 import { kebabCase } from "../names.js";
@@ -68,6 +69,8 @@ interface Root {
   readonly computed?: CompiledExpression | undefined;
   /** A `<context>`: the providing component's tag and the state it reads; these follow the computeds. */
   readonly context?: { readonly from: string; readonly name: string };
+  /** A `<data>` read, whose state roots follow the props. */
+  readonly data?: DataDeclaration;
 }
 
 /** A lowered expression in the supported subset. */
@@ -224,6 +227,9 @@ export interface BlockPlan {
   /** How many roots are `<state>`, and how many the controller's host shows; props' roots follow them. */
   readonly states: number;
   readonly shown: number;
+  /** `<data>` reads: their state's root, declaration and parameters (a `from` one also recorded). */
+  readonly reads: readonly { readonly index: number; readonly declaration: DataDeclaration;
+    readonly parameters: readonly { readonly name: string; readonly from: boolean; readonly value: Lowered; readonly recorded: Lowered | undefined; readonly record: string }[] }[];
   /** A root `$match`: one root block per arm, and the arm index its tests choose. */
   readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
 }
@@ -686,8 +692,14 @@ function compileRoots(definition: ComponentDefinition): Root[] {
   const states: Root[] = [];
   const computeds: Root[] = [];
   const contexts: Root[] = [];
+  const reads: Root[] = [];
   for (const declaration of declarations) {
     if (declaration.kind === "handler" || declaration.kind === "event") continue;
+    // A declared read's state starts pending, as live's does, until its request settles.
+    if (declaration.kind === "data") {
+      reads.push({ name: declaration.name, type: "?", initial: "{ pending: true, value: null, error: null, ok: false }", data: declaration });
+      continue;
+    }
     // A context reads an ancestor's state, which says nothing about its type here.
     if (declaration.kind === "context") {
       contexts.push({ name: declaration.as ?? declaration.name, type: "?", initial: "null", context: { from: declaration.from, name: declaration.name } });
@@ -723,7 +735,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     if (type === undefined) notYetDirect();
     return { name, type, initial: "null" };
   });
-  return [...states, ...computeds, ...contexts, ...props];
+  return [...states, ...computeds, ...contexts, ...props, ...reads];
 }
 
 
@@ -1350,10 +1362,23 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
         });
       }
     }
-    const props = Object.keys(definition.contract.props).length;
+    const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined).length;
+    // Each read's parameters, checked as live's `evalConforming` reads them; `from` ones also recorded,
+    // so a change to what they read re-requests, as live's request effect re-runs.
+    const reads = roots.flatMap((item, index) => item.data === undefined ? [] : [{
+      index, declaration: item.data,
+      parameters: item.data.parameters.map((parameter) => {
+        const recording = planner.recording(planner.scope);
+        return {
+          name: parameter.name, from: parameter.mode === "from",
+          value: planner.checked(parameter.expression, planner.scope),
+          recorded: parameter.mode === "from" ? planner.checked(parameter.expression, recording) : undefined, record: recording.record!,
+        };
+      }),
+    }]);
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
-      states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props,
+      states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
       ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
@@ -1986,19 +2011,44 @@ export function emitBlocks(
   const channel = plan.computeds.length > 0 || contextStart >= 0;
   // A component another's <context> may read tells it about its renders (`noContextReaders` proves none does).
   const provides = !noContextReaders && plan.states > 0;
-  const update = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
-  const instance = provides || contextStart >= 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const render = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
+  // Declared reads re-request before the template renders, as live's priority-0 request effects run first.
+  const update = plan.reads.length === 0 ? render : `((c, d) => { DU(c, d); ${render}(c, d); })`;
+  const instance = provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
     ...(slotted ? ["  const J = project(I, children, slots);"] : []),
     ...provides ? ["  I.R = new Set();"] : [],
+    ...plan.reads.flatMap((read, at) => {
+      // A parameter that does not conform keeps the value it last accepted, and a `from` one holds the request.
+      const parameter = (value: Lowered, name: string, from: boolean): string =>
+        `const x = ${convertible(value)}; if (x === NONCONFORMING) { p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
+      return [
+        `  const DP${at} = {};`,
+        `  let DQ${at}, DR${at};`,
+        // The `from` parameters, recorded so a change to what they read re-requests.
+        `  const DF${at} = () => { const p = {}; let ok = true; ${read.parameters.map((item) => item.from
+          ? `{ const ${item.record} = []; ${parameter(item.recorded!, item.name, true)} DQ${at} = ${item.record}; }`
+          : `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return [p, ok]; };`,
+        // Every parameter, sampled again when the request is sent.
+        `  const DS${at} = () => { const p = {}; ${read.parameters.map((item) => `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return p; };`,
+      ];
+    }),
+    ...plan.reads.length === 0 ? [] : [
+      "  const DU = (c, d) => {",
+      "    if (c === -1) return;",
+      ...plan.reads.flatMap((read, at) => read.parameters.filter((item) => item.from).map((item) =>
+        `    if (${guard(maskOf(item.recorded!))}) { const ${item.record} = []; ${convertible(item.recorded!)}; if (${rootsWritten(item.recorded!).replace(/^ \|\| /, "") || "false"} || readsChanged(DQ${at}, ${item.record})) DR${at}(); }`)),
+      "  };",
+    ],
     // A context provider tells its readers after each render.
     `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
+    ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at});`),
     ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
@@ -2114,7 +2164,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "ABSENT"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
@@ -2141,6 +2191,10 @@ export function emitBlocks(
       `const A = ${JSON.stringify(plan.arms.nodes.map((node) => armRoot(node, definition)))};`,
       ...(propNames.length === 0 ? [] : [`const Q = ${JSON.stringify(plan.arms.nodes.map(boundProps))};`]),
     ]),
+    ...(plan.reads.length === 0 ? [] : [`const DA = ${JSON.stringify(plan.reads.map(({ declaration }) => ({
+      n: declaration.name, ...declaration.source === undefined ? {} : { s: declaration.source }, ...declaration.type === undefined ? {} : { t: declaration.type },
+      ...declaration.debounce === undefined ? {} : { d: parseDuration(declaration.debounce) ?? 0 }, ...declaration.poll === undefined ? {} : { p: parseDuration(declaration.poll) ?? 0 },
+    })))};`]),
     ...(propNames.length === 0 ? [] : [`const D = { props: ${JSON.stringify(Object.fromEntries(Object.entries(runtimeProps(definition))
       .map(([name, prop]) => { const { target: _target, ...read } = prop as Record<string, unknown>; return [name, read]; })))} };`]),
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.

@@ -24,6 +24,7 @@ import {
   type ReactiveOwner,
 } from "./reactivity.js";
 import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
+import { DataResource, type DataState } from "./data.js";
 import { selectedPropType } from "./contract.js";
 import { kebabCase } from "./names.js";
 import { assignedPropValue, conformsAtDestination, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -577,6 +578,83 @@ export function readContext(
     },
     stop: () => { provider?.R?.delete(follow); },
   });
+}
+
+const readonlyViews = new WeakMap<object, Map<string, object>>();
+
+/** A read-only view for the controller, as live's host gives one: reads track, writes warn by path. */
+function readonlyView(spec: GeneratedStateSpec, value: unknown, path: string): unknown {
+  if (value === null || typeof value !== "object" || isNativeEvent(value)) return value;
+  const target = raw(value) as object;
+  let views = readonlyViews.get(target);
+  if (views === undefined) readonlyViews.set(target, views = new Map());
+  let view = views.get(path);
+  if (view === undefined) {
+    const deny = (key: PropertyKey): void => warnOnce(spec, `controller:${path}.${String(key)}`, `Destination \`${path}.${String(key)}\` is read-only.`);
+    view = new Proxy(target, {
+      get: (object, key) => {
+        if (key === RAW) return object;
+        trackProperty(object, key);
+        return readonlyView(spec, Reflect.get(object, key), `${path}.${String(key)}`);
+      },
+      set: (_object, key) => (deny(key), true),
+      deleteProperty: (_object, key) => (deny(key), true),
+      defineProperty: (_object, key) => (deny(key), false),
+    });
+    views.set(path, view);
+  }
+  return view;
+}
+
+/** A declared read: its name, source, declared type, and debounce and poll in milliseconds. */
+export interface GeneratedData { readonly n: string; readonly s?: string; readonly t?: string; readonly d?: number; readonly p?: number }
+
+/**
+ * A `<data>` read, as live runs one: its state (root `index`) starts pending, a request goes out when
+ * the root connects and whenever a `from` parameter changes (`from` reports the parameters and whether
+ * they all conform), every parameter is sampled again when it is sent, and disconnecting aborts it.
+ * `host.data` shows the state read-only. Returns what re-requests after a `from` parameter changed.
+ */
+export function manageData(
+  instance: GeneratedInstance, index: number, declaration: GeneratedData,
+  from: () => readonly [Record<string, unknown>, boolean], sample: () => Record<string, unknown>,
+): () => void {
+  const values = instance.v!;
+  const reads = (instance.A as { r?: Map<string, number> } | undefined)?.r ?? new Map<string, number>();
+  if (instance.A === undefined) {
+    const handles = (key: PropertyKey, has?: boolean): unknown => {
+      const at = typeof key === "string" ? reads.get(key) : undefined;
+      if (at === undefined) return undefined;
+      if (has === true) return true;
+      trackProperty(reads, key);
+      return readonlyView(instance.S, values[at], key as string);
+    };
+    instance.A = Object.assign(handles, { r: reads });
+  }
+  reads.set(declaration.n, index);
+  const resource = declaration.s === undefined ? undefined : new DataResource({
+    source: declaration.s, baseURL: instance.S.f,
+    ...declaration.t === undefined ? {} : { type: declaration.t },
+    ...declaration.d === undefined ? {} : { debounce: declaration.d },
+    ...declaration.p === undefined ? {} : { poll: declaration.p },
+    sampleParameters: sample,
+    onState: (state: DataState) => {
+      const previous = values[index];
+      instance.w(index, state);
+      notifyPropertySet(reads, declaration.n, previous, state, undefined);
+    },
+  });
+  let connected = false;
+  const request = (): void => {
+    const [parameters, valid] = from();
+    if (valid) resource?.update(parameters);
+  };
+  instance.o.push({
+    pause: () => { connected = false; resource?.disconnect(); },
+    resume: () => { connected = true; request(); },
+    stop: () => resource?.disconnect(),
+  });
+  return () => { if (connected) request(); };
 }
 
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
@@ -1158,6 +1236,8 @@ export interface GeneratedInstance {
   x?: number;
   /** Its root values, as attaching set them. */
   readonly v?: unknown[];
+  /** `host.data`: a declared read's handle by name (`has` only asks whether there is one). */
+  A?: (key: PropertyKey, has?: boolean) => unknown;
   /** A context provider's readers, told after each of its renders. */
   R?: Set<(changed: number, dirty: ReadonlyMap<unknown, 1 | 2> | undefined) => void>;
   /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
@@ -1569,11 +1649,11 @@ export function attachGeneratedController(
   });
   const dataPath = (key: PropertyKey): string => `data.${String(key)}`;
   const data = new Proxy({}, {
-    get: () => undefined,
+    get: (_target, key) => handle.A?.(key),
     set: (_target, key) => (readOnly(dataPath(key)), true),
     deleteProperty: (_target, key) => (readOnly(dataPath(key)), true),
     defineProperty: (_target, key) => (readOnly(dataPath(key)), false),
-    has: () => false,
+    has: (_target, key) => handle.A?.(key, true) !== undefined,
   });
   // The live host reads refs from an ordinary object, so inherited names answer as they do there.
   const recorded: Record<string, unknown> = {};

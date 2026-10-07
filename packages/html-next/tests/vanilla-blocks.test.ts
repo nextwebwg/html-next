@@ -311,6 +311,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     readonly errors: string[];
     readonly events: string[];
   }
+  /** The network a run's declared reads use, when a test supplies one. */
+  let fetchStub: ((url: string, init?: RequestInit) => Promise<unknown>) | undefined;
+
   /** A step drives the controller's host, or the root and its framework prop channel. */
   type Step = (host: any, update: (props: Record<string, unknown>) => void) => void;
 
@@ -343,6 +346,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
     const log = { hosts: [] as any[], events: [] as string[] };
     vi.stubGlobal("directExtendLog", log);
+    if (fetchStub !== undefined) vi.stubGlobal("fetch", fetchStub);
     const warnings: string[] = [];
     vi.spyOn(console, "warn").mockImplementation((message: string) => { warnings.push(message.replace(/^.*?: HR007/, "HR007")); });
     // Render failures surface from the scheduler's microtask; both paths report them here.
@@ -1214,6 +1218,34 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.people.push({ id: 2, name: "Bea" }); host.state.people[0].name = "Ann"; },
       (host) => { host.state.rows = [2, 3]; host.state.count = 3; },
     ]);
+  });
+
+  it("reads declared data like live", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      await Promise.resolve();
+      return { ok: !url.includes("fail"), status: 500, json: async () => [{ name: url.split("/").at(-1)!.split("?")[0] }], text: async () => "" };
+    };
+    try {
+      await same(parent(`
+        <section><p $if="users.pending">loading</p><b $if="users.ok">ok</b><i>{default(users.error, 'none')}</i>
+          <ul><li $each="user of default(users.value, [])">{user.name}</li></ul></section>`, `
+        <state name="q" type="string" value="a"></state><state name="page" type="integer" value="1"></state>
+        <data name="users" src="https://example.test/api/users/{q}" type="list(object({ name: string }))">
+          <param name="q" from:value="q"></param><param name="page" expr:value="page"></param></data>`), [
+        (host) => { host.state.q = "b"; },
+        // An `expr` parameter is sampled when a request goes out; changing it requests nothing.
+        (host) => { host.state.page = 2; },
+        (host) => { host.state.q = "fail"; },
+        (host) => { host.state.q = "c"; (globalThis as any).directExtendLog.events.push(`data ${JSON.stringify(host.data.users)} ${"users" in host.data} ${"other" in host.data}`); host.data.users.value = []; },
+      ]);
+      // Both paths made the same requests: on connect, per changed `from` parameter, and on reconnect.
+      assert.deepEqual(requests.slice(0, requests.length / 2), requests.slice(requests.length / 2));
+      assert.ok(requests.length >= 8, requests.join("\n"));
+    } finally {
+      fetchStub = undefined;
+    }
   });
 
   it("fails a moved duplicate key before writing any row", async () => {
