@@ -104,6 +104,24 @@ interface SlotInsertion {
   readonly nodes: readonly Node[];
 }
 
+/**
+ * Records the projected nodes a freshly prepared invocation renders in no slot. The components
+ * inside them are not instantiated by the same pass: they wait, like a branch whose condition is
+ * not met, until a slot renders them and lowering finds them in the document. Hidden content costs
+ * no instance, no bindings and no nested lowering.
+ */
+function recordUnrendered(invocation: PreparedInvocation, unrendered: Set<Node>): void {
+  const placed = new Set(invocation.context.slotInsertions.flatMap((insertion) => insertion.nodes));
+  for (const node of invocation.context.projectedNodes) if (!placed.has(node)) unrendered.add(node);
+}
+
+/** Whether `element` sits in projected content no slot renders yet (see `recordUnrendered`). */
+function withinUnrendered(element: Element, unrendered: ReadonlySet<Node>): boolean {
+  if (unrendered.size === 0) return false;
+  for (let node: Node | null = element; node !== null; node = node.parentNode) if (unrendered.has(node)) return true;
+  return false;
+}
+
 interface PropInput {
   readonly value: unknown;
   readonly source: "html" | "value";
@@ -2778,7 +2796,24 @@ function prepareRuntimeInvocation(
       hydratedNodes = [];
     }
   }
-  const children = hydration ? hydratedNodes! : Array.from(invocation.childNodes);
+  const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
+  const projected = hydration ? children : Array.from(invocation.childNodes);
+  // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
+  // The projection follows that root, so a slot that renders again inserts it, not the invocation
+  // element lowering replaced. A later root switch calls the same rebind with the new root.
+  for (const node of children) {
+    if (node.nodeType !== 1 || !(node as Element).localName.includes("-")) continue;
+    let current: Node = node;
+    whenLowered(node as Element, (root) => {
+      for (const nodes of [children, projected]) {
+        const index = nodes.indexOf(current);
+        if (index >= 0) nodes[index] = root;
+      }
+      const slot = projectedSlotNames.get(current);
+      if (slot !== undefined) projectedSlotNames.set(root, slot);
+      current = root;
+    });
+  }
   const instance: RuntimeInstance = {
     definition,
     ...(parent === undefined ? {} : { parent }),
@@ -2794,7 +2829,7 @@ function prepareRuntimeInvocation(
     owned: renderOwned(),
     rootNode,
     rootElement: createSignal<Element | undefined>(undefined),
-    projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
+    projection: { nodes: projected, slotNames: projectedSlotNames },
   };
   if (Object.keys(definition.contract.props).length > 0) {
     instance.effects.push(createEffect(scope.scheduler, () => {
@@ -3093,12 +3128,14 @@ function lowerRenderedComponents(
     }
     const prepared: PreparedInvocation[] = [];
     const pendingOwners = new WeakMap<Element, RuntimeInstance>();
+    const unrendered = new Set<Node>();
     for (const element of nested) {
       const live = registry.definitions.get(element.localName);
       if (live === undefined) continue;
       const { definition } = live;
       if (
         isContentOnly(element) ||
+        withinUnrendered(element, unrendered) ||
         supersededInvocations.has(element) ||
         alreadyLowered(element, definition.contract.tag) ||
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
@@ -3107,6 +3144,7 @@ function lowerRenderedComponents(
       const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners));
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
+      recordUnrendered(invocation, unrendered);
     }
     if (prepared.length === 0) return lowered;
     commitRuntimeInvocations(registry, prepared);
@@ -3210,10 +3248,12 @@ function lowerScopes(
   const lowered: Element[] = [];
   const prepared: PreparedInvocation[] = [];
   const pendingOwners = new WeakMap<Element, RuntimeInstance>();
+  const unrendered = new Set<Node>();
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
       isContentOnly(element) ||
+      !hydration && withinUnrendered(element, unrendered) ||
       supersededInvocations.has(element) ||
       // Already lowered here: a repeat pass must not build this component onto its own root a
       // second time. Another component still may, which is how a delegated root lowers.
@@ -3225,6 +3265,7 @@ function lowerScopes(
     const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
+    if (!hydration) recordUnrendered(invocation, unrendered);
     return true;
   };
   const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
