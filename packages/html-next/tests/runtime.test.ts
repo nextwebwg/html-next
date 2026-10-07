@@ -2072,6 +2072,88 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
+    it(`${name} lowers a component projected into a slot that first renders after lowering`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // x-host renders its "details" slot only once opened, so the consumer's x-leaf waits in the
+        // projection, detached, while the lowering pass commits. Opening the slot must insert the
+        // lowered x-leaf, not the invocation element its commit could not replace in place.
+        await page.setContent(
+          '<template component="x-leaf" status="early" summary="Leaf."><defs>' +
+          '<prop name="text" type="string" default="none">Text.</prop></defs><p class="leaf" $value="text"></p></template>' +
+          '<template component="x-host" status="early" summary="Host."><defs>' +
+          '<state type="boolean" name="open" value="false"></state>' +
+          '<handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>' +
+          '<div><button type="button" class="toggle" on:click="toggle">More</button>' +
+          '<section $if="open"><slot name="details"></slot></section></div></template>' +
+          '<template component="x-page" status="early" summary="Page."><defs>' +
+          '<state type="string" name="label" value="from the page"></state></defs>' +
+          '<div><x-host><x-leaf slot="details" from:text="label"></x-leaf></x-host></div></template>' +
+          '<x-page></x-page>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("button.toggle");
+        // While the slot is closed its projected content stays out of the document.
+        assert.equal(await page.evaluate(() => document.querySelector("x-leaf, .leaf")), null);
+        await page.click("button.toggle");
+        await page.waitForSelector("section", { state: "attached" });
+        const shown = (): Promise<unknown> => page.evaluate(() => {
+          const leaf = document.querySelector("section > .leaf");
+          return {
+            root: leaf?.getAttribute("data-component") ?? null,
+            text: leaf?.textContent ?? null,
+            host: leaf === null ? false : (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): unknown } })
+              .HtmlRuntime.getComponentHost(leaf) !== undefined,
+            invocations: document.querySelectorAll("x-leaf").length,
+          };
+        });
+        assert.deepEqual(await shown(), { root: "x-leaf", text: "from the page", host: true, invocations: 0 });
+        // Closing and reopening projects the same lowered root again.
+        await page.click("button.toggle");
+        await page.click("button.toggle");
+        await page.waitForSelector("section", { state: "attached" });
+        assert.deepEqual(await shown(), { root: "x-leaf", text: "from the page", host: true, invocations: 0 });
+      } finally {
+        await browser.close();
+      }
+    });
+
+    it(`${name} projects a component's lowered root again when its slot renders again`, async () => {
+      const browser = await browserType.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        // The slot starts open, so x-leaf lowers in the first pass. Closing removes its root;
+        // reopening must insert that root again, not the invocation element lowering replaced.
+        await page.setContent(
+          '<template component="x-leaf" status="early" summary="Leaf."><p class="leaf">leaf</p></template>' +
+          '<template component="x-host" status="early" summary="Host."><defs>' +
+          '<state type="boolean" name="open" value="true"></state>' +
+          '<handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>' +
+          '<div><button type="button" class="toggle" on:click="toggle">More</button>' +
+          '<section $if="open"><slot name="details"></slot></section></div></template>' +
+          '<template component="x-page" status="early" summary="Page.">' +
+          '<div><x-host><x-leaf slot="details"></x-leaf></x-host></div></template>' +
+          '<x-page></x-page>',
+        );
+        await page.addScriptTag({ path: bundlePath });
+        await page.evaluate(`window.HtmlRuntime.observeDocument(document)`);
+        await page.waitForSelector("section > .leaf", { state: "attached" });
+        const first = await page.evaluateHandle(() => document.querySelector("section > .leaf"));
+        await page.click("button.toggle");
+        await page.waitForSelector("section", { state: "detached" });
+        await page.click("button.toggle");
+        await page.waitForSelector("section", { state: "attached" });
+        assert.deepEqual(await page.evaluate((root) => {
+          const leaf = document.querySelector("section > .leaf");
+          return { same: leaf === root, root: leaf?.getAttribute("data-component") ?? null, invocations: document.querySelectorAll("x-leaf").length };
+        }, first), { same: true, root: "x-leaf", invocations: 0 });
+      } finally {
+        await browser.close();
+      }
+    });
+
     it(`${name} runs a parent's on: binding on a child component's declared event`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
