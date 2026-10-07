@@ -1119,8 +1119,24 @@ export function project(
       projectedEntries.set(node, entry);
     }
   }
+  // A consumer's <template slot> lists the elements its outlets render now, in document order (none
+  // while the instance is disconnected); any other projected element lists itself.
   const into = (key: string): Element[] => projected
-    .filter(([node, name]) => node.nodeType === 1 && name === (key === "default" ? "" : key)).map(([node]) => node as Element);
+    .filter(([node, name]) => node.nodeType === 1 && name === (key === "default" ? "" : key))
+    .flatMap(([node]) => {
+      const template = scopedTemplates.get(node as Element);
+      if (template === undefined) return [node as Element];
+      if ((instance as GeneratedInstance).c?.() !== true) return [];
+      const ranges = [...template.l].flatMap((record) => record.r?.[0].isConnected === true ? [record.r] : [])
+        .sort(([left], [right]) => left.compareDocumentPosition(right) & 4 ? -1 : 1);
+      return ranges.flatMap(([start, end]) => {
+        const elements: Element[] = [];
+        for (let current = start.nextSibling; current !== null && current !== end; current = current.nextSibling) {
+          if (current.nodeType === 1) elements.push(current as Element);
+        }
+        return elements;
+      });
+    });
   // A host lists the elements a slot was given, in order; `default` reads the unnamed slot.
   instance.Y = new Proxy({}, {
     get: (_target, key) => typeof key === "string" ? into(key) : undefined,
@@ -1129,8 +1145,11 @@ export function project(
   return instance.J = projected;
 }
 
-/** A rendering of a consumer's scoped-slot template: its nodes, and the slot's prop values it reads. */
-export interface ScopedRecord { readonly n: Node; readonly s: Record<string, unknown>; z?: (() => void)[] }
+/**
+ * A rendering of a consumer's slot template: its nodes, the slot's prop values it reads, and the
+ * range markers its outlet put it between.
+ */
+export interface ScopedRecord { readonly n: Node; readonly s: Record<string, unknown>; z?: (() => void)[]; r?: readonly [ChildNode, ChildNode] }
 
 /** A consumer's compiled scoped-slot template: makes a rendering, patches one, and holds the live ones. */
 export interface ScopedTemplate {
@@ -1160,18 +1179,21 @@ export function fillSlot(
   const doc = start.ownerDocument!;
   const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
   const slot = `slot="${name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
-  const scoped = props === undefined ? "" : ' scoped=""';
   let rendered: readonly [ScopedTemplate, ScopedRecord] | undefined;
-  if (props !== undefined && assigned.length > 0) {
-    const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template");
+  // A slot with props, or one given a consumer's <template slot>, renders that template afresh,
+  // in the consumer's scope; any other content given to it does not render.
+  const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template");
+  if (props !== undefined && assigned.length > 0 || carrier !== undefined) {
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
     const template = scopedTemplates.get(carrier as Element);
     if (template === undefined) fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
-    const record = template.m(dirty!, props);
+    const record = template.m(dirty ?? new Map(), props ?? {});
     for (const node of Array.from(record.n.childNodes)) markProjectedRoot(node);
     template.l.add(record);
     rendered = [template, record];
   }
+  // A range rendered from a template, or a slot that exposes props, is marked scoped.
+  const scoped = rendered === undefined && props === undefined ? "" : ' scoped=""';
   const nodes = rendered === undefined ? assigned.length : rendered[1].n.childNodes.length;
   if (nodes === 0 && !fallback || rendered !== undefined && nodes === 0) {
     start.replaceWith(renderedFormMark(doc, "marker", slot));
@@ -1179,10 +1201,14 @@ export function fillSlot(
     return rendered;
   }
   const close = renderedFormMark(doc, "end", "") as ChildNode;
-  start.replaceWith(renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""${scoped}` : `${slot}${scoped}`));
+  const open = renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""${scoped}` : `${slot}${scoped}`) as ChildNode;
+  start.replaceWith(open);
   end.replaceWith(close);
   if (assigned.length === 0) return close;
-  if (rendered !== undefined) close.before(rendered[1].n);
+  if (rendered !== undefined) {
+    rendered[1].r = [open, close];
+    close.before(rendered[1].n);
+  }
   else {
     close.before(...assigned);
     // Components invoked in the nodes this slot now places are created, as live lowers them now.

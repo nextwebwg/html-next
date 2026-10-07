@@ -1530,6 +1530,25 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await same([page, host(true), leaf], [toggle, toggle]);
   });
 
+  it("renders a consumer's <template slot> only while a slot without props renders, like live", async () => {
+    const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
+      <p class="leaf" $value="text"></p></template>`;
+    const toggle = `<template component="x-toggle" controller="./host-reader.js" status="early" summary="Toggle.">
+      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
+      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="open"><slot name="details"></slot><slot name="note"></slot></section></div></template>`;
+    const page = `<template component="x-page" status="early" summary="Page."><defs><state type="string" name="label" value="first"></state>
+      <handler name="rename"><set name="label" expr:value="'second'"></set></handler></defs>
+      <div><button type="button" class="rename" on:click="rename">Rename</button><x-toggle>
+        <p slot="note" class="note" data-id="note">Note</p>
+        <template slot="details"><i data-id="detail" $value="label"></i><x-leaf from:text="label"></x-leaf></template>
+      </x-toggle></div></template>`;
+    const tag = (element: Element): string => element.localName + (element.className === "" ? "" : `.${element.className}`);
+    const read = (host: any): void => log(`details ${host.slots.details.map(tag)} note ${host.slots.note.map(tag)} rendered ${
+      host.root.ownerDocument.querySelectorAll("template[slot]").length}`);
+    const click = (name: string) => (host: any): void => host.root.ownerDocument.querySelector(`button.${name}`).click();
+    await same([page, toggle, leaf], [read, click("toggle"), read, click("rename"), read, click("toggle"), read, click("toggle"), read]);
+  });
+
   it("invokes a scalar prop component like live lowering", async () => {
     const tag = `<template component="x-tag" status="early" summary="Tag.">
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>

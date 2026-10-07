@@ -189,10 +189,16 @@ interface Block {
   readonly scopes: { readonly site: number; readonly block: Block }[];
   /** A parent's content projected into a component it invokes. */
   projection?: boolean;
+  /** A consumer's <template slot> content, which renders only when an outlet renders it. */
+  template?: boolean;
 }
 
-/** Whether a block renders projected content, where invoked components wait for a slot to place them. */
-const inProjection = (block: Block | undefined): boolean => block !== undefined && (block.projection === true || inProjection(block.parent));
+/**
+ * Whether a block renders projected content, where invoked components wait for a slot to place
+ * them; a consumer's template content creates its components when an outlet renders it.
+ */
+const inProjection = (block: Block | undefined): boolean =>
+  block !== undefined && block.template !== true && (block.projection === true || inProjection(block.parent));
 
 /**
  * A component the template invokes, created through its factory where the placeholder sits, as
@@ -223,7 +229,8 @@ interface Invocation {
 
 /** Whether a block, or a region below it, listens: removing it must stop those listeners. */
 function disposable(block: Block): boolean {
-  return block.events.length > 0 || block.invocations.length > 0 || block.regions.some((region) => region.props !== undefined) ||
+  // Any slot may render a consumer's <template slot>, which its outlet lets go of.
+  return block.events.length > 0 || block.invocations.length > 0 || block.regions.some((region) => region.kind === "slot") ||
     block.regions.some((region) => [region.block, ...region.arms ?? []].some(disposable));
 }
 
@@ -803,6 +810,8 @@ class Planner {
   readonly handlers = new Map<string, HandlerPlan>();
   /** The projection being planned, and the component it is projected into, whose slots name its carriers' props. */
   private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
+  /** The next block planned is a consumer's <template slot> content. */
+  private templateContent = false;
 
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition,
     readonly invocations: ReadonlyMap<string, Invoked> = new Map()) {
@@ -975,6 +984,10 @@ class Planner {
     if (projecting !== undefined) {
       projecting.block = block;
       block.projection = true;
+    }
+    if (this.templateContent) {
+      this.templateContent = false;
+      block.template = true;
     }
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
@@ -1181,6 +1194,7 @@ class Planner {
       const inner: Scope = { ...scope, level: scope.level + 1 };
       const types: TypeScope = { get: () => undefined };
       declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, undefined])));
+      this.templateContent = true;
       const content = this.block({ kind: "element", name: "template", attributes: [], children: node.children }, false,
         { ...inner, types, aliases: [...inner.aliases, ...props.map((name) => ({ name, level: inner.level, kind: "item" as const, field: `s` }))] },
         false, svg, false);
@@ -1824,7 +1838,9 @@ export function emitBlocks(
         const props = region.props;
         if (props === undefined) {
           lines.push(
-            `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}); if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
+            // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
+            `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d);`,
+            `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
             `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
           );
           return;
