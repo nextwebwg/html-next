@@ -32,7 +32,8 @@ const browserExports = [
   "./browser",
 ] as const;
 
-afterAll(() => rmSync(workspace, { recursive: true, force: true }));
+// Removing the installed consumers on Windows can outlast the default hook budget.
+afterAll(() => rmSync(workspace, { recursive: true, force: true }), 60_000);
 
 function pack(packageDirectory: string): string {
   const packageRoot = join(root, "packages", packageDirectory);
@@ -217,7 +218,8 @@ describe("workspace package contracts", () => {
     expect(existsSync(join(consumer, "dist/index.html"))).toBe(true);
     writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label={42} />;');
     expect(() => execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8", stdio: "pipe" })).toThrow();
-  }, 120_000);
+    // Windows runners have measured 82-133 s for this install, build and type-check sequence.
+  }, 300_000);
 
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
     const versions = new Set<string>();
@@ -241,10 +243,11 @@ describe("workspace package contracts", () => {
     mkdirSync(join(consumer, "app/layouts"), { recursive: true });
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "htmlkit-consumer", private: true, type: "module" }));
     execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", pack("html-next"), pack("htmlkit")], { cwd: consumer, shell: useCommandShell });
-    writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/" });');
-    writeFileSync(join(consumer, "app/layouts/default.html"), '<template component="packed-shell"><title>Layout default</title><main><slot name="page"></slot></main></template>');
-    writeFileSync(join(consumer, "app/pages/index.html"), '<meta name="htmlkit:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="label"></h1><packed-label></packed-label></section></template>');
-    writeFileSync(join(consumer, "app/pages/index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
+    writeFileSync(join(consumer, "htmlkit.config.ts"), 'import { defineConfig } from "@nextwebwg/htmlkit"; export default defineConfig({ base: "/packed/", routeOrdering: true });');
+    writeFileSync(join(consumer, "app/layouts/default.html"), '<link rel="component" href="@nextwebwg/htmlkit/components/navigation.html"><template component="packed-shell"><title>Layout default</title><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><htmlkit-navigation from:items="navigation"></htmlkit-navigation><slot name="page"></slot></main></template>');
+    writeFileSync(join(consumer, "app/layouts/default.server.ts"), 'export const load = async ({ navigation }) => ({ props: { navigation: await navigation() } });');
+    writeFileSync(join(consumer, "app/pages/01-index.html"), '<meta name="htmlkit:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="label"></h1><packed-label></packed-label></section></template>');
+    writeFileSync(join(consumer, "app/pages/01-index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
     const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
     const output = execFileSync(process.execPath, [join(installed, "dist/cli.js"), "build"], { cwd: consumer, encoding: "utf8" });
     expect(output).toContain("Generated 1 pages");
@@ -253,6 +256,8 @@ describe("workspace package contracts", () => {
     expect(html).toContain("<title>Installed platform</title>");
     expect(html).toContain('data-component="packed-shell"');
     expect(html).toContain("Packaged helper");
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain('href="/packed/"');
     expect(html).toContain('src="/packed/_htmlkit/');
     expect(JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).dependencies[componentsPackage]).not.toContain("workspace:");
     expect(readFileSync(join(installed, "LICENSE"), "utf8")).toBe(repositoryLicense);

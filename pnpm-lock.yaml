@@ -121,9 +121,6 @@ catalogs:
       specifier: 3.3.11
       version: 3.3.11
 
-patchedDependencies:
-  svelte@5.57.1: fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08
-
 importers:
 
   .:
@@ -254,7 +251,7 @@ importers:
         version: 1.9.15
       svelte:
         specifier: 'catalog:'
-        version: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+        version: 5.57.1
       tsx:
         specifier: 'catalog:'
         version: 4.23.15
@@ -315,7 +312,7 @@ importers:
         version: 19.3.0(react@19.3.0)
       svelte:
         specifier: 'catalog:'
-        version: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+        version: 5.57.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -348,7 +345,7 @@ importers:
         version: 8.0.1
       svelte2tsx:
         specifier: 0.7.61
-        version: 0.7.61(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(typescript@5.9.3)
+        version: 0.7.61(svelte@5.57.1)(typescript@5.9.3)
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -361,7 +358,7 @@ importers:
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.1
-        version: 7.3.1(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(vite@8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15))
+        version: 7.3.1(svelte@5.57.1)(vite@8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15))
       '@types/node':
         specifier: 'catalog:'
         version: 25.9.8
@@ -388,10 +385,10 @@ importers:
         version: 19.3.0(react@19.3.0)
       svelte:
         specifier: 'catalog:'
-        version: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+        version: 5.57.1
       svelte-check:
         specifier: 4.7.6
-        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(typescript@5.9.3)
+        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.1)(typescript@5.9.3)
       vite:
         specifier: 'catalog:'
         version: 8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15)
@@ -2457,12 +2454,12 @@ snapshots:
 
   '@sveltejs/load-config@0.2.3': {}
 
-  '@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(vite@8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15))':
+  '@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15))':
     dependencies:
       deepmerge: 4.3.1
       magic-string: 1.3.1
       obug: 2.2.1
-      svelte: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+      svelte: 5.57.1
       vite: 8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15)
       vitefu: 1.1.3(vite@8.3.2(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.15))
 
@@ -3082,7 +3079,7 @@ snapshots:
 
   std-env@4.2.0: {}
 
-  svelte-check@4.7.6(picomatch@4.0.7)(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(typescript@5.9.3):
+  svelte-check@4.7.6(picomatch@4.0.7)(svelte@5.57.1)(typescript@5.9.3):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@sveltejs/load-config': 0.2.3
@@ -3090,19 +3087,19 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picocolors: 1.1.1
       sade: 1.8.1
-      svelte: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+      svelte: 5.57.1
       typescript: 5.9.3
     transitivePeerDependencies:
       - picomatch
 
-  svelte2tsx@0.7.61(svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08))(typescript@5.9.3):
+  svelte2tsx@0.7.61(svelte@5.57.1)(typescript@5.9.3):
     dependencies:
       dedent-js: 1.0.1
       scule: 1.3.0
-      svelte: 5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08)
+      svelte: 5.57.1
       typescript: 5.9.3
 
-  svelte@5.57.1(patch_hash=fa11b1c11d283310f0dce91b8d2a2fb95eaca95229a8e446a4e334493ad96d08):
+  svelte@5.57.1:
     dependencies:
       '@jridgewell/remapping': 2.3.5
       '@jridgewell/sourcemap-codec': 1.6.0

@@ -33,6 +33,13 @@ const definitions = [
     <ul><li $each="row of rows" $key="row"><b $value="row"></b></li></ul></section></template>`,
   `<template component="ssr-reader"><defs><context name="current" from="ssr-provider"></context></defs>
     <output $value="current"></output></template>`,
+  `<template component="ssr-bound-button"><defs><prop name="count" type="number" default="0">Count</prop></defs>
+    <template $match><button $when="count < 6" type="button"><slot></slot><span $value="count"></span></button>
+    <a $else href="#kept"><slot></slot><span $value="count"></span></a></template></template>`,
+  `<template component="ssr-bound-parent"><defs><state name="count" type="number" value="0"></state>
+    <handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+    <section><ssr-bound-button $ref="action" from:count="count" from:aria-expanded="count > 4"
+    class:active="count > 4" style:opacity="count > 4 ? '0.5' : '1'" on:click="increment"><strong>Next</strong></ssr-bound-button></section></template>`,
   `<template component="ssr-provider"><defs><state name="current" type="number" value="1"></state>
     <handler name="increment"><set name="current" expr:value="current + 1"></set></handler></defs>
     <section><button type="button" on:click="increment">Next</button><ssr-reader></ssr-reader><slot></slot></section></template>`,
@@ -68,6 +75,8 @@ const cases = [
   { name: "changed state, implicit props, adjacent text and unrendered slots", html: '<ssr-counter id="subject"><b slot="title">T</b>world<i slot="extra">Hidden</i></ssr-counter>', state: { count: 7 } },
   { name: "keyed lists and retained row identity", html: '<ssr-list id="subject"></ssr-list>', state: { rows: ["Ada", "Bea"] } },
   { name: "nested components and shared state", html: '<ssr-provider id="subject"><strong>Projected</strong></ssr-provider>', state: { current: 5 } },
+  { name: "parent bindings and events on nested native roots", html: '<ssr-bound-parent id="subject"></ssr-bound-parent>', state: { count: 5 } },
+  { name: "parent bindings on nested native roots adopted in an earlier pass", html: '<ssr-bound-parent id="subject"></ssr-bound-parent>', state: { count: 5 }, earlierPass: "ssr-bound-button" },
   { name: "native form controls and edits before hydration", html: '<ssr-control id="subject"></ssr-control>', state: { text: "server" } },
   { name: "delegated roots and slot passthrough", html: '<ssr-delegate id="subject">Delegated</ssr-delegate>', state: {} },
   { name: "structured, boolean and rejected prop inputs", html: '<ssr-props id="subject" enabled items="[&quot;&lt;/script&gt;&amp;&quot;]" amount="invalid"></ssr-props>', state: {} },
@@ -107,7 +116,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             }
           });
           await page.addScriptTag({ path: bundle });
-          const result = await page.evaluate(async ({ definitionJSON, stateJSON }) => {
+          const result = await page.evaluate(async ({ definitionJSON, stateJSON, earlierPass }) => {
             const definitions = JSON.parse(definitionJSON) as unknown[];
             const state = JSON.parse(stateJSON) as Record<string, unknown>;
             const context = window as unknown as {
@@ -115,13 +124,19 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
                 registerComponentDefinitions(definitions: unknown[]): void;
                 lowerDocument(): number;
                 inspectInstance(element: Element): unknown;
-                getComponentHost(element: Element): { state: Record<string, unknown> } | undefined;
+                getComponentHost(element: Element): { state: Record<string, unknown>; refs: Record<string, Element> } | undefined;
               };
               originalRoot: Element;
               originalNodes: Element[];
             };
             const runtime = context.HtmlRuntime;
-            runtime.registerComponentDefinitions(definitions);
+            // A child adopted before its parent is registered has already committed when the parent binds it.
+            const first = definitions.filter((definition) => (definition as { contract: { tag: string } }).contract.tag === earlierPass);
+            if (first.length > 0) {
+              runtime.registerComponentDefinitions(first);
+              runtime.lowerDocument();
+            }
+            runtime.registerComponentDefinitions(definitions.filter((definition) => !first.includes(definition)));
             runtime.lowerDocument();
             const server = document.querySelector("#server")!;
             const client = document.querySelector("#client")!;
@@ -142,6 +157,21 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
             server.querySelector<HTMLButtonElement>("button")?.click();
             client.querySelector<HTMLButtonElement>("button")?.click();
             await new Promise((resolve) => setTimeout(resolve, 0));
+            const nested = server.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]');
+            let parentBindings = null;
+            if (nested !== null) {
+              nested.click();
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              client.querySelector<HTMLElement>('[data-component~="ssr-bound-button"]')!.click();
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              parentBindings = {
+                tag: nested.localName, count: nested.querySelector("span")!.textContent,
+                expanded: nested.getAttribute("aria-expanded"), active: nested.classList.contains("active"),
+                opacity: nested.style.opacity, refFollowsRoot: runtime.getComponentHost(root)!.refs.action === nested,
+                projectionKept: context.originalNodes.filter(node => node.localName === "strong").every(node => nested.contains(node)),
+                noNativeProp: !nested.hasAttribute("count"),
+              };
+            }
             const after = { server: inspect(server), client: inspect(client), html: [server.innerHTML, client.innerHTML] };
             const rowKept = retained === null || Array.from(server.querySelectorAll("li")).includes(retained);
             if (root instanceof HTMLInputElement) {
@@ -149,15 +179,20 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("Node render to brows
               root.dispatchEvent(new Event("input", { bubbles: true }));
             }
             await Promise.resolve();
-            return { initial, identity, metadataRemoved, control, after, rowKept,
+            return { initial, identity, metadataRemoved, control, after, rowKept, parentBindings,
               editedState: root instanceof HTMLInputElement ? runtime.getComponentHost(root)?.state.text : null };
-          }, { definitionJSON: JSON.stringify(definitions), stateJSON: JSON.stringify(fixture.state) });
+          }, { definitionJSON: JSON.stringify(definitions), stateJSON: JSON.stringify(fixture.state),
+            earlierPass: "earlierPass" in fixture ? fixture.earlierPass : undefined });
           assert.deepEqual(result.initial.server, result.initial.client);
           assert.equal(result.identity, true, "hydrate existing nodes in place");
           assert.equal(result.metadataRemoved, true);
           assert.deepEqual(result.after.server, result.after.client);
           assert.deepEqual(result.after.html[0], result.after.html[1]);
           assert.equal(result.rowKept, true);
+          if (fixture.name.startsWith("parent bindings")) {
+            assert.deepEqual(result.parentBindings, { tag: "a", count: "7", expanded: "true", active: true,
+              opacity: "0.5", refFollowsRoot: true, projectionKept: true, noNativeProp: true });
+          }
           if (fixture.name.includes("controls")) {
             assert.deepEqual(result.control, { value: "edited before hydration", defaultValue: "authored", focused: true, selection: [2, 6] });
             assert.equal(result.editedState, "next");

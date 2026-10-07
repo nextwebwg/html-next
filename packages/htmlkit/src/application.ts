@@ -13,7 +13,7 @@ import { documentHTML, escapeHTML } from "./document.js";
 import { discoverRoutes, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, RenderedHead, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, RenderedHead, RouteLayer, ServerModule } from "./types.js";
 
 function invocation(definition: ComponentDefinition, result: LoaderResult, id: string, child: string, nested: boolean): string {
   const props = result.props ?? {};
@@ -55,36 +55,77 @@ export async function createApplication(options: ApplicationOptions = {}, module
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
     await environment.runner.import(layer.server) as ServerModule;
 
-  return {
-    ...config, routes,
-    async entries() {
-      const paths = new Set<string>();
-      for (const route of routes) {
-        const loaded = await module(route);
-        if (route.params.length > 0 && typeof loaded.entries !== "function") {
-          throw new HtmlKitError(`Static entries() must enumerate parameters: ${route.params.join(", ")}.`, route.server ?? route.component);
-        }
-        const entries = loaded.entries === undefined ? [{}] : await loaded.entries();
-        if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", route.server);
-        for (const entry of entries) {
-          if (entry === null || typeof entry !== "object" || Object.keys(entry).sort().join(",") !== [...route.params].sort().join(",")) {
-            throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, route.server);
-          }
-          const segments = route.segments.map(segment => {
-            const name = parameter(segment);
-            if (name === undefined) return segment;
-            const value: unknown = entry[name];
-            if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, route.server);
-            return encodeURIComponent(value);
-          });
-          const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
-          if (paths.has(path)) throw new HtmlKitError(`Static route collision at ${path}.`, route.component);
-          const matched = matchRoute(routes, path, config.base);
-          if (matched?.route !== route) throw new HtmlKitError(`Static route collision with ${matched?.route.pattern} at ${path}.`, route.component);
-          paths.add(path);
-        }
+  // Materialize entries once per application so loaders and navigation see the same catalog.
+  const unenumerated: typeof routes[number][] = [];
+  let catalog: Promise<ReadonlyMap<string, typeof routes[number]>> | undefined;
+  const concreteRoutes = () => catalog ??= (async () => {
+    const paths = new Map<string, typeof routes[number]>();
+    for (const route of routes) {
+      const loaded = await module(route);
+      if (route.params.length > 0 && typeof loaded.entries !== "function") {
+        unenumerated.push(route); continue;
       }
-      return [...paths].sort();
+      const entries = loaded.entries === undefined ? [{}] : await loaded.entries();
+      if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", route.server);
+      for (const entry of entries) {
+        if (entry === null || typeof entry !== "object" || Object.keys(entry).sort().join(",") !== [...route.params].sort().join(",")) {
+          throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, route.server);
+        }
+        const segments = route.segments.map(segment => {
+          const name = parameter(segment);
+          if (name === undefined) return segment;
+          const value: unknown = entry[name];
+          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, route.server);
+          return encodeURIComponent(value);
+        });
+        const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
+        if (paths.has(path)) throw new HtmlKitError(`Static route collision at ${path}.`, route.component);
+        const matched = matchRoute(routes, path, config.base);
+        if (matched?.route !== route) throw new HtmlKitError(`Static route collision with ${matched?.route.pattern} at ${path}.`, route.component);
+        paths.set(path, route);
+      }
+    }
+    return paths;
+  })();
+  const navigation = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
+    const from = query.from ?? "/";
+    if (!/^\/(?:[^/]+\/)*$/.test(from) || from.includes("[") || from.includes("?") || from.includes("#")) {
+      throw new HtmlKitError("Navigation from requires a concrete application-relative directory prefix.", from);
+    }
+    const prefix = config.base + from.slice(1);
+    const depth = from.split("/").filter(Boolean).length;
+    const items = [...await concreteRoutes()].filter(([path]) => path.startsWith(prefix));
+    items.sort(([a, left], [b, right]) => {
+      const aParts = a.slice(config.base.length).split("/").filter(Boolean);
+      const bParts = b.slice(config.base.length).split("/").filter(Boolean);
+      for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+        const aRank = left.order?.[i] ?? null;
+        const bRank = right.order?.[i] ?? null;
+        if (aRank !== bRank) {
+          if (aRank === null) return 1;
+          if (bRank === null) return -1;
+          const difference = BigInt(aRank) - BigInt(bRank);
+          if (difference !== 0n) return difference < 0n ? -1 : 1;
+        }
+        const difference = aParts[i]!.localeCompare(bParts[i]!);
+        if (difference !== 0) return difference;
+      }
+      return aParts.length - bParts.length || a.localeCompare(b);
+    });
+    return Object.freeze(items.map(([href, route]) => {
+      const parts = href.slice(config.base.length).split("/").filter(Boolean);
+      return Object.freeze({ href, label: decodeURIComponent(parts.at(-1) ?? "Home"),
+        current: href === query.current ? "page" as const : "false" as const,
+        depth: parts.length - depth, pageName: route.pageName });
+    }));
+  };
+  return {
+    ...config, routes, navigation,
+    async entries() {
+      const paths = await concreteRoutes();
+      const missing = unenumerated[0];
+      if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, missing.server ?? missing.component);
+      return [...paths.keys()].sort();
     },
     async render(pathname, signal = new AbortController().signal) {
       signal.throwIfAborted();
@@ -144,7 +185,7 @@ export async function createApplication(options: ApplicationOptions = {}, module
         signal.throwIfAborted();
         const loaded = await module(layer);
         const context = { phase: "prerender" as const, url: new URL(url), base: config.base, params, parent,
-          fetch: globalThis.fetch, signal,
+          fetch: globalThis.fetch, signal, navigation: (query?: NavigationQuery) => navigation({ current: url.pathname, ...query }),
           get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", layer.server); } };
         const result = loaded.load === undefined ? {} : await loaded.load(context);
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.server);

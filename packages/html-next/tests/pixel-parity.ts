@@ -65,12 +65,19 @@ async function diagnosePixelMismatch(actualPage: Page, expectedPage: Page | unde
   const state = async (page: Page) => page.evaluate(() => {
     const button = document.querySelector("#case button");
     const style = button === null ? null : getComputedStyle(button);
+    // A form control named "id" shadows the form's id property, so read the attribute.
+    const name = (element: Element) => {
+      const id = element.getAttribute("id");
+      return id ? `${element.localName}#${id}` : element.localName;
+    };
     return {
-      activeElement: document.activeElement?.localName,
+      activeElement: document.activeElement && name(document.activeElement),
       documentFocused: document.hasFocus(),
-      hovered: Array.from(document.querySelectorAll(":hover"), (element) => element.localName),
-      active: Array.from(document.querySelectorAll(":active"), (element) => element.localName),
-      focusVisible: Array.from(document.querySelectorAll(":focus-visible"), (element) => element.localName),
+      // Fixtures without a doctype use quirks mode, where bare :hover and :active match only links; :is() is exempt.
+      // https://quirks.spec.whatwg.org/#the-active-and-hover-quirk
+      hovered: Array.from(document.querySelectorAll(":is(:hover)"), name),
+      active: Array.from(document.querySelectorAll(":is(:active)"), name),
+      focusVisible: Array.from(document.querySelectorAll(":focus-visible"), name),
       buttonBackground: style?.backgroundColor,
       buttonBorder: style?.borderColor,
     };

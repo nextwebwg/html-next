@@ -59,7 +59,8 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
       } else if (node.type === "atrule" && GROUPING.has(node.name.toLowerCase()) && node.nodes !== undefined) {
         prune(node as AtRule, want, false);
       } else if (node.type === "atrule") {
-        if (topLevel && want === "own") hoisted.push(node.toString());
+        // PostCSS serializes a detached statement without its parent's trailing semicolon.
+        if (topLevel && want === "own") hoisted.push(node.toString() + (node.nodes === undefined ? ";" : ""));
         node.remove();
       } else if (node.type === "decl") {
         node.remove();

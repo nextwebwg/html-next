@@ -1,0 +1,20 @@
+<template component="controller-keyed" controller="./controller.js" status="experimental" summary="Controller keyed-list bundle-size fixture.">
+  <defs>
+    <state name="ready" type="boolean" value="false"></state>
+    <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+    <state name="selected" type="number" nullable></state>
+  </defs>
+  <div>
+    <div class="list" $if="ready">
+      <table>
+        <tbody>
+          <tr $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected">
+            <td $value="row.id"></td>
+            <td><a data-action="select" $value="row.label"></a></td>
+            <td><a data-action="remove">Remove</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
