@@ -195,6 +195,8 @@ interface Invocation {
   readonly factory: string;
   /** Literal prop attributes, which the component reads as HTML input. */
   readonly html: readonly (readonly [string, string])[];
+  /** The same, parsed to values, for components the compact paths compile. */
+  readonly values: readonly (readonly [string, unknown])[];
   /** Literal attributes that are not props: the component's root takes them as an invocation's. */
   readonly attributes: readonly (readonly [string, string])[];
   /** Bound props: each starts as its attribute text, then applies as its value whenever what it read changes. */
@@ -207,6 +209,10 @@ interface Invocation {
   readonly projection?: Block | undefined;
   /** The template's root: the parent delegates its root to this component and shares it. */
   readonly root: boolean;
+  /** Two-way props' destinations, written when the component's root reports its control's value. */
+  readonly controls: readonly string[];
+  /** `$value` or `$html` on the invocation: its first value is the content projected into the component. */
+  readonly content?: { readonly kind: "value" | "html"; readonly expression: Lowered } | undefined;
 }
 
 /** Whether a block, or a region below it, listens: removing it must stop those listeners. */
@@ -964,7 +970,6 @@ class Planner {
       block.events.push({ site: this.site(block, path), name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers });
     }
     const literals = node.attributes.filter((attribute) => attribute.kind === "literal");
-    if (literals.some((attribute) => attribute.name === "is")) notYetDirect();
     const svg = parentSvg || node.name === "svg";
     const literal = (name: string): string | undefined =>
       literals.find((attribute) => attribute.name === name)?.value;
@@ -1054,13 +1059,22 @@ class Planner {
     const html: [string, string][] = [];
     const attributes: [string, string][] = [];
     const props: { name: string; attribute: string; expression: Lowered; record: string; type: unknown }[] = [];
+    const controls: string[] = [];
+    let content: Invocation["content"];
     const rest: ElementNode["attributes"][number][] = [];
     for (const attribute of node.attributes) {
       const prop = attribute.kind === "property" || attribute.kind === "directive" || attribute.kind === "attribute" && attribute.target !== undefined
         ? undefined : propOf(attribute.name);
       if (attribute.kind === "literal") (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
-      else if (attribute.kind === "directive" || attribute.kind === "attribute" && attribute.twoWay === true) notYetDirect();
-      else if (prop !== undefined && attribute.kind === "attribute") {
+      else if (attribute.kind === "directive") {
+        // Live writes it into the invocation before lowering, so it is what the component is given.
+        content = { kind: attribute.name === "html" ? "html" : "value", expression: this.checked(attribute.expressionPlan!, scope) };
+      } else if (prop !== undefined && attribute.kind === "attribute") {
+        // A two-way prop applies as a value, and its control on the component's root writes back.
+        if (attribute.twoWay === true) {
+          if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) notYetDirect();
+          controls.push(this.writable(attribute.writablePath, scope));
+        }
         // Re-applied exactly when what it read changes, as its live effect re-runs.
         const recording = this.recording(scope);
         const contract = invoked.definition.contract.props[prop]!;
@@ -1071,7 +1085,7 @@ class Planner {
     // Every other binding targets the component's root, which the site holds once it is created.
     this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg);
     let projection: Block | undefined;
-    if (node.children.length > 0) {
+    if (node.children.length > 0 && content === undefined) {
       const outer = this.projecting;
       // The projection's own scoped-slot templates take the props the component's slots give them.
       this.projecting = { block: undefined as never, definition: invoked.definition };
@@ -1079,8 +1093,14 @@ class Planner {
         false, { ...scope, level: scope.level + 1 }, false, svg, false, this.projecting);
       this.projecting = outer;
     }
+    // The compact paths take their props as values: literal ones parsed as live parses HTML input.
+    const values = html.map(([name, text]) => {
+      const prop = contract.props[name]!;
+      const parsed = prop.select === undefined ? parseTypedValue(prop.type === "boolean" && text === "" ? true : text, prop.type, "$", "html") : undefined;
+      return [name, parsed?.ok === true ? parsed.value : text] as const;
+    });
     block.invocations.push({
-      site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined,
+      site, factory: `create${contract.name}`, html, values, attributes, props, projection, root: path.length === 0 && block.parent === undefined, controls, content,
       events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
       ref: node.ref === undefined ? undefined : { name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) },
     });
@@ -1599,8 +1619,14 @@ export function emitBlocks(
         `    r.q${index}_${at} = ${prop.record};`,
         `    { const t = propText(${JSON.stringify(prop.type)}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
       ]),
+      ...invocation.content === undefined ? [] : [
+        `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
+        `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
+      ],
       `    r.h${index} = invoke(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
-        make === undefined ? "" : ", ...projected(j.n)"} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+        make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""}${
+        invocation.values.map(([name, value]) => `, ${JSON.stringify(name)}: ${JSON.stringify(value)}`).join("")}${
+        invocation.props.map((prop, at) => `, ${JSON.stringify(prop.name)}: y${at} === NONCONFORMING ? undefined : y${at}`).join("")} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
@@ -1609,9 +1635,12 @@ export function emitBlocks(
         // Outer to inner, as live's lineage lists a delegated root's components.
         `    I.e.setAttribute("data-component", \`${contract.tag} \${I.e.getAttribute("data-component")}\`);`,
       ] : [],
-      ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (y${at} !== NONCONFORMING) ` : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`),
+      ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (y${at} !== NONCONFORMING) ` : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at}${prop.type === undefined ? "" : `, ${JSON.stringify(prop.type)}`});`),
       ...ref === undefined ? [] : [ref.iterated ? `    (I.r[${refKey}] ??= []).push(${site});` : `    I.r[${refKey}] = ${site};`],
       ...invocation.events.map((event) => `    r.z.push(${listener(event, `r.h${index}`, true)});`),
+      // Two-way bindings listen on the component's root, wherever it is.
+      ...[...invocation.controls, ...block.bindings.filter((binding) => binding.site === invocation.site && binding.kind === "control").map((binding) => binding.path!)]
+        .map((path) => `    r.z.push(bindRootControl(I, r.h${index}, ${path}));`),
       ...projection === undefined ? [] : [`    r.z.push(() => dispose(r.j${index}));`],
       `  } else {`,
       ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
@@ -1621,7 +1650,7 @@ export function emitBlocks(
         // A nested write anywhere in the value re-applies it, as live's parse at the destination reads it all.
         `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record}) || touches(x, d)) {`,
         `        r.q${index}_${at} = ${prop.record};`,
-        `        ${prop.expression.fails ? "if (x !== NONCONFORMING) " : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x);`,
+        `        ${prop.expression.fails ? "if (x !== NONCONFORMING) " : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x${prop.type === undefined ? "" : `, ${JSON.stringify(prop.type)}`});`,
         "      }",
         "    }",
       ]),
@@ -1864,7 +1893,8 @@ export function emitBlocks(
     // A select's `applySelection` runs once its options exist and after its option regions change.
     for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`)};`);
     const stops = block.events.map((event) => listener(event, siteOf(event.site)));
-    for (const binding of block.bindings) if (binding.kind === "control") stops.push(`bindControl(I, ${siteOf(binding.site)}, ${binding.path})`);
+    const invoked = new Set(block.invocations.map((invocation) => invocation.site));
+    for (const binding of block.bindings) if (binding.kind === "control" && !invoked.has(binding.site)) stops.push(`bindControl(I, ${siteOf(binding.site)}, ${binding.path})`);
     // A cleared region or removed row stops its listeners and the regions and rows below it.
     block.regions.forEach((region, index) => {
       if (![region.block, ...region.arms ?? []].some(disposable)) return;
@@ -2060,7 +2090,8 @@ export function emitBlocks(
       "  {",
       // A destination function reads the root record as `r`, as listeners in other blocks do.
       "    const r = R;",
-      ...root.bindings.filter((binding) => binding.kind === "control").map((binding) => `    bindControl(I, ${siteOf(binding.site)}, ${binding.path});`),
+      ...root.bindings.filter((binding) => binding.kind === "control" && !root.invocations.some((invocation) => invocation.site === binding.site))
+        .map((binding) => `    bindControl(I, ${siteOf(binding.site)}, ${binding.path});`),
       "  }",
     ] : [],
     delegated ? "  return I.e;" : "  return element;",
@@ -2167,7 +2198,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

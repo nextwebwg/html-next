@@ -170,7 +170,6 @@ describe("direct-extend Vanilla generation", () => {
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
-    "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
@@ -1246,6 +1245,47 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     } finally {
       fetchStub = undefined;
     }
+  });
+
+  it("writes is=, content directives and two-way bindings on invocations like live", async () => {
+    const field = `<template component="x-field" status="early" summary="Field.">
+      <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="value"></template>`;
+    await same([parent(`
+      <section><button is="x-fancy" from:title="label">is</button>
+        <x-badge $value="label" from:count="count"></x-badge><x-badge $html="'<b>' + label + '</b>'"></x-badge>
+        <x-field bind:value="label"></x-field><x-field bind:title="label"></x-field></section>`), badge, field], [
+      (host) => { host.state.label = "M"; },
+      (host) => {
+        const [first, second] = host.root.querySelectorAll("input");
+        first.value = "typed"; first.dispatchEvent(new Event("input", { bubbles: true }));
+        second.value = "other"; second.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+      (host) => { (globalThis as any).directExtendLog.events.push(`label ${host.state.label}`); host.state.label = "N"; },
+    ]);
+  });
+
+  it("compiles a component with only props like the general runtime", async () => {
+    for (const body of ['<button from:data-tone="tone" type="button">{label}</button>', '<input from:value="label" from:data-tone="tone">']) {
+      await same(`<template component="x-shape" status="early" summary="Shape.">
+        <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>${body}</template>`, [
+        (_host, update) => { update({ tone: "warn", label: "L" }); },
+        (_host, update) => { update({ tone: "bad", label: undefined }); },
+        (host) => { (globalThis as any).directExtendLog.events.push(`valid ${(host.root as any).validity?.valid} ${(host.root as any).validationMessage}`); },
+      ], { tone: "nope" });
+    }
+  });
+
+  it("invokes a component the compact prop path compiles like live lowering", async () => {
+    const tag = `<template component="x-tag" status="early" summary="Tag.">
+      <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>
+      <button from:data-tone="tone" type="button">{label}</button></template>`;
+    assert.match(vanilla(tag, true), /manageGeneratedProps/, "the child stays on the compact path");
+    await same([parent(`
+      <section><x-tag tone="warn" label="Hi"></x-tag><x-tag tone="bad"></x-tag><x-tag from:label="label" from:tone="flag ? 'warn' : 'nope'"></x-tag></section>`), tag], [
+      (_host, update) => { update({ flag: true }); },
+      (host) => { host.state.label = "7"; },
+      (host, update) => { host.state.label = "8"; update({ flag: false }); },
+    ]);
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

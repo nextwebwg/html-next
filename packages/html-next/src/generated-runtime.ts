@@ -414,7 +414,8 @@ export function invoke(
   const root = factory(options, html);
   // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
   if (placeholder.parentNode !== null) placeholder.replaceWith(root);
-  const child = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
+  // A component the compact paths compile keeps its root and takes props through its factory's channel.
+  const child = ((root as RuntimeElement)[lifecycleKey]?.h ?? { e: root }) as GeneratedInstance;
   let current = root;
   const effect = createEffect(instance.q, () => {
     trackProperty(child, "e");
@@ -454,8 +455,12 @@ export function projected(fragment: Node): { children: Node[]; slots: Record<str
  * Applies a parent's bound value to an invoked component's prop, as live's invocation binding does:
  * a value the prop's type (chosen by its selector) does not take is not applied at all.
  */
-export function bindProp(child: GeneratedInstance, name: string, value: unknown): void {
-  const record = child.B!;
+export function bindProp(child: GeneratedInstance, name: string, value: unknown, declared?: PropType): void {
+  const record = child.B;
+  if (record === undefined) {
+    if (conformsAtDestination(value as Value, declared)) updateGeneratedProps(child.e, { [name]: value });
+    return;
+  }
   const prop = record.D.props[name]!;
   const from = prop.select?.from;
   const type = selectedPropType(record.D as ComponentContract, prop, from === undefined ? {}
@@ -715,6 +720,8 @@ export function acceptProps(
   element: Element | undefined, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
   input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>,
 ): GeneratedPropRecord {
+  // An invocation's factory values only serve components the compact paths compile.
+  if (html !== undefined) input = {};
   const props = D.props;
   const names = Object.keys(props);
   // The factory's explicit values are recorded as `data-<name>`, raw, once the root exists (`manageProps`).
@@ -726,7 +733,7 @@ export function acceptProps(
     raw.add(name);
   }
   // An invocation's literal props are its HTML input; a factory's root reads its `data-<name>`
-  // attributes back as HTML input instead. The factory's values win.
+  // attributes back as HTML input instead, and the factory's values win.
   const incoming: Record<string, PropInput> = Object.create(null);
   if (html !== undefined) {
     for (const name of names) if (Object.hasOwn(html, name)) incoming[name] = { value: html[name], source: "html", present: true };
@@ -1367,6 +1374,17 @@ export function bindControl(instance: GeneratedInstance, target: Element, path: 
       if (object != null) (object as Record<PropertyKey, unknown>)[resolved.at(-1) as PropertyKey] = controlValue(target);
     } finally { trusted = false; }
   }, false, false, false);
+}
+
+/** A two-way binding on an invoked component, listening on its root and following it through a root switch. */
+export function bindRootControl(instance: GeneratedInstance, child: GeneratedInstance, path: () => readonly unknown[] | undefined): () => void {
+  const effect = createEffect(instance.q, () => {
+    trackProperty(child, "e");
+    const root = child.e;
+    return untracked(() => bindControl(instance, root, path));
+  }, 2, instance.c());
+  instance.o.push(effect);
+  return () => release(instance, effect);
 }
 
 /** A handler's `<set>`: checks the destination's declared type, then writes through the host's facades. */
