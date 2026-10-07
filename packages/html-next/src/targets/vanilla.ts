@@ -1337,7 +1337,14 @@ export function generateVanilla(
   );
   const blocks = directExtend && runtimeFallback ? blockPlan(definition) : undefined;
   const needsRuntime = runtimeFallback && blocks === undefined;
+  // A handler's write that fails a numeric state's type warns once, as the live runtime warns.
+  const directWarns = direct !== undefined && [...direct.handlers.values()].some(({ declaration }) => declaration.steps.some((step) => {
+    if (step.kind !== "set") return false;
+    const target = definition.declarations?.find((candidate) => candidate.kind === "state" && candidate.name === String(step.writablePath[0]));
+    return target?.kind === "state" && (target.type === "number" || target.type === "integer");
+  }));
   const generatedRuntimeImports = [
+    ...(directWarns ? ["warnOnce"] : []),
     ...(directProps === undefined ? [] : [directPropSingle ? "manageGeneratedProp" : "manageGeneratedProps"]),
     ...(directHasLifecycle ? ["manageGeneratedLifecycle"] : []),
     ...(directDispatches ? ["dispatchGeneratedEvent"] : []),
@@ -1354,6 +1361,7 @@ export function generateVanilla(
     `import "../styles/${contract.tag}.css";`,
     "",
     ...(needsRuntime ? [`const definition = ${serializedDefinition(definition)};`, ""] : []),
+    ...(directWarns ? ["const W = { f: import.meta.url };", ""] : []),
     `export function create${contract.name}(options${hasRequired ? "" : " = {}"}) {`,
     `  const { attributes = {}, children = [], slots = {}${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
     "  const projected = [];",
@@ -1564,8 +1572,9 @@ export function generateVanilla(
         const stateType = stateDeclaration?.kind === "state" ? stateDeclaration.type : undefined;
         const validNext = stateType === "integer" ? `Number.isInteger(${nextVariable})`
           : stateType === "number" ? `Number.isFinite(${nextVariable})` : undefined;
+        const warn = validNext === undefined ? "" : `if (!${validNext}) warnOnce(W, ${js(`handler:${declaration.name}:${step.path}`)}, ${js(`State \`${step.path}\` does not satisfy its declared type.`)}); else `;
         lines.push(
-          `${indent}if (${validNext === undefined ? "" : `${validNext} && `}!Object.is(${stateVariable}, ${nextVariable})) { ${stateVariable} = ${nextVariable};` +
+          `${indent}${warn}if (!Object.is(${stateVariable}, ${nextVariable})) { ${stateVariable} = ${nextVariable};` +
           `${selective ? ` dirty |= ${directPlan.states.get(state)!.bit};` : ""}${directHasBindings ? " schedule();" : ""} }`,
         );
         if (guard !== undefined) lines.push("    }");

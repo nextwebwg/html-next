@@ -12,6 +12,7 @@ import { generateComponent } from "../src/generate.js";
 import { compactTypeAt, conforms, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 import { visitSelected } from "../src/selection.js";
+import { serializedDefinition } from "../src/targets/shared.js";
 import { blockPlan, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
 import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../src/type-system.js";
 
@@ -22,6 +23,28 @@ function vanilla(text: string, directExtend: boolean): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
   const named = definition.controller === undefined ? definition : { ...definition, controller: "./controller.js" };
   return generateComponent(named, { directExtend }).find((artifact) => artifact.path.endsWith(".js"))!.content;
+}
+
+/**
+ * The reference every compiled module is held to: the live runtime attached to a fresh root, as
+ * generated output's general-runtime fallback attached it, rendering the same definition.
+ */
+function reference(text: string): string {
+  const definition = parseComponent(text, new URL("component.html", fixtures).href);
+  const controlled = definition.controller !== undefined;
+  const named = controlled ? { ...definition, controller: "./controller.js" } : definition;
+  const root = definition.template.name;
+  return [
+    'import { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";',
+    ...controlled ? ['import * as controller from "./controller.js";'] : [],
+    `const definition = ${serializedDefinition(named)};`,
+    "export function createReference() {",
+    root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
+    `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
+    `  manageComponentLifecycle(element, definition, ${controlled ? "{ controller }" : "{}"});`,
+    "  return element;",
+    "}",
+  ].join("\n");
 }
 
 const component = (defs: string, body: string, controller = true): string =>
@@ -229,7 +252,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   /** Builds `text` on one path, runs `steps` with a render and a snapshot after each, and reconnects. */
   async function run(text: string, directExtend: boolean, steps: readonly Step[]): Promise<Run> {
-    const { text: code } = await bundle(vanilla(text, directExtend));
+    const { text: code } = await bundle(directExtend ? vanilla(text, true) : reference(text));
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
       if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
@@ -566,6 +589,43 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { type(control(host.root, "bio"), "Cy"); host.state.colors = ["blue", "red"]; note(host, "bio"); },
     ]);
   });
+
+  // The older direct paths compile these primitive, controller-free shapes; they must match live too.
+  const older = (defs: string, body: string): string => component(defs, body, false);
+  const fire = (target: any, type: string, init: EventInit & { key?: string } = {}): boolean => {
+    const event = type === "keydown" ? new KeyboardEvent(type, { bubbles: true, cancelable: true, ...init })
+      : type === "click" ? new MouseEvent(type, { bubbles: true, cancelable: true, ...init }) : new Event(type, { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const log = (text: string): void => { (globalThis as any).directExtendLog.events.push(text); };
+  const olderShapes: Record<string, [string, readonly Step[]]> = {
+    counter: [older(`<state name="count" type="number" value="0"></state><computed name="label" from="concat('n', count)"></computed>
+      <handler name="up"><set name="count" expr:value="count + 1" $if="count < 2"></set></handler>`,
+      `<section><button on:click.prevent="up" from:aria-label="label">{count}</button><output $value="label"></output></section>`),
+      [({ root }) => log(String(fire(root.querySelector("button"), "click"))), ({ root }) => { fire(root.querySelector("button"), "click"); fire(root.querySelector("button"), "click"); }]],
+    "number guard": [older(`<state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler>`,
+      `<section><button on:click="divide"><output $value="count"></output></button></section>`), [({ root }) => fire(root.querySelector("button"), "click")]],
+    checkbox: [older(`<state name="done" type="boolean" value="false"></state>`, `<section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>`),
+      [({ root }) => { root.querySelector("input").click(); log(String(root.querySelector("input").checked)); }]],
+    range: [older(`<state name="position" type="number" value="0"></state>`, `<section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>`),
+      [({ root }) => { root.querySelector("input").value = "42"; fire(root.querySelector("input"), "input"); log(root.querySelector("input").value); }]],
+    choice: [older(`<state name="choice" type="string" value="one"></state>`,
+      `<section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>`),
+      [({ root }) => { root.querySelector("select").value = "two"; fire(root.querySelector("select"), "change"); log(root.querySelector("textarea").value); },
+        ({ root }) => { root.querySelector("textarea").value = "three"; fire(root.querySelector("textarea"), "input"); log(root.querySelector("select").value); }]],
+    modifiers: [older(`<state name="count" type="number" value="0"></state><handler name="up"><set name="count" expr:value="count + 1"></set></handler>`,
+      `<section><input on:keydown.enter.stop="up"><button on:click.self.once="up"><b>inner</b></button><output $value="count"></output></section>`),
+      [({ root }) => { log(String(fire(root.querySelector("input"), "keydown", { key: "Enter" }))); fire(root.querySelector("input"), "keydown", { key: "a" }); },
+        ({ root }) => { fire(root.querySelector("b"), "click"); fire(root.querySelector("button"), "click"); fire(root.querySelector("button"), "click"); }]],
+    "mixed text and styles": [older(`<state name="count" type="number" value="2"></state><state name="tone" type="string" value="red"></state>
+      <handler name="up"><set name="count" expr:value="count + 1"></set><set name="tone" value="blue"></set></handler>`,
+      `<section style:color="tone" from:data-count="count"><p>Count: {count} of {tone}!</p><button on:click="up" class:big="count > 2">Up</button></section>`),
+      [({ root }) => fire(root.querySelector("button"), "click")]],
+  };
+  for (const [name, [text, steps]] of Object.entries(olderShapes)) {
+    it(`matches live for the older direct shape: ${name}`, async () => { await same(text, steps); });
+  }
 
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`
