@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.33
+
+- Withdraw framework speed and bundle-size comparison claims from the public documentation and package READMEs pending validation of the standard build.
+
 ## 1.0.0-alpha.31
 
 - Browser adoption retains parent refs, reactive bindings, declared child props, and events on nested components rendered as native roots, whether the nested component is adopted before or after its parent. Bindings and refs follow child root replacement without replacing projected content.
