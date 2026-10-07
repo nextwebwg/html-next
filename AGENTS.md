@@ -16,6 +16,7 @@
 ## Workspace structure
 
 - Keep proposal implementations in separate packages under `packages/`. The four publishable packages share one release version and publish together.
+- Record each change in `CHANGELOG.md` under the version its pull request targets. Merging a new shared version publishes it, so there is no Unreleased section: a change merged without a version bump belongs to the next version.
 - Put shared tooling at the repository root; keep proposal-specific source, tests, and build configuration with its package.
 - Use pnpm through Corepack and preserve strict ESM TypeScript package boundaries.
 
