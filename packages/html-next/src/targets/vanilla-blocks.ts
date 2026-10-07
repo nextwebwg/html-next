@@ -18,7 +18,7 @@ import {
   type ExpressionNode,
   type Scope as TypeScope,
 } from "../expression.js";
-import { conforms, type CompactType } from "../generated-runtime.js";
+import type { CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { foreignContent } from "parse5";
 
@@ -26,7 +26,7 @@ import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
 import { iteratedRefNames, rootArms, type ComponentDefinition, type ElementNode, type Flow, type TemplateNode } from "../template.js";
 import type { WritablePath } from "../expression.js";
-import { declarationTypeNode, formatType, type TypeNode } from "../type-system.js";
+import { declarationTypeNode, formatType, parseTypedValue, type TypeNode } from "../type-system.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
@@ -182,15 +182,36 @@ function notYetDirect(): never {
   throw new NotYetDirect();
 }
 
-/** The compact form of a declared type, or undefined for kinds the subset does not check yet. */
+/** A build-time stand-in for a check function, written into the module as `source`. */
+interface CompactCheck { readonly js: string }
+
+const FORMAT_CHECKS: Readonly<Record<string, string>> = {
+  keyword: "keywordFormat", url: "urlFormat", email: "emailFormat", date: "dateFormat", month: "monthFormat",
+  week: "weekFormat", time: "timeFormat", "datetime-local": "datetimeLocalFormat", datetime: "datetimeFormat",
+  color: "colorFormat", "color-hex": "colorHexFormat", length: "lengthFormat", percentage: "percentageFormat",
+  duration: "durationFormat",
+};
+
+/** Whether `parseTypedValue` accepts null for the type, decided once at build time. */
+const nullAccepted = (node: TypeNode): boolean => parseTypedValue(null, node, "$", "value").ok;
+
+/** The compact form of a declared type; kinds without a structure of their own check through a predicate. */
 export function compactType(node: TypeNode): CompactType | undefined {
   switch (node.kind) {
     case "terminal": {
       const names: Readonly<Record<string, CompactType>> = {
         string: "s", boolean: "b", number: "n", integer: "i", null: "z", absent: "a", unknown: "?",
       };
-      return names[node.name];
+      const plain = names[node.name];
+      if (plain !== undefined) return plain;
+      const format = FORMAT_CHECKS[node.name];
+      const check: CompactCheck = format !== undefined ? { js: `formatOf(${format})` }
+        : node.name === "function" ? { js: "isFunctionValue" }
+        : node.name === "event" ? { js: "isNativeEvent" }
+        : { js: `detailCheck(${JSON.stringify(node)})` };
+      return ["p", check, nullAccepted(node)];
     }
+    case "keyword": return ["k", node.value];
     case "list": {
       const item = compactType(node.item);
       return item === undefined ? undefined : ["l", item];
@@ -218,13 +239,27 @@ export function compactType(node: TypeNode): CompactType | undefined {
       return ["u", ...members];
     }
     case "constrained": {
-      // A reference checks only the base. A null write would also check the constraints, so only
-      // bases that reject null lower exactly.
+      // A reference checks only the base; a null write checks the constraints too, so a base
+      // that accepts null carries whether the whole type does.
       const base = compactType(node.base);
-      return base === undefined || conforms(null, base) ? undefined : base;
+      if (base === undefined) return undefined;
+      return acceptsNullCompact(base) ? ["c", base, nullAccepted(node)] : base;
     }
-    default: return undefined;
+    default:
+      // A selected type depends on another declaration; a separated list checks its items.
+      return ["p", { js: `detailCheck(${JSON.stringify(node)})` } satisfies CompactCheck, nullAccepted(node)];
   }
+}
+
+const acceptsNullCompact = (type: CompactType): boolean =>
+  type === "?" || type === "z" || typeof type === "object" && (type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNullCompact(member as CompactType))
+    : (type[0] === "p" || type[0] === "c") && type[2] === true);
+
+/** JavaScript for a compact type: JSON, with each predicate's check written as code. */
+export function compactSource(type: unknown): string {
+  if (Array.isArray(type)) return `[${type.map(compactSource).join(",")}]`;
+  if (type !== null && typeof type === "object" && "js" in type) return (type as CompactCheck).js;
+  return JSON.stringify(type);
 }
 
 /** Whether values of `type` may be lists or objects, whose conversion reads their contents. */
@@ -585,7 +620,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     // An untyped root says nothing about its value, so it may also hold undefined.
     const type = node === undefined ? "?" : compactType(node);
     if (type === undefined) notYetDirect();
-    const undefinable = type === "?" || type === 0 || conforms(undefined, type);
+    const undefinable = node === undefined || parseTypedValue(undefined, node, "$", "value").ok;
     if (declaration.kind === "computed") {
       computeds.push({ name: declaration.name, type, initial: "undefined", computed: declaration.expression, checked: node !== undefined });
       continue;
@@ -596,7 +631,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       continue;
     }
     // A literal that conforms keeps every read of the root free of the reference check.
-    const conforming = literal.value === null || conforms(literal.value, type);
+    const conforming = literal.value === null || node === undefined || parseTypedValue(literal.value, node, "$", "value").ok;
     states.push({
       name: declaration.name, type, initial: valueSource(literal.value), undefinable,
       checked: (!conforming || controlled.has(declaration.name)) && node !== undefined,
@@ -717,7 +752,7 @@ class Planner {
         if (type === undefined) notYetDirect();
         const local = aliasSource(scope, shadow);
         const localRead = steps.length === 0 ? local : `readDeclared(${local}, ${JSON.stringify(steps)}${scope.record === undefined ? "" : `, ${scope.record}`})`;
-        checks.push(`checkReference(S, ${scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+        checks.push(`checkReference(S, ${scope.record === undefined ? localRead : `rec(${scope.record}, ${localRead})`}, ${compactSource(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
         reads = merge(reads, { bits: 0, nested: false, item: true, contents: false, fails: true });
         continue;
       }
@@ -729,7 +764,7 @@ class Planner {
       const declaredRead = scope.record === undefined
         ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
         : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
-      checks.push(`checkReference(S, ${declaredRead}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+      checks.push(`checkReference(S, ${declaredRead}, ${compactSource(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
       const rootReads = root.computed === undefined ? { bits: 1 << index, nested: steps.length > 0 } : this.computedLowered(index);
       reads = merge(reads, { bits: rootReads.bits, nested: rootReads.nested, item: false, contents: false, fails: true });
     }
@@ -1556,7 +1591,7 @@ export function emitBlocks(
     const type = declarationTypeNode(declaration.type, declaration.shape);
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${JSON.stringify(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
-  const stateSpec = `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
+  const stateSpec = `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: [${plan.roots.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
     plan.computeds.length === 0 ? "" : `, k: ${plan.computeds[0]!.index}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""} };`;
   const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
@@ -1565,7 +1600,9 @@ export function emitBlocks(
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
     "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState",
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
-    "bindControl"]
+    "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
+    "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
+    "lengthFormat", "percentageFormat", "durationFormat"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 

@@ -13,7 +13,7 @@ import { compactTypeAt, conforms, type CompactType } from "../src/generated-runt
 import { parseComponent } from "../src/source-parser.js";
 import { visitSelected } from "../src/selection.js";
 import { serializedDefinition } from "../src/targets/shared.js";
-import { blockPlan, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
+import { blockPlan, compactSource, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
 import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../src/type-system.js";
 
 const source = fileURLToPath(new URL("../src/", import.meta.url));
@@ -114,7 +114,6 @@ describe("direct-extend Vanilla generation", () => {
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
     props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
-    "format type": component('<state name="x" type="url" value="https://a.example/"></state>', '<p $value="x"></p>'),
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
     "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
     "host state": component(state, '<p $value="ready"></p><style>:host-state([ready]) { color: red; }</style>'),
@@ -231,12 +230,25 @@ describe("compact declared types (matrix)", () => {
     });
   }
 
-  it("leaves kinds it does not check yet on the fallback", () => {
-    for (const text of ["url", "email", "color", "keyword", "keyword+", "event", "list(url)"]) {
-      assert.equal(compactType(parseTypeExpression(text)), undefined, text);
+  it("checks formats, keywords, functions, events and constrained nullable types as the type system does", async () => {
+    const helpers = await import("../src/generated-runtime.js");
+    const materialize = (node: TypeNode): CompactType =>
+      // oxlint-disable-next-line typescript/no-implied-eval
+      new Function("h", `with (h) { return ${compactSource(compactType(node))}; }`)(helpers) as CompactType;
+    const samples: unknown[] = [null, undefined, "", "x", "abc-1", "https://a.example/", "a@b.example", "2024-02-29", "2023-02-29",
+      "2024-W53", "2020-W53", "12:30", "2024-01-01T10:00", "2024-01-01T10:00Z", "#fff", "#ffff", "rebeccapurple", "rgb(1 2 3)",
+      "10px", "0", "5%", "3ms", "solid", 1, true, () => 1, new Event("x"), {}, []];
+    const types = ["keyword", "url", "email", "date", "month", "week", "time", "datetime-local", "datetime", "color", "color-hex",
+      "length", "percentage", "duration", "event", "list(email)", "object({ site: url, at?: date })"].map(parseTypeExpression);
+    types.push({ kind: "terminal", name: "function" }, { kind: "union", members: [parseTypeExpression("url"), { kind: "terminal", name: "null" }] });
+    types.push({ kind: "keyword", value: "solid" }, { kind: "union", members: [{ kind: "keyword", value: "solid" }, { kind: "keyword", value: "outline" }] });
+    types.push({ kind: "constrained", base: { kind: "union", members: [{ kind: "terminal", name: "number" }, { kind: "terminal", name: "null" }] }, values: [1, 2] });
+    for (const node of types) {
+      const type = materialize(node);
+      for (const value of samples) {
+        assert.equal(conforms(value, type), atDestination(value, node), `${JSON.stringify(node)} ${String(value)}`);
+      }
     }
-    assert.equal(compactType({ kind: "keyword", value: "a" }), undefined);
-    assert.equal(compactType({ kind: "constrained", base: { kind: "terminal", name: "unknown" } }), undefined);
   });
 });
 
@@ -626,6 +638,25 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   for (const [name, [text, steps]] of Object.entries(olderShapes)) {
     it(`matches live for the older direct shape: ${name}`, async () => { await same(text, steps); });
   }
+
+  it("checks formatted and keyword state like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="site" type="url" value="https://a.example/"></state>
+      <state name="tint" type="color" value="red"></state>
+      <state name="when" type="date" nullable></state>
+      <state name="tone" type="keyword" values="solid, outline" value="solid"></state>
+      <state name="links" type="list(url)" value="[]"></state>`, `
+      <section><p>{site} {tint} {when} {tone}</p><a from:href="site">x</a><b $value="links[0]"></b><i $value="links.length"></i></section>`);
+    await same(text, [
+      (host) => { host.state.site = "not a url"; host.state.tint = "#abc"; host.state.when = "2024-02-29"; host.state.tone = "outline"; },
+      (host) => { host.state.tint = "nope"; host.state.when = "2023-02-29"; host.state.tone = "dashed"; host.state.when = null; },
+      (host) => { host.state.links = ["https://b.example/", "bad"]; host.state.links.push(4); },
+      (host) => { host.state.site = "https://c.example/"; host.state.links[0] = "also bad"; host.state.selected = 1; },
+    ]);
+  });
 
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`

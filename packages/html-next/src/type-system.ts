@@ -3,7 +3,10 @@
 import { deepFreeze, isNativeEvent } from "./freeze.js";
 import { compileExpression } from "./expression.js";
 import { parseHtmlLiteral } from "./structured-input.js";
-import { CSS_COLOR_KEYWORDS } from "./css-color-keywords.js";
+import {
+  colorFormat, colorHexFormat, dateFormat, datetimeFormat, datetimeLocalFormat, durationFormat, emailFormat, keywordFormat,
+  lengthFormat, monthFormat, percentageFormat, timeFormat, urlFormat, weekFormat,
+} from "./formats.js";
 import { boundFailures, type ValueBounds } from "./value-constraints.js";
 
 export type TerminalTypeName =
@@ -139,9 +142,8 @@ const PUBLIC_TERMINALS = new Set([
   "month", "week", "time", "datetime-local", "datetime", "color", "color-hex",
   "length", "percentage", "duration", "unknown", "event",
 ]);
-const CSS_NAMED_COLOR_SET = new Set<string>(CSS_COLOR_KEYWORDS);
 // HTML's valid-email-address production permits a single-label domain such as a@b.
-export const HTML_EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/?=^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+export { HTML_EMAIL_PATTERN } from "./formats.js";
 
 /** Names the grammar reads as a type, so a keyword spelling one must be written quoted. */
 const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set([...TERMINALS, "list", "record", "object"]);
@@ -420,7 +422,7 @@ function structuredInput(value: unknown): unknown {
   return parseHtmlLiteral(value, readStructuredExpression);
 }
 
-function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
+export function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
   if (typeof value !== "object" || value === null) return false;
   if ((value as { kind?: unknown }).kind === type && "value" in value) return true;
   const expected = type === "trusted-html" ? "TrustedHTML" : "TrustedScript";
@@ -428,69 +430,22 @@ function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script")
     Object.prototype.toString.call(value) === `[object ${expected}]`;
 }
 
-function validDate(value: string): boolean {
-  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null || match[1] === "0000") return false;
-  const year = Number(match[1]);
-  const date = new Date(0);
-  date.setUTCFullYear(year, Number(match[2]) - 1, Number(match[3]));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
-}
-
-function validTime(value: string): boolean {
-  const match = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
-  return match !== null && Number(match[1]) < 24 && Number(match[2]) < 60 && Number(match[3] ?? 0) < 60;
-}
-
-function validFunctionalColor(value: string): boolean {
-  const match = /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\((.*)\)$/i.exec(value);
-  if (match === null) return false;
-  const body = match[2]!.trim();
-  const parts = body.replaceAll(",", " ").replaceAll("/", " ").split(/\s+/);
-  const colorSpace = match[1]!.toLowerCase() === "color";
-  if (colorSpace && !/^(?:srgb|srgb-linear|display-p3|a98-rgb|prophoto-rgb|rec2020|xyz|xyz-d50|xyz-d65)$/.test(parts.shift() ?? "")) return false;
-  if (parts.length < 3 || parts.length > 4) return false;
-  if (parts.length === 4 && !body.includes("/") && !body.includes(",")) return false;
-  return parts.every((part) => part === "none" || /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|deg|rad|grad|turn)?$/.test(part));
-}
-
-// Prop parsing also runs in Node during builds and SSR. The color subset stays the same in
-// both environments rather than accepting browser-only CSS forms during hydration.
 function validFormat(value: string, name: TerminalTypeName): boolean {
   switch (name) {
-    case "keyword": return /^[A-Za-z0-9_-]+$/.test(value);
-    case "url": {
-      try { return new URL(value).protocol !== ""; } catch { return false; }
-    }
-    case "email": return HTML_EMAIL_PATTERN.test(value);
-    case "date": return validDate(value);
-    case "month": return /^(?!0000)\d{4,}-(?:0[1-9]|1[0-2])$/.test(value);
-    case "week": {
-      const match = /^(\d{4,})-W(\d{2})$/.exec(value);
-      if (match === null || match[1] === "0000") return false;
-      const year = Number(match[1]);
-      const week = Number(match[2]);
-      const jan1 = new Date(0);
-      jan1.setUTCFullYear(year, 0, 1);
-      const jan1Day = jan1.getUTCDay();
-      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-      return week >= 1 && (week < 53 || (week === 53 && (jan1Day === 4 || (jan1Day === 3 && leap))));
-    }
-    case "time": return validTime(value);
-    case "datetime-local": {
-      const match = /^(\d{4,}-\d{2}-\d{2})[T ](.+)$/.exec(value);
-      return match !== null && validDate(match[1]!) && validTime(match[2]!);
-    }
-    case "datetime": {
-      const match = /^(\d{4,}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/.exec(value);
-      return match !== null && validDate(match[1]!) && validTime(match[2]!);
-    }
-    case "color-hex": return /^#[\da-fA-F]{3}(?:[\da-fA-F]{1}|[\da-fA-F]{3}(?:[\da-fA-F]{2})?)?$/.test(value);
-    case "color": return validFormat(value, "color-hex") || CSS_NAMED_COLOR_SET.has(value.toLowerCase()) ||
-      validFunctionalColor(value);
-    case "length": return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|vw|vh|vmin|vmax|ch|ex|cm|mm|in|pt|pc|q)$/.test(value) || value === "0";
-    case "percentage": return /^-?(?:\d+(?:\.\d+)?|\.\d+)%$/.test(value);
-    case "duration": return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:ms|s)$/.test(value);
+    case "keyword": return keywordFormat(value);
+    case "url": return urlFormat(value);
+    case "email": return emailFormat(value);
+    case "date": return dateFormat(value);
+    case "month": return monthFormat(value);
+    case "week": return weekFormat(value);
+    case "time": return timeFormat(value);
+    case "datetime-local": return datetimeLocalFormat(value);
+    case "datetime": return datetimeFormat(value);
+    case "color-hex": return colorHexFormat(value);
+    case "color": return colorFormat(value);
+    case "length": return lengthFormat(value);
+    case "percentage": return percentageFormat(value);
+    case "duration": return durationFormat(value);
     default: return false;
   }
 }

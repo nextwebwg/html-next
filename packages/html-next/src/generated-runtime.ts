@@ -511,13 +511,25 @@ export function clearRegion(start: Comment, end: Comment): void {
 /**
  * A declared type in generated form: 0 none, "?" unknown, "s" string, "b" boolean, "n" number,
  * "i" integer, "z" null, "a" absent, ["l", item], ["r", value], ["o", [field, type, ...], open?],
- * ["u", ...members]. Constrained types are written as their base.
+ * ["u", ...members], ["k", keyword], ["p", check, acceptsNull] for any other kind (a format, a
+ * function, an event, trusted content), and ["c", base, acceptsNull] for a constrained type whose
+ * base accepts null: a reference checks only the base, a null write the whole type.
  */
 export type CompactType = 0 | "?" | "s" | "b" | "n" | "i" | "z" | "a" | readonly unknown[];
 
 const acceptsNull = (type: CompactType): boolean =>
-  type === "?" || type === "z" || typeof type === "object" && type[0] === "u" &&
-    type.some((member, index) => index > 0 && acceptsNull(member as CompactType));
+  type === "?" || type === "z" || typeof type === "object" && (
+    type[0] === "u" ? type.some((member, index) => index > 0 && acceptsNull(member as CompactType))
+      : (type[0] === "p" || type[0] === "c") && type[2] === true);
+
+/** A string format's check over any value. */
+export const formatOf = (format: (value: string) => boolean) => (value: unknown): boolean => typeof value === "string" && format(value);
+export const isFunctionValue = (value: unknown): boolean => typeof value === "function";
+export { isNativeEvent };
+export {
+  colorFormat, colorHexFormat, dateFormat, datetimeFormat, datetimeLocalFormat, durationFormat, emailFormat, keywordFormat,
+  lengthFormat, monthFormat, percentageFormat, timeFormat, urlFormat, weekFormat,
+} from "./formats.js";
 
 const conformsAtReference = (value: unknown, type: CompactType): boolean => {
   switch (typeof type === "object" ? type[0] : type) {
@@ -531,6 +543,9 @@ const conformsAtReference = (value: unknown, type: CompactType): boolean => {
     case "r":
     case "o": return typeof value === "object" && value !== null && !Array.isArray(value);
     case "u": return (type as readonly unknown[]).some((member, index) => index > 0 && conformsAtReference(value, member as CompactType));
+    case "k": return value === (type as readonly unknown[])[1];
+    case "p": return ((type as readonly unknown[])[1] as (value: unknown) => boolean)(value);
+    case "c": return conformsAtReference(value, (type as readonly unknown[])[1] as CompactType);
   }
   return false;
 };
