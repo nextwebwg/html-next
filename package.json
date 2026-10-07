@@ -22,6 +22,9 @@
     "measure:hydration": "pnpm --filter @nextwebwg/html-next measure:hydration",
     "measure:performance": "pnpm --filter @nextwebwg/html-next measure:performance",
     "measure:reactivity": "pnpm --filter @nextwebwg/html-next measure:reactivity",
+    "measure:frameworks": "pnpm --filter @nextwebwg/html-next measure:frameworks",
+    "setup:frameworks": "pnpm --filter @nextwebwg/html-next setup:frameworks",
+    "smoke:frameworks": "pnpm --filter @nextwebwg/html-next smoke:frameworks",
     "report:performance": "pnpm --filter @nextwebwg/html-next report:performance",
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
@@ -36,6 +39,7 @@
     "verify:release": "pnpm --filter @nextwebwg/html-next check:release && pnpm test:consumer",
     "release:dry-run": "pnpm --filter @nextwebwg/html-next release:dry-run",
     "verify:performance": "pnpm --filter @nextwebwg/html-next verify:performance",
+    "verify:frameworks": "pnpm --filter @nextwebwg/html-next verify:frameworks",
     "report:reactivity:suite": "pnpm --filter @nextwebwg/html-next report:reactivity:suite"
   },
   "devDependencies": {

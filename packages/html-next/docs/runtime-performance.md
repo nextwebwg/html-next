@@ -77,6 +77,25 @@ it rejects demonstrated slowdowns over 10% in aggregate or 25% in any workload.
 Unstable controls produce an inconclusive failure after one retry. The Required
 CI job includes this check; the full third-party matrix remains optional.
 
+## Framework rendering comparison
+
+The [framework comparison benchmark](./framework-benchmark.md) is the tracked tooling for keyed
+rendering against Solid, Vue, React Hooks and Svelte. The gated target is the Vite-compiled entry (an
+app built with Vite and `@nextwebwg/html-next-unplugin`, compiled to the native target): at most
+0.99× each of Solid, Vue and React Hooks; Svelte is reported but not gated. The live runtime is
+measured alongside it and must stay competitive.
+
+`pnpm setup:frameworks` prepares the pinned fork, `pnpm measure:frameworks` runs a serial sweep of the
+Vite-compiled and live entries against the controls, and `pnpm verify:frameworks --base=<ref>` gates
+both entries against a base revision in paired sweeps. The gate also fails a Vite-compiled entry that
+grows by more than 1 KB gzip or 5%. Recorded summaries form a ledger in `benchmarks/framework-results/`
+with every entry's and control's gzip bytes; raw results stay local. To read a summary, start with
+`gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
+and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
+[field reference](./framework-benchmark.md#ledger)). The CI job runs the comparison but is not yet
+Required. The results below predate the Vite
+entry: their "compiled-native" figures are an esbuild bundle of the native generator's output.
+
 ## Keyed component rendering: confirmed October 2026 results
 
 Four retained runtime changes removed the dominant dependency-tracking and controller-identity costs and reduced list-clearing work. Through experiment 005, live rendering's weighted time ratio against Solid fell from 4.591× to 1.465×. The target of beating all four framework controls remains unmet: live rendering was still 1.089× React, 1.272× Vue, and 1.424× Svelte. Ordinary compiled-native output was measured separately and reached 1.444× Solid. These are results for one keyed component and its nine workloads, not a general framework ranking.
