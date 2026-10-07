@@ -248,8 +248,6 @@ component-relative data URLs. The adapter supplies `parse5` for converted `$html
 
 ## Native builds
 
-**Beats Solid, Svelte, Vue, and React in js-framework-benchmark.** The native build also produces a **23% smaller benchmark bundle than Svelte**. [Results and methodology](https://nextwebwg.org/html-next/performance).
-
 Build integration for a closed Declarative Components application or library graph. The plugin
 parses component sources during the build, emits native DOM factories, combines the graph's support
 imports through the bundler, and writes `html-next.manifest.json` with the component and capability
