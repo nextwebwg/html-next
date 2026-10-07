@@ -128,14 +128,14 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 
 | Authored feature | Gzip bytes (level 9) | Runtime shape |
 | --- | ---: | --- |
-| Static markup | 6,617 | Cloned blocks, slot ranges, compiled-root handle and host |
-| Numeric state and handler | 6,855 | Same, with root bits and a handler |
+| Static markup | 6,875 | Cloned blocks, slot ranges, compiled-root handle and host |
+| Numeric state and handler | 6,856 | Same, with root bits and a handler |
 | Numeric computed state | 7,155 | Same, with a computed root, read-only to the controller |
-| Scalar and enum props | 11,039 | Same, with the live prop boundary and validity, each type compiled to its own checks |
+| Scalar and enum props | 11,287 | Same, with the live prop boundary and validity, each type compiled to its own checks |
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
 | Declared read | 7,455 | Cloned blocks and `DataResource` |
-| Controller lifecycle | 6,648 | Cloned blocks and the generated controller host |
-| Controller keyed list | 8,146 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
+| Controller lifecycle | 6,907 | Cloned blocks and the generated controller host |
+| Controller keyed list | 8,145 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions remain attributable. They are not separate
 per-component runtimes: an application or library build combines the complete input graph,
