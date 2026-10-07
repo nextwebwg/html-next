@@ -92,8 +92,8 @@ grows by more than 1 KB gzip or 5%. Recorded summaries form a ledger in `benchma
 with every entry's and control's gzip bytes; raw results stay local. To read a summary, start with
 `gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
 and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
-[field reference](./framework-benchmark.md#ledger)). The CI job runs the comparison but is not yet
-Required. The results below predate the Vite
+[field reference](./framework-benchmark.md#ledger)). A nightly workflow runs the comparison; it is not
+yet a release gate. The results below predate the Vite
 entry: their "compiled-native" figures are an esbuild bundle of the native generator's output.
 
 ## Keyed component rendering: confirmed October 2026 results
