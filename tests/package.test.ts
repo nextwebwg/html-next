@@ -32,7 +32,8 @@ const browserExports = [
   "./browser",
 ] as const;
 
-afterAll(() => rmSync(workspace, { recursive: true, force: true }));
+// Removing the installed consumers on Windows can outlast the default hook budget.
+afterAll(() => rmSync(workspace, { recursive: true, force: true }), 60_000);
 
 function pack(packageDirectory: string): string {
   const packageRoot = join(root, "packages", packageDirectory);
@@ -273,7 +274,8 @@ describe("workspace package contracts", () => {
     expect(existsSync(join(consumer, "dist/index.html"))).toBe(true);
     writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label={42} />;');
     expect(() => execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8", stdio: "pipe" })).toThrow();
-  }, 120_000);
+    // Windows runners have measured 82-133 s for this install, build and type-check sequence.
+  }, 300_000);
 
   it("publishes every workspace package publicly on the latest tag under MIT", () => {
     const versions = new Set<string>();

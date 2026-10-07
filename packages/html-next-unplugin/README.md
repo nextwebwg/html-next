@@ -248,6 +248,8 @@ component-relative data URLs. The adapter supplies `parse5` for converted `$html
 
 ## Native builds
 
+**Beats Solid, Svelte, Vue, and React in js-framework-benchmark.** The native build also produces a **23% smaller benchmark bundle than Svelte**. [Results and methodology](https://nextwebwg.org/html-next/performance).
+
 Build integration for a closed Declarative Components application or library graph. The plugin
 parses component sources during the build, emits native DOM factories, combines the graph's support
 imports through the bundler, and writes `html-next.manifest.json` with the component and capability
@@ -262,6 +264,7 @@ export default defineConfig({
   plugins: [htmlNext({
     entries: ["src/components/app.html"],
     mode: "application",
+    experimentalDirectExtend: true,
   })],
 });
 ```
@@ -271,6 +274,8 @@ import { createApp } from "virtual:html-next/components";
 
 document.body.append(createApp());
 ```
+
+`experimentalDirectExtend: true` enables direct DOM generation for supported components, as used in the benchmark. The manifest’s `directExtend` field records whether it applies and which components use runtime fallbacks.
 
 In application mode, the virtual module exports one `create<Name>` function for each component declared in the configured
 application entries. A linked `<link rel="component">` dependency used as an empty custom-element

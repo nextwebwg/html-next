@@ -1,0 +1,20 @@
+<template component="x-parity" controller="./controller.js" status="early" summary="Direct-extend parity fixture.">
+  <defs>
+    <state name="ready" type="boolean" value="false"></state>
+    <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
+    <state name="selected" type="number" nullable></state>
+    <state name="title" type="string" value="Rows"></state>
+  </defs>
+  <section from:data-count="rows.length" class:busy="ready and selected = 2">
+    <h1>{title}</h1>
+    <p $value="selected"></p>
+    <div class="wrap" $if="ready">
+      <span $value="title"></span>
+      <ul>
+        <li $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected" from:title="row.label ? row.label : 'none'">
+          <b $value="row.label"></b><i $value="row.tags"></i><em $value="not row.label"></em>
+        </li>
+      </ul>
+    </div>
+  </section>
+</template>

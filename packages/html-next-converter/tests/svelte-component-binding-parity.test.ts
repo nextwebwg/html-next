@@ -42,6 +42,28 @@ const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-fr
 
 async function snapshot(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const captureState = () => page.evaluate(() => {
+    const active = document.activeElement;
+    return {
+      focused: active === null ? null : { id: active.id, tag: active.localName,
+        focusVisible: active.matches(":focus-visible") },
+      controls: Array.from(document.querySelectorAll<HTMLInputElement>("#case input"), input => ({
+        id: input.id, checked: input.checked, defaultChecked: input.defaultChecked,
+        indeterminate: input.indeterminate, disabled: input.disabled,
+      })),
+    };
+  });
+  const before = await captureState();
+  // This fixture's #case has the body's native margin; the viewport origin is outside it.
+  assert.equal(await page.locator("#case").evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.left > 0 || rect.top > 0;
+  }), true, "Pointer normalization needs a point outside the captured form");
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.deepEqual(await captureState(), before, "Pointer normalization must preserve native focus and checked state");
+  assert.equal(await page.locator("#case").evaluate(element => element.querySelector("input:hover, textarea:hover, select:hover, button:hover") === null), true,
+    "Captured controls must use the same neutral pointer state");
   return {
     behavior: await page.locator("#case").evaluate((root) => ({
       amount: root.querySelector("#amount")?.textContent,

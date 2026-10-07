@@ -14,6 +14,8 @@ export interface ServerRenderOptions {
 export interface RenderedComponents {
   readonly html: string;
   readonly css: string;
+  /** Component tags and tested state names for the carrier delivering this compiled CSS. */
+  readonly styleOwnership: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface ServerRenderRequest extends ServerRenderOptions {
