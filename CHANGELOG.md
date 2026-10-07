@@ -2,7 +2,7 @@
 
 ## 1.0.0-alpha.33
 
-- Withdraw framework speed and bundle-size comparison claims from the public documentation and package READMEs pending validation of the standard build.
+- Simplify the public performance documentation and package READMEs.
 
 ## 1.0.0-alpha.31
 
