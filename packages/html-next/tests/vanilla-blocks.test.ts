@@ -965,7 +965,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="selected" type="number" nullable></state>
       <computed name="first" from="$rows[0]"></computed>
       <computed name="labels" from="[default($first.label, 'none')]"></computed>`, `
-      <section><p>{default(first.label, 'none')}</p><b $value="$labels[0]"></b><i $value="$rows.length"></i></section>`);
+      <section><p>{default($first.label, 'none')}</p><b $value="$labels[0]"></b><i $value="$rows.length"></i></section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} ${JSON.stringify(host.state.rows)} ${JSON.stringify(host.state.first)} ${JSON.stringify(host.state.labels)}`);
     };
@@ -1024,7 +1024,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <computed name="summary" from="concat($variant, ':', default($label, $note))"></computed>`;
   const scalarBody = `
     <section class:open="$open" from:data-tone="$variant"><p>{$label} {$count} {$ratio}</p><b $value="$summary"></b>
-      <i $if="$open">{$doubled}</i><ul><li $each="n of [1, 2, 3]" $key="$n" from:data-id="$n"><b $if="$n <= $count">{n}</b></li></ul></section>`;
+      <i $if="$open">{$doubled}</i><ul><li $each="n of [1, 2, 3]" $key="$n" from:data-id="$n"><b $if="$n <= $count">{$n}</b></li></ul></section>`;
 
   it("accepts, renders and reflects props like the general runtime", async () => {
     await same(propsShape(scalarProps, scalarBody), [
@@ -1060,7 +1060,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await same(propsShape(`
       <prop name="items" type="list(object({ id: integer, label: string }))" default="[]">Items.</prop>
       <prop name="config" type="object({ title: string, limit?: integer })">Config.</prop>`, `
-      <section><h2>{$config.title}</h2><ol><li $each="item of $items" $key="$item.id" from:data-id="$item.id"><b $if="$item.id <= default($config.limit, 9)">{item.label}</b></li></ol></section>`), [
+      <section><h2>{$config.title}</h2><ol><li $each="item of $items" $key="$item.id" from:data-id="$item.id"><b $if="$item.id <= default($config.limit, 9)">{$item.label}</b></li></ol></section>`), [
       (_host, update) => { update({ items: [{ id: 1, label: "a" }, { id: 2, label: "b" }], config: { title: "T", limit: 1 } }); },
       (_host, update) => { update({ items: [{ id: 2, label: "B" }, { id: 3, label: "c" }], config: { title: "U" } }); },
       (_host, update) => { update({ items: [{ id: "x" }], config: { title: 1 } }); },
@@ -1467,7 +1467,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     };
     try {
       await same(parent(`
-        <section><p $if="$users.pending">loading</p><b $if="$users.ok">ok</b><i>{default(users.error, 'none')}</i>
+        <section><p $if="$users.pending">loading</p><b $if="$users.ok">ok</b><i>{default($users.error, 'none')}</i>
           <ul><li $each="user of default($users.value, [])">{$user.name}</li></ul></section>`, `
         <state name="q" type="string" value="a"></state><state name="page" type="integer" value="1"></state>
         <data name="users" src="https://example.test/api/users/{q}" type="list(object({ name: string }))">
@@ -1571,7 +1571,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows[0].label = "z"; host.state.selected = 2; },
       (host) => { host.state.rows = []; },
     ];
-    await same(component(rows, `<section $with="$rows[0] as first" from:data-n="$rows.length"><p>{default(first.label, 'none')}</p><b $if="$first">has</b></section>`), steps);
+    await same(component(rows, `<section $with="$rows[0] as first" from:data-n="$rows.length"><p>{default($first.label, 'none')}</p><b $if="$first">has</b></section>`), steps);
     await same(component(rows, `<section $match class="m"><p $when="$rows.length = 0">empty</p><p $when="$selected">{$selected}</p><ul $else><li $each="row of $rows" $key="$row.id" from:data-id="$row.id">{$row.label}</li></ul></section>`), steps);
   });
 
@@ -1582,14 +1582,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>
         <article $else><slot name="item" from:second="$second"></slot></article></template></template>`;
     await same([parent(`
-      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i></template></x-alternate></section>`,
+      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default($first, 'no first')}</b> <i>{default($second, 'no second')}</i></template></x-alternate></section>`,
       `<state name="first" type="string" value="mine"></state><state name="second" type="string" value="own"></state>`), alternate], [
       (_host, update) => { update({ flag: true }); },
       (host) => { if (host.state === undefined) (globalThis as any).directExtendLog.events.push("no host"); else { host.state.first = "changed"; host.state.second = "own2"; } },
       (_host, update) => { update({ flag: false }); },
     ]);
     await same([parent(`
-      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i> <u>{$label}</u></template></x-alternate></section>`,
+      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default($first, 'no first')}</b> <i>{default($second, 'no second')}</i> <u>{$label}</u></template></x-alternate></section>`,
       `<state name="first" type="string" value="mine"></state>`), alternate], [
       // The section arm gives no \`second\`, which the consumer does not declare: HB001 leaves the old arm, inert.
       (_host, update) => { update({ flag: true }); },
