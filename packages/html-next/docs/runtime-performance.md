@@ -92,8 +92,8 @@ grows by more than 1 KB gzip or 5%. Recorded summaries form a ledger in `benchma
 with every entry's and control's gzip bytes; raw results stay local. To read a summary, start with
 `gated_target_met` and `vite_vs_gated_max`, then the per-control `vite_vs_*` and `live_vs_*` ratios
 and the `bundles` gzip bytes; only `full_standard` summaries confirm a result (see the
-[field reference](./framework-benchmark.md#ledger)). The CI job runs the comparison but is not yet
-Required.
+[field reference](./framework-benchmark.md#ledger)). A nightly workflow runs the comparison; it is not
+yet a release gate.
 
 ### October 2026 owner decisions
 

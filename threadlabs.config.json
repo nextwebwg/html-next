@@ -36,6 +36,10 @@
     },
     {
       "mode": "local",
+      "path": ".github/workflows/frameworks.yml"
+    },
+    {
+      "mode": "local",
       "path": ".gitignore"
     },
     {

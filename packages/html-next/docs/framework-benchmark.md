@@ -148,9 +148,10 @@ flag, the environment, and per mode the bundles, size assessment, comparisons an
 followed by every sweep's medians, and `directExtend` (whether the Vite entries were built with the
 option; each Vite bundle records what its revision applied).
 
-The CI job "Framework rendering against main" runs the gate when `packages/html-next/src` or
-`packages/html-next-unplugin/src` changes. It is not part of the Required job until its noise on
-hosted runners is known.
+The nightly "Framework rendering" workflow runs the gate against main as of 24 hours earlier when
+`packages/html-next/src` or `packages/html-next-unplugin/src` changed since then; it can also be run
+manually with a base commit. A full comparison exceeds the 15-minute CI budget, so pull requests do
+not run it, and it is not a release gate until its noise on hosted runners is known.
 
 ## Ledger
 
