@@ -8,7 +8,7 @@ import { afterEach, describe, it, vi } from "vitest";
 
 import { compileExpression, evaluateCompiled, truthy, type Value } from "../src/expression.js";
 import { generateComponent } from "../src/generate.js";
-import { compactTypeAt, conforms, readMember, type CompactType } from "../src/generated-runtime.js";
+import { compactTypeAt, conforms, readMember, trackContainer, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 import { blockPlan, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
 import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../src/type-system.js";
@@ -64,7 +64,7 @@ describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
     const module = vanilla(benchmarkShape, true);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
-    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
+    assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
     const { inputs } = await bundle(module, true);
     const forbidden = /(?:^|\/)src\/(?:runtime|parser|source-parser|expression-parser|type-system|format)\.ts$/;
@@ -165,12 +165,12 @@ describe("direct-extend expression lowering (differential)", () => {
       }
       assert.notEqual(lowered, undefined, text);
       // oxlint-disable-next-line typescript/no-implied-eval
-      const run = new Function("v", "o", "readMember", "truthy", `return ${lowered};`) as
-        (v: unknown[], o: unknown, member: typeof readMember, truth: typeof truthy) => unknown;
+      const run = new Function("v", "o", "r", "readMember", "truthy", "trackContainer", `return ${lowered};`) as
+        (v: unknown[], o: unknown, r: object, member: typeof readMember, truth: typeof truthy, track: typeof trackContainer) => unknown;
       for (const a of pool) for (const b of pool.slice(0, 8)) for (const row of pool) {
         const scope = { get: (name: string) => name === "a" ? a : name === "b" ? b : name === "row" ? row : undefined };
         const expected = evaluateCompiled(ast, scope);
-        const actual = run([a, b], row, readMember, truthy);
+        const actual = run([a, b], row, {}, readMember, truthy, trackContainer);
         assert.ok(Object.is(actual, expected), `${text} with a=${JSON.stringify(a)} b=${JSON.stringify(b)} row=${JSON.stringify(row)}: ${String(actual)} vs ${String(expected)}`);
       }
     });
@@ -327,6 +327,29 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.ready = false; },
       (host) => { host.state.ready = true; },
       (host) => { host.state.rows = []; },
+    ]);
+  });
+
+  it("re-renders container conversions written through any path, not only through the row's item", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
+      <state name="current" type="list(string)" value="[]"></state>`, `
+      <section><p $value="current"></p><ul $if="ready">
+        <li $each="row of rows" $key="row.id" from:data-id="row.id" from:title="row.tags">
+          <i $value="row.tags"></i><b $value="row.tags ? 'y' : 'n'"></b><em $value="row.label"></em><s class:full="row.tags"></s>
+        </li>
+      </ul></section>`);
+    await same(text, [
+      (host) => { const shared = ["t"]; host.state.rows = [{ id: 1, label: "a", tags: shared }, { id: 2, label: "b", tags: shared }]; },
+      (host) => { host.state.rows[0].tags.push("u"); },
+      (host) => { host.state.current = host.state.rows[1].tags; host.state.current.push("v"); },
+      (host) => { host.state.current.length = 0; },
+      // Declared item fields are checked only where written, so a row may still hold a list in `label`.
+      (host) => { const label = ["x"]; host.state.rows = [{ id: 3, label, tags: [] }, { id: 4, label, tags: [] }]; },
+      (host) => { host.state.rows[0].label.push("y"); },
+      (host) => { host.state.rows[1].tags = ["z"]; host.state.rows[1].tags.push("w"); },
+      (host) => { host.state.rows[1].label = "plain"; host.state.rows[0].label.push("q"); },
     ]);
   });
 

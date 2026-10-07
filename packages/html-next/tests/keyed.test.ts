@@ -159,6 +159,25 @@ describe("KeyedList", () => {
     assert.deepEqual(rows(), before);
   });
 
+  it("patches rows showing a container on every nested write, trimmed or not", () => {
+    const { keyed, patches } = fixture();
+    const value = items([1, 2, 3]);
+    keyed.update(value, none, 2);
+    keyed.r[1]!.w = 1;
+    patches.length = 0;
+    // A write somewhere else: no item of this list changed.
+    keyed.update(value, new Map([[{}, 1]]), NESTED);
+    assert.deepEqual(patches, [[2, NESTED]]);
+    patches.length = 0;
+    value.push(...items([4]));
+    keyed.update(value, new Map([[value, 1]]), NESTED);
+    assert.deepEqual(patches, [[2, -1], [4, -1]]);
+    // Without nested writes its contents cannot have changed.
+    patches.length = 0;
+    keyed.update(value.slice(), none, 2);
+    assert.deepEqual(patches, []);
+  });
+
   it("reconciles an array written in place and sweeps outer changes", () => {
     const { keyed, patches, rows } = fixture();
     const value = items([1, 2]);

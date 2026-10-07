@@ -484,6 +484,12 @@ export const readMember = (object: unknown, key: string): unknown =>
     : object === null || typeof object !== "object" || Array.isArray(object) ? ABSENT
     : (object = (object as Record<string, unknown>)[key]) === undefined ? ABSENT : raw(object);
 
+/** Flags a row whose binding converts a list or object (see `KeyedRow.w`); returns the value. */
+export const trackContainer = (row: { w?: number }, value: unknown): unknown => {
+  if (value !== null && typeof value === "object") row.w = 1;
+  return value;
+};
+
 /** Writes `$value` text: the sole Text child's data, or `textContent` for "" and foreign content (decision 2b). */
 export function writeText(element: Element, text: string): void {
   const node = element.firstChild;

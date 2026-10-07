@@ -44,6 +44,8 @@ interface Lowered {
   readonly boolean: boolean;
   /** The result may be a list or object, whose conversion reads its contents. */
   readonly deep: boolean;
+  /** A truthiness conversion inside reads the contents of a possible container from the item. */
+  readonly contents: boolean;
   /** Structural identity, so equal expressions in one update share an evaluation. */
   readonly key: string;
 }
@@ -192,10 +194,10 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     case "literal": {
       const value = node.value;
       if (value !== null && typeof value !== "string" && typeof value !== "boolean" && typeof value !== "number") ineligible();
-      return { source: valueSource(value), bits: 0, nested: false, item: false, boolean: typeof value === "boolean", deep: false, key };
+      return { source: valueSource(value), bits: 0, nested: false, item: false, boolean: typeof value === "boolean", deep: false, contents: false, key };
     }
     case "id": {
-      if (node.name === scope.alias) return { source: "o", bits: 0, nested: false, item: true, boolean: false, deep: true, key };
+      if (node.name === scope.alias) return { source: "o", bits: 0, nested: false, item: true, boolean: false, deep: true, contents: false, key };
       // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
       if (scope.alias !== undefined && node.name === "loop") ineligible();
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -204,13 +206,13 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
         source: `v[${index}]`, bits: 1 << index, nested: false, item: false,
-        boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type), key,
+        boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type), contents: false, key,
       };
     }
     case "member": {
       // The loop item one level deep, or an undeclared path below a root.
       if (node.object.kind === "id" && node.object.name === scope.alias) {
-        return { source: `readMember(o, ${JSON.stringify(node.key)})`, bits: 0, nested: false, item: true, boolean: false, deep: true, key };
+        return { source: `readMember(o, ${JSON.stringify(node.key)})`, bits: 0, nested: false, item: true, boolean: false, deep: true, contents: false, key };
       }
       const keys: string[] = [node.key];
       let object = node.object;
@@ -227,7 +229,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       if (type !== 0) ineligible();
       let source = `v[${index}]`;
       for (const step of keys) source = `readMember(${source}, ${JSON.stringify(step)})`;
-      return { source, bits: 1 << index, nested: true, item: false, boolean: false, deep: true, key };
+      return { source, bits: 1 << index, nested: true, item: false, boolean: false, deep: true, contents: false, key };
     }
     case "unary": {
       if (node.op !== "not") ineligible();
@@ -263,13 +265,28 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
   }
 }
 
-function merge(left: Pick<Lowered, "bits" | "nested" | "item">, right: Pick<Lowered, "bits" | "nested" | "item">): Pick<Lowered, "bits" | "nested" | "item"> {
-  return { bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item };
+type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents">;
+
+function merge(left: Reads, right: Reads): Reads {
+  return { bits: left.bits | right.bits, nested: left.nested || right.nested, item: left.item || right.item, contents: left.contents || right.contents };
+}
+
+/** Whether converting the value may read the contents of a list or object the row's item reached. */
+function itemContainer(value: Lowered): boolean {
+  return value.item && value.deep;
+}
+
+/** Source that converts `value`, flagging the row when an item-reached container is converted. */
+function convertible(value: Lowered): string {
+  return itemContainer(value) ? `trackContainer(r, ${value.source})` : value.source;
 }
 
 /** Applies the interpreter's truthiness; converting a possible container reads its contents. */
 function truthiness(value: Lowered): Lowered {
-  return value.boolean ? value : { ...converted(value), source: `truthy(${value.source})`, boolean: true, deep: false };
+  return value.boolean ? value : {
+    ...converted(value), source: `truthy(${convertible(value)})`, boolean: true, deep: false,
+    contents: value.contents || itemContainer(value),
+  };
 }
 
 /** A conversion of a possible container depends on its contents, so it also follows NESTED. */
@@ -406,8 +423,8 @@ class Planner {
     const list = lower(flow.listPlan.ast, scope);
     const rowScope = { roots: this.roots, alias: flow.item };
     const key = lower(flow.keyPlan.ast, rowScope);
-    // A key is memoized per item, so it may read only the item.
-    if (key.bits !== 0 || key.nested) ineligible();
+    // A key is memoized per item, so it may read only the item, and never a container's contents.
+    if (key.bits !== 0 || key.nested || key.contents) ineligible();
     if (list.item) ineligible();
     block.regions.push({ kind: "each", site, block: this.block(body, true, flow.item, false), list, key, alias: flow.item });
     return 2;
@@ -490,6 +507,11 @@ function finalExpression(binding: Binding): Lowered {
   return binding.kind === "class" ? truthiness(binding.expression) : converted(binding.expression);
 }
 
+/** Whether a block's bindings convert a list or object its row's item reached (see `KeyedRow.w`). */
+function tracks(block: Block): boolean {
+  return block.bindings.some((binding) => binding.expression.contents || itemContainer(binding.expression));
+}
+
 /** Emits the direct-extend module for a plan from `blockPlan`. */
 export function emitBlocks(
   plan: BlockPlan,
@@ -508,6 +530,7 @@ export function emitBlocks(
     sites.forEach((expression, site) => {
       if (written.has(site) && block.sites[site]!.length > 0) entries.push(`a${site}: ${expression}`);
     });
+    if (tracks(block)) entries.push("w: 0");
     block.bindings.forEach((binding, index) => entries.push(`v${index}: ${binding.initial}`));
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
@@ -523,23 +546,28 @@ export function emitBlocks(
   /** The update body: guard groups in first-binding order, then regions. */
   const patch = (block: Block): string[] => {
     const lines: string[] = [];
-    const groups = new Map<number, Binding[]>();
+    const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
     for (const binding of block.bindings) {
       const mask = maskOf(finalExpression(binding));
-      const group = groups.get(mask) ?? [];
-      group.push(binding);
-      groups.set(mask, group);
+      const at = groups.findIndex((group) => group.mask === mask);
+      if (at < 0) groups.push({ mask, bindings: [binding] });
+      else groups[at]!.bindings.push(binding);
     }
+    // Rows showing a container are flagged afresh whenever their item bindings all re-run.
+    const reset = tracks(block);
+    if (reset && groups[0]!.mask !== NESTED) lines.push(`  if (${guard(NESTED)}) r.w = 0;`);
     let temporary = 0;
-    for (const [mask, group] of groups) {
+    for (const { mask, bindings: group } of groups) {
       lines.push(`  if (${guard(mask)}) {`);
+      if (reset && mask === NESTED && group === groups[0]!.bindings) lines.push("    r.w = 0;");
       const shared = new Map<string, string>();
       for (const binding of group) {
         let value = shared.get(binding.expression.key);
         if (value === undefined) {
           value = `x${temporary++}`;
           shared.set(binding.expression.key, value);
-          lines.push(`    const ${value} = ${binding.expression.source};`);
+          // Every binding sharing an expression converts it, so an item-reached container is flagged here.
+          lines.push(`    const ${value} = ${convertible(binding.expression)};`);
         }
         const index = block.bindings.indexOf(binding);
         const last = `r.v${index}`;
@@ -650,7 +678,7 @@ export function emitBlocks(
   ];
   const source = factory.join("\n");
   const helpers = ["attachGeneratedController", "buildTemplate", "clearRegion", "KeyedList", "readMember", "toAttribute",
-    "toText", "truthy", "writeAttribute", "writeText"].filter((name) => name === "attachGeneratedController" ||
+    "toText", "trackContainer", "truthy", "writeAttribute", "writeText"].filter((name) => name === "attachGeneratedController" ||
     new RegExp(`\\b${name}\\b`).test(source));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
   const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);

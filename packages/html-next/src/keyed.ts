@@ -33,6 +33,11 @@ export interface KeyedRow {
   x: number;
   /** Old position, valid while `x` holds the current epoch. */
   y: number;
+  /**
+   * 1 when a binding last converted a list or object: that output depends on contents any nested
+   * write may have changed, so the row is patched on every nested write (compare-before-write).
+   */
+  w?: number;
 }
 
 type Move = (parent: Node, node: Node, reference: Node) => void;
@@ -119,13 +124,13 @@ export class KeyedList<R extends KeyedRow> {
   }
 
   /**
-   * Patches rows whose item was written; true, before writing any row, when a key moved, so a
-   * duplicate (HR004) fails with the DOM untouched.
+   * Patches rows whose item was written, and rows showing a container; true, before writing any
+   * row, when a key moved, so a duplicate (HR004) fails with the DOM untouched.
    */
   touch(dirty: DirtyObjects): boolean {
     const rows = this.r;
     for (const row of rows) if (dirty.has(row.i) && this.key(row.i) !== row.k) return true;
-    for (const row of rows) if (dirty.has(row.i)) this.p(row, NESTED);
+    for (const row of rows) if (row.w === 1 || dirty.has(row.i)) this.p(row, NESTED);
     return false;
   }
 
@@ -148,8 +153,10 @@ export class KeyedList<R extends KeyedRow> {
       if (item === undefined) fail("HB001", `\`${this.alias}\` is not declared in scope.`);
       next.push(item);
     }
+    // Written objects; a row showing a container is treated as written whenever anything was.
     const changed = dirty.size > 0 ? dirty : undefined;
-    const same = (row: R, item: unknown): boolean => row.i === item && changed?.has(item) !== true;
+    const same = (row: R, item: unknown): boolean =>
+      row.i === item && (changed === undefined || row.w !== 1 && !changed.has(item));
 
     // 1. Trim common ends and swapped ends without touching the DOM. Trimmed rows keep their key.
     let oldStart = 0;
@@ -246,7 +253,7 @@ export class KeyedList<R extends KeyedRow> {
         map.set(row.k, row);
       } else {
         row = old[previous[index]!]!;
-        if (full || row.i !== item || changed?.has(item) === true) {
+        if (full || !same(row, item)) {
           row.i = item;
           this.p(row, -1);
         }
