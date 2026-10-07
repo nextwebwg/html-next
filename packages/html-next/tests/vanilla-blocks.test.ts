@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 
 import { build, transform } from "esbuild";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
 
 import { compileExpression, evaluateCompiled, type Value } from "../src/expression.js";
@@ -1073,6 +1073,33 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     assert.ok(handle.o.length <= baseline + 2 * 10 * 3, `${handle.o.length} owners after 40 rounds (${baseline} at start)`);
   });
 
+  it("fails a <context> no ancestor provides with live's HR009", async () => {
+    const step = `<template component="x-step" status="early" summary="Step.">
+      <defs><context name="count" from="x-shape" as="active"></context></defs><li>{active}</li></template>`;
+    const messages: string[] = [];
+    for (const compiled of [false, true]) {
+      const { text: code } = await bundle(compiled ? graph([step]).entry : reference(step));
+      // The failure surfaces from the lifecycle observer's callback, which jsdom reports.
+      const reported: string[] = [];
+      const virtualConsole = new VirtualConsole();
+      virtualConsole.on("jsdomError", (error) => reported.push(error.message));
+      const { window } = new JSDOM("<!doctype html><body></body>", { virtualConsole });
+      for (const key of Object.getOwnPropertyNames(window)) {
+        if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
+        try { vi.stubGlobal(key, (window as unknown as Record<string, unknown>)[key]); } catch { /* read-only global */ }
+      }
+      const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// missing ${compiled}`).toString("base64")}`) as Record<string, unknown>;
+      const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as () => Element;
+      window.document.body.append(factory());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      messages.push(reported.find((message) => /HR\d+/.test(message)) ?? "none");
+      vi.unstubAllGlobals();
+    }
+    assert.equal(messages.length, 2);
+    assert.match(messages[0]!, /HR009: <x-step> requires context `count` from <x-shape>\./);
+    assert.equal(messages[1], messages[0]);
+  });
+
   it("observes each document once however many compiled roots it holds", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
@@ -1169,6 +1196,23 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.people[0].name = "Ann"; },
       (host) => { host.state.people = [host.state.people[1], { id: 3, name: "Cy" }, host.state.people[0]]; },
       (host) => { host.state.people = []; },
+    ]);
+  });
+
+  it("reads an ancestor's state through <context> like live", async () => {
+    const step = `<template component="x-step" status="early" summary="Step.">
+      <defs><prop name="index" type="integer" default="0">Index.</prop>
+        <context name="count" from="x-shape" as="active"></context><context name="people" from="x-shape"></context></defs>
+      <li from:aria-current="active = index ? 'step' : null"><b>{active}</b> <i>{people.length}</i>
+        <em $each="person of people" $key="person.id">{person.name}</em></li></template>`;
+    const provider = parent(`
+      <ol><x-step index="1"></x-step><x-step from:index="count + 1"></x-step><li $each="n of rows" $key="n" from:data-id="n"><x-step from:index="n"></x-step></li></ol>`,
+      `<state name="people" type="list(object({ id: integer, name: string }))" value="[]"></state>`);
+    await same([provider, step], [
+      (host) => { host.state.count = 2; },
+      (host) => { host.state.people = [{ id: 1, name: "Ada" }]; },
+      (host) => { host.state.people.push({ id: 2, name: "Bea" }); host.state.people[0].name = "Ann"; },
+      (host) => { host.state.rows = [2, 3]; host.state.count = 3; },
     ]);
   });
 

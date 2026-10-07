@@ -1761,7 +1761,7 @@ export function generateVanilla(
     const rootLines: string[] = [];
     const literals = { ...template, attributes: template.attributes.filter((attribute) => attribute.kind === "literal") };
     renderAttributes(literals, "element", rootLines, contract.props, { value: 0 }, "  ", undefined, undefined, true);
-    return { module: emitBlocks(blocks, definition, version, rootLines, invocations), declaration };
+    return { module: emitBlocks(blocks, definition, version, rootLines, invocations, noContextReaders), declaration };
   }
   return { module: `${lines.join("\n")}\n`, declaration };
 }

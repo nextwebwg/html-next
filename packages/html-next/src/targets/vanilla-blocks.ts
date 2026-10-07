@@ -66,6 +66,8 @@ interface Root {
   readonly undefinable?: boolean;
   /** A computed's expression; computeds follow the writable state roots. */
   readonly computed?: CompiledExpression | undefined;
+  /** A `<context>`: the providing component's tag and the state it reads; these follow the computeds. */
+  readonly context?: { readonly from: string; readonly name: string };
 }
 
 /** A lowered expression in the supported subset. */
@@ -683,8 +685,14 @@ function compileRoots(definition: ComponentDefinition): Root[] {
   const controlled = twoWayRoots(definition);
   const states: Root[] = [];
   const computeds: Root[] = [];
+  const contexts: Root[] = [];
   for (const declaration of declarations) {
     if (declaration.kind === "handler" || declaration.kind === "event") continue;
+    // A context reads an ancestor's state, which says nothing about its type here.
+    if (declaration.kind === "context") {
+      contexts.push({ name: declaration.as ?? declaration.name, type: "?", initial: "null", context: { from: declaration.from, name: declaration.name } });
+      continue;
+    }
     if (declaration.kind !== "state" && declaration.kind !== "computed") notYetDirect();
     const node = declarationTypeNode(declaration.type, declaration.shape);
     // An untyped root says nothing about its value, so it may also hold undefined.
@@ -715,7 +723,7 @@ function compileRoots(definition: ComponentDefinition): Root[] {
     if (type === undefined) notYetDirect();
     return { name, type, initial: "null" };
   });
-  return [...states, ...computeds, ...props];
+  return [...states, ...computeds, ...contexts, ...props];
 }
 
 
@@ -1345,7 +1353,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
     const props = Object.keys(definition.contract.props).length;
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
-      states: roots.length - props - roots.filter((item) => item.computed !== undefined).length, shown: roots.length - props,
+      states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props,
       ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
@@ -1480,6 +1488,7 @@ export function emitBlocks(
   version: string,
   rootLines: readonly string[],
   invocations?: ReadonlyMap<string, Invoked>,
+  noContextReaders = false,
 ): string {
   const { contract } = definition;
   const blocks = plan.blocks;
@@ -1973,14 +1982,23 @@ export function emitBlocks(
       ...region.key === undefined && region.positional === true ? [`  R.L${index}.q = true;`] : [],
     ]),
   );
-  const instance = plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const contextStart = plan.roots.findIndex((item) => item.context !== undefined);
+  const channel = plan.computeds.length > 0 || contextStart >= 0;
+  // A component another's <context> may read tells it about its renders (`noContextReaders` proves none does).
+  const provides = !noContextReaders && plan.states > 0;
+  const update = plan.arms === undefined ? "((c, d) => p0(R, c, d))" : "p";
+  const instance = provides || contextStart >= 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
     ...(slotted ? ["  const J = project(I, children, slots);"] : []),
-    `  attachGeneratedController(element, S, v, ${plan.arms === undefined ? "(c, d) => p0(R, c, d)" : "p"}, ${definition.controller === undefined ? "undefined" : "C"}${
-      plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
+    ...provides ? ["  I.R = new Set();"] : [],
+    // A context provider tells its readers after each render.
+    `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : "C"}${
+      channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
+    ...plan.roots.flatMap((item, index) => item.context === undefined ? []
+      : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
     ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
@@ -2040,12 +2058,15 @@ export function emitBlocks(
       ...(propNames.length === 0 ? [] : ["  acceptProps(undefined, D, S.n, v, componentProps, [], html);"]),
     ],
     ...plan.initializers,
+    // A context's value is its own: the host reads it as it reads a computed.
+    ...(contextStart >= 0 && plan.computeds.length === 0 ? ["  const X = { e: 0, g: (j) => v[j], w: new Set() };"] : []),
     ...(plan.computeds.length === 0 ? [] : [
       "  const X = { e: 0, g: (j) => g(j), w: new Set() };",
       "  const ke = [];",
       `  const K = [${plan.computeds.map((computed) => `() => ${computed.source}`).join(", ")}];`,
       // Computed lazily on read, once per write epoch; a change tells the controller's effects.
       "  const g = (j) => {",
+      ...contextStart >= 0 ? [`    if (j >= ${contextStart}) return v[j];`] : [],
       `    const i = j - ${plan.computeds[0]!.index};`,
       "    if (ke[i] === X.e) return v[j];",
       "    if (ke[i] === -1) computedCycle();",
@@ -2093,7 +2114,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

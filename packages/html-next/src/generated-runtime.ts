@@ -536,6 +536,49 @@ export function passThrough(literals: Readonly<Record<string, string>>, consumer
   return merged;
 }
 
+/**
+ * A `<context>`: on first connect, as live resolves it on attaching, the nearest ancestor root of
+ * component `from` that declares state `name` provides it (HR009 when none does). Its value is root
+ * `index`: a new value re-renders and tells the controller's effects; a nested write the provider
+ * rendered patches what reads into it (`nested`). The provider tells only connected readers.
+ */
+export function readContext(
+  instance: GeneratedInstance, channel: GeneratedChannel, index: number, from: string, name: string,
+  nested: (dirty: ReadonlyMap<unknown, 1 | 2>) => void,
+): void {
+  let provider: GeneratedInstance | undefined;
+  let at = -1;
+  const follow = (_changed: number, dirty: ReadonlyMap<unknown, 1 | 2> | undefined): void => {
+    const values = instance.v!;
+    const previous = values[index];
+    const next = provider!.v![at];
+    if (!Object.is(previous, next)) {
+      instance.w(index, next);
+      channel.n?.(index, previous, next);
+    } else if (dirty !== undefined && touches(next, dirty)) nested(dirty);
+  };
+  instance.o.push({
+    pause: () => { provider?.R?.delete(follow); },
+    resume: () => {
+      search: for (let element = instance.e.parentElement; provider === undefined && element !== null; element = element.parentElement) {
+        const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+        for (const candidate of owner === undefined ? [] : [owner, ...owner.D ?? []]) {
+          const position = candidate.S.n.indexOf(name);
+          if (candidate.S.g === from && position >= 0 && position < (candidate.S.k ?? candidate.S.n.length)) {
+            provider = candidate;
+            at = position;
+            break search;
+          }
+        }
+      }
+      if (provider === undefined) fail("HR009", `<${instance.S.g}> requires context \`${name}\` from <${from}>.`);
+      (provider.R ??= new Set()).add(follow);
+      follow(0, undefined);
+    },
+    stop: () => { provider?.R?.delete(follow); },
+  });
+}
+
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
 export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
   generatedPropUpdaters.get(element)?.(props);
@@ -1113,6 +1156,10 @@ export interface GeneratedInstance {
   D?: GeneratedInstance[];
   /** How many of its owners were released since the list was last compacted. */
   x?: number;
+  /** Its root values, as attaching set them. */
+  readonly v?: unknown[];
+  /** A context provider's readers, told after each of its renders. */
+  R?: Set<(changed: number, dirty: ReadonlyMap<unknown, 1 | 2> | undefined) => void>;
   /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
   readonly J?: Projection;
   readonly Y?: Readonly<Record<string, readonly Element[]>>;

@@ -83,7 +83,8 @@ async function generatedFixture(name: string, targetGzip: number, directExtend =
   const sourceURL = new URL(`../benchmarks/fixtures/${name}.html`, import.meta.url);
   const source = await readFile(sourceURL, "utf8");
   const definition = parseComponent(source, sourceURL.href);
-  const module = generateComponent(definition, { directExtend })
+  // Each fixture is its own closed graph, as a build compiles it: nothing reads its state as context.
+  const module = generateComponent(definition, { directExtend, noContextReaders: true })
     .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)?.content;
   if (module === undefined) throw new Error(`The ${name} fixture produced no Vanilla module.`);
   const result = await bundle({
