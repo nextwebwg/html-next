@@ -534,7 +534,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       }));
     } catch (error) { recover(error); }
   }
-  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
+  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...diagnostics]);
 
   if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
@@ -645,5 +645,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     }),
     components: Object.freeze(manifestComponents),
   });
+  // Check-mode warnings surface only once every phase has run.
+  if (graph.warnings !== undefined) throw new HtmlDiagnosticAggregateError(graph.warnings);
   return { manifest, artifacts: planned.map(({ artifact }) => artifact) };
 }

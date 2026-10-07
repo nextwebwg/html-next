@@ -55,7 +55,7 @@ try {
   else for (const diagnostic of diagnostics) {
     process.stderr.write(`${formatCheckDiagnostic(diagnostic, { hyperlinks })}\n`);
   }
-  process.exitCode = diagnostics.length === 0 ? 0 : 1;
+  process.exitCode = diagnostics.some((diagnostic) => diagnostic.severity === "error") ? 1 : 0;
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 2;

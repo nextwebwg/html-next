@@ -55,11 +55,12 @@ export function parseComponentResource(sourceText: string, source: string): Pars
 export function parseComponentResourceForCheck(sourceText: string, source: string): DiagnosedComponentResource {
   const diagnostics: HtmlDiagnostic[] = [];
   const resource = readComponentResource(sourceText, source, (diagnostic) => diagnostics.push(diagnostic));
-  if (diagnostics.length === 0) {
+  const valid = (): boolean => diagnostics.every((diagnostic) => diagnostic.severity === "warning");
+  if (valid()) {
     try { finishResource(resource, source); }
     catch (error) { recoverDiagnostic(error, (diagnostic) => diagnostics.push(diagnostic)); }
   }
-  return { definitions: diagnostics.length === 0 ? resource.definitions : [], dependencies: resource.dependencies, diagnostics };
+  return { definitions: valid() ? resource.definitions : [], dependencies: resource.dependencies, diagnostics };
 }
 
 function finishResource(resource: Pick<ParsedComponentResource, "definitions" | "dependencies">, source: string): ParsedComponentResource {

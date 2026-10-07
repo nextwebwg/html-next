@@ -47,7 +47,7 @@ export class UndeclaredName extends Error {
 }
 
 export type ExpressionNode =
-  | { kind: "literal"; value: Value; dimension?: "length" | "percentage" | "duration" }
+  | { kind: "literal"; value: Value; dimension?: "length" | "percentage" | "duration"; keyword?: true }
   | { kind: "id"; name: string }
   | { kind: "member"; object: ExpressionNode; key: string }
   | { kind: "index"; object: ExpressionNode; index: ExpressionNode }
@@ -503,13 +503,22 @@ export function compileExpression(source: string): CompiledExpression {
   return compiled;
 }
 
+/**
+ * Compile a path field (`bind:`, `<set name>`): its root names a declaration with or without the
+ * `$` marker. Bracketed segments remain expressions; a caller rejects anything but an access chain.
+ */
+export function compilePath(source: string): CompiledExpression {
+  const path = source.trimStart();
+  return compileExpression(path.startsWith("$") ? path : `$${path}`);
+}
+
 /** Return a writable path only when it is rooted in declared writable state. */
 export function getWritablePath(
   source: string,
   writableRoots: ReadonlySet<string>,
 ): WritablePath | undefined {
   const result: WritablePathSegment[] = [];
-  if (!appendWritable(compileExpression(source).ast, result)
+  if (!appendWritable(compilePath(source).ast, result)
     || result[0] === "$$event" || !writableRoots.has(result[0] as string)) return undefined;
   return result;
 }
