@@ -100,9 +100,14 @@ const marker = (directory: string): string => join(work, directory, ".html-next-
 const pinnedTrees = (): string[] => git(["rev-parse", ...STEPS.map(([directory]) => `${PIN}:${directory}`)], work).split("\n");
 const isSetUp = (directory: string, tree: string): boolean => existsSync(marker(directory)) && readFileSync(marker(directory), "utf8") === tree;
 
+// The fork's Playwright browser packages download browsers on install and prune the shared
+// ms-playwright cache, deleting the repository's own browsers. The runner always receives this
+// repository's Chromium through --chromeBinary, so the fork never needs browsers of its own.
+const forkEnv = { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1", PUPPETEER_SKIP_DOWNLOAD: "1" };
+
 function run(file: string, args: readonly string[], cwd: string): void {
   console.error(`$ ${file} ${args.join(" ")}   [${cwd}]`);
-  if (spawnSync(file, args, { cwd, stdio: "inherit" }).status !== 0) throw new Error(`${file} ${args.join(" ")} failed in ${cwd}.`);
+  if (spawnSync(file, args, { cwd, stdio: "inherit", env: forkEnv }).status !== 0) throw new Error(`${file} ${args.join(" ")} failed in ${cwd}.`);
 }
 
 function setup(force: boolean): void {
