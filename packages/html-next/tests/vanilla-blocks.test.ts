@@ -239,11 +239,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     readonly snapshots: string[];
     readonly identities: string[];
     readonly warnings: string[];
+    readonly errors: string[];
     readonly events: string[];
   }
+  type Step = (host: any) => void;
 
-  async function run(directExtend: boolean): Promise<Run> {
-    const text = await readFile(new URL("parity.html", fixtures), "utf8");
+  /** Builds `text` on one path, runs `steps` with a render and a snapshot after each, and reconnects. */
+  async function run(text: string, directExtend: boolean, steps: readonly Step[]): Promise<Run> {
     const { text: code } = await bundle(vanilla(text, directExtend));
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
@@ -254,15 +256,22 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     vi.stubGlobal("directExtendLog", log);
     const warnings: string[] = [];
     vi.spyOn(console, "warn").mockImplementation((message: string) => { warnings.push(message.replace(/^.*?: HR007/, "HR007")); });
+    // Render failures surface from the scheduler's microtask; both paths report them here.
+    const errors: string[] = [];
+    const queue = globalThis.queueMicrotask;
+    vi.stubGlobal("queueMicrotask", (callback: () => void) => queue(() => {
+      try { callback(); } catch (error) { errors.push((error as Error).message); }
+    }));
     const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// ${directExtend}`).toString("base64")}`);
     const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-    const element: Element = module.createXParity();
+    const factory = Object.values(module).find((value) => typeof value === "function") as () => Element;
+    const element = factory();
     const snapshots: string[] = [];
     const identities: string[] = [];
     let previous = new Map<string, Element>();
     const record = (): void => {
       snapshots.push(element.outerHTML.replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
-      const rows = new Map(Array.from(element.querySelectorAll("li"), (row) => [row.getAttribute("data-id")!, row]));
+      const rows = new Map(Array.from(element.querySelectorAll("[data-id]"), (row) => [row.getAttribute("data-id")!, row]));
       identities.push([...rows].map(([id, row]) => `${id}:${previous.get(id) === row ? "same" : "new"}`).join(","));
       previous = rows;
     };
@@ -270,26 +279,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await flush();
     record();
     const host = log.hosts[0];
-    const steps: Array<() => void> = [
-      () => { host.state.rows = [1, 2, 3, 4, 5].map((id) => ({ id, label: `r${id}`, tags: [] })); },
-      () => { host.state.selected = 2; },
-      () => { const rows = host.state.rows; const second = rows[1]; rows[1] = rows[3]; rows[3] = second; },
-      () => { host.state.rows[0].label = ""; host.state.rows[2].label += "!"; },
-      () => { host.state.rows[0].tags.push("a", "b"); },
-      () => { host.state.rows = host.state.rows.filter((row: { id: number }) => row.id !== 3); },
-      () => { host.state.rows = host.state.rows.concat([{ id: 9, label: "n", tags: ["t"] }]); },
-      () => { host.state.rows[1].id = 20; },
-      () => { host.state.rows = host.state.rows.toReversed(); },
-      () => { host.state.rows = host.state.rows.slice(); },
-      () => { host.state.rows[0].id = "bad"; host.state.selected = "bad"; host.state.title = 3; host.state.nope = 1; delete host.state.title; },
-      () => { host.state.title = ""; host.state.selected = null; },
-      () => { host.state.rows.length = 1; },
-      () => { host.state.ready = false; },
-      () => { host.state.ready = true; },
-      () => { host.state.rows = []; },
-    ];
     for (const step of steps) {
-      step();
+      step(host);
       await flush();
       record();
     }
@@ -300,19 +291,54 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     window.document.body.append(element);
     await flush();
     record();
-    return { snapshots, identities, warnings, events: log.events };
+    return { snapshots, identities, warnings, errors, events: log.events };
   }
 
-  it("renders, keeps row identity, warns and orders lifecycle callbacks like the general runtime", async () => {
-    const live = await run(false);
+  async function same(text: string, steps: readonly Step[]): Promise<Run> {
+    const live = await run(text, false, steps);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    const compiled = await run(true);
+    const compiled = await run(text, true, steps);
     for (let index = 0; index < live.snapshots.length; index += 1) {
       assert.equal(compiled.snapshots[index], live.snapshots[index], `snapshot ${index}`);
       assert.equal(compiled.identities[index], live.identities[index], `identity ${index}`);
     }
     assert.deepEqual(compiled.warnings, live.warnings);
+    assert.deepEqual(compiled.errors, live.errors);
     assert.deepEqual(compiled.events, live.events);
+    return compiled;
+  }
+
+  it("renders, keeps row identity, warns and orders lifecycle callbacks like the general runtime", async () => {
+    await same(await readFile(new URL("parity.html", fixtures), "utf8"), [
+      (host) => { host.state.rows = [1, 2, 3, 4, 5].map((id) => ({ id, label: `r${id}`, tags: [] })); },
+      (host) => { host.state.selected = 2; },
+      (host) => { const rows = host.state.rows; const second = rows[1]; rows[1] = rows[3]; rows[3] = second; },
+      (host) => { host.state.rows[0].label = ""; host.state.rows[2].label += "!"; },
+      (host) => { host.state.rows[0].tags.push("a", "b"); },
+      (host) => { host.state.rows = host.state.rows.filter((row: { id: number }) => row.id !== 3); },
+      (host) => { host.state.rows = host.state.rows.concat([{ id: 9, label: "n", tags: ["t"] }]); },
+      (host) => { host.state.rows[1].id = 20; },
+      (host) => { host.state.rows = host.state.rows.toReversed(); },
+      (host) => { host.state.rows = host.state.rows.slice(); },
+      (host) => { host.state.rows[0].id = "bad"; host.state.selected = "bad"; host.state.title = 3; host.state.nope = 1; delete host.state.title; },
+      (host) => { host.state.title = ""; host.state.selected = null; },
+      (host) => { host.state.rows.length = 1; },
+      (host) => { host.state.ready = false; },
+      (host) => { host.state.ready = true; },
+      (host) => { host.state.rows = []; },
+    ]);
+  });
+
+  it("fails a moved duplicate key before writing any row", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
+      <section><p>rows</p><ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id"><b $value="row.label"></b></li></ul></section>`);
+    const compiled = await same(text, [
+      (host) => { host.state.rows = [{ id: 1, label: "a" }, { id: 2, label: "b" }]; },
+      (host) => { host.state.rows[0].label = "X"; host.state.rows[1].id = 1; },
+    ]);
+    assert.deepEqual(compiled.errors, ["HR004: A keyed list produced duplicate key `1`."]);
   });
 });

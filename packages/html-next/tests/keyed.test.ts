@@ -144,6 +144,21 @@ describe("KeyedList", () => {
     assert.equal(keyed.m.size, 3);
   });
 
+  it("checks every written row's key before patching any row", () => {
+    const { keyed, observer, patches, rows } = fixture();
+    const value = items([1, 2]);
+    keyed.update(value, none, 2);
+    const before = rows();
+    observer.takeRecords();
+    patches.length = 0;
+    value[0]!.label = "X";
+    value[1]!.id = 1;
+    assert.throws(() => keyed.update(value, new Map([[value[0], 1], [value[1], 1]]), NESTED), /duplicate key `1`/);
+    assert.deepEqual(patches, []);
+    assert.equal(observer.takeRecords().length, 0);
+    assert.deepEqual(rows(), before);
+  });
+
   it("reconciles an array written in place and sweeps outer changes", () => {
     const { keyed, patches, rows } = fixture();
     const value = items([1, 2]);

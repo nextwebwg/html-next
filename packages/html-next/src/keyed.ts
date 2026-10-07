@@ -118,13 +118,14 @@ export class KeyedList<R extends KeyedRow> {
     for (const row of this.r) this.p(row, changed);
   }
 
-  /** Patches rows whose item was written; true, before writing that row, when a key moved. */
+  /**
+   * Patches rows whose item was written; true, before writing any row, when a key moved, so a
+   * duplicate (HR004) fails with the DOM untouched.
+   */
   touch(dirty: DirtyObjects): boolean {
-    for (const row of this.r) {
-      if (!dirty.has(row.i)) continue;
-      if (this.key(row.i) !== row.k) return true;
-      this.p(row, NESTED);
-    }
+    const rows = this.r;
+    for (const row of rows) if (dirty.has(row.i) && this.key(row.i) !== row.k) return true;
+    for (const row of rows) if (dirty.has(row.i)) this.p(row, NESTED);
     return false;
   }
 
