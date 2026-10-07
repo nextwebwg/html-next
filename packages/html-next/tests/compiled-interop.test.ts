@@ -137,4 +137,21 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     assert.equal(element.outerHTML, rendered);
     assert.equal(runtime.getComponentHost(element), undefined);
   });
+
+  it("gives an adopted control its bound value unless the user edited it before hydration", async () => {
+    const control = parseComponent(`<template component="x-control" status="early" summary="Control.">
+      <defs><state name="title" type="string" value="Bound"></state></defs>
+      <section><input .value="title"><input .value="title"></section></template>`, "file:///control.html");
+    const { runtime, document } = await load(definition);
+    const server = document.createElement("main");
+    server.innerHTML = '<section data-component="x-control"><input><input></section>';
+    document.body.append(server);
+    const [untouched, edited] = Array.from(server.querySelectorAll("input"));
+    edited!.value = "typed";
+    runtime.registerComponentDefinitions([control]);
+    runtime.lowerDocument(document);
+    await flush();
+    assert.equal(untouched!.value, "Bound");
+    assert.equal(edited!.value, "typed");
+  });
 });

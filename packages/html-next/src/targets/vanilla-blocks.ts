@@ -19,6 +19,8 @@ import {
 } from "../expression.js";
 import { conforms, type CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
+import { foreignContent } from "parse5";
+
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
 import { rootArms, type ComponentDefinition, type ElementNode, type TemplateNode } from "../template.js";
@@ -27,11 +29,15 @@ import { declarationTypeNode, formatType, type TypeNode } from "../type-system.j
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
 
-/** Elements whose prototypes are not inert, or whose children the runtime manages itself. */
-const EXCLUDED = new Set([
-  "script", "template", "iframe", "object", "embed", "link", "style", "meta", "base", "noscript",
-  "svg", "math",
-]);
+/** Elements whose children the live runtime manages itself (scoped slot and `$match` carriers). */
+const EXCLUDED = new Set(["template"]);
+
+/** A bound attribute's name on an SVG element, case-adjusted as the HTML parser adjusts it. */
+function svgAttributeName(name: string): string {
+  const token = { attrs: [{ name, value: "" }] };
+  foreignContent.adjustTokenSVGAttrs(token as Parameters<typeof foreignContent.adjustTokenSVGAttrs>[0]);
+  return token.attrs[0]!.name;
+}
 /** Parents whose option regions the live runtime re-synchronizes. */
 const SELECTS = new Set(["select", "datalist", "optgroup"]);
 
@@ -63,7 +69,7 @@ interface Lowered {
   readonly key: string;
 }
 
-type BindingKind = "attribute" | "class" | "value" | "text";
+type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed";
 
 interface Binding {
   readonly site: number;
@@ -72,6 +78,14 @@ interface Binding {
   readonly expression: Lowered;
   /** JavaScript source for the converted value the prototype already shows. */
   readonly initial: string;
+  /**
+   * The name of the reads array of a binding that writes whenever what it read changed, as a live
+   * effect re-runs, rather than when its converted output differs: property writes, and the class
+   * attribute with the class toggles it overwrites.
+   */
+  readonly exact?: string | undefined;
+  /** Mixed text: literal strings and lowered segments, joined in order. */
+  readonly parts?: readonly (string | Lowered)[];
 }
 
 interface Region {
@@ -94,6 +108,8 @@ interface Block {
   readonly bindings: Binding[];
   readonly regions: Region[];
   readonly row: boolean;
+  /** The prototype is built in the SVG namespace (its base element sits inside `<svg>`). */
+  readonly svg: boolean;
 }
 
 export interface BlockPlan {
@@ -202,7 +218,12 @@ interface Scope {
   readonly alias: string | undefined;
   /** Declared types at build time, as the live scope answers them (`declareTypes`). */
   readonly types: TypeScope;
+  /** The reads array an exact binding records every value it reads into (see `Binding.exact`). */
+  readonly record?: string | undefined;
 }
+
+/** A read, recorded when the binding is exact. */
+const read = (scope: Scope, source: string): string => scope.record === undefined ? source : `rec(${scope.record}, ${source})`;
 
 const ARITHMETIC = new Set(["+", "-", "*", "/"]);
 
@@ -217,7 +238,8 @@ function none(key: string, source: string): Lowered {
 }
 
 function lower(node: ExpressionNode, scope: Scope): Lowered {
-  const key = JSON.stringify(node);
+  // A recorded evaluation is never shared: its reads array is its own.
+  const key = `${scope.record ?? ""}${JSON.stringify(node)}`;
   switch (node.kind) {
     case "literal": {
       const value = node.value;
@@ -225,7 +247,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       return { ...none(key, valueSource(value)), boolean: typeof value === "boolean" };
     }
     case "id": {
-      if (node.name === scope.alias) return { ...none(key, "o"), item: true, deep: true };
+      if (node.name === scope.alias) return { ...none(key, read(scope, "o")), item: true, deep: true };
       // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
       if (scope.alias !== undefined && node.name === "loop") notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === node.name);
@@ -233,7 +255,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const root = scope.roots[index]!;
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
-        ...none(key, `v[${index}]`), bits: 1 << index,
+        ...none(key, read(scope, `v[${index}]`)), bits: 1 << index,
         boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type),
       };
     }
@@ -241,7 +263,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const object = lower(node.object, scope);
       return {
         ...object, key, boolean: false, deep: true,
-        source: `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`,
+        source: read(scope, `${object.fails ? "readFailing" : "readMember"}(${object.source}, ${JSON.stringify(node.key)})`),
         // A read below a root follows that root's data; a read below the item is item data.
         nested: object.nested || !object.item && object.bits !== 0,
       };
@@ -251,7 +273,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const index = lower(node.index, scope);
       const both = merge(object, index);
       return {
-        ...none(key, `readIndex(${object.source}, ${index.source})`), ...both, deep: true,
+        ...none(key, read(scope, `readIndex(${object.source}, ${index.source})`)), ...both, deep: true,
         nested: both.nested || !object.item && object.bits !== 0,
       };
     }
@@ -261,7 +283,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         const dimension = dimensionType(node.operand, scope.types);
         return { ...operand, key, boolean: false, deep: false, source: `negate(${operand.source}, ${dimensionSource(dimension)})` };
       }
-      const operand = truthiness(lower(node.operand, scope));
+      const operand = truthiness(lower(node.operand, scope), scope.record);
       return operand.fails
         ? { ...operand, source: `notValue(${operand.source})`, boolean: false, deep: false, key }
         : { ...operand, source: `!${operand.source}`, boolean: true, deep: false, key };
@@ -271,8 +293,8 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const right = lower(node.right, scope);
       const fails = left.fails || right.fails;
       if (node.op === "and" || node.op === "or") {
-        const a = truthiness(left);
-        const b = truthiness(right);
+        const a = truthiness(left, scope.record);
+        const b = truthiness(right, scope.record);
         return fails
           ? { ...none(key, `logicValue(${node.op === "and"}, ${a.source}, ${b.source})`), ...merge(a, b), fails: true }
           : { ...none(key, `(${a.source} ${node.op === "and" ? "&&" : "||"} ${b.source})`), ...merge(a, b), boolean: true };
@@ -292,7 +314,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       };
     }
     case "conditional": {
-      const test = truthiness(lower(node.test, scope));
+      const test = truthiness(lower(node.test, scope), scope.record);
       const consequent = lower(node.consequent, scope);
       const alternate = lower(node.alternate, scope);
       const both = merge(test, merge(consequent, alternate));
@@ -315,7 +337,8 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
         };
       }
       // Text and formatting read a list's or object's contents, as a converting binding does.
-      const values = (): string => `[${args.map(convertible).join(", ")}]`;
+      const values = (): string => `[${args.map((argument) =>
+        scope.record !== undefined && argument.deep ? `recContents(${scope.record}, ${convertible(argument)})` : convertible(argument)).join(", ")}]`;
       const contents = args.reduce<Reads>((all, argument) => {
         const read = converted(argument);
         return merge(all, { ...read, contents: read.contents || itemContainer(argument) });
@@ -376,9 +399,10 @@ function convertible(value: Lowered): string {
 }
 
 /** Applies the interpreter's truthiness; converting a possible container reads its contents. */
-function truthiness(value: Lowered): Lowered {
+function truthiness(value: Lowered, record?: string): Lowered {
+  const operand = record !== undefined && value.deep ? `recLength(${record}, ${convertible(value)})` : convertible(value);
   return value.boolean ? value : {
-    ...converted(value), source: `${value.fails ? "truthyValue" : "truthy"}(${convertible(value)})`,
+    ...converted(value), source: `${value.fails ? "truthyValue" : "truthy"}(${operand})`,
     boolean: !value.fails, deep: false, contents: value.contents || itemContainer(value),
   };
 }
@@ -421,6 +445,7 @@ function pathSource(root: number, steps: readonly string[]): string {
 class Planner {
   readonly blocks: Block[] = [];
   readonly scope: Scope;
+  private recordings = 0;
 
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition) {
     const types: TypeScope = { get: () => undefined };
@@ -448,17 +473,25 @@ class Planner {
       if (steps.length === 0) continue;
       const type = compactType(declared);
       if (type === undefined) notYetDirect();
-      checks.push(`checkReference(S, ${pathSource(index, steps)}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
+      const declaredRead = scope.record === undefined ? pathSource(index, steps)
+        : `rec(${scope.record}, readDeclared(v[${index}], ${JSON.stringify(steps)}, ${scope.record}))`;
+      checks.push(`checkReference(S, ${declaredRead}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
       reads = merge(reads, { bits: 1 << index, nested: true, item: false, contents: false, fails: true });
     }
     if (checks.length === 0) return value;
     return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
   }
 
-  block(element: ElementNode, row: boolean, scope: Scope, root: boolean): Block {
-    const block: Block = { id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row };
+  /** A fresh reads array name for an exact binding. */
+  recording(scope: Scope): Scope {
+    return { ...scope, record: `f${this.recordings++}` };
+  }
+
+  block(element: ElementNode, row: boolean, scope: Scope, root: boolean, svg: boolean): Block {
+    // The root's prototype is a fragment of its children, which are SVG when the root is `<svg>`.
+    const block: Block = { id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row, svg: root ? element.name === "svg" : svg };
     this.blocks.push(block);
-    const spec = this.element(block, element, [], scope, root);
+    const spec = this.element(block, element, [], scope, root, svg);
     // The root's own element is the factory's; its children clone from a fragment.
     (block as { spec: unknown }).spec = root ? ["", [], ...spec.slice(2)] : spec;
     return block;
@@ -472,42 +505,53 @@ class Planner {
     return block.sites.length - 1;
   }
 
-  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean): unknown[] {
+  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] {
     if (EXCLUDED.has(node.name) || node.name.includes("-") || node.ref !== undefined || (node.events?.length ?? 0) > 0) notYetDirect();
     const literals = node.attributes.filter((attribute) => attribute.kind === "literal");
     if (literals.some((attribute) => attribute.name === "is")) notYetDirect();
+    const svg = parentSvg || node.name === "svg";
     const literal = (name: string): string | undefined =>
       literals.find((attribute) => attribute.name === name)?.value;
+    // A bound class attribute overwrites the class toggles, which then stay overwritten until their
+    // own inputs change, so on such an element both write exactly when their reads change.
+    const classOverwrites = node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === undefined &&
+      attribute.name === "class") && node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class");
     let content: Lowered | undefined;
-    const bound = new Set<string>();
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
       if (attribute.expressionPlan === undefined) notYetDirect();
-      const expression = this.checked(attribute.expressionPlan, scope);
+      const exact = attribute.kind === "property" || classOverwrites && attribute.kind === "attribute" &&
+        (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
+      const bindingScope = exact ? this.recording(scope) : scope;
+      const expression = this.checked(attribute.expressionPlan, bindingScope);
       if (attribute.kind === "directive") {
         if (attribute.name !== "value") notYetDirect();
         content = expression;
         continue;
       }
-      if (attribute.kind !== "attribute" || attribute.twoWay === true || attribute.target === "style") notYetDirect();
       const site = this.site(block, path);
-      if (attribute.target === "class") {
-        bound.add("class:");
-        // The root's invocation may carry the class, so its first evaluation always writes.
-        const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
-        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
+      if (attribute.kind === "property") {
+        block.bindings.push({ site, kind: "property", name: attribute.name, expression, initial: "undefined", exact: bindingScope.record });
         continue;
       }
-      if (isUrlAttribute(attribute.name) || attribute.name === "data-component") notYetDirect();
-      bound.add(attribute.name);
+      if (attribute.twoWay === true) notYetDirect();
+      if (attribute.target === "class") {
+        // The root's invocation may carry the class, so its first evaluation always writes.
+        const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
+        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial, exact: bindingScope.record });
+        continue;
+      }
+      if (attribute.target === "style") {
+        block.bindings.push({ site, kind: "style", name: attribute.name, expression, initial: "undefined" });
+        continue;
+      }
+      const name = svg ? svgAttributeName(attribute.name) : attribute.name;
       const value = literal(attribute.name);
       block.bindings.push({
-        site, kind: "attribute", name: attribute.name, expression,
-        initial: root ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
+        site, kind: isUrlAttribute(name) ? "url" : "attribute", name, expression, exact: bindingScope.record,
+        initial: root || bindingScope.record !== undefined ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
       });
     }
-    // A bound class attribute would overwrite class toggles the update skips as unchanged.
-    if (bound.has("class") && bound.has("class:")) notYetDirect();
     const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
     if (content !== undefined) {
       // `$value` replaces the element's content, so its authored children never render.
@@ -517,7 +561,7 @@ class Planner {
     }
     let index = 0;
     for (const child of node.children) {
-      const item = this.child(block, node, child, [...path, index], scope);
+      const item = this.child(block, node, child, [...path, index], scope, svg && node.name !== "foreignObject");
       spec.push(item);
       // A region is an anchor pair, so the next child sits two nodes on.
       index += item === 1 || item === 2 ? 2 : 1;
@@ -525,17 +569,26 @@ class Planner {
     return spec;
   }
 
-  child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope): unknown {
+  child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope, svg: boolean): unknown {
     if (node.kind === "slot") notYetDirect();
     if (node.kind === "text") {
-      if (node.segments !== undefined) notYetDirect();
+      if (node.segments !== undefined) {
+        const parts = node.segments.map((segment) => segment.expressionPlan === undefined ? segment.value : this.checked(segment.expressionPlan, scope));
+        const reads = parts.reduce<Reads>((all, part) => typeof part === "string" ? all
+          : merge(all, { ...converted(part), contents: part.contents || itemContainer(part) }), none("", ""));
+        block.bindings.push({
+          site: this.site(block, path), kind: "mixed", name: "", initial: '""', parts,
+          expression: { ...none(JSON.stringify(node.segments), ""), ...reads, deep: false },
+        });
+        return 0;
+      }
       if (node.expressionPlan === undefined) return node.value;
       const expression = this.checked(node.expressionPlan, scope);
       block.bindings.push({ site: this.site(block, path), kind: "text", name: "", expression, initial: '""' });
       return 0;
     }
     const flow = node.flow;
-    if (flow === undefined) return this.element(block, node, path, scope, false);
+    if (flow === undefined) return this.element(block, node, path, scope, false, svg);
     if (block.row || SELECTS.has(parent.name)) notYetDirect();
     const { flow: _flow, ...body } = node;
     const site = this.site(block, path);
@@ -545,7 +598,7 @@ class Planner {
       // A test re-renders its body whenever its inputs change, as the live runtime does, so it
       // may read only roots it can name exactly.
       if (test.nested || test.item) notYetDirect();
-      block.regions.push({ kind: "if", site, block: this.block(body, false, scope, false), test });
+      block.regions.push({ kind: "if", site, block: this.block(body, false, scope, false, svg), test });
       return 1;
     }
     if (flow.kind !== "each" || flow.key === undefined || flow.keyPlan === undefined || flow.listPlan === undefined ||
@@ -560,7 +613,7 @@ class Planner {
     // A key is memoized per item, so it may read only the item, and never a container's contents.
     if (key.bits !== 0 || key.nested || key.contents) notYetDirect();
     if (list.item) notYetDirect();
-    block.regions.push({ kind: "each", site, block: this.block(body, true, rowScope, false), list, key, alias: flow.item });
+    block.regions.push({ kind: "each", site, block: this.block(body, true, rowScope, false, svg), list, key, alias: flow.item });
     return 2;
   }
 }
@@ -577,7 +630,7 @@ export function blockPlan(definition: ComponentDefinition): BlockPlan | undefine
     if (compileComponentStylesForBuild(definition.css, definition).stateNames.length > 0) return undefined;
     const roots = compileRoots(definition);
     const planner = new Planner(roots, definition);
-    const root = planner.block(definition.template, false, planner.scope, true);
+    const root = planner.block(definition.template, false, planner.scope, true, false);
     return { roots, root, blocks: planner.blocks };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
@@ -674,7 +727,13 @@ export function emitBlocks(
       if (written.has(site) && block.sites[site]!.length > 0) entries.push(`a${site}: ${expression}`);
     });
     if (tracks(block)) entries.push("w: 0");
-    block.bindings.forEach((binding, index) => entries.push(`v${index}: ${binding.initial}`));
+    block.bindings.forEach((binding, index) => {
+      entries.push(`v${index}: ${binding.initial}`);
+      // A nonconforming segment keeps the text it last accepted.
+      binding.parts?.forEach((part, segment) => {
+        if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
+      });
+    });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
       if (region.kind === "if") {
@@ -692,7 +751,8 @@ export function emitBlocks(
     // One group per mask, except that writes to one element's attributes and classes keep their
     // authored order (it decides the order attributes and class tokens are created in).
     const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
-    const ordered = (binding: Binding): boolean => binding.kind === "attribute" || binding.kind === "class";
+    const ordered = (binding: Binding): boolean =>
+      binding.kind === "attribute" || binding.kind === "url" || binding.kind === "class" || binding.kind === "style";
     for (const binding of block.bindings) {
       const mask = maskOf(finalExpression(binding));
       const at = groups.findLastIndex((group) => group.mask === mask);
@@ -710,6 +770,39 @@ export function emitBlocks(
       if (reset && mask === NESTED && group === groups[0]!.bindings) lines.push("    r.w = 0;");
       const shared = new Map<string, string>();
       for (const binding of group) {
+        const index = block.bindings.indexOf(binding);
+        const last = `r.v${index}`;
+        const site = field(block, binding.site);
+        const output = `s${index}`;
+        if (binding.kind === "mixed") {
+          const pieces = binding.parts!.map((part, segment) => {
+            if (typeof part === "string") return JSON.stringify(part);
+            const value = `x${temporary++}`;
+            lines.push(`    const ${value} = ${convertible(part)};`);
+            if (!part.fails) return `toText(${value})`;
+            lines.push(`    if (${value} !== NONCONFORMING) r.m${index}_${segment} = toText(${value});`);
+            return `r.m${index}_${segment}`;
+          });
+          lines.push(`    const ${output} = ${pieces.length === 0 ? '""' : pieces.join(" + ")};`,
+            `    if (${output} !== ${last}) ${site}.data = ${last} = ${output};`);
+          continue;
+        }
+        if (binding.exact !== undefined) {
+          // Written whenever what it read changed, as its live effect re-runs (see `Binding.exact`).
+          const value = `x${temporary++}`;
+          const expression = binding.kind === "class" ? truthiness(binding.expression, binding.exact) : binding.expression;
+          lines.push(`    const ${binding.exact} = [];`, `    const ${value} = ${convertible(expression)};`,
+            // A full render (a reconnect) re-runs every live effect, and a root write notifies its
+            // readers even when a later write in the batch restores it; nested reads compare values.
+            `    if (c === -1${expression.bits === 0 ? "" : ` || c & ${expression.bits}`} || readsChanged(${last}, ${binding.exact})) {`,
+            `      ${last} = ${binding.exact};`);
+          const name = JSON.stringify(binding.name);
+          const write = binding.kind === "property" ? `${site}[${name}] = ${value};`
+            : binding.kind === "class" ? `${site}.classList.toggle(${name}, ${value});`
+            : `${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${name}, toAttribute(${value}, ${name}));`;
+          lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${write}` : `      ${write}`, "    }");
+          continue;
+        }
         let value = shared.get(binding.expression.key);
         if (value === undefined) {
           value = `x${temporary++}`;
@@ -717,24 +810,25 @@ export function emitBlocks(
           // Every binding sharing an expression converts it, so an item-reached container is flagged here.
           lines.push(`    const ${value} = ${convertible(binding.expression)};`);
         }
-        const index = block.bindings.indexOf(binding);
-        const last = `r.v${index}`;
-        const site = field(block, binding.site);
-        const output = `s${index}`;
         // A nonconforming result leaves what the binding last wrote, as the live runtime does.
         const fails = finalExpression(binding).fails;
         if (fails) lines.push(`    if (${value} !== NONCONFORMING) {`);
         const start = lines.length;
         switch (binding.kind) {
           case "attribute":
+          case "url":
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
-              `    if (${output} !== ${last}) writeAttribute(${site}, ${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    if (${output} !== ${last}) ${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${JSON.stringify(binding.name)}, ${last} = ${output});`);
             break;
           case "value":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) writeText(${site}, ${last} = ${output});`);
             break;
           case "text":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) ${site}.data = ${last} = ${output};`);
+            break;
+          case "style":
+            lines.push(`    const ${output} = toText(${value});`,
+              `    if (${output} !== ${last}) ${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output});`);
             break;
           case "class":
             lines.push(`    const ${output} = ${binding.expression.boolean ? value : `truthy(${value})`};`,
@@ -778,6 +872,7 @@ export function emitBlocks(
     return lines;
   };
 
+  const prototype = (block: Block): string => `buildTemplate(T${block.id}${block.svg ? ", document, 1" : ""})`;
   const body: string[] = [];
   for (const block of blocks.slice(1)) {
     const lines: string[] = [];
@@ -787,7 +882,7 @@ export function emitBlocks(
     if (block.row) {
       body.push(
         `  const m${block.id} = (o) => {`,
-        `    const n = (P${block.id} ??= buildTemplate(T${block.id})).cloneNode(true);`,
+        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
         ...lines.map((line) => `    ${line}`),
         `    const r = { k: undefined, i: o, n, x: 0, y: 0${entries.map((entry) => `, ${entry}`).join("")} };`,
         `    p${block.id}(r, -1);`,
@@ -801,7 +896,7 @@ export function emitBlocks(
     } else {
       body.push(
         `  const m${block.id} = (d) => {`,
-        `    const n = (P${block.id} ??= buildTemplate(T${block.id})).cloneNode(true);`,
+        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
         ...lines.map((line) => `    ${line}`),
         `    const r = { n${entries.map((entry) => `, ${entry}`).join("")} };`,
         `    p${block.id}(r, -1, d);`,
@@ -833,14 +928,16 @@ export function emitBlocks(
   const factory = [
     `export function create${contract.name}(options = {}) {`,
     "  const { attributes = {} } = options;",
-    `  const element = document.createElement(${JSON.stringify(definition.template.name)});`,
+    definition.template.name === "svg"
+      ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");'
+      : `  const element = document.createElement(${JSON.stringify(definition.template.name)});`,
     "  for (const [name, value] of Object.entries(attributes)) {",
     "    if (value === null || value === undefined || value === false) continue;",
     "    element.setAttribute(name, value === true ? \"\" : String(value));",
     "  }",
     ...rootLines,
     `  element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
-    ...(rootChildren ? ["  element.append((P0 ??= buildTemplate(T0)).cloneNode(true));"] : []),
+    ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
     `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...body,
@@ -848,8 +945,9 @@ export function emitBlocks(
   const source = factory.join("\n");
   const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
-    "readDeclared", "readFailing", "readIndex", "readMember", "recordValue", "textCall", "toAttribute", "toText",
-    "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText"]
+    "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
+    "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
+    "writeUrlAttribute"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(source));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
   const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);

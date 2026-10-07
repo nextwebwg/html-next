@@ -6,6 +6,7 @@ import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { ABSENT, NONCONFORMING, truthy, type Value } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
+import { hasExecutableUrl } from "./sanitize.js";
 import {
   createComputed,
   createEffect,
@@ -284,16 +285,23 @@ export function updateGeneratedProps(element: Element, props: Readonly<Record<st
 export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
 type TemplateChild = string | 0 | 1 | 2 | TemplateSpec;
 
-/** Builds a prototype once with createElement/setAttribute: no HTML parser or sink. */
-export function buildTemplate(spec: TemplateSpec, doc: Document = document): Node {
-  const node = spec[0] === "" ? doc.createDocumentFragment() : doc.createElement(spec[0]);
+const SVG = "http://www.w3.org/2000/svg";
+
+/**
+ * Builds a prototype once with createElement/setAttribute: no HTML parser or sink. Elements take
+ * the namespace their position implies, as the live runtime creates them: `<svg>` and its
+ * descendants are SVG, and `<foreignObject>`'s children are HTML again.
+ */
+export function buildTemplate(spec: TemplateSpec, doc: Document = document, svg?: number): Node {
+  const inSvg = svg === 1 || spec[0] === "svg";
+  const node = spec[0] === "" ? doc.createDocumentFragment() : inSvg ? doc.createElementNS(SVG, spec[0]) : doc.createElement(spec[0]);
   const attributes = spec[1];
   for (let index = 0; index < attributes.length; index += 2) {
     (node as Element).setAttribute(attributes[index]!, attributes[index + 1]!);
   }
   for (let index = 2; index < spec.length; index += 1) {
     const child = spec[index] as TemplateChild;
-    if (typeof child === "object") node.append(buildTemplate(child, doc));
+    if (typeof child === "object") node.append(buildTemplate(child, doc, inSvg && spec[0] !== "foreignObject" ? 1 : 0));
     else if (typeof child === "string" || child === 0) node.append(doc.createTextNode(child === 0 ? "" : child));
     else {
       const prefix = child === 2 ? "html-next:each-" : "html-next:";
@@ -362,6 +370,30 @@ export function writeText(element: Element, text: string): void {
 export function writeAttribute(element: Element, name: string, value: string | null): void {
   if (value === null) element.removeAttribute(name);
   else element.setAttribute(name, value);
+}
+
+/** Writes a URL attribute as the live runtime does: an executable URL removes it. */
+export function writeUrlAttribute(element: Element, name: string, value: string | null): void {
+  if (value === null || hasExecutableUrl(value)) element.removeAttribute(name);
+  else element.setAttribute(name, value);
+}
+
+/** Records a value a non-idempotent binding read, so it re-runs only when one of them changed. */
+export const rec = (reads: unknown[], value: unknown): unknown => (reads.push(value), value);
+/** Records a list's length, which truthiness reads (`truthyIn`). */
+export const recLength = (reads: unknown[], value: unknown): unknown =>
+  (Array.isArray(value) && reads.push(value.length), value);
+/** Records a container's contents, which text and formatting read item by item. */
+export function recContents(reads: unknown[], value: unknown): unknown {
+  if (Array.isArray(value)) reads.push(value.length, ...value);
+  else if (value !== null && typeof value === "object") for (const key of Object.keys(value)) reads.push(key, (value as Record<string, unknown>)[key]);
+  return value;
+}
+/** Whether a binding's reads differ from the last evaluation's; the first evaluation always differs. */
+export function readsChanged(last: readonly unknown[] | undefined, reads: readonly unknown[]): boolean {
+  if (last === undefined || last.length !== reads.length) return true;
+  for (let index = 0; index < reads.length; index += 1) if (!Object.is(last[index], reads[index])) return true;
+  return false;
 }
 
 /** Removes everything between two region anchors, node by node, as the live `$if` teardown does. */
@@ -473,8 +505,9 @@ interface Facade extends ProxyHandler<object> {
 const reportedWarnings = new WeakMap<GeneratedStateSpec, Set<string>>();
 
 /** A declared reference's value (`readPath`): list items by index, `length`, and object keys. */
-export function readDeclared(value: unknown, steps: readonly string[]): unknown {
+export function readDeclared(value: unknown, steps: readonly string[], reads?: unknown[]): unknown {
   for (const step of steps) {
+    reads?.push(value);
     if (Array.isArray(value)) {
       value = step === "length" ? value.length : /^\d+$/.test(step) ? value[Number(step)] : undefined;
     } else if (typeof value === "string" && step === "length") {

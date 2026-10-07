@@ -2176,8 +2176,12 @@ function renderInstance(
     element instanceof HTMLSelectElement
   ) ? {
       value: element.value,
+      // Only what the user changed is theirs to keep; an untouched control takes its bindings.
+      edited: element instanceof HTMLSelectElement
+        ? Array.from(element.options).some((option) => option.selected !== option.defaultSelected)
+        : element.value !== element.defaultValue,
       focused: element.ownerDocument.activeElement === element,
-      ...(element instanceof HTMLInputElement ? { checked: element.checked } : {}),
+      ...(element instanceof HTMLInputElement ? { checked: element.checked, toggled: element.checked !== element.defaultChecked } : {}),
       ...(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
@@ -2290,8 +2294,8 @@ function renderInstance(
     }
   }
   if (controlState !== undefined) {
-    (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
-    if (element instanceof HTMLInputElement && "checked" in controlState) {
+    if (controlState.edited) (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = controlState.value;
+    if (element instanceof HTMLInputElement && "checked" in controlState && controlState.toggled) {
       element.checked = controlState.checked;
     }
     if (

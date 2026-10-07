@@ -106,15 +106,9 @@ describe("direct-extend Vanilla generation", () => {
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     ref: component(state, '<p><span $ref="label"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
-    svg: component(state, '<p><svg><circle from:r="rows.length"></circle></svg></p>'),
-    iframe: component(state, '<p><iframe from:title="ready"></iframe></p>'),
     "select region": component(state, '<p><select><option $if="ready">A</option></select></p>'),
-    "style binding": component(state, '<p style:--x="rows.length"></p>'),
-    "url attribute": component(state, '<p><a from:href="rows.length">A</a></p>'),
-    "property binding": component(state, '<p><input .value="rows.length"></p>'),
     "two-way binding": component('<state name="name" type="string" value="a"></state>', '<p><input bind:value="name"></p>'),
     html: component(state, '<p $html="rows.length"></p>'),
-    "mixed text": component(state, "<p>Rows: {rows.length}</p>"),
     with: component(state, '<p><span $with="rows as list" $value="list.length"></span></p>'),
     "unkeyed each": component(state, '<ul><li $each="row of rows" $value="row.label"></li></ul>'),
     "each index": component(state, '<ul><li $each="row, i of rows" $key="row.id" $value="i"></li></ul>'),
@@ -127,7 +121,6 @@ describe("direct-extend Vanilla generation", () => {
     "key reads state": component(state, '<ul><li $each="row of rows" $key="ready" $value="row.label"></li></ul>'),
     "member test": component(state, '<p><b $if="rows.length">x</b></p>'),
     "container test": component(state, '<p><b $if="rows">x</b></p>'),
-    "class attribute and toggle": component(state, '<p from:class="rows.length" class:on="ready"></p>'),
   };
   for (const [name, text] of Object.entries(notYetDirect)) {
     it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
@@ -448,6 +441,39 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       // A controller that kept the raw object can still corrupt it; the read-time reference check catches it.
       (host) => { (kept as { name: unknown }).name = 5; host.state.user.age = 2; },
       (host) => { host.state.selected = null; host.state.rows = host.state.rows.toReversed(); },
+    ]);
+  });
+
+  it("binds styles, URLs, properties, mixed text, SVG and class overwrites like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="title" type="string" value="Rows"></state>
+      <state name="link" type="string" value="https://a.example/"></state>`, `
+      <section style:--count="rows.length" from:data-n="rows.length">
+        <p>Rows: {rows.length} of {title}!</p>
+        <a from:href="link">Link</a><img from:src="link" alt=""><input .value="title">
+        <div from:class="title" class:on="ready" class:pick="selected = 2"></div>
+        <svg viewBox="0 0 10 10"><circle from:r="rows.length" from:viewbox="title"></circle>
+          <foreignObject><b $value="title"></b></foreignObject></svg>
+        <ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id"><i>{row.label}: {row.id}</i></li></ul>
+      </section>`);
+    const note = (host: any): void => {
+      const input = host.root.querySelector("input") as HTMLInputElement;
+      const circle = host.root.querySelector("circle") as Element;
+      (globalThis as any).directExtendLog.events.push(`value=${input.value} svg=${circle.namespaceURI} ${[...circle.attributes].map((a) => a.name).join(",")} ${host.root.querySelector("b").namespaceURI}`);
+    };
+    await same(text, [
+      (host) => { host.state.rows = [1, 2].map((id) => ({ id, label: `r${id}` })); note(host); },
+      (host) => { host.state.link = " javascript:alert(1)"; host.state.title = "Next"; note(host); },
+      // A user edit survives a nested write the property binding does not read.
+      (host) => { host.root.querySelector("input").value = "typed"; host.state.rows[0].label = "z"; note(host); },
+      (host) => { host.state.selected = 2; host.state.link = "https://b.example/"; note(host); },
+      // The class attribute overwrites the toggles, which return only when their own inputs change.
+      (host) => { host.state.title = "fresh"; note(host); },
+      (host) => { host.state.selected = 1; note(host); },
+      (host) => { host.state.ready = false; host.state.ready = true; host.state.selected = 2; note(host); },
     ]);
   });
 
