@@ -2021,6 +2021,9 @@ export function emitBlocks(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
     ...(slotted ? ["  const J = project(I, children, slots);"] : []),
     ...provides ? ["  I.R = new Set();"] : [],
+    // host.data shows each declared read's state; reading one tracks it by name.
+    ...plan.reads.length === 0 ? [] : [`  const DT = { ${plan.reads.map((read) => `${JSON.stringify(read.declaration.name)}: ${read.index}`).join(", ")} };`,
+      "  I.A = dataHandles(S, v, DT);"],
     ...plan.reads.flatMap((read, at) => {
       // A parameter that does not conform keeps the value it last accepted, and a `from` one holds the request.
       const parameter = (value: Lowered, name: string, from: boolean): string =>
@@ -2048,7 +2051,7 @@ export function emitBlocks(
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
-    ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at});`),
+    ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at}, DT);`),
     ...(propNames.length > 0 ? ["  manageProps(I);"] : []),
     ...plan.arms !== undefined ? [] : root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
     ...plan.arms !== undefined ? [] : root.selects.map((select) => `  R.c${select}();`),
@@ -2164,7 +2167,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "ABSENT"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
