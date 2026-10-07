@@ -55,9 +55,7 @@ import {
 import {
   declarationTypeNode,
   formatType,
-  normalizeType,
   parseTypedValue,
-  serializeTypedValue,
   type TypeNode,
 } from "./type-system.js";
 import type {
@@ -77,7 +75,7 @@ import type {
 } from "./template.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
-import type { ComponentContract, PropContract, PropType, PropValue } from "./types.js";
+import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageElementValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
 

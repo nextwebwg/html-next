@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, it } from "vitest";
 import { build } from "vite";
@@ -17,39 +16,6 @@ import {
 import { installSourcePackage } from "./source-package.js";
 
 const temporary: string[] = [];
-
-class TestElement {
-  readonly nodeType = 1;
-  readonly attributes = new Map<string, string>();
-  readonly childNodes: unknown[] = [];
-  readonly isConnected = true;
-
-  constructor(readonly localName: string) {}
-
-  get ownerDocument(): unknown {
-    return globalThis.document;
-  }
-
-  append(...children: unknown[]): void {
-    this.childNodes.push(...children);
-  }
-
-  getAttribute(name: string): string | null {
-    return this.attributes.get(name) ?? null;
-  }
-
-  setAttribute(name: string, value: string): void {
-    this.attributes.set(name, value);
-  }
-
-  hasAttribute(name: string): boolean {
-    return this.attributes.has(name);
-  }
-
-  removeAttribute(name: string): void {
-    this.attributes.delete(name);
-  }
-}
 
 // A build is compiled for its entries. Only the live browser runtime watches the document for
 // component links and later definitions, so none of that machinery may reach a build.

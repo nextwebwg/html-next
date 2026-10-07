@@ -977,7 +977,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ disabled: true }); },
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "button" }); },
       (host) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName} ${host.refs.control === host.root}`); },
-    ], (document) => ({ children: ["Go"] }));
+    ], { children: ["Go"] });
   });
 
   const badge = `<template component="x-badge" status="early" summary="Badge.">
@@ -1097,7 +1097,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.root.click(); (globalThis as any).directExtendLog.events.push(`hosts ${(globalThis as any).directExtendLog.hosts.length}`); },
       (_host, update) => { update({ title: "Next", kind: "article" }); },
       (host, update) => { host.root.click(); update({ title: undefined }); },
-    ], (document) => ({ title: "T", attributes: { id: "p", class: "mine" }, children: ["body"] }));
+    ], { title: "T", attributes: { id: "p", class: "mine" }, children: ["body"] });
   });
 
   it("fails a moved duplicate key before writing any row", async () => {
