@@ -35,6 +35,7 @@ These are the owner's targets, set on 2026-10-06.
 | Plain-object template reads (another session) | Merged: nextwebwg/html-next#154 (`009a08a`) |
 | Fork entry `frameworks/keyed/html-next` runs the improved runtime | Merged: nextwebwg/js-framework-benchmark#2 (`1c5c091`); the harness pins this commit |
 | **M0 + M1, compiled direct path behind `experimentalDirectExtend`** | **Merged: nextwebwg/html-next#155** (`eba4fa0`) |
+| Key-aligned equality/inequality class selection, compiled and live | Merged: nextwebwg/html-next#156 (`0171638`) |
 
 M1 moves components with controllers, structured state and keyed lists off
 `manageComponentLifecycle`. With the option on, the benchmark component's Vite entry is **8,051 B
@@ -81,11 +82,34 @@ with standard samples (15, or 25 for select) unless marked otherwise.
   `pnpm verify:pr`, focused three-engine runtime and generated-component tests, and the framework
   smoke/parity checks pass.
 
+- **Full standard insertion experiment**, 2026-10-07 (ledger
+  `benchmarks/framework-results/20261007T034531Z-354f17d.json`): all seven entries and nine workloads,
+  standard samples (15; 25 for select). The source is the merged selector plus
+  `KeyedList.fragment = false`; that insertion change was reverted after measurement.
+
+  | Entry | vs Solid | vs Svelte | vs Vue | vs React | gzip-6 |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Vite direct experiment | **1.012** | 1.013 | 0.884 | 0.720 | 8,347 B |
+  | Live | 1.329 | 1.330 | 1.161 | 0.945 | 56,173 B |
+
+  Compiled and live selection both measured **5.3 ms**, against Solid's **6.5 ms**.
+  Compiled remove-one remained **16.2 ms** against **13.4 ms**; its script time was **1.0 ms**
+  against **0.5 ms**. The overall ≤0.99× Solid target remains unmet. An earlier reduced screen
+  of individual insertion reached 0.975× Solid, which the full run did not confirm.
+  Holding all other medians fixed, matching Solid on remove-one would yield approximately
+  **0.988× Solid** overall with the benchmark's existing weights. This is a modeled target,
+  not a measured improvement.
+  Individual insertion used the same gzip bytes and showed promise on creation: 257.1 ms for
+  10k rows against Solid's 265.1 ms. It needs a controlled comparison against fragment insertion
+  before retention. The default remains `KeyedList.fragment = true`.
+  Separate reduced screens found no demonstrated gain from `moveBefore = false` or skipping
+  ancestor scans for new controller facades; both changes were reverted.
+
 ## Required next work
 
 In order. Each item is screened first (see Working method), then confirmed.
 
-1. **Equality selector. Key-aligned class bindings implemented and screened; confirmation remains.** M1's plan rejected a selector
+1. **Equality selector. Key-aligned class bindings merged and measured; the overall target remains unmet.** M1's plan rejected a selector
    index as worth about 0.1 ms, but the measured `04_select1k` is 7.1 ms against Solid's 5.5. It is the second-largest remaining share and the one the owner explicitly requires.
    Before the selector, every row's `class:danger="row.id = selected"` binding re-evaluated when
    `selected` changed. With `$key="row.id"`, the new path touches only the affected rows.
