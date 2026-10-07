@@ -256,6 +256,24 @@ function runtimeInstance(element: Element): RuntimeInstance | undefined {
   return runtimeInstances.get(element);
 }
 
+/** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
+interface CompiledHandle {
+  readonly S: { readonly n: readonly string[]; readonly g: string };
+  readonly v: readonly unknown[];
+  readonly H: ComponentHost;
+}
+
+/** The compiled handle of a generated root, which the live runtime's instance map never holds. */
+function compiledHandle(element: Element): CompiledHandle | undefined {
+  const handle = (element as RuntimeElement)[lifecycleKey]?.h as Partial<CompiledHandle> | undefined;
+  return handle?.H === undefined ? undefined : handle as CompiledHandle;
+}
+
+/** A compiled root's declared state, as `instanceRecord` reports a live instance's. */
+function compiledState(handle: CompiledHandle): Record<string, Value> {
+  return Object.fromEntries(handle.S.n.map((name, index) => [name, handle.v[index] as Value]));
+}
+
 function registryFor(root: Document): DocumentRegistry {
   const state = documentState(root);
   let registry = state.registry;
@@ -2752,9 +2770,13 @@ export function serializeRenderedForm(container: Element): string {
       }
     }
     const instance = runtimeInstance(original);
+    const compiled = instance === undefined ? compiledHandle(original) : undefined;
     if (instance !== undefined) {
       const records = Object.fromEntries([instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, instanceRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
+    } else if (compiled !== undefined) {
+      const record: RenderedInstanceRecord = { explicit: [], inputs: {}, props: {}, state: compiledState(compiled) };
+      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue({ [compiled.S.g]: record })]));
     }
     const projection = instance?.projection;
     if (projection === undefined) return;
@@ -2764,6 +2786,20 @@ export function serializeRenderedForm(container: Element): string {
     for (const node of unrendered) carrier.content.append(node.cloneNode(true));
     copies[index]!.append(renderedFormMark(clone.ownerDocument, "carrier", ""), carrier);
   });
+  // Compiled keyed rows are their element, without item markers (owner decision 2a). Hydration
+  // adopts rows by their markers, so a region whose first child is not one gets them back here.
+  const regions = clone.ownerDocument.createTreeWalker(clone, 128 /* SHOW_COMMENT */);
+  for (let node = regions.nextNode(); node !== null; node = regions.nextNode()) {
+    if ((node as Comment).data !== "html-next:each-start") continue;
+    const first = node.nextSibling;
+    if (first === null || first.nodeType === 8 && /^html-next:(?:item-start|each-end)$/.test((first as Comment).data)) continue;
+    for (let row: ChildNode | null = first; row !== null && !(row.nodeType === 8 && (row as Comment).data === "html-next:each-end");) {
+      const next: ChildNode | null = row.nextSibling;
+      row.before(clone.ownerDocument.createComment("html-next:item-start"));
+      row.after(clone.ownerDocument.createComment("html-next:item-end"));
+      row = next;
+    }
+  }
   // Serialize marks in the HTML spelling every parser accepts: a PI in supporting browsers and
   // the fallback comment elsewhere. Node's DOM and a browser need not support the same node type.
   const marks: string[] = [];
@@ -2791,8 +2827,11 @@ export function serializeRenderedForm(container: Element): string {
  */
 export function inspectInstance(element: Element): unknown {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return undefined;
-  return inspectRuntimeInstance(instance);
+  if (instance !== undefined) return inspectRuntimeInstance(instance);
+  const handle = compiledHandle(element);
+  return handle === undefined ? undefined : {
+    tag: handle.S.g, explicit: [], props: {}, state: compiledState(handle), slots: {}, delegates: [],
+  };
 }
 
 function inspectRuntimeInstance(instance: RuntimeInstance): unknown {
@@ -3391,6 +3430,8 @@ function lowerScopes(
         if (!existing.frameworkOwned) roots.add(element);
         continue;
       }
+      // Generated output registered this root's lifecycle itself; it is rendered and owned, not server markup.
+      if ((element as RuntimeElement)[lifecycleKey] !== undefined) continue;
       let accepted = false;
       for (const tag of new Set((element.getAttribute("data-component") ?? "").split(/\s+/))) {
         const owner = byTag.get(tag);
@@ -3470,6 +3511,8 @@ interface ManagedComponentLifecycle {
   disconnect: undefined | (() => void);
   /** The element that carries the record; a root switch moves it. */
   element: Element;
+  /** A compiled root's handle (see `CompiledHandle`). */
+  readonly h?: unknown;
 }
 
 interface LifecycleCoordinator {
@@ -3872,7 +3915,7 @@ function disconnectRuntimeInstance(instance: RuntimeInstance): void {
 /** Returns the private lifecycle host for a lowered root; page code normally never needs it. */
 export function getComponentHost(element: Element): ComponentHost | undefined {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return undefined;
+  if (instance === undefined) return compiledHandle(element)?.H;
   if (instance.host !== undefined) return instance.host;
   const writable = new Set(
     (instance.definition.declarations ?? [])

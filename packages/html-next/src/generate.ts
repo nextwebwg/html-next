@@ -50,7 +50,7 @@ export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend === true);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend !== false);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;

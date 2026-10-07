@@ -714,7 +714,7 @@ export function emitBlocks(
     "",
     ...specs,
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
-    `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url };`,
+    `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url, g: ${JSON.stringify(contract.tag)} };`,
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
     "const C = (host) => controller.default(host);",
     "",

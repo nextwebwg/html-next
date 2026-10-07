@@ -353,7 +353,7 @@ describe("generated lifecycle coordinator", () => {
 });
 
 describe("generated controller host", () => {
-  const spec = (names: readonly string[], types: readonly CompactType[]): GeneratedStateSpec => ({ n: names, t: types, f: "x.html" });
+  const spec = (names: readonly string[], types: readonly CompactType[]): GeneratedStateSpec => ({ n: names, t: types, f: "x.html", g: "x-test" });
 
   it("validates, stores raw values, and renders once per flush after controller effects are ordered", async () => {
     const root = document.createElement("div");

@@ -593,7 +593,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       return [];
     }
   });
-  const requested = options.experimentalDirectExtend === true;
+  const requested = options.experimentalDirectExtend !== false;
   let generated = generateGraph(requested);
   // ponytail: all or nothing per graph. Direct helpers next to the general runtime only add bytes,
   // so one component the direct path does not cover yet keeps the graph on today's output.

@@ -409,6 +409,8 @@ export interface GeneratedStateSpec {
   readonly n: readonly string[];
   readonly t: readonly CompactType[];
   readonly f: string;
+  /** The component tag, which inspection and serialization report. */
+  readonly g: string;
 }
 
 /** The changed-roots bits plus the raw objects written since the last render (see `DirtyObjects`). */
