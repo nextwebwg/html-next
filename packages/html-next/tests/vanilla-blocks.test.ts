@@ -1152,6 +1152,26 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
+  it("renders scoped and $each slots with a consumer's template like live", async () => {
+    const list = `<template component="x-row-list" status="early" summary="Rows.">
+      <defs><prop name="items" type="list(object({ id: integer, name: string }))" default="[]">Items.</prop>
+        <state name="title" type="string" value="Rows"></state></defs>
+      <section><h3><slot name="title" from:text="title">{title}</slot></h3>
+        <ul><slot $each="item, i of items" $key="item.id" name="row" from:item="item" from:index="i"><li>{item.name}</li></slot></ul></section></template>`;
+    const consumer = parent(`
+      <section><x-row-list from:items="people">
+        <template slot="row"><li from:data-id="item.id"><b>{item.name}</b> {index} <i $if="flag">{label}</i></li></template>
+      </x-row-list><x-row-list from:items="people"></x-row-list></section>`,
+      `<state name="people" type="list(object({ id: integer, name: string }))" value="[]"></state>`);
+    await same([consumer, list], [
+      (host) => { host.state.people = [{ id: 1, name: "Ada" }, { id: 2, name: "Bea" }]; },
+      (host, update) => { host.state.label = "L2"; update({ flag: true }); },
+      (host) => { host.state.people[0].name = "Ann"; },
+      (host) => { host.state.people = [host.state.people[1], { id: 3, name: "Cy" }, host.state.people[0]]; },
+      (host) => { host.state.people = []; },
+    ]);
+  });
+
   it("fails a moved duplicate key before writing any row", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>

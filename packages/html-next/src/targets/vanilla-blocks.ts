@@ -144,6 +144,8 @@ interface Region {
   readonly slot?: string | Lowered;
   /** A slot has fallback content, which renders when nothing is projected into it. */
   readonly fallback?: boolean;
+  /** A scoped slot's props: the values a consumer's template reads, by its names. */
+  readonly props?: readonly Lowered[];
 }
 
 interface Block {
@@ -175,6 +177,8 @@ interface Block {
   readonly invocations: Invocation[];
   /** A row of several nodes (`<template $each>`), delimited by item markers. */
   ranged?: boolean;
+  /** A consumer's scoped-slot templates projected from this block: the carrier's site and its content's block. */
+  readonly scopes: { readonly site: number; readonly block: Block }[];
 }
 
 /**
@@ -202,7 +206,7 @@ interface Invocation {
 
 /** Whether a block, or a region below it, listens: removing it must stop those listeners. */
 function disposable(block: Block): boolean {
-  return block.events.length > 0 || block.invocations.length > 0 ||
+  return block.events.length > 0 || block.invocations.length > 0 || block.regions.some((region) => region.props !== undefined) ||
     block.regions.some((region) => [region.block, ...region.arms ?? []].some(disposable));
 }
 
@@ -360,6 +364,8 @@ interface AliasEntry {
   readonly kind: "item" | "index" | "loop";
   /** A variable that holds it where it is evaluated (a function's parameter), not the record chain. */
   readonly source?: string;
+  /** The holder record's field for it, as a scoped slot's prop values are held. */
+  readonly field?: string;
 }
 
 interface Scope {
@@ -391,6 +397,7 @@ function aliasSource(scope: Scope, entry: AliasEntry): string {
   // Every block between the reader and the holder keeps a link to its parent's record.
   for (let block = scope.block, step = 0; step < up && block !== undefined; step += 1, block = block.parent) block.needsParent = true;
   const record = `r${".u".repeat(up)}`;
+  if (entry.field !== undefined) return `${record}.${entry.field}`;
   if (entry.kind === "index") return `${record}.j`;
   if (entry.kind === "loop") return `loopRecord(${record})`;
   return up === 0 && scope.closure !== true ? "o" : `${record}.i`;
@@ -594,6 +601,7 @@ function readsPosition(block: Block): boolean {
     block.invocations.some((invocation) => invocation.props.some((prop) => prop.expression.positional === true) ||
       invocation.projection !== undefined && readsPosition(invocation.projection)) ||
     block.regions.some((region) => region.test?.positional === true || region.list?.positional === true ||
+      region.props?.some((prop) => prop.positional === true) === true ||
       region.kind !== "each" && [region.block, ...region.arms ?? []].some(readsPosition));
 }
 
@@ -725,6 +733,8 @@ class Planner {
   /** Initializer statements, in declaration order. */
   readonly initializers: string[] = [];
   readonly handlers = new Map<string, HandlerPlan>();
+  /** The projection being planned, and the component it is projected into, whose slots name its carriers' props. */
+  private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
 
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition,
     readonly invocations: ReadonlyMap<string, Invoked> = new Map()) {
@@ -884,16 +894,18 @@ class Planner {
     return { ...scope, record: `f${this.recordings++}` };
   }
 
-  block(element: ElementNode, row: boolean, outer: Scope, root: boolean, svg: boolean, alias = row): Block {
+  block(element: ElementNode, row: boolean, outer: Scope, root: boolean, svg: boolean, alias = row,
+    projecting?: { block: Block; definition: ComponentDefinition }): Block {
     // The root's prototype is a fragment of its children, which are SVG when the root is `<svg>`;
     // a `<template>` body is a fragment of its children too.
     const fragment = root || element.name === "template";
     const block: Block = {
       id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row,
       svg: root ? element.name === "svg" : svg, events: [], refs: [], selects: [], alias, level: outer.level, parent: root ? undefined : outer.block,
-      invocations: [],
+      invocations: [], scopes: [],
     };
     this.blocks.push(block);
+    if (projecting !== undefined) projecting.block = block;
     const scope: Scope = { ...outer, block };
     if (fragment && !root) {
       // A `<template $each>` row is several nodes, between item markers as live renders them.
@@ -1038,11 +1050,15 @@ class Planner {
     }
     // Every other binding targets the component's root, which the site holds once it is created.
     this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg);
-    const carriers = node.children.filter((child) => child.kind === "element" && child.name === "template" &&
-      child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
-    if (carriers.length > 0) notYetDirect();
-    const projection = node.children.length === 0 ? undefined : this.block({ kind: "element", name: "template", attributes: [], children: node.children },
-      false, { ...scope, level: scope.level + 1 }, false, svg, false);
+    let projection: Block | undefined;
+    if (node.children.length > 0) {
+      const outer = this.projecting;
+      // The projection's own scoped-slot templates take the props the component's slots give them.
+      this.projecting = { block: undefined as never, definition: invoked.definition };
+      projection = this.block({ kind: "element", name: "template", attributes: [], children: node.children },
+        false, { ...scope, level: scope.level + 1 }, false, svg, false, this.projecting);
+      this.projecting = outer;
+    }
     block.invocations.push({
       site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined,
       events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
@@ -1073,7 +1089,24 @@ class Planner {
   }
 
   carrier(block: Block, node: ElementNode, path: readonly number[], index: number, scope: Scope, svg: boolean): unknown[] {
-    if (node.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot")) notYetDirect();
+    const slot = node.attributes.find((attribute): attribute is Extract<typeof attribute, { kind: "literal" }> =>
+      attribute.kind === "literal" && attribute.name === "slot")?.value;
+    if (slot !== undefined) {
+      // A consumer's scoped-slot template stays an inert carrier. Projected into a compiled component,
+      // its content renders where that component's slot asks, reading the slot's props by name.
+      const projecting = this.projecting;
+      if (projecting === undefined || projecting.block !== block || path.length > 0) return [["template", ["slot", slot]]];
+      const props = [...new Set((projecting.definition.slots ?? [])
+        .filter((contract) => contract.dynamic || (contract.name ?? "") === slot).flatMap((contract) => contract.props ?? []))];
+      const inner: Scope = { ...scope, level: scope.level + 1 };
+      const types: TypeScope = { get: () => undefined };
+      declareLayerTypes(types, inner.types, Object.fromEntries(props.map((name) => [name, undefined])));
+      const content = this.block({ kind: "element", name: "template", attributes: [], children: node.children }, false,
+        { ...inner, types, aliases: [...inner.aliases, ...props.map((name, at) => ({ name, level: inner.level, kind: "item" as const, field: `s[${at}]` }))] },
+        false, svg, false);
+      block.scopes.push({ site: this.site(block, [...path, index]), block: content });
+      return [["template", ["slot", slot]]];
+    }
     const directive = node.attributes.find((attribute) => attribute.kind === "directive");
     if (directive?.kind === "directive" && directive.expressionPlan !== undefined) {
       const site = this.site(block, [...path, index]);
@@ -1090,12 +1123,17 @@ class Planner {
 
   child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope, svg: boolean): unknown {
     if (node.kind === "slot") {
-      if (node.flow !== undefined || (node.props?.length ?? 0) > 0) notYetDirect();
+      // An `$each` slot renders the slot once per row, as rows of several nodes.
+      if (node.flow !== undefined) {
+        const { flow, ...slot } = node;
+        return this.child(block, parent, { kind: "element", name: "template", attributes: [], children: [slot], flow }, path, scope, svg);
+      }
       // The name is read when the slot renders, without reference checks, as live evaluates it.
       const slot = node.nameExpression === undefined ? node.name ?? "" : lower(node.nameExpression.ast, scope);
       const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
         false, { ...scope, level: scope.level + 1 }, false, svg, false);
-      block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0 });
+      const props = (node.props?.length ?? 0) > 0 ? node.props!.map((prop) => this.checked(prop.expressionPlan, scope)) : undefined;
+      block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0, ...props === undefined ? {} : { props } });
       return 4;
     }
     if (node.kind === "text") {
@@ -1413,6 +1451,7 @@ function regionOuter(block: Block): number {
   let mask = 0;
   for (const region of block.regions) {
     if (region.test !== undefined) mask |= outerOf(region.test);
+    for (const prop of region.props ?? []) mask |= outerOf(prop);
     if (region.list !== undefined) mask |= outerOf(region.list) | (region.list.nested ? NESTED : 0);
     if (region.kind !== "each") for (const body of [region.block, ...region.arms ?? []]) {
       mask |= body.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | invocationOuter(body) | regionOuter(body);
@@ -1470,6 +1509,7 @@ export function emitBlocks(
         if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
       });
     });
+    block.scopes.forEach((_scope, index) => entries.push(`k${index}: undefined`));
     block.invocations.forEach((invocation, index) => {
       if (block.sites[invocation.site]!.length > 0 && !written.has(invocation.site)) entries.push(`a${invocation.site}: ${sites[invocation.site]}`);
       entries.push(`h${index}: undefined`, ...invocation.projection === undefined ? [] : [`j${index}: undefined`],
@@ -1478,7 +1518,8 @@ export function emitBlocks(
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
       if (region.kind !== "each") {
-        entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`, ...region.kind === "slot" ? [`f${index}: undefined`] : []);
+        entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`,
+          ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
         if (region.recorded !== undefined) entries.push(`q${index}: undefined`);
       } else {
         const child = region.block.id;
@@ -1541,9 +1582,10 @@ export function emitBlocks(
       `  } else {`,
       ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
       ...invocation.props.flatMap((prop, at) => [
-        `    if (${guard(maskOf(prop.expression))}) {`,
+        `    if (${guard(maskOf(prop.expression) | NESTED)}) {`,
         `      const ${prop.record} = [], x = ${convertible(prop.expression)};`,
-        `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record})) {`,
+        // A nested write anywhere in the value re-applies it, as live's parse at the destination reads it all.
+        `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record}) || touches(x, d)) {`,
         `        r.q${index}_${at} = ${prop.record};`,
         `        ${prop.expression.fails ? "if (x !== NONCONFORMING) " : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x);`,
         "      }",
@@ -1675,9 +1717,31 @@ export function emitBlocks(
         const body = `r.b${index}`;
         const name = typeof region.slot === "string" ? JSON.stringify(region.slot) : `toText(${region.slot!.source})`;
         const make = `m${child}(d${region.block.needsParent === true ? ", undefined, r" : ""})`;
+        const props = region.props;
+        if (props === undefined) {
+          lines.push(
+            `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}); if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
+            `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
+          );
+          return;
+        }
+        // A scoped slot renders the consumer's template with its props, and patches that rendering
+        // when a prop changes or nested data may have: a nonconforming prop keeps its last value.
+        const rendering = `r.x${index}`;
         lines.push(
-          `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}); if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
-          `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
+          `  if (r.f${index} === undefined) {`,
+          `    r.f${index} = 1;`,
+          `    const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, [${props.map((prop) => convertible(prop)).join(", ")}].map((y) => y === NONCONFORMING ? undefined : y), d);`,
+          `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
+          `    else if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); }`,
+          `  } else if (${rendering} !== undefined) {`,
+          `    if (${guard(props.reduce((mask, prop) => mask | maskOf(prop), 0) | NESTED)}) {`,
+          `      const t = ${rendering}[1].s;`,
+          `      let w = c & ${NESTED};`,
+          ...props.map((prop, at) => `      { const y = ${convertible(prop)}; if (y !== NONCONFORMING && !Object.is(t[${at}], y)) { t[${at}] = y; w = 1; } }`),
+          `      if (w) ${rendering}[0].p(${rendering}[1], ${NESTED}, d);`,
+          "    }",
+          `  } else if (${body} !== undefined) p${child}(${body}, c, d);`,
         );
         return;
       }
@@ -1740,6 +1804,8 @@ export function emitBlocks(
         lines.push(`  if (c !== -1 && c & ${rootBit(root)}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
       }
     });
+    // Renderings of this block's scoped-slot templates follow its own changes too.
+    block.scopes.forEach((scope, index) => lines.push(`  for (const x of r.k${index}.l) p${scope.block.id}(x, c, d);`));
     return lines;
   };
 
@@ -1759,6 +1825,8 @@ export function emitBlocks(
       if (region.kind === "each" && listOwned(region)) lines.push(`${indent}${record}.L${index}.u = ${record};`);
       if (region.kind === "each" && region.key === undefined && region.positional === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
+    // A consumer's scoped-slot templates, which the component it projects into renders with its props.
+    block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: (d, s) => m${scope.block.id}(d, s, ${record}), p: p${scope.block.id}, l: new Set() });`));
     // A select's `applySelection` runs once its options exist and after its option regions change.
     for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`)};`);
     const stops = block.events.map((event) => listener(event, siteOf(event.site)));
@@ -1780,13 +1848,27 @@ export function emitBlocks(
     return `${invoked ? "listenRoot" : "listen"}(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")})`;
   };
   const armIds = new Set(plan.arms?.blocks.map((block) => block.id) ?? []);
+  const scopedIds = new Set(blocks.flatMap((block) => block.scopes.map((scope) => scope.block.id)));
   for (const block of blocks.slice(1)) {
     if (armIds.has(block.id)) continue;
     const lines: string[] = [];
     const sites = walk("n", block.sites, lines, "t");
     const entries = fields(block, sites);
     const reads = block.alias;
-    if (block.row) {
+    if (scopedIds.has(block.id)) {
+      // A rendering of a consumer's scoped-slot template holds the slot's prop values in `s`.
+      body.push(
+        `  const m${block.id} = (d, s, u) => {`,
+        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
+        ...lines.map((line) => `    ${line}`),
+        `    const r = { n, s, u${entries.map((entry) => `, ${entry}`).join("")} };`,
+        ...ownership(block, sites, "r", "    "),
+        `    p${block.id}(r, -1, d);`,
+        ...block.selects.map((select) => `    r.c${select}();`),
+        "    return r;",
+        "  };",
+      );
+    } else if (block.row) {
       body.push(
         `  const m${block.id} = (o, j, l${block.needsParent === true ? ", u" : ""}) => {`,
         `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
@@ -2011,7 +2093,7 @@ export function emitBlocks(
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
     "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
     "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough",
-    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList"]
+    "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

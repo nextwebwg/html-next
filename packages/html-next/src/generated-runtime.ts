@@ -464,6 +464,20 @@ export function bindProp(child: GeneratedInstance, name: string, value: unknown)
   record.u!({ [name]: value });
 }
 
+/**
+ * Whether a nested write reached anything in `value`: live parses a bound prop at its destination
+ * inside the binding's effect, so every part of the value is a dependency of that binding.
+ */
+export function touches(value: unknown, dirty: ReadonlyMap<unknown, 1 | 2>, seen = new Set<unknown>()): boolean {
+  if (dirty.size === 0 || value === null || typeof value !== "object" || seen.has(value)) return false;
+  if (dirty.has(value)) return true;
+  seen.add(value);
+  for (const item of Array.isArray(value) ? value : Object.values(value)) {
+    if (touches(raw(item), dirty, seen)) return true;
+  }
+  return false;
+}
+
 /** A listener on an invoked component's root, which moves to a replacement root as live's does. */
 export function listenRoot(
   instance: GeneratedInstance, child: GeneratedInstance, type: string, listener: (event: Event) => void,
@@ -1133,26 +1147,62 @@ export function project(
   return instance.J = projected;
 }
 
+/** A rendering of a consumer's scoped-slot template: its nodes, and the slot's prop values it reads. */
+export interface ScopedRecord { readonly n: Node; readonly s: unknown[]; z?: (() => void)[] }
+
+/** A consumer's compiled scoped-slot template: makes a rendering, patches one, and holds the live ones. */
+export interface ScopedTemplate {
+  readonly m: (dirty: Map<unknown, 1 | 2>, props: unknown[]) => ScopedRecord;
+  readonly p: (record: ScopedRecord, changed: number, dirty: Map<unknown, 1 | 2>) => void;
+  readonly l: Set<ScopedRecord>;
+}
+
+const scopedTemplates = new WeakMap<Element, ScopedTemplate>();
+
+/** Registers a consumer's compiled template on its `<template slot>` carrier, which the slot it is projected into finds. */
+export function scopedTemplate(carrier: Element, template: ScopedTemplate): ScopedTemplate {
+  scopedTemplates.set(carrier, template);
+  return template;
+}
+
 /**
  * Renders a slot between its placeholders as the live runtime renders one: the nodes projected into
- * it, or its fallback, between rendered-form marks; a slot with neither leaves one marker. Returns
- * the node its fallback goes before, when the fallback renders.
+ * it, or its fallback, between rendered-form marks; a slot with neither leaves one marker. A scoped
+ * slot (`props`) renders the consumer's `<template slot>` with its props instead of moving it.
+ * Returns the node its fallback goes before, when the fallback renders, or a scoped rendering.
  */
-export function fillSlot(start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean): ChildNode | undefined {
+export function fillSlot(
+  start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
+  props?: unknown[], dirty?: Map<unknown, 1 | 2>,
+): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const doc = start.ownerDocument!;
   const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
   const slot = `slot="${name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
-  if (assigned.length === 0 && !fallback) {
+  const scoped = props === undefined ? "" : ' scoped=""';
+  let rendered: readonly [ScopedTemplate, ScopedRecord] | undefined;
+  if (props !== undefined && assigned.length > 0) {
+    const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template");
+    if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
+    const template = scopedTemplates.get(carrier as Element);
+    if (template === undefined) fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
+    const record = template.m(dirty!, props);
+    for (const node of Array.from(record.n.childNodes)) markProjectedRoot(node);
+    template.l.add(record);
+    rendered = [template, record];
+  }
+  const nodes = rendered === undefined ? assigned.length : rendered[1].n.childNodes.length;
+  if (nodes === 0 && !fallback || rendered !== undefined && nodes === 0) {
     start.replaceWith(renderedFormMark(doc, "marker", slot));
     end.remove();
-    return undefined;
+    return rendered;
   }
   const close = renderedFormMark(doc, "end", "") as ChildNode;
-  start.replaceWith(renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""` : slot));
+  start.replaceWith(renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""${scoped}` : `${slot}${scoped}`));
   end.replaceWith(close);
   if (assigned.length === 0) return close;
-  close.before(...assigned);
-  return undefined;
+  if (rendered !== undefined) close.before(rendered[1].n);
+  else close.before(...assigned);
+  return rendered;
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */
