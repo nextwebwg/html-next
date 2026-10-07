@@ -71,6 +71,15 @@ describe("direct-extend Vanilla generation", () => {
     assert.deepEqual(inputs.filter((path) => forbidden.test(path)), []);
   });
 
+  it("keeps the indexed lifecycle coordinator out of every other generated bundle", async () => {
+    const index = /(?:^|\/)src\/generated-lifecycle-index\.ts$/;
+    const props = await readFile(new URL("../benchmarks/fixtures/prop-button.html", import.meta.url), "utf8");
+    const older = await bundle(vanilla(props, true));
+    assert.ok(older.inputs.some((path) => path.endsWith("src/generated-lifecycle.ts")));
+    assert.equal(older.inputs.some((path) => index.test(path)), false);
+    assert.ok((await bundle(vanilla(benchmarkShape, true), true)).inputs.some((path) => index.test(path)));
+  });
+
   it("keeps the flag-off output byte-identical", () => {
     assert.equal(vanilla(benchmarkShape, false), generateComponent(parseComponent(benchmarkShape, new URL("component.html", fixtures).href))
       .find((artifact) => artifact.path.endsWith(".js"))!.content.replace(/import \* as controller from "[^"]*";/, 'import * as controller from "./controller.js";'));

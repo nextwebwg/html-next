@@ -17,6 +17,7 @@ import {
   type CompactType,
   type GeneratedStateSpec,
 } from "../src/generated-runtime.js";
+import { manageIndexedLifecycle } from "../src/generated-lifecycle-index.js";
 import { NESTED, raw } from "../src/keyed.js";
 
 setFlagsFromString("--expose-gc");
@@ -122,8 +123,10 @@ describe("compact declared types", () => {
 });
 
 describe("generated lifecycle coordinator", () => {
-  const managed = (element: Element, log: string[], name: string): (() => void) =>
-    manageGeneratedLifecycle(element, () => { log.push(`+${name}`); }, () => { log.push(`-${name}`); }, { name });
+  const managed = (element: Element, log: string[], name: string): void =>
+    manageIndexedLifecycle(element, () => { log.push(`+${name}`); return () => { log.push(`-${name}`); }; }, { name });
+  const lifecycle = (): unknown =>
+    (document as unknown as Record<symbol, { lifecycle?: unknown }>)[Symbol.for("@nextwebwg/html-next.runtime.v1")]?.lifecycle;
 
   it("keeps the handle on the lifecycle record", () => {
     const element = document.createElement("div");
@@ -243,6 +246,55 @@ describe("generated lifecycle coordinator", () => {
     wrapper.remove();
     await flush();
     assert.deepEqual(log, ["+a", "+b", "-b", "+b", "-b", "+b", "-b"]);
+  });
+
+  it("indexes roots that other generated output registers while it is installed", async () => {
+    const log: string[] = [];
+    const direct = document.createElement("div");
+    direct.setAttribute("data-component", "x-direct");
+    const older = document.createElement("div");
+    older.setAttribute("data-component", "x-older");
+    document.body.append(direct, older);
+    managed(direct, log, "direct");
+    const installed = lifecycle();
+    const stop = manageGeneratedLifecycle(older, () => { log.push("+older"); }, () => { log.push("-older"); });
+    assert.equal(lifecycle(), installed);
+    const list = document.createElement("ul");
+    document.body.append(list);
+    const query = vi.spyOn(window.Element.prototype, "querySelectorAll");
+    for (let index = 0; index < 20; index += 1) list.append(Object.assign(document.createElement("li"), { innerHTML: "<b>x</b>" }));
+    await flush();
+    assert.equal(query.mock.calls.length, 0);
+    older.remove();
+    await flush();
+    stop();
+    direct.remove();
+    await flush();
+    assert.deepEqual(log, ["+direct", "+older", "-older", "-direct"]);
+  });
+
+  it("lets a coordinator installed first serve direct-extend roots with the exact walk", async () => {
+    const log: string[] = [];
+    const older = document.createElement("div");
+    older.setAttribute("data-component", "x-older");
+    const direct = document.createElement("div");
+    direct.setAttribute("data-component", "x-direct");
+    const holder = document.createElement("section");
+    holder.append(direct);
+    document.body.append(older);
+    const stop = manageGeneratedLifecycle(older, () => { log.push("+older"); }, () => { log.push("-older"); });
+    const installed = lifecycle();
+    managed(direct, log, "direct");
+    assert.equal(lifecycle(), installed);
+    document.body.append(holder);
+    await flush();
+    holder.remove();
+    older.remove();
+    await flush();
+    stop();
+    assert.deepEqual(log, ["+older", "+direct", "-direct", "-older"]);
+    // The direct root still holds the document's one coordinator.
+    assert.equal(lifecycle(), installed);
   });
 
   it("connects roots added in one batch in mutation order", async () => {

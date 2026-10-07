@@ -295,10 +295,10 @@ describe("HTML Next unplugin", () => {
     assert.equal(scripts.length, 1);
     const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
     assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
-    // The M1 receipt for the js-framework-benchmark entry is 8,096 B gzip-6 (controller included), a
-    // ceiling later milestones may not raise; ratchet this down whenever the entry shrinks.
+    // The js-framework-benchmark entry is 8,044 B gzip-6 (controller included) since the indexed
+    // coordinator split, a ceiling later milestones may not raise; ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_150, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_100, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

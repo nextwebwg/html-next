@@ -185,6 +185,12 @@ added or removed nodes reach (`contains` and `querySelectorAll` share light-DOM 
 32 registered roots the coordinator finds those roots directly: one is synchronized, and two or more
 fall back to the walk, which keeps mutation-order sequencing. Above 32 roots the walk runs.
 
+Only direct-extend output imports the indexed coordinator (`src/generated-lifecycle-index.ts`), so
+other generated output bundles exactly the coordinator it did before. Both occupy the one
+coordinator slot a document has: whichever installs first serves every root registered in that
+document, so two coordinators never disagree. When another coordinator installed first, direct-extend
+roots get the exact walk without the fast path.
+
 ## Review sequence
 
 The next decisions are intentionally separated so approval of one custom layer cannot be read as

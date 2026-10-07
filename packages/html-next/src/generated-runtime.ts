@@ -1,6 +1,8 @@
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
+import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { ABSENT } from "./expression.js";
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
@@ -19,6 +21,7 @@ import {
 import { parseTypedValue, parseTypeExpression } from "./type-system.js";
 
 export { toAttribute, toText, truthy } from "./expression.js";
+export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { KeyedList } from "./keyed.js";
 
 export interface GeneratedEvent {
@@ -42,185 +45,6 @@ export function dispatchGeneratedEvent(target: EventTarget | null | undefined, e
     composed: event.composed,
     cancelable: event.cancelable,
   })) ?? false;
-}
-
-interface ManagedComponentLifecycle {
-  readonly connect: (element: Element) => () => void;
-  disconnect: undefined | (() => void);
-  /** What the instance exposes to the runtime (state, values, host); read by inspection (M3). */
-  readonly h?: unknown;
-  /** The generated coordinator's weak reference to the root. */
-  w?: WeakRef<Element>;
-}
-
-interface LifecycleCoordinator {
-  add(element: Element, record: ManagedComponentLifecycle): void;
-  remove(element: Element, record: ManagedComponentLifecycle): void;
-}
-
-type DocumentMutationSubscriber = (mutations: readonly MutationRecord[]) => void;
-
-interface DocumentMutationHub {
-  readonly observer: MutationObserver;
-  readonly subscribers: Set<DocumentMutationSubscriber>;
-}
-
-const runtimeKey = Symbol.for("@nextwebwg/html-next.runtime.v1");
-const lifecycleKey = Symbol.for("@nextwebwg/html-next.lifecycle.v1");
-
-interface DocumentState {
-  mutationHub?: DocumentMutationHub;
-  lifecycle?: LifecycleCoordinator;
-}
-
-type RuntimeDocument = Document & { [runtimeKey]?: DocumentState };
-type RuntimeElement = Element & { [lifecycleKey]?: ManagedComponentLifecycle };
-
-function documentState(root: Document): DocumentState {
-  return (root as RuntimeDocument)[runtimeKey] ??= {};
-}
-
-function subscribeDocumentMutations(root: Document, subscriber: DocumentMutationSubscriber): () => void {
-  const state = documentState(root);
-  let hub = state.mutationHub;
-  if (hub === undefined) {
-    const Observer = root.defaultView?.MutationObserver ?? MutationObserver;
-    const subscribers = new Set<DocumentMutationSubscriber>();
-    const observer = new Observer((mutations) => {
-      for (const notify of Array.from(subscribers)) notify(mutations);
-    });
-    hub = { observer, subscribers };
-    state.mutationHub = hub;
-    observer.observe(root, { childList: true, subtree: true });
-  }
-  hub.subscribers.add(subscriber);
-  let subscribed = true;
-  return () => {
-    if (!subscribed) return;
-    subscribed = false;
-    hub.subscribers.delete(subscriber);
-    if (hub.subscribers.size === 0) {
-      hub.observer.disconnect();
-      delete state.mutationHub;
-    }
-  };
-}
-
-function coordinatorFor(root: Document): LifecycleCoordinator {
-  const state = documentState(root);
-  const installed = state.lifecycle;
-  if (installed !== undefined) return installed;
-  let size = 0;
-  /** Every registered root, held weakly: the coordinator retains nothing the document dropped (006). */
-  const roots = new Set<WeakRef<Element>>();
-  const collected = new FinalizationRegistry<WeakRef<Element>>((reference) => roots.delete(reference));
-  const synchronize = (element: Element): void => {
-    const record = (element as RuntimeElement)[lifecycleKey];
-    if (record === undefined) return;
-    if (element.isConnected && record.disconnect === undefined) {
-      record.disconnect = record.connect(element);
-    } else if (!element.isConnected && record.disconnect !== undefined) {
-      record.disconnect();
-      record.disconnect = undefined;
-    }
-  };
-  /** Whether the walk below reaches `element` from this batch: the same light-DOM scope. */
-  const reaches = (mutations: readonly MutationRecord[], element: Element): boolean => {
-    const within = (nodes: NodeList): boolean => {
-      for (const node of nodes) {
-        if (node === element || node.nodeType === 1 && node.contains(element) && element.matches("[data-component]")) return true;
-      }
-      return false;
-    };
-    return mutations.some((mutation) => within(mutation.removedNodes) || within(mutation.addedNodes));
-  };
-  const stopObservation = subscribeDocumentMutations(root, (mutations) => {
-    // ponytail: the walk only acts on a root whose connection no longer matches its record and that
-    // the batch reaches. Up to 32 roots, find those directly: one is synchronized here, two or more
-    // keep the walk's mutation-order sequencing. Above 32 roots the walk runs (M3: index by subtree).
-    if (roots.size <= 32) {
-      let next: Element | undefined;
-      let several = false;
-      for (const reference of roots) {
-        const element = reference.deref();
-        const record = element && (element as RuntimeElement)[lifecycleKey];
-        if (record !== undefined && element!.isConnected !== (record.disconnect !== undefined) && reaches(mutations, element!)) {
-          if (next !== undefined) { several = true; break; }
-          next = element;
-        }
-      }
-      if (!several) {
-        if (next !== undefined) synchronize(next);
-        return;
-      }
-    }
-    const changed: Element[] = [];
-    const collect = (node: Node): void => {
-      if (node.nodeType !== 1) return;
-      const element = node as Element;
-      if ((element as RuntimeElement)[lifecycleKey] !== undefined) changed.push(element);
-      if (element.childElementCount === 0) return;
-      for (const descendant of element.querySelectorAll("[data-component]")) {
-        if ((descendant as RuntimeElement)[lifecycleKey] !== undefined) changed.push(descendant);
-      }
-    };
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) collect(node);
-      for (const node of mutation.removedNodes) collect(node);
-    }
-    for (const element of changed) synchronize(element);
-  });
-  const coordinator: LifecycleCoordinator = {
-    add(element, record) {
-      const target = element as RuntimeElement;
-      const previous = target[lifecycleKey];
-      if (previous === record) return;
-      previous?.disconnect?.();
-      if (previous === undefined) size += 1;
-      else roots.delete(previous.w!);
-      target[lifecycleKey] = record;
-      collected.register(element, record.w = new WeakRef(element));
-      roots.add(record.w);
-      synchronize(element);
-    },
-    remove(element, record) {
-      const target = element as RuntimeElement;
-      if (target[lifecycleKey] !== record) return;
-      record.disconnect?.();
-      delete target[lifecycleKey];
-      roots.delete(record.w!);
-      size -= 1;
-      if (size === 0) {
-        stopObservation();
-        delete state.lifecycle;
-      }
-    },
-  };
-  state.lifecycle = coordinator;
-  return coordinator;
-}
-
-/**
- * Connects generated behavior while its native root is in the document. Every generated
- * bundle in the realm shares the same browser-owned document observer and coordinator.
- */
-export function manageGeneratedLifecycle(
-  element: Element,
-  connect: () => void,
-  disconnect: () => void,
-  handle?: unknown,
-): () => void {
-  const coordinator = coordinatorFor(element.ownerDocument);
-  const record: ManagedComponentLifecycle = {
-    connect: () => {
-      connect();
-      return disconnect;
-    },
-    disconnect: undefined,
-    h: handle,
-  };
-  coordinator.add(element, record);
-  return () => coordinator.remove(element, record);
 }
 
 export type GeneratedPropType = "string" | "boolean" | "number" | readonly string[];
@@ -810,22 +634,7 @@ export function attachGeneratedController(
       root.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true, cancelable: false })),
   });
   render(-1);
-  manageGeneratedLifecycle(root, () => {
-    connected = true;
-    for (const entry of entries) entry.resume();
-    if (started) {
-      // Live resumes its template effects after the controller's: every binding re-renders.
-      dirty = 0;
-      render(-1);
-      return;
-    }
-    started = true;
-    void Promise.resolve(controller(host as never)).then((result) => {
-      if (typeof result !== "function") return;
-      if (gone) (result as () => void)();
-      else cleanup = result as () => void;
-    });
-  }, () => {
+  const disconnect = (): void => {
     if (!gone) {
       gone = true;
       const finish = cleanup;
@@ -835,5 +644,22 @@ export function attachGeneratedController(
     connected = false;
     objects.clear();
     for (const entry of entries) entry.pause();
+  };
+  manageIndexedLifecycle(root, () => {
+    connected = true;
+    for (const entry of entries) entry.resume();
+    if (started) {
+      // Live resumes its template effects after the controller's: every binding re-renders.
+      dirty = 0;
+      render(-1);
+    } else {
+      started = true;
+      void Promise.resolve(controller(host as never)).then((result) => {
+        if (typeof result !== "function") return;
+        if (gone) (result as () => void)();
+        else cleanup = result as () => void;
+      });
+    }
+    return disconnect;
   }, { S: spec, v: values, H: host });
 }
