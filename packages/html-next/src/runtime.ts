@@ -28,6 +28,8 @@ import {
   createEffect,
   createSignal,
   ReactiveScope,
+  readItems,
+  readKey,
   registerReactiveAlias,
   untracked,
   type ReactiveEffect,
@@ -761,16 +763,16 @@ const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly C
  * The value at a dependency path. A path names both a list index and a record key as a segment
  * (`items.0`, `byId.42`), so each segment is read the way the value in hand reads it.
  */
-function readPath(path: string, scope: Scope): Value {
+function readPath(path: string, scope: ReactiveScope): Value {
   const [root, ...keys] = path.split(".");
-  let value = scope.get(root!);
+  let value = scope.read(root!);
   for (const key of keys) {
     if (Array.isArray(value)) {
-      value = key === "length" ? value.length : /^\d+$/.test(key) ? value[Number(key)] : undefined;
+      value = key === "length" || /^\d+$/.test(key) ? readKey(value, key === "length" ? key : Number(key)) : undefined;
     } else if (typeof value === "string" && key === "length") {
       value = value.length;
     } else if (typeof value === "object" && value !== null) {
-      value = (value as { readonly [key: string]: Value })[key];
+      value = readKey(value, key);
     } else {
       return ABSENT;
     }
@@ -1288,7 +1290,8 @@ function shapeList(
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
 ): Value[] {
-  let result = items.slice();
+  // Rows stay plain: tracked like the proxy's reads, but no row ever needs its own proxy.
+  let result = readItems(items);
   if (flow.where !== undefined) {
     const where = flow.where;
     result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
@@ -1555,18 +1558,6 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
   return stable;
 }
 
-/** A row's scope. Its loop record gets a proxy only if something reads it. */
-function rowScope(
-  parent: ReactiveScope,
-  locals: Record<string, Value>,
-  types: Readonly<Record<string, TypeNode | undefined>>,
-  loop: Record<string, Value> | undefined,
-): ReactiveScope {
-  const local = typedLayer(parent, locals, types);
-  if (loop !== undefined) local.setUnread("loop", loop);
-  return local;
-}
-
 function renderEachRegion(
   node: ElementNode | SlotNode,
   scope: ReactiveScope,
@@ -1594,8 +1585,6 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
-  // An item or index named `loop` shadows the record, so it then stays an ordinary local.
-  const unreadLoop = flow.item !== "loop" && flow.index !== "loop";
   const { flow: _flow, ...body } = node;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
@@ -1609,19 +1598,21 @@ function renderEachRegion(
     let retained = 0;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
-      const locals: Record<string, Value> = unreadLoop ? { [flow.item]: item } : { [flow.item]: item, loop };
+      const locals: Record<string, Value> = {
+        [flow.item]: item,
+        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+      };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local = typedLayer(scope, locals, { [flow.item]: itemType });
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
+        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(context, owned);
         const adopted = adopting[adoptionIndex++];
@@ -1646,8 +1637,7 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        if (unreadLoop) block.scope.setUnread("loop", loop);
-        else block.scope.set("loop", locals.loop!);
+        block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
       ordered?.push(block);

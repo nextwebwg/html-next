@@ -446,7 +446,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
           };
           return [
             await step(() => { host.state.rows = [row(1, "a"), row(2, "b"), row(3, "c")]; }),
-            // The raw array held the raw row; the write stores its canonical proxy instead.
+            // Storage stays plain, so writing a row's proxy over the row itself is no change.
             await step(() => { host.state.rows[0] = host.state.rows[0]; }),
             await step(() => { host.state.rows[0] = host.state.rows[0]; }),
             await step(() => {
@@ -459,7 +459,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             await step(() => { host.state.rows[1].label = "z"; }),
           ];
         }, JSON.stringify(definition));
-        assert.deepEqual(actual, [[3, "abc"], [3, "abc"], [0, "abc"], [3, "cba"], [4, "cbad"], [2, "cb"], [0, "cz"]]);
+        assert.deepEqual(actual, [[3, "abc"], [0, "abc"], [0, "abc"], [3, "cba"], [4, "cbad"], [2, "cb"], [0, "cz"]]);
       } finally { await browser.close(); }
     });
 

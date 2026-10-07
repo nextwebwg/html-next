@@ -81,6 +81,7 @@
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
     "measure:hydration": "tsx scripts/measure-hydration.ts",
+    "measure:list-memory": "tsx scripts/measure-list-memory.ts",
     "measure:performance": "tsx scripts/measure-performance.ts",
     "measure:reactivity": "tsx scripts/measure-reactivity-matrix.ts",
     "measure:runtime": "tsx scripts/measure-runtime-size.ts",
