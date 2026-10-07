@@ -19,7 +19,9 @@ const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.
 /**
  * With HTMLNEXT_LIVE_REFERENCE=1, each generated Vanilla module is the live runtime's reference
  * instead (`live-reference.ts`), under the same factory name, so these browser scripts read what
- * live does: compiled output must match it.
+ * live does: compiled output must match it. It is a tool for reading live's answers, not a suite
+ * that passes: a script that reads the DOM before the root connects fails against live, which
+ * renders a factory's root only on connect (compiled output renders at construction, by decision).
  */
 const liveMode = process.env.HTMLNEXT_LIVE_REFERENCE === "1";
 const generateComponent: typeof generateCompiled = (definition, options) => {
