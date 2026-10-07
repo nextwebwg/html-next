@@ -8,6 +8,7 @@ import {
   createSignal,
   type ReactiveEffect,
   ReactiveScope,
+  registerReactiveAlias,
 } from "../src/reactivity.js";
 
 describe("reactive scope", () => {
@@ -637,6 +638,33 @@ describe("reactive scope", () => {
     assert.equal(runs, 400);
   });
 
+  it("binds an unread object exactly as set would, wrapping it on first read", () => {
+    const record = { n: 1 };
+    const scope = new ReactiveScope();
+    scope.setUnread("record", record);
+    const seen: unknown[] = [];
+    createEffect(scope.scheduler, () => { seen.push((scope.get("record") as typeof record).n); });
+    // The first read wraps the record into the same canonical proxy that `set` would store.
+    const proxy = scope.get("record") as typeof record;
+    assert.equal(new ReactiveScope([["record", record]]).get("record"), proxy);
+    proxy.n = 2;
+    scope.scheduler.flush();
+    // Writing the value it already holds is still no change, read or not.
+    scope.set("record", proxy);
+    scope.scheduler.flush();
+    const next = { n: 3 };
+    scope.setUnread("record", next);
+    scope.scheduler.flush();
+    scope.setUnread("record", { n: 4 });
+    scope.set("record", new ReactiveScope([["other", next]]).get("other")!);
+    scope.scheduler.flush();
+    const frozen = Object.freeze({ n: 5 });
+    scope.setUnread("record", frozen);
+    scope.scheduler.flush();
+    assert.equal(scope.get("record"), frozen);
+    assert.deepEqual(seen, [1, 2, 3, 3, 5]);
+  });
+
   it("falls back without duplicating effects when one dependency spans schedulers", async () => {
     const shared = { value: 0 };
     const first = new ReactiveScope([["shared", shared]]);
@@ -657,5 +685,133 @@ describe("reactive scope", () => {
 
     assert.equal(firstRuns, 2);
     assert.equal(secondRuns, 2);
+  });
+});
+
+describe("reactive proxies", () => {
+  it("shares target dependencies when a foreign proxy reenters wrapping before cache publication", () => {
+    const nested = new ReactiveScope();
+    let entered = false;
+    const foreign = new Proxy({ value: 1 }, {
+      isExtensible(target) {
+        if (!entered) {
+          entered = true;
+          nested.set("record", foreign);
+        }
+        return Reflect.isExtensible(target);
+      },
+    });
+    const outer = new ReactiveScope([["record", foreign]]);
+    const outerRecord = outer.get("record") as { value: number };
+    const nestedRecord = nested.get("record") as { value: number };
+    // Object.isFrozen's trap installed the nested wrapper before the outer wrapper was cached.
+    assert.notEqual(outerRecord, nestedRecord);
+    const outerSeen: number[] = [];
+    const nestedSeen: number[] = [];
+    const outerReader = createEffect(outer.scheduler, () => { outerSeen.push(outerRecord.value); });
+    const nestedReader = createEffect(nested.scheduler, () => { nestedSeen.push(nestedRecord.value); });
+    outerRecord.value = 2;
+    outer.scheduler.flush();
+    nested.scheduler.flush();
+    nestedRecord.value = 3;
+    outer.scheduler.flush();
+    nested.scheduler.flush();
+    assert.deepEqual(outerSeen, [1, 2, 3]);
+    assert.deepEqual(nestedSeen, [1, 2, 3]);
+    outerReader.stop(); nestedReader.stop();
+  });
+
+  it("shares property subscriptions across scopes and registered writable aliases", () => {
+    const source = { value: 1 };
+    const left = new ReactiveScope([["record", source]]);
+    const right = new ReactiveScope([["record", source]]);
+    const record = left.get("record") as { value: number };
+    assert.equal(right.get("record"), record);
+    const alias = new Proxy(record, {});
+    registerReactiveAlias(alias, record);
+    left.set("alias", alias);
+    assert.equal(left.get("alias"), record);
+    const leftSeen: number[] = [];
+    const rightSeen: number[] = [];
+    const leftEffect = createEffect(left.scheduler, () => {
+      leftSeen.push((left.get("record") as { value: number }).value + (left.get("alias") as { value: number }).value);
+    });
+    const rightEffect = createEffect(right.scheduler, () => {
+      rightSeen.push((right.get("record") as { value: number }).value);
+    });
+    (right.get("record") as { value: number }).value = 2;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    (left.get("alias") as { value: number }).value = 3;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    assert.deepEqual(leftSeen, [2, 4, 6]);
+    assert.deepEqual(rightSeen, [1, 2, 3]);
+    leftEffect.stop();
+    record.value = 4;
+    left.scheduler.flush();
+    right.scheduler.flush();
+    assert.deepEqual(leftSeen, [2, 4, 6]);
+    assert.deepEqual(rightSeen, [1, 2, 3, 4]);
+    rightEffect.stop();
+  });
+
+  it("notifies a property reader first installed by the property's native setter", () => {
+    let current = 1;
+    let scope!: ReactiveScope;
+    let reader: ReactiveEffect | undefined;
+    const seen: number[] = [];
+    const source = {
+      get value(): number { return current; },
+      set value(next: number) {
+        current = next;
+        reader ??= createEffect(scope.scheduler, () => {
+          seen.push((scope.get("record") as { value: number }).value);
+        });
+      },
+    };
+    scope = new ReactiveScope([["record", source]]);
+    const record = scope.get("record") as { value: number };
+    // No property reader exists on entry to the set trap; Reflect.set creates the first one.
+    record.value = 2;
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [2, 2]);
+    record.value = 3;
+    scope.scheduler.flush();
+    assert.deepEqual(seen, [2, 2, 3]);
+    reader!.stop();
+  });
+
+  it("tracks symbol reads and array iteration after unobserved writes and deletion", () => {
+    const symbol = Symbol("value");
+    const source = { [symbol]: 1 };
+    const scope = new ReactiveScope([["record", source as unknown as Value], ["items", ["a", "b", "c"]]]);
+    const record = scope.get("record") as object;
+    const items = scope.get("items") as string[];
+    Reflect.set(record, symbol, 2);
+    items.push("d");
+    const symbols: unknown[] = [];
+    const snapshots: (string | undefined)[][] = [];
+    const lengths: number[] = [];
+    const symbolReader = createEffect(scope.scheduler, () => { symbols.push(Reflect.get(record, symbol)); });
+    const iterator = createEffect(scope.scheduler, () => { snapshots.push([...items]); });
+    const lengthReader = createEffect(scope.scheduler, () => { lengths.push(items.length); });
+    Reflect.set(record, symbol, 3);
+    delete items[2];
+    scope.scheduler.flush();
+    assert.deepEqual(symbols, [2, 3]);
+    assert.deepEqual(snapshots, [["a", "b", "c", "d"], ["a", "b", undefined, "d"]]);
+    assert.deepEqual(lengths, [4]);
+    Reflect.deleteProperty(record, symbol);
+    items.length = 1;
+    scope.scheduler.flush();
+    assert.deepEqual(symbols, [2, 3, undefined]);
+    assert.deepEqual(snapshots.at(-1), ["a"]);
+    assert.deepEqual(lengths, [4, 1]);
+    items[3] = "z";
+    scope.scheduler.flush();
+    assert.deepEqual(snapshots.at(-1), ["a", undefined, undefined, "z"]);
+    assert.deepEqual(lengths, [4, 1, 4]);
+    symbolReader.stop(); iterator.stop(); lengthReader.stop();
   });
 });

@@ -16,6 +16,8 @@ interface Dependency {
 interface ReactiveCell extends Dependency {
   computed?: ReactiveComputed<Value>;
   value: Value;
+  /** The value is still the raw object `setUnread` bound; its first read wraps it. */
+  unread: boolean;
 }
 
 interface Subscription {
@@ -567,20 +569,38 @@ export class ReactiveScope implements Scope {
     const cell = this.#local(name);
     if (cell === undefined) return this.parent?.get(name);
     activeEffect?.track(cell);
-    return cell.value;
+    return cell.unread ? this.#read(cell) : cell.value;
   }
 
   set(name: string, value: Value): void {
-    const wrapped = this.#wrap(value);
+    const wrapped = wrap(value);
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: wrapped, first: undefined, last: undefined };
+      cell = { value: wrapped, first: undefined, last: undefined, unread: false };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
       return;
     }
-    if (Object.is(cell.value, wrapped)) return;
+    if (Object.is(cell.unread ? this.#read(cell) : cell.value, wrapped)) return;
     cell.value = wrapped;
+    trigger(cell);
+  }
+
+  /**
+   * Binds an object this binding has never held, as `set` would, but defers its proxy to the first
+   * read. Wrapping has no observable effect, so a value nothing reads never needs a proxy. Being a
+   * new value, it notifies the binding's readers like `set` does.
+   */
+  setUnread(name: string, value: Record<string, Value>): void {
+    const cell = this.#local(name);
+    if (cell === undefined) {
+      const created: ReactiveCell = { value, first: undefined, last: undefined, unread: true };
+      this.#cells.set(name, created);
+      this.#cachedCell = created;
+      return;
+    }
+    cell.value = value;
+    cell.unread = true;
     trigger(cell);
   }
 
@@ -597,13 +617,13 @@ export class ReactiveScope implements Scope {
   defineComputed(name: string, compute: () => Value): ReactiveComputed<Value> {
     let cell = this.#local(name);
     if (cell === undefined) {
-      cell = { value: null, first: undefined, last: undefined };
+      cell = { value: null, first: undefined, last: undefined, unread: false };
       this.#cells.set(name, cell);
       this.#cachedCell = cell;
     }
     const computed = new ReactiveComputed(
       this.scheduler,
-      () => this.#wrap(compute()),
+      () => wrap(compute()),
       cell,
     );
     cell.computed = computed;
@@ -633,63 +653,75 @@ export class ReactiveScope implements Scope {
     if (cell === undefined) return this.parent?.get(name);
     if (cell.computed !== undefined) return cell.computed.get();
     activeEffect?.track(cell);
-    return cell.value;
+    return cell.unread ? this.#read(cell) : cell.value;
   }
 
-  #wrap(value: Value): Value {
-    if (value === null || typeof value !== "object") return value;
-    const cached = proxyCache.get(value);
-    if (cached !== undefined) return cached as Value;
-    if (isNativeEvent(value) || Object.isFrozen(value)) return value;
-    const proxy = new Proxy(value, {
-      get: (target, key, receiver) => {
-        if (activeEffect !== undefined) {
-          let properties = objectSubscribers.get(target);
-          if (properties === undefined) {
-            properties = new Map();
-            objectSubscribers.set(target, properties);
-          }
-          let subscribers = properties.get(key);
-          if (subscribers === undefined) {
-            subscribers = { first: undefined, last: undefined };
-            properties.set(key, subscribers);
-          }
-          activeEffect.track(subscribers);
-        }
-        return this.#wrap(Reflect.get(target, key, receiver) as Value);
-      },
-      set: (target, key, next, receiver) => {
-        const previousLength = Array.isArray(target) ? target.length : undefined;
-        const previous = Reflect.get(target, key, receiver);
-        const wrapped = this.#wrap(next as Value);
-        const result = Reflect.set(target, key, wrapped, receiver);
-        if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
-        // Defining an array index can extend length before push writes that same length again.
-        if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
-          trigger(objectSubscribers.get(target)?.get("length"));
-        }
-        // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
-        if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
-          const length = (target as Value[]).length;
-          for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
-            if (typeof property !== "string") continue;
-            const index = Number(property);
-            if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
-              trigger(subscribers);
-            }
-          }
-        }
-        return result;
-      },
-      deleteProperty: (target, key) => {
-        const had = Reflect.has(target, key);
-        const result = Reflect.deleteProperty(target, key);
-        if (had) trigger(objectSubscribers.get(target)?.get(key));
-        return result;
-      },
-    });
-    proxyCache.set(value, proxy);
-    proxyCache.set(proxy, proxy);
-    return proxy as Value;
+  #read(cell: ReactiveCell): Value {
+    cell.unread = false;
+    return cell.value = wrap(cell.value);
   }
+}
+
+/**
+ * The traps every reactive proxy shares. They keep no per-proxy or per-scope state: dependencies
+ * live in the weak target registries, so one handler serves every proxy.
+ */
+const reactiveHandler: ProxyHandler<object> = {
+  get(target, key, receiver) {
+    if (activeEffect !== undefined) {
+      let properties = objectSubscribers.get(target);
+      if (properties === undefined) {
+        properties = new Map();
+        objectSubscribers.set(target, properties);
+      }
+      let subscribers = properties.get(key);
+      if (subscribers === undefined) {
+        subscribers = { first: undefined, last: undefined };
+        properties.set(key, subscribers);
+      }
+      activeEffect.track(subscribers);
+    }
+    return wrap(Reflect.get(target, key, receiver) as Value);
+  },
+  set(target, key, next, receiver) {
+    const previousLength = Array.isArray(target) ? target.length : undefined;
+    const previous = Reflect.get(target, key, receiver);
+    const wrapped = wrap(next as Value);
+    const result = Reflect.set(target, key, wrapped, receiver);
+    if (!Object.is(previous, wrapped)) trigger(objectSubscribers.get(target)?.get(key));
+    // Defining an array index can extend length before push writes that same length again.
+    if (key !== "length" && previousLength !== undefined && previousLength !== (target as Value[]).length) {
+      trigger(objectSubscribers.get(target)?.get("length"));
+    }
+    // ArraySetLength deletes indices inside the native setter, bypassing deleteProperty.
+    if (key === "length" && previousLength !== undefined && (target as Value[]).length < previousLength) {
+      const length = (target as Value[]).length;
+      for (const [property, subscribers] of objectSubscribers.get(target) ?? []) {
+        if (typeof property !== "string") continue;
+        const index = Number(property);
+        if (Number.isInteger(index) && String(index) === property && index >= length && index < previousLength) {
+          trigger(subscribers);
+        }
+      }
+    }
+    return result;
+  },
+  deleteProperty(target, key) {
+    const had = Reflect.has(target, key);
+    const result = Reflect.deleteProperty(target, key);
+    if (had) trigger(objectSubscribers.get(target)?.get(key));
+    return result;
+  },
+};
+
+/** The canonical reactive proxy for a mutable object; primitives, frozen values and events stay as they are. */
+function wrap(value: Value): Value {
+  if (value === null || typeof value !== "object") return value;
+  const cached = proxyCache.get(value);
+  if (cached !== undefined) return cached as Value;
+  if (isNativeEvent(value) || Object.isFrozen(value)) return value;
+  const proxy = new Proxy(value, reactiveHandler);
+  proxyCache.set(value, proxy);
+  proxyCache.set(proxy, proxy);
+  return proxy as Value;
 }

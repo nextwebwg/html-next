@@ -1423,6 +1423,8 @@ interface EachBlock {
   readonly end: Comment;
   readonly scope: ReactiveScope;
   readonly owned: RenderOwned;
+  /** Index in the last completed keyed run; a failed run leaves it as it was. */
+  position: number;
 }
 
 function existingEachRange(candidate: Node | undefined, kind: "each" | "item"): readonly [Comment, Comment] | undefined {
@@ -1483,8 +1485,10 @@ function removeStaleBlocks(
       const first = group[0]!;
       const last = group.at(-1)!;
       const parent = first.start.parentNode;
-      if (parent !== null && last.end.parentNode === parent &&
-          (first.start.compareDocumentPosition(last.end) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+      if (parent !== null && last.end.parentNode === parent) {
+        // Order needs no sibling walk. Whole-parent anchors place the first start second and the
+        // last end second to last, so it follows. Otherwise the range collapses exactly when a
+        // foreign move put the first start after the last end, which keeps per-block removal.
         if ((parent instanceof Element || parent instanceof DocumentFragment) &&
             first.start.previousSibling === start && last.end.nextSibling === end &&
             start.previousSibling === null && end.nextSibling === null) {
@@ -1494,7 +1498,8 @@ function removeStaleBlocks(
           const range = first.start.ownerDocument.createRange();
           range.setStartBefore(first.start);
           range.setEndAfter(last.end);
-          range.deleteContents();
+          if (range.collapsed) for (const block of group) removeBlock(block);
+          else range.deleteContents();
         }
       } else {
         for (const block of group) removeBlock(block);
@@ -1517,7 +1522,8 @@ function removeStaleBlocks(
 function stableBlockPositions(previous: readonly number[]): Uint8Array | undefined {
   let last = -1;
   let ordered = true;
-  for (const position of previous) {
+  for (let index = 0; index < previous.length; index += 1) {
+    const position = previous[index]!;
     if (position < 0) continue;
     if (position < last) ordered = false;
     last = position;
@@ -1549,6 +1555,18 @@ function stableBlockPositions(previous: readonly number[]): Uint8Array | undefin
   return stable;
 }
 
+/** A row's scope. Its loop record gets a proxy only if something reads it. */
+function rowScope(
+  parent: ReactiveScope,
+  locals: Record<string, Value>,
+  types: Readonly<Record<string, TypeNode | undefined>>,
+  loop: Record<string, Value> | undefined,
+): ReactiveScope {
+  const local = typedLayer(parent, locals, types);
+  if (loop !== undefined) local.setUnread("loop", loop);
+  return local;
+}
+
 function renderEachRegion(
   node: ElementNode | SlotNode,
   scope: ReactiveScope,
@@ -1576,6 +1594,8 @@ function renderEachRegion(
     }
   }
   let blocks = new Map<unknown, EachBlock>();
+  // An item or index named `loop` shadows the record, so it then stays an ordinary local.
+  const unreadLoop = flow.item !== "loop" && flow.index !== "loop";
   const { flow: _flow, ...body } = node;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
@@ -1585,30 +1605,23 @@ function renderEachRegion(
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
     const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
-    let oldPositions: Map<unknown, number> | undefined;
-    if (keyed) {
-      oldPositions = new Map();
-      let position = 0;
-      for (const key of blocks.keys()) oldPositions.set(key, position++);
-    }
     const previous: number[] | undefined = keyed ? [] : undefined;
+    let retained = 0;
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      const locals: Record<string, Value> = {
-        [flow.item]: item,
-        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
-      };
+      const loop = { index, first: index === 0, last: index === items.length - 1, count: items.length };
+      const locals: Record<string, Value> = unreadLoop ? { [flow.item]: item } : { [flow.item]: item, loop };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = typedLayer(scope, locals, { [flow.item]: itemType });
+        local = rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
+        local ??= rowScope(scope, locals, { [flow.item]: itemType }, unreadLoop ? loop : undefined);
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(context, owned);
         const adopted = adopting[adoptionIndex++];
@@ -1625,15 +1638,19 @@ function renderEachRegion(
           end: blockEnd,
           scope: local,
           owned,
+          position: -1,
         };
+        previous?.push(-1);
       } else {
+        retained += 1;
+        previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        block.scope.set("loop", locals.loop!);
+        if (unreadLoop) block.scope.setUnread("loop", loop);
+        else block.scope.set("loop", locals.loop!);
       }
       next.set(key, block);
       ordered?.push(block);
-      previous?.push(oldPositions?.get(key) ?? -1);
     }
     for (const [blockStart, blockEnd] of adopting.slice(adoptionIndex)) {
       clearRange(blockStart, blockEnd);
@@ -1644,7 +1661,8 @@ function renderEachRegion(
     adoptionIndex = 0;
     removeStaleBlocks(blocks, next, start, end);
     if (ordered !== undefined && previous !== undefined) {
-      const stable = stableBlockPositions(previous);
+      // With no retained block every position is -1, which is already ordered.
+      const stable = retained === 0 ? undefined : stableBlockPositions(previous);
       let reference: Node = end;
       for (let index = ordered.length - 1; index >= 0; index -= 1) {
         const block = ordered[index]!;
@@ -1654,6 +1672,7 @@ function renderEachRegion(
         reference = block.start;
       }
     }
+    if (ordered !== undefined) for (let index = 0; index < ordered.length; index += 1) ordered[index]!.position = index;
     blocks = next;
     syncContainingSelect(end);
   });
@@ -3989,6 +4008,27 @@ export function observeDocument(
       else connected.set(element, dispose);
     } catch (error) { report(error); }
   };
+  /**
+   * Collects the connected roots a removed node held, in the order its marker query reports them.
+   * `contains` and `querySelectorAll` share light-DOM scope, so testing the few connected roots
+   * replaces querying every removed row.
+   */
+  const collectRemoved = (node: Element, removed: Element[]): void => {
+    // ponytail: O(removed nodes × connected roots); above 8 roots the subtree query is cheaper.
+    if (connected.size > 8) {
+      visitComponentRoots(node, (element) => {
+        if (connected.has(element)) removed.push(element);
+      });
+      return;
+    }
+    const start = removed.length;
+    for (const [element] of connected) {
+      if (node.contains(element) && element.matches("[data-component]")) removed.push(element);
+    }
+    if (removed.length - start > 1) {
+      removed.push(...removed.splice(start).sort((a, b) => a.compareDocumentPosition(b) & 4 ? -1 : 1));
+    }
+  };
   const synchronize = (mutations?: readonly MutationRecord[]): void => {
     if (stopped) return;
     const scopes: QueryRoot[] = [];
@@ -3998,10 +4038,7 @@ export function observeDocument(
       const removed: Element[] = [];
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) {
-          if (node.nodeType !== 1) continue;
-          visitComponentRoots(node as QueryRoot, (element) => {
-            if (connected.has(element)) removed.push(element);
-          });
+          if (node.nodeType === 1) collectRemoved(node as Element, removed);
         }
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== 1) continue;
