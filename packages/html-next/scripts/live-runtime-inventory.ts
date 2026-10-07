@@ -19,6 +19,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/controller.ts",
     "packages/html-next/src/data.ts",
     "packages/html-next/src/duration.ts",
+    "packages/html-next/src/event-filter.ts",
     "packages/html-next/src/expression.ts",
     "packages/html-next/src/expression-parser.ts",
     "packages/html-next/src/format.ts",

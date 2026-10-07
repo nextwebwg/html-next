@@ -44,8 +44,19 @@ const SELECTS = new Set(["select", "datalist", "optgroup"]);
 interface Root {
   readonly name: string;
   readonly type: CompactType;
-  /** JavaScript source for a fresh initial value. */
+  /** JavaScript source for a fresh initial value (`null` when an initializer computes it). */
   readonly initial: string;
+  /** An initial-value expression the factory evaluates in declaration order, as live does. */
+  readonly init?: CompiledExpression | undefined;
+  /**
+   * The value may not satisfy the declared type (an initializer, a nonconforming literal, a
+   * computed), so expressions check the root itself where they read it, as `evalConforming` does.
+   */
+  readonly checked?: boolean;
+  /** An untyped or `unknown` root may hold undefined, which its read fails with (HB001). */
+  readonly undefinable?: boolean;
+  /** A computed's expression; computeds follow the writable state roots. */
+  readonly computed?: CompiledExpression | undefined;
 }
 
 /** A lowered expression in the supported subset. */
@@ -110,12 +121,21 @@ interface Block {
   readonly row: boolean;
   /** The prototype is built in the SVG namespace (its base element sits inside `<svg>`). */
   readonly svg: boolean;
+  /** `on:` listeners: the site, the event, its handler's function name and the modifiers. */
+  readonly events: { readonly site: number; readonly name: string; readonly handler: string; readonly modifiers: readonly string[] }[];
+  /** `$ref` names recorded for a site. */
+  readonly refs: { readonly site: number; readonly name: string }[];
 }
 
 export interface BlockPlan {
   readonly roots: readonly Root[];
   readonly root: Block;
   readonly blocks: readonly Block[];
+  /** Initializer statements, in declaration order. */
+  readonly initializers: readonly string[];
+  readonly handlers: readonly HandlerPlan[];
+  /** Each computed root's index and lowered expression. */
+  readonly computeds: readonly { readonly index: number; readonly source: string }[];
 }
 
 /** A feature the direct path does not cover yet; the component keeps the general-runtime fallback. */
@@ -220,6 +240,12 @@ interface Scope {
   readonly types: TypeScope;
   /** The reads array an exact binding records every value it reads into (see `Binding.exact`). */
   readonly record?: string | undefined;
+  /** An initializer of root N: roots from N on, and computeds, still read null, as live sets them. */
+  readonly initializing?: number | undefined;
+  /** A handler step: `$$event` is the event being handled. */
+  readonly event?: boolean | undefined;
+  /** A computed root's lowered expression (reads, result flags). */
+  readonly computed?: ((index: number) => Lowered) | undefined;
 }
 
 /** A read, recorded when the binding is exact. */
@@ -248,15 +274,23 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     }
     case "id": {
       if (node.name === scope.alias) return { ...none(key, read(scope, "o")), item: true, deep: true };
+      if (node.name === "$$event" && scope.event === true) return { ...none(key, "e"), deep: true };
       // A row's `loop` record shadows any root of that name; positions are not in this subset yet.
       if (scope.alias !== undefined && node.name === "loop") notYetDirect();
       const index = scope.roots.findIndex((root) => root.name === node.name);
       if (index < 0) notYetDirect();
       const root = scope.roots[index]!;
+      if (scope.initializing !== undefined && (index >= scope.initializing || root.computed !== undefined)) return none(key, "null");
+      if (root.computed !== undefined) {
+        // A computed reads what its expression reads; its bindings recompute it lazily, as live does.
+        const value = scope.computed!(index);
+        return { ...value, key, item: false, source: read(scope, `g(${index})`) };
+      }
+      const source = root.undefinable === true ? `rootValue(v[${index}], ${JSON.stringify(root.name)})` : `v[${index}]`;
       // A boolean root is only ever a boolean once its initial value is one (an absent value is null).
       return {
-        ...none(key, read(scope, `v[${index}]`)), bits: 1 << index,
-        boolean: root.type === "b" && root.initial !== "null", deep: mayContain(root.type),
+        ...none(key, read(scope, source)), bits: 1 << index,
+        boolean: root.type === "b" && root.initial !== "null" && root.checked !== true, deep: mayContain(root.type),
       };
     }
     case "member": {
@@ -421,36 +455,128 @@ function outerOf(value: Lowered): number {
   return value.bits | (value.nested ? NESTED : 0);
 }
 
-function compileRoots(definition: ComponentDefinition): Root[] {
-  const declarations = definition.declarations ?? [];
-  if (declarations.length === 0 || declarations.length > 30) notYetDirect();
-  return declarations.map((declaration) => {
-    if (declaration.kind !== "state") notYetDirect();
-    const node = declarationTypeNode(declaration.type, declaration.shape);
-    const type = node === undefined ? undefined : compactType(node);
-    // A root that may be undefined makes the interpreter fail (HB001) where it is read.
-    if (type === undefined || type === 0 || conforms(undefined, type)) notYetDirect();
-    const initial = declaration.expression === undefined ? null : literalValue(declaration.expression.ast);
-    // Initial values conform, so reads of a root never need the interpreter's reference check.
-    if (initial !== null && !conforms(initial, type)) notYetDirect();
-    return { name: declaration.name, type, initial: valueSource(initial) };
-  });
+/** The value of a literal initializer, or undefined for one that needs evaluating. */
+function literalInitial(node: ExpressionNode): { readonly value: unknown } | undefined {
+  try { return { value: literalValue(node) }; }
+  catch (error) {
+    if (error instanceof NotYetDirect) return undefined;
+    throw error;
+  }
 }
 
-/** A declared path's read (`readPath`): list items by index, `length`, and object keys. */
-function pathSource(root: number, steps: readonly string[]): string {
-  return steps.length === 0 ? `v[${root}]` : `readDeclared(v[${root}], ${JSON.stringify(steps)})`;
+function compileRoots(definition: ComponentDefinition): Root[] {
+  const declarations = definition.declarations ?? [];
+  const states: Root[] = [];
+  const computeds: Root[] = [];
+  for (const declaration of declarations) {
+    if (declaration.kind === "handler" || declaration.kind === "event") continue;
+    if (declaration.kind !== "state" && declaration.kind !== "computed") notYetDirect();
+    const node = declarationTypeNode(declaration.type, declaration.shape);
+    // An untyped root says nothing about its value, so it may also hold undefined.
+    const type = node === undefined ? "?" : compactType(node);
+    if (type === undefined) notYetDirect();
+    const undefinable = type === "?" || type === 0 || conforms(undefined, type);
+    if (declaration.kind === "computed") {
+      computeds.push({ name: declaration.name, type, initial: "undefined", computed: declaration.expression, checked: node !== undefined });
+      continue;
+    }
+    const literal = declaration.expression === undefined ? { value: null } : literalInitial(declaration.expression.ast);
+    if (literal === undefined) {
+      states.push({ name: declaration.name, type, initial: "null", init: declaration.expression, checked: node !== undefined, undefinable });
+      continue;
+    }
+    // A literal that conforms keeps every read of the root free of the reference check.
+    const conforming = literal.value === null || conforms(literal.value, type);
+    states.push({ name: declaration.name, type, initial: valueSource(literal.value), checked: !conforming && node !== undefined, undefinable });
+  }
+  const roots = [...states, ...computeds];
+  if (roots.length > 30) notYetDirect();
+  return roots;
+}
+
+
+interface HandlerPlan {
+  readonly name: string;
+  readonly lines: readonly string[];
 }
 
 class Planner {
   readonly blocks: Block[] = [];
   readonly scope: Scope;
   private recordings = 0;
+  private readonly computeds = new Map<number, Lowered>();
+  private readonly computing = new Set<number>();
+  /** Initializer statements, in declaration order. */
+  readonly initializers: string[] = [];
+  readonly handlers = new Map<string, HandlerPlan>();
 
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition) {
     const types: TypeScope = { get: () => undefined };
     declareTypes(types, definition);
-    this.scope = { roots, alias: undefined, types };
+    this.scope = { roots, alias: undefined, types, computed: (index) => this.computedLowered(index) };
+    roots.forEach((root, index) => {
+      // Live evaluates initializers with `evalValue`, without reference checks.
+      if (root.init !== undefined) this.initializers.push(`  v[${index}] = ${lower(root.init.ast, { ...this.scope, initializing: index }).source};`);
+    });
+  }
+
+  /** A computed's lowered expression; a cycle reads nothing more and fails HR006 when it computes. */
+  computedLowered(index: number): Lowered {
+    const known = this.computeds.get(index);
+    if (known !== undefined) return known;
+    if (this.computing.has(index)) return none(`computed:${index}`, "undefined");
+    this.computing.add(index);
+    try {
+      const expression = this.roots[index]!.computed;
+      const value = expression === undefined ? none(`computed:${index}`, "null") : this.checked(expression, this.scope);
+      this.computeds.set(index, value);
+      return value;
+    } finally { this.computing.delete(index); }
+  }
+
+  /** Compiles a handler's steps once, as `runHandler` runs them: `(e) => { … }`. */
+  handler(name: string): HandlerPlan {
+    const known = this.handlers.get(name);
+    if (known !== undefined) return known;
+    const declaration = (this.definition.declarations ?? []).find((candidate) => candidate.kind === "handler" && candidate.name === name);
+    if (declaration?.kind !== "handler") notYetDirect();
+    const scope: Scope = { ...this.scope, event: true };
+    const lines: string[] = [];
+    const events = this.definition.declarations ?? [];
+    for (const step of declaration.steps) {
+      const body: string[] = [];
+      if (step.kind === "set") {
+        const value = this.checked(step.value, scope);
+        const segments = step.writablePath.map((segment) => typeof segment === "object"
+          ? lower(segment.expression, scope).source : JSON.stringify(segment));
+        const dynamic = step.writablePath.some((segment) => typeof segment === "object");
+        body.push(`const x = ${value.source};`);
+        const write = `setState(I, p, x, ${JSON.stringify(`handler:${name}:${step.path}`)}, ${JSON.stringify(step.path)});`;
+        const resolved = dynamic ? "if (p.every((k) => typeof k === \"string\" || typeof k === \"number\")) " : "";
+        body.push(value.fails ? `if (x !== NONCONFORMING) { const p = [${segments.join(", ")}]; ${resolved}${write} }`
+          : `const p = [${segments.join(", ")}]; ${resolved}${write}`);
+      } else if (step.kind === "dispatch") {
+        const detail = step.value === undefined ? undefined : this.checked(step.value, scope);
+        const declared = events.find((candidate) => candidate.kind === "event" && candidate.name === step.event);
+        const target = step.target === undefined ? "element" : `refTargets(I.r[${JSON.stringify(step.target)}])`;
+        body.push(`const x = ${detail === undefined ? "undefined" : detail.source};`);
+        const dispatch = `dispatchDeclared(${target}, ${JSON.stringify(step.event)}, x, S.d?.[${JSON.stringify(step.event)}]);`;
+        body.push(detail?.fails === true ? `if (x !== NONCONFORMING) ${dispatch}` : dispatch);
+        void declared;
+      } else {
+        const target = `I.r[${JSON.stringify(step.target)}]`;
+        body.push(`const t = ${target}; const x = Array.isArray(t) ? t[0] : t;`,
+          step.kind === "focus" ? "x?.focus();" : "x?.reportValidity?.();");
+      }
+      if (step.guard === undefined) lines.push(`    { ${body.join(" ")} }`);
+      else {
+        const guard = this.checked(step.guard, scope);
+        lines.push(`    { const q = ${guard.source}; if (q !== NONCONFORMING && truthy(q)) { ${body.join(" ")} } }`);
+      }
+    }
+    const plan = { name: `h${this.handlers.size}`, lines };
+    this.handlers.set(name, plan);
+    return plan;
   }
 
   /**
@@ -470,13 +596,18 @@ class Planner {
       const [name, ...steps] = path.split(".");
       const index = this.roots.findIndex((root) => root.name === name);
       if (index < 0) notYetDirect();
-      if (steps.length === 0) continue;
+      const root = this.roots[index]!;
+      // A state root's own value is checked on every write, unless its initial value may not conform.
+      if (steps.length === 0 && root.checked !== true) continue;
       const type = compactType(declared);
       if (type === undefined) notYetDirect();
-      const declaredRead = scope.record === undefined ? pathSource(index, steps)
-        : `rec(${scope.record}, readDeclared(v[${index}], ${JSON.stringify(steps)}, ${scope.record}))`;
+      const base = root.computed === undefined ? `v[${index}]` : `g(${index})`;
+      const declaredRead = scope.record === undefined
+        ? steps.length === 0 ? base : `readDeclared(${base}, ${JSON.stringify(steps)})`
+        : `rec(${scope.record}, readDeclared(${base}, ${JSON.stringify(steps)}, ${scope.record}))`;
       checks.push(`checkReference(S, ${declaredRead}, ${JSON.stringify(type)}, ${JSON.stringify(`expression:${plan.source}:${path}`)}, ${JSON.stringify(`Reference \`${path}\` must satisfy ${formatType(declared)}.`)})`);
-      reads = merge(reads, { bits: 1 << index, nested: true, item: false, contents: false, fails: true });
+      const rootReads = root.computed === undefined ? { bits: 1 << index, nested: steps.length > 0 } : this.computedLowered(index);
+      reads = merge(reads, { bits: rootReads.bits, nested: rootReads.nested, item: false, contents: false, fails: true });
     }
     if (checks.length === 0) return value;
     return { ...value, ...reads, source: `(${checks.join(" && ")} ? ${value.source} : NONCONFORMING)` };
@@ -489,7 +620,10 @@ class Planner {
 
   block(element: ElementNode, row: boolean, scope: Scope, root: boolean, svg: boolean): Block {
     // The root's prototype is a fragment of its children, which are SVG when the root is `<svg>`.
-    const block: Block = { id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row, svg: root ? element.name === "svg" : svg };
+    const block: Block = {
+      id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row, svg: root ? element.name === "svg" : svg,
+      events: [], refs: [],
+    };
     this.blocks.push(block);
     const spec = this.element(block, element, [], scope, root, svg);
     // The root's own element is the factory's; its children clone from a fragment.
@@ -506,7 +640,13 @@ class Planner {
   }
 
   element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] {
-    if (EXCLUDED.has(node.name) || node.name.includes("-") || node.ref !== undefined || (node.events?.length ?? 0) > 0) notYetDirect();
+    if (EXCLUDED.has(node.name) || node.name.includes("-")) notYetDirect();
+    // Listeners and refs inside a region or row are not direct yet; the root block's are.
+    if ((node.ref !== undefined || (node.events?.length ?? 0) > 0) && block.id !== 0) notYetDirect();
+    if (node.ref !== undefined) block.refs.push({ site: this.site(block, path), name: node.ref });
+    for (const event of node.events ?? []) {
+      block.events.push({ site: this.site(block, path), name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers });
+    }
     const literals = node.attributes.filter((attribute) => attribute.kind === "literal");
     if (literals.some((attribute) => attribute.name === "is")) notYetDirect();
     const svg = parentSvg || node.name === "svg";
@@ -624,14 +764,15 @@ class Planner {
  */
 export function blockPlan(definition: ComponentDefinition): BlockPlan | undefined {
   try {
-    if (definition.controller === undefined || Object.keys(definition.contract.props).length > 0 ||
+    if (Object.keys(definition.contract.props).length > 0 ||
       (definition.slots?.length ?? 0) > 0 || definition.root?.kind === "component" ||
       rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
     if (compileComponentStylesForBuild(definition.css, definition).stateNames.length > 0) return undefined;
     const roots = compileRoots(definition);
     const planner = new Planner(roots, definition);
     const root = planner.block(definition.template, false, planner.scope, true, false);
-    return { roots, root, blocks: planner.blocks };
+    return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
+      computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]) };
   } catch (error) {
     if (error instanceof NotYetDirect) return undefined;
     throw error;
@@ -921,7 +1062,19 @@ export function emitBlocks(
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { ${rootEntries.join(", ")} };`,
-    "  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), C);",
+  );
+  const instance = plan.handlers.length > 0 || root.refs.length > 0;
+  const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
+  body.push(
+    `  ${instance ? "const I = " : ""}attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${plan.computeds.length > 0 ? ", X" : ""});`,
+    ...root.refs.map((ref) => `  I.r[${JSON.stringify(ref.name)}] = ${siteOf(ref.site)};`),
+    ...root.events.map((event) => {
+      const target = siteOf(event.site);
+      const filter = event.modifiers.some((modifier) => !["capture", "once", "passive", "prevent", "stop"].includes(modifier))
+        ? `if (!eventPasses(event, ${target}, ${JSON.stringify(event.modifiers)})) return; ` : "";
+      const effects = `${event.modifiers.includes("prevent") ? "event.preventDefault(); " : ""}${event.modifiers.includes("stop") ? "event.stopPropagation(); " : ""}`;
+      return `  listen(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")});`;
+    }),
     "  return element;",
     "}",
   );
@@ -939,29 +1092,58 @@ export function emitBlocks(
     `  element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
     ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
     `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+    ...plan.initializers,
+    ...(plan.computeds.length === 0 ? [] : [
+      "  const X = { e: 0, g: (j) => g(j), w: new Set() };",
+      "  const ke = [];",
+      `  const K = [${plan.computeds.map((computed) => `() => ${computed.source}`).join(", ")}];`,
+      // Computed lazily on read, once per write epoch; a change tells the controller's effects.
+      "  const g = (j) => {",
+      `    const i = j - ${plan.computeds[0]!.index};`,
+      "    if (ke[i] === X.e) return v[j];",
+      "    if (ke[i] === -1) computedCycle();",
+      "    ke[i] = -1;",
+      "    let next;",
+      "    try { next = K[i](); } catch (error) { ke[i] = undefined; throw error; }",
+      "    ke[i] = X.e;",
+      "    const previous = v[j];",
+      "    if (!Object.is(previous, next)) { v[j] = next; X.n?.(j, previous, next); }",
+      "    return next;",
+      "  };",
+    ]),
+    ...plan.handlers.map((handler) => [`  const ${handler.name} = (e) => {`, ...handler.lines, "  };"].join("\n")),
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...body,
   ];
   const source = factory.join("\n");
+  // Declared events: the controller's `host.dispatch` and handler dispatches check and flag them as live does.
+  const events = (definition.declarations ?? []).flatMap((declaration) => {
+    if (declaration.kind !== "event") return [];
+    const type = declarationTypeNode(declaration.type, declaration.shape);
+    return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${JSON.stringify(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
+  });
+  const stateSpec = `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
+    plan.computeds.length === 0 ? "" : `, k: ${plan.computeds[0]!.index}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`} };`;
   const helpers = ["attachGeneratedController", "binaryValue", "buildTemplate", "checkReference", "chooseValue", "clearRegion",
     "defaultValue", "formatCall", "KeyedList", "listValue", "logicValue", "mathCall", "negate", "NONCONFORMING", "notValue",
     "readDeclared", "readFailing", "readIndex", "readMember", "readsChanged", "rec", "recContents", "recLength", "recordValue",
     "textCall", "toAttribute", "toText", "trackContainer", "truthy", "truthyValue", "visitSelected", "writeAttribute", "writeText",
-    "writeUrlAttribute"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(source));
+    "writeUrlAttribute", "computedCycle", "dispatchDeclared", "detailCheck", "eventPasses", "listen", "refTargets", "rootValue", "setState"]
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
+
   const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
     `import { ${helpers.join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
-    `import * as controller from ${JSON.stringify(definition.controller)};`,
+    ...(definition.controller === undefined ? [] : [`import * as controller from ${JSON.stringify(definition.controller)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
     ...specs,
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
-    `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url, g: ${JSON.stringify(contract.tag)} };`,
+    stateSpec,
     // Only the default export is read, and only on first connect, so bundlers need no namespace object.
-    "const C = (host) => controller.default(host);",
+    ...(definition.controller === undefined ? [] : ["const C = (host) => controller.default(host);"]),
     "",
     source,
     "",

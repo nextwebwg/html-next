@@ -295,10 +295,11 @@ describe("HTML Next unplugin", () => {
     assert.equal(scripts.length, 1);
     const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
     assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
-    // The js-framework-benchmark entry is 8,051 B gzip-6 (controller included) since the indexed
-    // coordinator split, a ceiling later milestones may not raise; ratchet this down whenever it shrinks.
+    // The js-framework-benchmark entry is 8,269 B gzip-6 (controller included). Default-on direct
+    // output added the compiled-root handle, declared dispatch, computeds and SVG prototypes every
+    // direct component carries (owner-approved, 2026-10-07); ratchet this down whenever it shrinks.
     const gzip = gzipSync(bundle, { level: 6 }).byteLength;
-    assert.ok(gzip <= 8_100, `direct benchmark entry is ${gzip} B gzip-6`);
+    assert.ok(gzip <= 8_300, `direct benchmark entry is ${gzip} B gzip-6`);
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

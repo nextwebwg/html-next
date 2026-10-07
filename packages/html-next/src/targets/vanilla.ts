@@ -1330,10 +1330,13 @@ export function generateVanilla(
     directRendered.every((variable) => variable !== undefined);
   const directProps = direct === undefined ? directPropPlan(definition) : undefined;
   const directPropSingle = directProps !== undefined && directProps.props.size === 1;
-  const blocks = directExtend && direct === undefined && directProps === undefined ? blockPlan(definition) : undefined;
-  const needsRuntime = direct === undefined && directProps === undefined && blocks === undefined && (
+  // Only a component the other direct paths decline and that would otherwise need the general
+  // runtime is planned: static output already needs no runtime at all.
+  const runtimeFallback = direct === undefined && directProps === undefined && (
     arms !== undefined || props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
   );
+  const blocks = directExtend && runtimeFallback ? blockPlan(definition) : undefined;
+  const needsRuntime = runtimeFallback && blocks === undefined;
   const generatedRuntimeImports = [
     ...(directProps === undefined ? [] : [directPropSingle ? "manageGeneratedProp" : "manageGeneratedProps"]),
     ...(directHasLifecycle ? ["manageGeneratedLifecycle"] : []),

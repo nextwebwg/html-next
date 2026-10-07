@@ -122,7 +122,7 @@ describe("generateComponent", () => {
     );
   });
 
-  it("keeps list-joining computed expressions on the full-runtime fallback", () => {
+  it("compiles list-joining computed expressions directly through the interpreter's join", () => {
     const source = `<template component="computed-label" status="experimental" summary="Fallback fixture.">
       <defs>
         <state type="list(string)" name="parts" value="['a', 'b']"></state>
@@ -136,7 +136,8 @@ describe("generateComponent", () => {
       .find((artifact) => artifact.path === "vanilla/ComputedLabel.js")?.content;
 
     assert.ok(vanilla);
-    assert.match(vanilla, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(vanilla, /@nextwebwg\/html-next\/runtime/);
+    assert.match(vanilla, /textCall\("join", \[v\[0\], v\[1\]\]\)/);
   });
 
   it("provides and reads ancestor state in generated targets and lowers conditional values", () => {

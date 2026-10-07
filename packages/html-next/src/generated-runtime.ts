@@ -19,7 +19,7 @@ import {
   untracked,
   type ReactiveOwner,
 } from "./reactivity.js";
-import { parseTypedValue, parseTypeExpression } from "./type-system.js";
+import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
@@ -33,6 +33,57 @@ export interface GeneratedEvent {
   readonly bubbles: boolean;
   readonly composed: boolean;
   readonly cancelable: boolean;
+}
+
+/** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
+export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
+
+/** An undeclared event: bubbling, composed and not cancelable, as the live host dispatches one. */
+const dispatchUndeclared = (target: Element | readonly Element[], name: string, detail: unknown): boolean =>
+  (target as Element).dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false }));
+
+/** The detail check of a typed event; only modules that declare one import it, and with it the type system. */
+export const detailCheck = (type: TypeNode) => (detail: unknown): boolean => parseTypedValue(detail, type, "$", "value").ok;
+
+/**
+ * Dispatches a component event as the live runtime does: a declared event checks its detail
+ * (HR002) and uses its declared flags; an undeclared one bubbles, is composed and not cancelable.
+ * Several targets each receive their own event while connected.
+ */
+export function dispatchDeclared(
+  target: Element | readonly Element[],
+  name: string,
+  detail: unknown,
+  declaration: GeneratedEventDeclaration | undefined,
+): boolean {
+  if (declaration !== undefined && declaration[0] !== 0 && detail !== undefined && !declaration[0](detail)) {
+    fail("HR002", `Event \`${name}\` detail does not satisfy its declared type.`);
+  }
+  const init = { detail, bubbles: declaration?.[1] ?? true, composed: declaration?.[2] ?? true, cancelable: declaration?.[3] ?? false };
+  if (!Array.isArray(target)) return (target as Element).dispatchEvent(new CustomEvent(name, init));
+  let accepted = true;
+  for (const element of target as readonly Element[]) {
+    if (element.isConnected && !element.dispatchEvent(new CustomEvent(name, init))) accepted = false;
+  }
+  return accepted;
+}
+
+/** A handler's dispatch to `$ref` targets: connected ones, in document order. */
+export function refTargets(recorded: unknown): Element[] {
+  return (Array.isArray(recorded) ? [...recorded as Element[]] : recorded === undefined ? [] : [recorded as Element])
+    .filter((target) => target.isConnected)
+    .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+}
+
+/** A computed that reads itself while it computes (live `HR006`). */
+export function computedCycle(): never {
+  fail("HR006", "A reactive computed value depends on itself.");
+}
+
+/** A root read: an undefined value fails as the interpreter's undeclared read does (HB001). */
+export function rootValue(value: unknown, name: string): unknown {
+  if (value === undefined) fail("HB001", `\`${name}\` is not declared in scope.`);
+  return value;
 }
 
 /** Validates and dispatches an event emitted by target-native generated code. */
@@ -486,6 +537,78 @@ export interface GeneratedStateSpec {
   readonly f: string;
   /** The component tag, which inspection and serialization report. */
   readonly g: string;
+  /** How many of the names are writable `<state>`; the rest are read-only computeds. */
+  readonly k?: number;
+  /** Declared events, which `host.dispatch` checks and flags as the live host does. */
+  readonly d?: Readonly<Record<string, GeneratedEventDeclaration>>;
+  /** `dispatchDeclared`, supplied by a module that declares events, so others do not bundle it. */
+  readonly x?: typeof dispatchDeclared;
+}
+
+/**
+ * What a module with computeds shares with its controller host. Every state or nested write
+ * advances the epoch, so a computed knows it may be stale; the module computes a slot on demand
+ * (`g`); the computeds a controller has read (`w`) are refreshed before each render, and the host
+ * tells controller effects when one changed (`n`).
+ */
+export interface GeneratedChannel {
+  e: number;
+  readonly g: (index: number) => unknown;
+  readonly w: Set<number>;
+  n?: (index: number, previous: unknown, next: unknown) => void;
+}
+
+/** The instance internals generated handlers, listeners and refs use; each is imported only when used. */
+export interface GeneratedInstance {
+  readonly S: GeneratedStateSpec;
+  /** The controller's state facade, which validates, stores raw and schedules. */
+  readonly s: Record<PropertyKey, unknown>;
+  readonly q: ReactiveScheduler;
+  /** The instance's owners, paused on disconnect and resumed on connect. */
+  readonly o: ReactiveOwner[];
+  /** Recorded refs, read by `host.refs` and handler steps. */
+  readonly r: Record<string, unknown>;
+  readonly c: () => boolean;
+}
+
+/** A handler's `<set>`: checks the destination's declared type, then writes through the host's facades. */
+export function setState(instance: GeneratedInstance, path: readonly (string | number)[], value: unknown, key: string, label: string): void {
+  const { n: names, t: types } = instance.S;
+  let type = types[names.indexOf(path[0] as string)]!;
+  for (let index = 1; index < path.length; index += 1) type = compactTypeAt(type, path[index]!);
+  if (!conforms(value, type)) {
+    warnOnce(instance.S, key, `State \`${label}\` does not satisfy its declared type.`);
+    return;
+  }
+  // Through the controller's facades, which notify, mark what changed and schedule the render.
+  let target: unknown = instance.s;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    if (target == null) return;
+    target = (target as Record<PropertyKey, unknown>)[path[index]!];
+  }
+  if (target != null) (target as Record<PropertyKey, unknown>)[path.at(-1)!] = value;
+}
+
+/**
+ * Listens while the root is connected, as a live template listener effect does. A `once`
+ * listener is spent by its first event and never re-armed by a reconnect.
+ */
+export function listen(
+  instance: GeneratedInstance, target: EventTarget, type: string, listener: (event: Event) => void,
+  capture: boolean, passive: boolean, once: boolean,
+): () => void {
+  let fired = false;
+  const wrapped = (event: Event): void => {
+    fired = once;
+    listener(event);
+  };
+  const effect = createEffect(instance.q, () => {
+    if (fired) return;
+    target.addEventListener(type, wrapped, { capture, passive, once });
+    return () => target.removeEventListener(type, wrapped, { capture });
+  }, 2, instance.c());
+  instance.o.push(effect);
+  return () => effect.stop();
 }
 
 /** The changed-roots bits plus the raw objects written since the last render (see `DirtyObjects`). */
@@ -548,9 +671,11 @@ export function attachGeneratedController(
   values: unknown[],
   update: GeneratedUpdate,
   /** Calls the controller module's default export; read when the root first connects, as live does. */
-  controller: (host: never) => unknown,
-): void {
+  controller: ((host: never) => unknown) | undefined,
+  channel?: GeneratedChannel,
+): GeneratedInstance {
   const { n: names, t: types } = spec;
+  const writable = spec.k ?? names.length;
   const scheduler = new ReactiveScheduler();
   const entries: ReactiveOwner[] = [];
   const facades = new WeakMap<object, Facade>();
@@ -572,10 +697,12 @@ export function attachGeneratedController(
   const job = new ReactiveEffect(scheduler, () => {
     // Bits wait while disconnected; a reconnect's full render may already have taken them.
     if (!connected || dirty === 0) return;
+    if (channel !== undefined) for (const index of channel.w) channel.g(index);
     const changed = dirty;
     dirty = 0;
     render(changed);
   }, 1);
+  if (channel !== undefined) channel.n = (index, previous, next) => notifyPropertySet(roots, names[index]!, previous, next, undefined);
   const warn = (path: string, message: string): void => warnOnce(spec, `controller:${path}`, message);
   const readOnly = (path: string): void => warn(path, `Destination \`${path}\` is read-only.`);
   const mismatch = (path: string): void => warn(path, `State \`${path}\` does not satisfy its declared type.`);
@@ -586,6 +713,7 @@ export function attachGeneratedController(
   };
   /** Marks a written object (1) and the objects on its last path (2), then schedules a render. */
   const written = (facade: Facade): void => {
+    if (channel !== undefined) channel.e += 1;
     // A reconnect renders everything, so nothing written while disconnected needs keeping.
     if (!connected) return;
     objects.set(facade.r, 1);
@@ -666,16 +794,19 @@ export function attachGeneratedController(
       const index = typeof key === "string" ? names.indexOf(key) : -1;
       if (index < 0) return undefined;
       trackProperty(roots, key);
-      return wrap(values[index], types[index]!, undefined, key);
+      if (index < writable) return wrap(values[index], types[index]!, undefined, key);
+      channel!.w.add(index);
+      return wrap(channel!.g(index), types[index]!, undefined, key);
     },
     set: (_target, key, value) => {
       const index = typeof key === "string" ? names.indexOf(key) : -1;
-      if (index < 0) readOnly(String(key));
+      if (index < 0 || index >= writable) readOnly(String(key));
       else if (!conforms(value, types[index]!)) mismatch(String(key));
       else {
         const previous = values[index];
         const next = raw(value);
         if (!Object.is(previous, next)) {
+          if (channel !== undefined) channel.e += 1;
           values[index] = next;
           dirty |= 1 << index;
           job.schedule();
@@ -735,8 +866,7 @@ export function attachGeneratedController(
       entries.push(effect);
       return () => effect.stop();
     },
-    dispatch: (event: string, detail?: unknown): boolean =>
-      root.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true, cancelable: false })),
+    dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
   });
   render(-1);
   const disconnect = (): void => {
@@ -759,7 +889,7 @@ export function attachGeneratedController(
       render(-1);
     } else {
       started = true;
-      void Promise.resolve(controller(host as never)).then((result) => {
+      if (controller !== undefined) void Promise.resolve(controller(host as never)).then((result) => {
         if (typeof result !== "function") return;
         if (gone) (result as () => void)();
         else cleanup = result as () => void;
@@ -767,4 +897,5 @@ export function attachGeneratedController(
     }
     return disconnect;
   }, { S: spec, v: values, H: host });
+  return { S: spec, s: state as Record<PropertyKey, unknown>, q: scheduler, o: entries, r: recorded, c: () => connected };
 }

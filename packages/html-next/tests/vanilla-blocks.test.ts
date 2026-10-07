@@ -90,13 +90,7 @@ describe("direct-extend Vanilla generation", () => {
 
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
-    "no controller": component(state, '<p $value="ready"></p>', false),
     props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
-    computed: component(`${state}<computed name="count" from="rows.length"></computed>`, '<p $value="count"></p>'),
-    handler: component(`${state}<handler name="go"><set name="ready" expr:value="true"></set></handler>`, '<button on:click="go">Go</button>'),
-    event: component(`${state}<event name="saved" type="number"></event>`, '<p $value="ready"></p>'),
-    "untyped state": component('<state name="x" value="1"></state>', '<p $value="x"></p>'),
-    "unknown state": component('<state name="x" type="unknown" value="1"></state>', '<p $value="x"></p>'),
     "format type": component('<state name="x" type="url" value="https://a.example/"></state>', '<p $value="x"></p>'),
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
     "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
@@ -104,7 +98,6 @@ describe("direct-extend Vanilla generation", () => {
     slot: component(state, "<p><slot></slot></p>"),
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
-    ref: component(state, '<p><span $ref="label"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
     "select region": component(state, '<p><select><option $if="ready">A</option></select></p>'),
     "two-way binding": component('<state name="name" type="string" value="a"></state>', '<p><input bind:value="name"></p>'),
@@ -283,7 +276,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     window.document.body.append(element);
     await flush();
     record();
-    const host = log.hosts[0];
+    // A component without a controller is driven through its DOM.
+    const host = log.hosts[0] ?? { root: element };
     for (const step of steps) {
       step(host);
       await flush();
@@ -291,7 +285,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
     element.remove();
     await flush();
-    host.state.rows = [{ id: 7, label: "back", tags: [] }];
+    if (host.state !== undefined && "rows" in host.state) host.state.rows = [{ id: 7, label: "back", tags: [] }];
     await flush();
     window.document.body.append(element);
     await flush();
@@ -300,6 +294,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   }
 
   async function same(text: string, steps: readonly Step[]): Promise<Run> {
+    // The compared module must be the direct one: a fallback would compare the general runtime with itself.
+    assert.doesNotMatch(vanilla(text, true), /@nextwebwg\/html-next\/runtime/, "compiles directly");
     const live = await run(text, false, steps);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -474,6 +470,40 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.title = "fresh"; note(host); },
       (host) => { host.state.selected = 1; note(host); },
       (host) => { host.state.ready = false; host.state.ready = true; host.state.selected = 2; note(host); },
+    ]);
+  });
+
+  it("runs handlers, computeds, initializers, refs and declared events like the general runtime", async () => {
+    const text = component(`
+      <state name="count" type="number" value="0"></state>
+      <state name="items" type="list(number)" value="[]"></state>
+      <state name="label" type="string" value="start"></state>
+      <state name="seed" type="number" expr:value="count + 10"></state>
+      <computed name="double" from="count * 2"></computed>
+      <computed name="total" type="number" from="seed + double"></computed>
+      <event name="changed" type="number" bubbles="false"></event>
+      <handler name="increment"><set name="count" expr:value="count + 1" $if="count < 3"></set><set name="items" expr:value="[count, double]"></set>
+        <dispatch event="changed" expr:value="count"></dispatch><focus target="out"></focus></handler>
+      <handler name="bad"><set name="count" expr:value="'x'"></set><set name="label" expr:value="$$event.type"></set></handler>`, `
+      <section><button id="go" on:click.prevent="increment">Next</button><button id="bad" on:click.once="bad">Bad</button>
+        <output $ref="out" tabindex="-1" $value="double"></output><p>{total} {label} {seed} {items}</p></section>`, false);
+    const log = (root: Element, note: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${note} focus=${(root.ownerDocument.activeElement as Element | null)?.localName}`);
+    };
+    const click = (root: Element, id: string): boolean => {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      root.querySelector(`#${id}`)!.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    await same(text, [
+      ({ root }) => {
+        root.addEventListener("changed", (event: Event) => {
+          (globalThis as any).directExtendLog.events.push(`changed ${(event as CustomEvent).detail} bubbles=${event.bubbles}`);
+        });
+        log(root, `prevented=${click(root, "go")}`);
+      },
+      ({ root }) => { click(root, "go"); click(root, "go"); click(root, "go"); log(root, "four"); },
+      ({ root }) => { click(root, "bad"); click(root, "bad"); log(root, "bad"); },
     ]);
   });
 

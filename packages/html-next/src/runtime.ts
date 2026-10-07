@@ -4,6 +4,7 @@ import { declaredExpressionType, declareLayerTypes, declaredTypeAt, declareTypes
 import { DataResource } from "./data.js";
 import { parseDuration } from "./duration.js";
 import { fail } from "./diagnostics.js";
+import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
 import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
@@ -1139,34 +1140,6 @@ function dispatchComponentEvent(
     return accepted;
   }
   return (target as Element).dispatchEvent(new CustomEvent(event, init));
-}
-
-function eventPasses(event: Event, element: Element, modifiers: readonly string[]): boolean {
-  if (modifiers.includes("self") && event.target !== element) return false;
-  if (event instanceof MouseEvent) {
-    const buttonFilters = modifiers.filter((modifier) => ["left", "middle", "right"].includes(modifier));
-    const buttons: Record<string, number> = { left: 0, middle: 1, right: 2 };
-    if (buttonFilters.length > 0 && !buttonFilters.some((filter) => event.button === buttons[filter])) return false;
-  }
-  const systemKeys = ["ctrl", "shift", "alt", "meta"] as const;
-  for (const key of systemKeys) {
-    if (modifiers.includes(key) && !(event as unknown as Record<string, boolean>)[`${key}Key`]) return false;
-  }
-  if (
-    modifiers.includes("exact") &&
-    systemKeys.some((key) => !modifiers.includes(key) && (event as unknown as Record<string, boolean>)[`${key}Key`])
-  ) return false;
-  if (event instanceof KeyboardEvent) {
-    const keyFilters = modifiers.filter((modifier) =>
-      ["enter", "escape", "space", "tab", "up", "down", "left", "right"].includes(modifier),
-    );
-    const keyNames: Record<string, string> = {
-      enter: "Enter", escape: "Escape", space: " ", tab: "Tab",
-      up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
-    };
-    if (keyFilters.length > 0 && !keyFilters.some((filter) => event.key === keyNames[filter])) return false;
-  }
-  return true;
 }
 
 function bindEvents(

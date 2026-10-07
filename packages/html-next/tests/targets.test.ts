@@ -1253,7 +1253,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps a type-incompatible direct primitive state on the conforming runtime", () => {
+  it("compiles a type-incompatible primitive state directly with its declared-type check", () => {
     const module = generated(`<template component="demo-inert" status="experimental" summary="Typed direct primitive fallback.">
       <defs>
         <state name="open" type="string" value="false"></state>
@@ -1262,7 +1262,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <button on:click="toggle" from:aria-expanded="open"><output $value="open"></output></button>
     </template>`).get("vanilla/DemoInert.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    // The handler's write is checked against `string` and warns under its own key, as live does.
+    assert.match(module, /setState\(I, p, x, "handler:toggle:open", "open"\)/);
   });
 
   it("guards direct mutable numeric state against non-finite writes", () => {
@@ -1341,7 +1343,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps string URL attributes on the sanitizing live runtime", () => {
+  it("compiles string URL attributes directly through the sanitizing writer", () => {
     const module = generated(`<template component="demo-link" status="experimental" summary="String URL fallback.">
       <defs>
         <state type="string" name="destination" value="/start"></state>
@@ -1350,7 +1352,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <a on:click="change" from:href="destination"><output $value="destination"></output></a>
     </template>`).get("vanilla/DemoLink.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /writeUrlAttribute\(r\.n, "href"/);
   });
 
   it("compiles literal primitive concat expressions to direct string concatenation", async () => {
@@ -1382,7 +1385,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(module, /String\(state0\) \+ "\/%s"/);
   });
 
-  it("retains the live runtime for ordinary SVG attributes that need name adjustment", () => {
+  it("compiles bound SVG attributes directly with the parser's name adjustment", () => {
     const module = generated(`<template component="demo-svg-bound" status="experimental" summary="Bound SVG attribute.">
       <defs>
         <state type="number" name="size" value="24"></state>
@@ -1391,7 +1394,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <button on:click="grow"><svg from:viewBox="size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgBound.js")!;
 
-    assert.match(module, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assert.match(module, /writeAttribute\([^,]+, "viewBox"/);
   });
 
   it("keeps numeric SVG data attributes on the direct native emitter", async () => {
