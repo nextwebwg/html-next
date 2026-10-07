@@ -27,7 +27,7 @@ import {
 } from "./expression.js";
 import { kebabCase } from "./names.js";
 import { documentParsesInstructions, renderedFormMark } from "./rendered-form.js";
-import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
+import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
 import { keyedEquality, visitSelected } from "./selection.js";
 import {
   createComputed,
@@ -266,6 +266,8 @@ interface CompiledHandle {
   readonly B?: { readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string> };
   /** Its projected nodes and the slot each is for. */
   readonly J?: readonly (readonly [Node, string])[];
+  /** The components it delegates its root to, which share it. */
+  readonly D?: readonly CompiledHandle[];
 }
 
 /** The compiled handle of a generated root, which the live runtime's instance map never holds. */
@@ -733,33 +735,6 @@ function constrainedReferences(
  * whether an item's field satisfies its own type is that field reference's business. That keeps the
  * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
  */
-function conformsAtReference(value: Value, type: TypeNode): boolean {
-  if (value === null) return true;
-  switch (type.kind) {
-    case "list":
-      return Array.isArray(value);
-    case "record":
-    case "object":
-      return typeof value === "object" && value !== null && !Array.isArray(value);
-    case "union":
-      return type.members.some((member) => conformsAtReference(value, member));
-    case "constrained":
-      return conformsAtReference(value, type.base);
-    default:
-      return parseTypedValue(value, type, "$", "value").ok;
-  }
-}
-
-/** Check the destination's immediate type; nested fields are checked when read. */
-function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
-  if (type === undefined || value === ABSENT) return true;
-  if (type === null) return false;
-  // A missing number source cannot overwrite a child's declared default. Only a destination
-  // that explicitly includes null accepts it; ordinary nullable rendering is handled elsewhere.
-  if (value === null) return parseTypedValue(value, type, "$", "value").ok;
-  return conformsAtReference(value, normalizeType(type));
-}
-
 /**
  * Evaluates a binding expression, or leaves it inert when a reference fails its declared type.
  *
@@ -2579,7 +2554,8 @@ export function serializeRenderedForm(container: Element): string {
       const records = Object.fromEntries([instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, instanceRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     } else if (compiled !== undefined) {
-      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue({ [compiled.S.g]: compiledRecord(compiled) })]));
+      const records = Object.fromEntries([compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, compiledRecord(entry)]));
+      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     }
     const projected = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
     if (projected === undefined) return;
@@ -2632,10 +2608,13 @@ export function inspectInstance(element: Element): unknown {
   const instance = runtimeInstance(element);
   if (instance !== undefined) return inspectRuntimeInstance(instance);
   const handle = compiledHandle(element);
-  if (handle === undefined) return undefined;
+  return handle === undefined ? undefined : inspectCompiled(handle, handle.D ?? []);
+}
+
+function inspectCompiled(handle: CompiledHandle, delegates: readonly CompiledHandle[]): unknown {
   const record = compiledRecord(handle);
   return { tag: handle.S.g, explicit: [...record.explicit].sort(), props: record.props, state: record.state,
-    slots: inspectedSlots(handle.J ?? []), delegates: [] };
+    slots: inspectedSlots(handle.J ?? []), delegates: delegates.map((delegate) => inspectCompiled(delegate, [])) };
 }
 
 /** Each slot's projected nodes, as inspection shows them. */

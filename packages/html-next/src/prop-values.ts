@@ -3,7 +3,8 @@
  * these, so both parse, default and reflect a prop the same way.
  */
 
-import { parseTypedValue, serializeTypedValue } from "./type-system.js";
+import { ABSENT, type Value } from "./expression.js";
+import { normalizeType, parseTypedValue, serializeTypedValue, type TypeNode } from "./type-system.js";
 import type { PropContract, PropType, PropValue } from "./types.js";
 
 /** An invocation's or framework's input, parsed through the prop's type; undefined when it fails. */
@@ -30,3 +31,31 @@ export function assignedPropValue(prop: PropContract, input: unknown, type: Prop
   if (input !== undefined) return invocationValue(prop, input, "value", false, type);
   return prop.default === undefined ? null : prop.default;
 }
+
+export function conformsAtReference(value: Value, type: TypeNode): boolean {
+  if (value === null) return true;
+  switch (type.kind) {
+    case "list":
+      return Array.isArray(value);
+    case "record":
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "union":
+      return type.members.some((member) => conformsAtReference(value, member));
+    case "constrained":
+      return conformsAtReference(value, type.base);
+    default:
+      return parseTypedValue(value, type, "$", "value").ok;
+  }
+}
+
+/** Check the destination's immediate type; nested fields are checked when read. */
+export function conformsAtDestination(value: Value, type: PropType | TypeNode | null | undefined): boolean {
+  if (type === undefined || value === ABSENT) return true;
+  if (type === null) return false;
+  // A missing number source cannot overwrite a child's declared default. Only a destination
+  // that explicitly includes null accepts it; ordinary nullable rendering is handled elsewhere.
+  if (value === null) return parseTypedValue(value, type, "$", "value").ok;
+  return conformsAtReference(value, normalizeType(type));
+}
+

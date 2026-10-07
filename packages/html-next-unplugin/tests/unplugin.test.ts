@@ -337,37 +337,19 @@ describe("HTML Next unplugin", () => {
       publicEntries: Array<{ tag: string }>;
       components: Array<{ tag: string }>;
     };
-    assert.match(output, /function createXChild/);
-    assert.match(output, /createXChild\(\)/);
-    assert.doesNotMatch(output, /createElement\("x-child"\)/);
+    // x-app creates x-child through x-child's factory (tests/vanilla-blocks.test.ts holds the DOM to live's).
+    assert.match(output, /function createXChild\b/);
+    assert.match(output, /invoke\(I, createXChild\b/);
+    assert.doesNotMatch(output, /createElement\("x-child"\)|function manageComponentLifecycle/);
     // Only component roots carry a marker, naming their own component.
     assert.match(output, /setAttribute\("data-component", "x-child"\)/);
     assert.doesNotMatch(output, /data-component-root|getAttribute\("data-component"\)/);
     assert.deepEqual(manifest.publicEntries.map(({ tag }) => tag), ["x-app", "x-child"]);
     assert.deepEqual(manifest.components.map(({ tag }) => tag), ["x-app", "x-child"]);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const child = app.childNodes[0] as TestElement;
-      assert.equal(app.localName, "main");
-      assert.equal(child.localName, "strong");
-      assert.deepEqual(child.childNodes, ["Compiled child"]);
-      assert.equal(child.getAttribute("data-component"), "x-child");
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with a bare child invocation on factory compilation", async () => {
+  it("compiles a read-only reactive parent with a bare child invocation through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-linked-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -396,32 +378,12 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /createXChild\(\)/);
+    assert.match(output, /invoke\(I, createXChild\b/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const label = app.childNodes[0] as TestElement & { textContent?: string };
-      const child = app.childNodes[1] as TestElement;
-      assert.equal(app.getAttribute("data-count"), "1");
-      assert.equal(label.textContent, "1");
-      assert.equal(child.localName, "strong");
-      assert.deepEqual(child.childNodes, ["Compiled child"]);
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with literal child pass-through attributes on factory compilation", async () => {
+  it("compiles a read-only reactive parent with literal child pass-through attributes through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-literal-child-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -450,32 +412,13 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /createXChild\(\{ attributes:/);
+    // Literal attributes that are not props reach the child's root as an invocation's.
+    assert.match(output, /attributes: \{\s*"class": "app-child",\s*"style": "color: red",\s*"aria-label": "Ready"\s*\}/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
-    assert.doesNotMatch(output, /setAttribute\("aria-label", "Ready"\)/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const child = app.childNodes[1] as TestElement;
-      assert.equal(child.localName, "strong");
-      assert.equal(child.getAttribute("aria-label"), "Ready");
-      assert.equal(child.getAttribute("class"), "child app-child");
-      assert.equal(child.getAttribute("style"), "font-weight: 700; color: red");
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with literal child inputs on factory compilation", async () => {
+  it("compiles a read-only reactive parent with literal child inputs through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-input-child-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -513,36 +456,13 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /createXChild\(\{[^}]*count[^}]*2/);
+    // A literal prop is the child's HTML input, as an invocation attribute is to live lowering.
+    assert.match(output, /invoke\(I, createXChild,[^;]*"count": "2"/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: {
-        createElement: (name: string) => new TestElement(name),
-        defaultView: { MutationObserver: class {
-          observe(): void {}
-          disconnect(): void {}
-        } },
-      },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const child = app.childNodes[1] as TestElement;
-      assert.equal(child.localName, "strong");
-      assert.equal(child.getAttribute("data-count"), "2");
-      assert.equal((child as unknown as { textContent: string }).textContent, "2");
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with static default-slot child content on factory compilation", async () => {
+  it("compiles a read-only reactive parent with static default-slot child content through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-projected-child-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -571,33 +491,13 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /createXChild\(\{ children: \[Array\.from\(element\d+\.childNodes\)\[0\]\] \}\)/);
+    // The parent's content is projected into the child's slots.
+    assert.match(output, /\.\.\.projected\(j\.n\)/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const child = app.childNodes[1] as TestElement;
-      const projected = child.childNodes[0] as TestElement;
-      assert.equal(child.localName, "p");
-      assert.equal(projected.localName, "span");
-      assert.equal(projected.getAttribute("class"), "projected");
-      assert.equal(projected.getAttribute("data-slotted"), "");
-      assert.deepEqual(projected.childNodes, ["Projected"]);
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with static named-slot child content on factory compilation", async () => {
+  it("compiles a read-only reactive parent with static named-slot child content through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-named-projected-child-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -626,34 +526,12 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /const element\d+Children = Array\.from\(element\d+\.childNodes\);/);
-    assert.match(output, /children: \[element\d+Children\[1\]\]/);
-    assert.match(output, /slots: \{ "title": \[element\d+Children\[0\]\] \}/);
+    assert.match(output, /\.\.\.projected\(j\.n\)/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const article = app.childNodes[1] as TestElement;
-      const header = article.childNodes[0] as TestElement;
-      const body = article.childNodes[1] as TestElement;
-      assert.equal(article.localName, "article");
-      assert.equal((header.childNodes[0] as TestElement).localName, "strong");
-      assert.equal((body.childNodes[0] as TestElement).localName, "span");
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
-  it("keeps a read-only reactive parent with a literal projected grandchild on factory compilation", async () => {
+  it("compiles a read-only reactive parent with a literal projected grandchild through the child's factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-read-only-projected-grandchild-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -686,30 +564,10 @@ describe("HTML Next unplugin", () => {
     });
 
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /createXGrandchild\(\{ attributes: \{\s*"title": "Grandchild title"\s*\} \}\)/);
-    assert.match(output, /createXChild\(\{ children:/);
+    assert.match(output, /invoke\(I, createXGrandchild, [^,]+, \{ attributes: \{ "title": "Grandchild title" \}/);
+    assert.match(output, /invoke\(I, createXChild\b/);
     assert.doesNotMatch(output, /@nextwebwg\/html-next\/runtime/);
 
-    const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { createElement: (name: string) => new TestElement(name) },
-    });
-    try {
-      const built = await import(`${pathToFileURL(join(root, "dist/app.js")).href}?test=${Date.now()}`) as {
-        createXApp(): TestElement;
-      };
-      const app = built.createXApp();
-      const child = app.childNodes[1] as TestElement;
-      const grandchild = child.childNodes[0] as TestElement;
-      assert.equal(child.localName, "article");
-      assert.equal(grandchild.localName, "strong");
-      assert.equal(grandchild.getAttribute("title"), "Grandchild title");
-      assert.deepEqual(grandchild.childNodes, ["Grandchild"]);
-    } finally {
-      if (priorDocument === undefined) delete (globalThis as { document?: unknown }).document;
-      else Object.defineProperty(globalThis, "document", priorDocument);
-    }
   });
 
   it("exposes independently consumable components from one HTML resource in library mode", async () => {
@@ -778,7 +636,7 @@ describe("HTML Next unplugin", () => {
     }), /HN008: Stable public component modules are available only in library mode/);
   });
 
-  it("lets the general runtime render the components its template invokes", async () => {
+  it("compiles the components a template invokes into calls of their factories", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-runtime-parent-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -810,22 +668,18 @@ describe("HTML Next unplugin", () => {
       },
     });
 
-    // The runtime renders x-app's template, so the invocation stays in it: the build registers the
-    // child's definition and includes its module, rather than compiling a factory call.
+    // x-app compiles directly and creates x-child through its factory: nothing is registered and
+    // the general runtime stays out. The child's stylesheet still reaches the build.
     const output = await readFile(join(root, "dist/app.js"), "utf8");
-    assert.match(output, /registerComponentDefinitions/);
-    assert.match(output, /registerRenderedComponents\(element\.ownerDocument\)/);
-    assert.match(output, /"tag":\s*"x-child"/);
-    assert.doesNotMatch(output, /createXChild\(\)/);
+    assert.match(output, /invoke\(I, createXChild\b/);
+    assert.doesNotMatch(output, /registerComponentDefinitions|function manageComponentLifecycle/);
     assertClosedOverEntries(output);
-    // The registered copy carries no styles, so the child's stylesheet has to reach the build.
-    assert.match(output, /"css":\s*""/);
     const css = await readFile(join(root, "dist/components.css"), "utf8");
     assert.match(css, /rebeccapurple/);
     assert.match(css, /@scope\s*\(\[data-component~="x-child"\]\)/);
   });
 
-  it("rejects dynamic linked invocation inputs until they can preserve the full child contract", async () => {
+  it("compiles dynamic linked invocation inputs and projected children", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-invocation-inputs-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
@@ -837,50 +691,55 @@ describe("HTML Next unplugin", () => {
     </template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
-    await assert.rejects(() => build({
+    await build({
       root,
       logLevel: "silent",
-      plugins: [htmlNext.vite({ entries: ["app.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /app\.html: HN009:.*cannot yet carry dynamic or unsupported attributes, projected children/);
+      plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+    });
+    // `label` is not one of x-child's props, so it is an attribute the parent keeps writing on its root.
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b[\s\S]*writeAttribute\(r\.a\d+, "label"/);
   });
 
-  it("rejects literal props that collide with factory option names", async () => {
+  it("carries a literal prop named like a factory option as HTML input", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-reserved-prop-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
-      <template component="x-app" status="early" summary="App."><x-child attributes="Ready"></x-child></template>`);
+      <template component="x-app" status="early" summary="App."><main><x-child attributes="Ready"></x-child></main></template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <defs><prop name="attributes" type="string" required>Attributes.</prop></defs>
       <p $value="attributes"></p>
     </template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
-    await assert.rejects(() => build({
+    await build({
       root,
       logLevel: "silent",
-      plugins: [htmlNext.vite({ entries: ["app.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /app\.html: HN009:.*cannot yet carry dynamic or unsupported attributes, projected children/);
+      plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+    });
+    // HTML input never meets the factory's own `attributes` option.
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild,[^;]*"attributes": "Ready"/);
   });
 
-  it("rejects empty compiled invocations of entries with required props", async () => {
+  it("renders an invocation without a required prop, whose validity reports it as live does", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-required-child-"));
     temporary.push(root);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./child.html">
-      <template component="x-app" status="early" summary="App."><x-child></x-child></template>`);
+      <template component="x-app" status="early" summary="App."><main><x-child></x-child></main></template>`);
     await writeFile(join(root, "child.html"), `<template component="x-child" status="early" summary="Child.">
       <defs><prop name="label" type="string" required>Label.</prop></defs>
       <p $value="label"></p>
     </template>`);
     await writeFile(join(root, "main.js"), `export { createXApp } from ${JSON.stringify(componentsModule)};`);
 
-    await assert.rejects(() => build({
+    await build({
       root,
       logLevel: "silent",
-      plugins: [htmlNext.vite({ entries: ["app.html"], root })],
-      build: { lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } },
-    }), /app\.html: HN014:.*requires an input/);
+      plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
+    });
+    assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b/);
   });
 
   it("rejects a values constraint that does not conform to its declared type", async () => {

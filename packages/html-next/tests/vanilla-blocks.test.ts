@@ -8,7 +8,7 @@ import { JSDOM } from "jsdom";
 import { afterEach, describe, it, vi } from "vitest";
 
 import { compileExpression, evaluateCompiled, type Value } from "../src/expression.js";
-import { generateComponent } from "../src/generate.js";
+import { generateComponent, type Invoked } from "../src/generate.js";
 import { compactTypeAt, conforms, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 import { visitSelected } from "../src/selection.js";
@@ -19,30 +19,65 @@ import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type Ty
 const source = fileURLToPath(new URL("../src/", import.meta.url));
 const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
 
-function vanilla(text: string, directExtend: boolean): string {
+function vanilla(text: string, directExtend: boolean, invocations?: ReadonlyMap<string, Invoked>): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
   const named = definition.controller === undefined ? definition : { ...definition, controller: `./${definition.controller.split("/").at(-1)}` };
-  return generateComponent(named, { directExtend }).find((artifact) => artifact.path.endsWith(".js"))!.content;
+  return generateComponent(named, { directExtend, ...invocations === undefined ? {} : { invocations } }).find((artifact) => artifact.path.endsWith(".js"))!.content;
+}
+
+/** A graph of components (the first one invokes the rest), each compiled with the others as invocations. */
+function graph(texts: readonly string[]): { readonly entry: string; readonly modules: ReadonlyMap<string, string> } {
+  const definitions = texts.map((text) => parseComponent(text, new URL("component.html", fixtures).href));
+  const invocations = new Map(definitions.map((definition) => [definition.contract.tag, { module: `./${definition.contract.name}.js`, definition }]));
+  const modules = new Map(texts.map((text, index) => [`./${definitions[index]!.contract.name}.js`, vanilla(text, true, invocations)]));
+  return { entry: modules.get(`./${definitions[0]!.contract.name}.js`)!, modules };
 }
 
 /**
  * The reference every compiled module is held to: the live runtime attached to a fresh root, as
  * generated output's general-runtime fallback attached it, rendering the same definition.
  */
-function reference(text: string): string {
+function reference(text: string, invoked: readonly string[] = []): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
+  // Components the root's template invokes, which live lowering renders from their registered definitions.
+  const others = invoked.map((other) => parseComponent(other, new URL("component.html", fixtures).href));
   const controlled = definition.controller !== undefined;
   const named = controlled ? { ...definition, controller: `./${definition.controller!.split("/").at(-1)}` } : definition;
   const root = definition.template.name;
   return [
-    'import { componentRootIndex, manageComponentLifecycle, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
+    'import { componentRootIndex, getComponentHost, manageComponentLifecycle, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
     ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
     // Registered as a live document registers it, with its styles and their `:host-state()` names.
     `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
-    "registerComponentDefinitions([definition]);",
+    `registerComponentDefinitions([definition${others.map((other) => `, { ...${serializedDefinition(other)}, css: ${JSON.stringify(other.css)} }`).join("")}]);`,
+    // A live document is observed, so an invocation a region renders later lowers too. A root lowered
+    // from its invocation gets its controller as the browser loader gives one: once per host, on connect.
+    ...others.length > 0 ? [definition.root?.kind === "component" && controlled ? [
+      "const initialized = new WeakSet();",
+      "observeDocument(document, { onConnect(element, connected) {",
+      `  if (connected.contract.tag !== ${JSON.stringify(definition.contract.tag)}) return;`,
+      "  const host = getComponentHost(element);",
+      "  if (initialized.has(host)) return;",
+      "  initialized.add(host);",
+      "  let cleanup; let disconnected = false;",
+      "  void Promise.resolve(controller.default(host)).then((result) => { if (typeof result !== \"function\") return; if (disconnected) result(); else cleanup = result; });",
+      "  return () => { disconnected = true; cleanup?.(); };",
+      "} });",
+    ].join("\n") : "observeDocument(document);"] : [],
     "export function createReference(options = {}) {",
     "  const { attributes = {}, children = [], slots = {}, ...props } = options;",
+    // A root delegated to another component is lowered from its invocation, as a live document lowers it.
+    ...definition.root?.kind === "component" ? [
+      `  const invocation = document.createElement(${JSON.stringify(definition.contract.tag)});`,
+      "  for (const [name, value] of Object.entries(attributes)) invocation.setAttribute(name, String(value));",
+      "  for (const [name, value] of Object.entries(props)) if (value !== undefined && value !== null && value !== false) invocation.setAttribute(name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value === true ? \"\" : typeof value === \"string\" ? value : JSON.stringify(value));",
+      "  for (const child of children) invocation.append(child);",
+      "  for (const [name, nodes] of Object.entries(slots)) for (const child of nodes) { if (typeof child !== \"string\") child.setAttribute(\"slot\", name); invocation.append(child); }",
+      "  return invocation;",
+      "}",
+    ] : [
+
     // A root `$match` starts on the arm the props choose, as the general runtime's factories chose it.
     root === "template" ? "  const arm = definition.template.children[componentRootIndex(definition, props)], element = document.createElement(arm.name);"
       : root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
@@ -61,6 +96,7 @@ function reference(text: string): string {
     `  manageComponentLifecycle(element, definition, { props, projected${controlled ? ", controller" : ""} });`,
     "  return element;",
     "}",
+    ],
   ].join("\n");
 }
 
@@ -78,7 +114,7 @@ const benchmarkShape = component(`
     </tr>
   </tbody></table></div></div>`);
 
-async function bundle(module: string, external = false): Promise<{ text: string; inputs: string[] }> {
+async function bundle(module: string, external = false, modules: ReadonlyMap<string, string> = new Map()): Promise<{ text: string; inputs: string[] }> {
   const result = await build({
     stdin: { contents: module, loader: "js", resolveDir: fileURLToPath(fixtures) },
     bundle: true, format: "esm", write: false, metafile: true, platform: "browser", target: ["es2022"],
@@ -90,6 +126,9 @@ async function bundle(module: string, external = false): Promise<{ text: string;
     plugins: [{ name: "styles", setup(builder) {
       builder.onResolve({ filter: /\.css$/ }, (args) => ({ path: args.path, namespace: "styles" }));
       builder.onLoad({ filter: /.*/, namespace: "styles" }, () => ({ contents: "", loader: "js" }));
+      // A graph's other components, generated beside the entry.
+      builder.onResolve({ filter: /^\.\/[A-Z]\w*\.js$/ }, (args) => modules.has(args.path) ? { path: args.path, namespace: "generated" } : undefined);
+      builder.onLoad({ filter: /.*/, namespace: "generated" }, (args) => ({ contents: modules.get(args.path)!, loader: "js", resolveDir: fileURLToPath(fixtures) }));
     } }],
   });
   // Modules that contribute output bytes; parsed but fully shaken modules do not count.
@@ -131,7 +170,6 @@ describe("direct-extend Vanilla generation", () => {
   const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
   const notYetDirect: Record<string, string> = {
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
-    "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
   };
@@ -292,10 +330,12 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   /** Factory options, or a function making them in the run's document (for projected nodes). */
   type Options = Record<string, unknown> | ((document: Document) => Record<string, unknown>);
 
-  async function run(text: string, directExtend: boolean, steps: readonly Step[], options?: Options): Promise<Run> {
-    const { text: code } = await bundle(directExtend
-      ? `${vanilla(text, true)}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`
-      : reference(text));
+  async function run(text: string | readonly string[], directExtend: boolean, steps: readonly Step[], options?: Options): Promise<Run> {
+    const [root, ...invoked] = typeof text === "string" ? [text] : text;
+    const compiled = directExtend ? graph([root!, ...invoked]) : undefined;
+    const { text: code } = await bundle(compiled !== undefined
+      ? `${compiled.entry}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`
+      : reference(root!, invoked), false, compiled?.modules);
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
       if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
@@ -314,14 +354,16 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// ${directExtend}`).toString("base64")}`);
     const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
     const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as (options?: Record<string, unknown>) => Element;
-    const update = (props: Record<string, unknown>): void => (module.update as (element: Element, props: Record<string, unknown>) => void)(element, props);
+    const update = (props: Record<string, unknown>): void => (module.update as (element: Element, props: Record<string, unknown>) => void)(current(), props);
     const element = factory(typeof options === "function" ? options(window.document) : options);
     const snapshots: string[] = [];
     const identities: string[] = [];
     let previous = new Map<string, Element>();
+    // The root as it is now in the document: a root switch or lowering replaces the element first returned.
+    const current = (): Element => window.document.body.firstElementChild ?? element;
     const record = (): void => {
-      snapshots.push(canonical(element).replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
-      const rows = new Map(Array.from(element.querySelectorAll("[data-id]"), (row) => [row.getAttribute("data-id")!, row]));
+      snapshots.push(canonical(current()).replaceAll(/<!--html-next:item-(?:start|end)-->/g, ""));
+      const rows = new Map(Array.from(current().querySelectorAll("[data-id]"), (row) => [row.getAttribute("data-id")!, row]));
       identities.push([...rows].map(([id, row]) => `${id}:${previous.get(id) === row ? "same" : "new"}`).join(","));
       previous = rows;
     };
@@ -329,25 +371,28 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await flush();
     record();
     // A component without a controller is driven through its DOM.
-    const host = log.hosts[0] ?? { root: element };
+    const host = log.hosts[0] ?? { get root() { return current(); } };
     for (const step of steps) {
       step(host, update);
       await flush();
       record();
     }
-    element.remove();
+    const detached = current();
+    detached.remove();
     await flush();
     if (host.state !== undefined && "rows" in host.state) host.state.rows = [{ id: 7, label: "back", tags: [] }];
     await flush();
-    window.document.body.append(element);
+    window.document.body.append(detached);
     await flush();
     record();
     return { snapshots, identities, warnings, errors, events: log.events };
   }
 
-  async function same(text: string, steps: readonly Step[], options?: Options): Promise<Run> {
-    // The compared module must be the direct one: a fallback would compare the general runtime with itself.
-    assert.doesNotMatch(vanilla(text, true), /@nextwebwg\/html-next\/runtime/, "compiles directly");
+  async function same(text: string | readonly string[], steps: readonly Step[], options?: Options): Promise<Run> {
+    // The compared modules must be direct ones: a fallback would compare the general runtime with itself.
+    for (const module of graph(typeof text === "string" ? [text] : text).modules.values()) {
+      assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/, "compiles directly");
+    }
     const live = await run(text, false, steps, options);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -911,9 +956,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.root.querySelector("button").click(); host.root.querySelector("button").focus(); },
       // Focus stays on the control in the same position among the new root's focusable elements.
       (_host, update) => { update({ as: "section" }); },
-      (host) => { globalThis.directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); host.root.focus(); },
+      (host) => { (globalThis as any).directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); host.root.focus(); },
       (host, update) => { update({ as: "div" }); host.root.click(); },
-      (host) => { globalThis.directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); },
+      (host) => { (globalThis as any).directExtendLog.events.push(`focus ${host.root.ownerDocument.activeElement.localName}`); },
     ], options);
   });
 
@@ -928,11 +973,131 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
         <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
       </template>`), [
-      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] }); },
-      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ disabled: true }); },
-      (host, update) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "button" }); },
-      (host) => { globalThis.directExtendLog.events.push(`ref ${host.refs.control.localName} ${host.refs.control === host.root}`); },
+      (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] }); },
+      (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ disabled: true }); },
+      (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "button" }); },
+      (host) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName} ${host.refs.control === host.root}`); },
     ], (document) => ({ children: ["Go"] }));
+  });
+
+  const badge = `<template component="x-badge" status="early" summary="Badge.">
+    <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
+      <prop name="count" type="integer" default="0">Count.</prop><prop name="label" type="string">Label.</prop>
+      <prop name="open" type="boolean" default="false">Open.</prop></defs>
+    <span class="badge" from:data-tone="tone"><b>{count}</b><i $if="open">{label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
+  const parent = (body: string, defs = ""): string => propsShape(`
+    <prop name="flag" type="boolean" default="false">Flag.</prop>
+    <state name="label" type="string" value="L"></state><state name="count" type="integer" value="1"></state>
+    <state name="rows" type="list(integer)" value="[1, 2]"></state>
+    <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>${defs}`, body);
+
+  it("invokes a compiled component like live lowering", async () => {
+    await same([parent(`
+      <section><x-badge tone="warn" count="3" open class="extra" title="t" from:label="label" class:hot="count > 1" style:color="flag ? 'red' : 'blue'"
+        from:data-n="count" on:click="bump" $ref="badge">Text {label}<em slot="icon">{count}</em></x-badge></section>`), badge], [
+      (host) => { host.state.label = "M"; },
+      (host) => { host.root.querySelector("span").click(); },
+      (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.badge.className}`); update({ flag: true }); host.state.count = 5; },
+    ]);
+  });
+
+  it("binds invocation props by their values, after their attribute text", async () => {
+    await same([parent(`
+      <section><x-badge from:count="label" from:tone="flag ? 'warn' : 'nope'" from:open="flag"></x-badge></section>`), badge], [
+      (_host, update) => { update({ flag: true }); },
+      (host) => { host.state.label = "7"; },
+      (host, update) => { host.state.label = "x"; update({ flag: false }); },
+    ]);
+  });
+
+  it("invokes components in regions and keyed rows like live lowering", async () => {
+    await same([parent(`
+      <section><x-badge $if="flag" from:count="count">if</x-badge>
+        <ul><li $each="n of rows" $key="n" from:data-id="n"><x-badge from:count="n" from:label="label" on:click="bump" $ref="rows">{n}</x-badge></li></ul>
+        <x-badge $each="n of rows" $key="n" from:count="n * 10"></x-badge></section>`), badge], [
+      (_host, update) => { update({ flag: true }); },
+      (host) => { host.state.rows = [2, 3, 1]; host.state.label = "z"; },
+      (host) => { host.root.querySelectorAll("li span")[1].click(); (globalThis as any).directExtendLog.events.push(`refs ${host.refs.rows.length}`); },
+      (host, update) => { host.state.rows = [3]; update({ flag: false }); },
+    ]);
+  });
+
+  it("follows an invoked component's root switch with the parent's bindings", async () => {
+    const action = `<template component="x-action" status="early" summary="Action.">
+      <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
+      <template $match><a $when="as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+    await same([parent(`
+      <section><x-action from:as="flag ? 'a' : 'button'" class:hot="count > 1" from:title="label" on:click="bump" $ref="action">Go {count}</x-action></section>`), action], [
+      (host) => { host.root.querySelector("button").click(); },
+      (_host, update) => { update({ flag: true }); },
+      (host) => { host.root.querySelector("a").click(); (globalThis as any).directExtendLog.events.push(`ref ${host.refs.action.localName}`); },
+      (host, update) => { host.state.label = "N"; update({ flag: false }); },
+      (host) => { host.root.querySelector("button").click(); (globalThis as any).directExtendLog.events.push(`ref ${host.refs.action.localName}`); },
+    ]);
+  });
+
+  it("renders a custom element no component claims as an element, like live", async () => {
+    await same(parent(`
+      <section><x-other class="o" from:title="label" class:hot="count > 1" from:data-n="count" on:click="bump" $ref="other"><b>{label}</b><x-deeper $if="flag">{count}</x-deeper></x-other></section>`), [
+      (host) => { host.root.querySelector("x-other").click(); (globalThis as any).directExtendLog.events.push(`ref ${host.refs.other.localName}`); },
+      (host, update) => { host.state.label = "Q"; update({ flag: true }); },
+    ]);
+  });
+
+  it("observes each document once however many compiled roots it holds", async () => {
+    const action = `<template component="x-action" status="early" summary="Action.">
+      <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
+      <template $match><a $when="as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+    const compiled = graph([parent(`
+      <section><x-badge $each="n of rows" $key="n" from:count="n"><x-action from:as="flag ? 'a' : 'button'">{n}</x-action></x-badge></section>`), badge, action]);
+    const { text: code } = await bundle(`${compiled.entry}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`, false, compiled.modules);
+    const { window } = new JSDOM("<!doctype html><body></body>");
+    let observers = 0;
+    const Native = window.MutationObserver;
+    (window as unknown as { MutationObserver: unknown }).MutationObserver = class extends Native {
+      constructor(callback: MutationCallback) { super(callback); observers += 1; }
+    };
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (key in globalThis && !["Event", "CustomEvent", "EventTarget", "document", "Node", "Element"].includes(key)) continue;
+      try { vi.stubGlobal(key, (window as unknown as Record<string, unknown>)[key]); } catch { /* read-only global */ }
+    }
+    vi.stubGlobal("directExtendLog", { hosts: [], events: [] });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(`${code}\n// observers`).toString("base64")}`) as Record<string, unknown>;
+    const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as (options?: object) => Element;
+    const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const roots = [factory(), factory(), factory()];
+    window.document.body.append(...roots);
+    await flush();
+    const host = (globalThis as any).directExtendLog.hosts[0];
+    host.state.rows = [1, 2, 3, 4];
+    (module.update as (element: Element, props: object) => void)(roots[0]!, { flag: true });
+    await flush();
+    roots[1]!.remove();
+    await flush();
+    window.document.body.append(roots[1]!);
+    await flush();
+    assert.equal(window.document.querySelectorAll("[data-component]").length, 3 + 3 * 2 * 2 + 2 * 2);
+    // Every compiled root, parent or invoked, shares the document's one lifecycle observer.
+    assert.equal(observers, 1);
+  });
+
+  it("delegates a root to an invoked component and shares it, like live", async () => {
+    const card = `<template component="x-card" status="early" summary="Card.">
+      <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
+        <prop name="as" type="keyword" values="section, article" default="section">As.</prop></defs>
+      <template $match><article $when="as = 'article'" class="card"><slot name="head"></slot><slot></slot></article>
+        <section $else class="card" from:data-tone="tone"><slot name="head"></slot><slot></slot></section></template></template>`;
+    const panel = propsShape(`
+      <prop name="title" type="string" required>Title.</prop>
+      <prop name="kind" type="keyword" values="section, article" default="section">Kind.</prop>
+      <state name="count" type="integer" value="1"></state>
+      <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>`, `
+      <x-card tone="warn" class="panel" from:as="kind" on:click="bump"><h2 slot="head">{title}</h2><p>{count} <slot></slot></p></x-card>`);
+    await same([panel, card], [
+      (host) => { host.root.click(); (globalThis as any).directExtendLog.events.push(`hosts ${(globalThis as any).directExtendLog.hosts.length}`); },
+      (_host, update) => { update({ title: "Next", kind: "article" }); },
+      (host, update) => { host.root.click(); update({ title: undefined }); },
+    ], (document) => ({ title: "T", attributes: { id: "p", class: "mine" }, children: ["body"] }));
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

@@ -161,7 +161,8 @@ describe("generateComponent", () => {
 
     const nestedProvider = parseComponent(`<template component="x-steps"><defs>` +
       `<state type="number" name="current" value="1"></state></defs><section><x-step></x-step></section></template>`);
-    assert.match(artifacts(nestedProvider).get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);  // invokes <x-step>
+    // Without a graph naming <x-step>, it is a custom element no component claims, as it is to live.
+    assert.doesNotMatch(artifacts(nestedProvider).get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
     const closedGraphOutput = new Map(generateComponent(nestedProvider, { noContextReaders: true })
       .map((item) => [item.path, item.content]));
     assert.doesNotMatch(closedGraphOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);

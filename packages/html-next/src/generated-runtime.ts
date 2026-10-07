@@ -26,7 +26,7 @@ import {
 import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
 import { selectedPropType } from "./contract.js";
 import { kebabCase } from "./names.js";
-import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
+import { assignedPropValue, conformsAtDestination, invocationValue, reflectedPropValue } from "./prop-values.js";
 import type { ComponentContract, PropContract, PropType } from "./types.js";
 import { validateComponentProps } from "./validate.js";
 import { manageElementValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
@@ -398,6 +398,130 @@ export function replaceRoot(instance: GeneratedInstance, previous: Element, next
   (target as HTMLElement | undefined)?.focus?.({ preventScroll: true });
 }
 
+/** A compiled factory: options, and the HTML input an invocation's literal props carry. */
+export type GeneratedFactory = (options: object, html?: Readonly<Record<string, string>>) => Element;
+
+/**
+ * Creates an invoked component through its factory where `placeholder` sits, as live lowering puts
+ * the component's root in its invocation's place, and follows its root: when a root switch replaces
+ * it, `follow` moves what the parent bound there. Returns the component's handle.
+ */
+export function invoke(
+  instance: GeneratedInstance, factory: GeneratedFactory, placeholder: ChildNode, options: object,
+  html: Readonly<Record<string, string>>, follow: (root: Element, previous: Element) => void, stops: (() => void)[],
+): GeneratedInstance {
+  const root = factory(options, html);
+  // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
+  if (placeholder.parentNode !== null) placeholder.replaceWith(root);
+  const child = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
+  let current = root;
+  const effect = createEffect(instance.q, () => {
+    trackProperty(child, "e");
+    const next = child.e;
+    if (next !== current) {
+      const previous = current;
+      current = next;
+      untracked(() => follow(next, previous));
+    }
+  }, 2, instance.c());
+  instance.o.push(effect);
+  stops.push(() => effect.stop());
+  return child;
+}
+
+/**
+ * A bound prop's first form, its attribute text, as live writes it on the invocation: none for a value
+ * the prop's type does not take (a select prop's type is unknown until the component exists).
+ */
+export function propText(type: PropType | null | undefined, value: unknown, attribute: string): string | null {
+  return value === NONCONFORMING || !conformsAtDestination(value as Value, type) ? null : toAttribute(value as Value, attribute);
+}
+
+/** The parent's projected content, by slot: elements with a `slot` attribute go to that slot, the rest to the unnamed one. */
+export function projected(fragment: Node): { children: Node[]; slots: Record<string, Node[]> } {
+  const children: Node[] = [];
+  const slots: Record<string, Node[]> = {};
+  for (const node of Array.from(fragment.childNodes)) {
+    const name = node.nodeType === 1 ? (node as Element).getAttribute("slot") : null;
+    if (name === null) children.push(node);
+    else (slots[name] ??= []).push(node);
+  }
+  return { children, slots };
+}
+
+/**
+ * Applies a parent's bound value to an invoked component's prop, as live's invocation binding does:
+ * a value the prop's type (chosen by its selector) does not take is not applied at all.
+ */
+export function bindProp(child: GeneratedInstance, name: string, value: unknown): void {
+  const record = child.B!;
+  const prop = record.D.props[name]!;
+  const from = prop.select?.from;
+  const type = selectedPropType(record.D as ComponentContract, prop, from === undefined ? {}
+    : { [from]: record.v[Object.hasOwn(record.D.props, from) ? record.n.length + Object.keys(record.D.props).indexOf(from) : record.n.indexOf(from)] });
+  if (!conformsAtDestination(value as Value, type)) return;
+  // The child's own channel: a root it shares answers to the component that delegates to it.
+  record.u!({ [name]: value });
+}
+
+/** A listener on an invoked component's root, which moves to a replacement root as live's does. */
+export function listenRoot(
+  instance: GeneratedInstance, child: GeneratedInstance, type: string, listener: (event: Event) => void,
+  capture: boolean, passive: boolean, once: boolean,
+): () => void {
+  let fired = false;
+  const wrapped = (event: Event): void => {
+    fired = once;
+    listener(event);
+  };
+  const effect = createEffect(instance.q, () => {
+    trackProperty(child, "e");
+    const target = child.e;
+    if (fired) return;
+    target.addEventListener(type, wrapped, { capture, passive, once });
+    return () => target.removeEventListener(type, wrapped, { capture });
+  }, 2, instance.c());
+  instance.o.push(effect);
+  return () => effect.stop();
+}
+
+/**
+ * The lifecycle of a component that delegates its root to `inner`: as live's, it owns the shared
+ * root (its host is the root's, and inspection lists `inner` among its delegates), and connects first,
+ * with `inner` riding its connection.
+ */
+export function delegateLifecycle(inner: GeneratedInstance): NonNullable<GeneratedInstance["L"]> {
+  return (element, connect, handle) => {
+    const record = (element as RuntimeElement)[lifecycleKey]! as { connect: (element: Element) => () => void; h?: unknown };
+    const own = record.connect;
+    record.connect = (current) => {
+      const stop = connect();
+      const stopInner = own(current);
+      return () => { stop(); stopInner(); };
+    };
+    record.h = handle;
+    (handle as GeneratedInstance).D = [inner, ...inner.D ?? []];
+  };
+}
+
+/** The root a delegating component shares, followed when its owner's root switch replaces it. */
+export function followShared(instance: GeneratedInstance, previous: Element, next: Element): void {
+  instance.e = next;
+  notifyPropertySet(instance, "e", previous, next, undefined);
+  instance.B?.m?.(previous, next);
+}
+
+/** An invocation's literal attributes, then its consumer's: theirs win, and class and style combine. */
+export function passThrough(literals: Readonly<Record<string, string>>, consumer: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...literals };
+  for (const [name, value] of Object.entries(consumer)) {
+    if (value === null || value === undefined || value === false) continue;
+    const own = name === "class" || name === "style" ? merged[name] : undefined;
+    merged[name] = own === undefined || own === "" ? value : `${own as string}${name === "class" ? " " : "; "}${value === true ? "" : String(value)}`;
+  }
+  return merged;
+}
+
 /** The framework-adapter prop channel for directly compiled components; not a page-authoring API. */
 export function updateGeneratedProps(element: Element, props: Readonly<Record<string, unknown>>): void {
   generatedPropUpdaters.get(element)?.(props);
@@ -426,6 +550,12 @@ export interface GeneratedPropRecord {
   b: readonly string[];
   /** Moves the prop boundary to a new root, set by `manageProps`. */
   m?: (previous: Element, next: Element) => void;
+  /** Applies a framework's or parent's props, set by `manageProps`. */
+  u?: (props: Readonly<Record<string, unknown>>) => void;
+  /** Props whose `data-<name>` holds a raw input write, which a first connection leaves as it is. */
+  readonly w: Set<string>;
+  /** The factory's values, written raw on the root before it first renders its props. */
+  readonly f: Readonly<Record<string, unknown>>;
   /** The props' validity, as the root reports it. */
   readonly y: () => ReturnType<typeof validateComponentProps>;
   /** `host.props`. */
@@ -440,20 +570,24 @@ export interface GeneratedPropRecord {
  */
 export function acceptProps(
   element: Element | undefined, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
-  input: Readonly<Record<string, unknown>>, bound: readonly string[],
+  input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>,
 ): GeneratedPropRecord {
   const props = D.props;
   const names = Object.keys(props);
-  // Without a root (a root `$match` choosing its arm), only the factory's values are parsed.
-  if (element !== undefined) for (const name of names) {
+  // The factory's explicit values are recorded as `data-<name>`, raw, once the root exists (`manageProps`).
+  const raw = new Set<string>();
+  for (const name of names) {
     const prop = props[name]!;
     const value = input[name];
     if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
-    element.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(value, selectedPropType(D as ComponentContract, prop, input)));
+    raw.add(name);
   }
-  // The root's `data-<name>` attributes are read back as HTML input, and the factory's values win.
+  // An invocation's literal props are its HTML input; a factory's root reads its `data-<name>`
+  // attributes back as HTML input instead. The factory's values win.
   const incoming: Record<string, PropInput> = Object.create(null);
-  for (const attribute of Array.from(element?.attributes ?? [])) {
+  if (html !== undefined) {
+    for (const name of names) if (Object.hasOwn(html, name)) incoming[name] = { value: html[name], source: "html", present: true };
+  } else for (const attribute of Array.from(element?.attributes ?? [])) {
     const name = names.find((candidate) => attribute.name === `data-${kebabCase(candidate)}` || attribute.name === `data-${candidate.toLowerCase()}`);
     if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
   }
@@ -467,7 +601,8 @@ export function acceptProps(
       if (item === undefined || (prop.select !== undefined) !== pass) continue;
       // A selector that is state chooses with its initial value.
       const from = prop.select?.from;
-      accepted[name] = invocationValue(prop, item.value, item.source, false, selectedPropType(D as ComponentContract, prop,
+      // An invocation's bare boolean attribute is present, so it reads as true.
+      accepted[name] = invocationValue(prop, item.value, item.source, html !== undefined && item.source === "html", selectedPropType(D as ComponentContract, prop,
         from === undefined || props[from] !== undefined ? accepted : { [from]: v[at(from)] }));
     }
   }
@@ -478,7 +613,7 @@ export function acceptProps(
   const inputs: Record<string, PropInput> = Object.create(null);
   for (const name of names) inputs[name] = incoming[name] ?? { value: null, source: "value", present: false };
   const record: GeneratedPropRecord = {
-    D, n, v, i: inputs, b: bound,
+    D, n, v, i: inputs, b: bound, w: raw, f: input,
     x: new Set(names.filter((name) => incoming[name] !== undefined && incoming[name]!.value !== null)),
     // Reads every prop's input and value, as live's validity does, so an effect reading it tracks them all.
     y: () => validateComponentProps(D as ComponentContract,
@@ -518,14 +653,26 @@ export function manageProps(instance: GeneratedInstance): void {
   const props = D.props;
   const names = Object.keys(props);
   const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
+  // The factory's explicit values, as its live attachment writes them before rendering.
+  for (const name of record.w) {
+    instance.e.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(record.f[name], selectedPropType(D as ComponentContract, props[name]!, record.f)));
+  }
+  for (const name of record.b) record.w.delete(name);
   const changed = new Set<string>();
   let connected = false;
   let installed = false;
+  /** The root's validity: every prop of every component sharing it, the owner's first, as live's. */
+  const shared = (): ReturnType<typeof validateComponentProps> => {
+    const owner = (instance.e as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+    const errors = [owner ?? instance, ...owner?.D ?? []].flatMap((entry) => entry.B?.y().errors ?? []);
+    return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
+  };
   const selected = (prop: PropContract, values: Readonly<Record<string, unknown>>): PropType | null =>
     selectedPropType(D as ComponentContract, prop, values);
   const reflect = (name: string): void => {
     const prop = props[name]!;
     const element = instance.e;
+    record.w.delete(name);
     if (!record.b.includes(name) && !explicit.has(name)) return;
     const value = v[at(name)];
     // Null is "no value" at the attribute boundary: it removes the attribute.
@@ -538,7 +685,7 @@ export function manageProps(instance: GeneratedInstance): void {
     if (!connected) return;
     for (const name of changed) reflect(name);
     changed.clear();
-    setElementValidity(instance.e, record.y());
+    setElementValidity(instance.e, shared());
   }, 2);
   instance.o.push({
     pause: () => { connected = false; },
@@ -547,12 +694,14 @@ export function manageProps(instance: GeneratedInstance): void {
       changed.clear();
       if (installed) {
         for (const name of names) reflect(name);
-        setElementValidity(instance.e, record.y());
+        setElementValidity(instance.e, shared());
         return;
       }
       installed = true;
-      manageElementValidity(instance.e, {}, { derive: record.y });
-      for (const name of record.b) reflect(name);
+      manageElementValidity(instance.e, {}, { derive: shared });
+      // Live reflects every explicit or bound prop as it adopts the root, then the factory's (and an
+      // invocation's bound) values write their raw text again: those keep it.
+      for (const name of names) if (!record.w.has(name)) reflect(name);
       job.schedule();
     },
     stop: () => job.stop(),
@@ -562,7 +711,7 @@ export function manageProps(instance: GeneratedInstance): void {
     generatedPropUpdaters.set(next, update);
     if (!installed) return;
     unmanageElementValidity(previous);
-    manageElementValidity(next, {}, { derive: record.y });
+    manageElementValidity(next, {}, { derive: shared });
     for (const name of names) reflect(name);
     job.schedule();
   };
@@ -595,7 +744,10 @@ export function manageProps(instance: GeneratedInstance): void {
         if (!record.b.includes(name)) element.removeAttribute(attribute);
       } else {
         explicit.add(name);
-        if (!record.b.includes(name)) element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
+        if (!record.b.includes(name)) {
+          element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
+          record.w.add(name);
+        }
       }
       const index = at(name);
       const current = v[index];
@@ -608,13 +760,14 @@ export function manageProps(instance: GeneratedInstance): void {
     }
     job.schedule();
   };
-  generatedPropUpdaters.set(instance.e, update);
+  generatedPropUpdaters.set(instance.e, record.u = update);
 }
 
 /**
  * A prototype for cloning: `[tag, [name, value, ...], ...children]`, where an empty tag is a
- * fragment, a string is text, 0 is an empty Text a `$value` writes, 1 is a `$if` anchor pair,
- * 2 is a `$each` anchor pair, 3 is an `$html` range and 4 is a slot's placeholder pair.
+ * fragment, a string is text, 0 is an empty Text (a `$value` writes it, and an invoked component
+ * replaces it), 1 is a `$if` anchor pair, 2 is a `$each` anchor pair, 3 is an `$html` range and 4 is
+ * a slot's placeholder pair.
  */
 export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
 type TemplateChild = string | 0 | 1 | 2 | 3 | 4 | TemplateSpec;
@@ -940,6 +1093,10 @@ export interface GeneratedInstance {
   readonly B?: GeneratedPropRecord;
   /** The root element, which a root `$match` replaces. */
   e: Element;
+  /** Registers the lifecycle: a component whose root is another's rides that one's (`delegateLifecycle`). */
+  L?: (element: Element, connect: () => () => void, handle: unknown) => void;
+  /** Components whose root is this one's, which inspection and serialization report with it. */
+  D?: GeneratedInstance[];
   /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
   readonly J?: Projection;
   readonly Y?: Readonly<Record<string, readonly Element[]>>;
@@ -1361,7 +1518,8 @@ export function attachGeneratedController(
     objects.clear();
     for (const entry of entries) entry.pause();
   };
-  manageIndexedLifecycle(root, () => {
+  // A delegated root's lifecycle rides the component that owns the element (`L`); otherwise its own.
+  (handle.L ?? manageIndexedLifecycle)(handle.e, () => {
     connected = true;
     for (const entry of entries) entry.resume();
     if (started) {

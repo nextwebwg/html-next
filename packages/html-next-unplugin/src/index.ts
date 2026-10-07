@@ -10,7 +10,6 @@ import {
   HtmlDiagnosticAggregateError,
   recoverDiagnostic,
   loadNodeComponents,
-  parseTypedValue,
   type HtmlDiagnostic,
   type DiagnosticLocation,
   type ComponentDefinition,
@@ -124,14 +123,6 @@ function diagnostic(code: string, message: string, source?: string, location?: D
   throw new HtmlDiagnosticError({ code, message, ...(source === undefined ? {} : { source }), ...location });
 }
 
-function escapePattern(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function propAttributeName(name: string): string {
-  return name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
-
 function visitComponentNodes(node: TemplateNode, visit: (node: ElementNode) => void): void {
   if (node.kind === "text") return;
   if (node.kind === "slot") {
@@ -215,113 +206,6 @@ function collectInvocationEdges(
   return { edges, dynamicUses };
 }
 
-/**
- * The generated factory can carry literal invocation data. Its prop values are parsed at build
- * time with the same declared contract the runtime uses; the remaining attributes use the
- * factory's existing root-attribute path (including class/style merging). Nothing here needs a
- * parent-to-child update channel.
- */
-interface FactoryInvocationOptions {
-  readonly attributes: readonly [string, string][];
-  readonly props: readonly [string, unknown][];
-  /** The authored attribute spelling, used to remove the parent emitter's duplicate write. */
-  readonly literals: readonly [string, string][];
-  /** The declared slot each static projected child targets; `""` is the default slot. */
-  readonly projectedSlots: readonly string[];
-}
-
-function staticProjectionSupported(node: TemplateNode, root = true): boolean {
-  if (node.kind === "text") return true;
-  if (node.kind === "slot") return false;
-  const staticComponent = node.name.includes("-") && node.children.length === 0 && node.attributes.every((attribute) =>
-    attribute.kind === "literal" && attribute.name !== "data-component"
-  );
-  return (!node.name.includes("-") || staticComponent) && node.flow === undefined && node.ref === undefined &&
-    (node.events?.length ?? 0) === 0 && node.attributes.every((attribute) =>
-      attribute.kind === "literal" && (root || attribute.name !== "slot")
-    ) && node.children.every((child) => staticProjectionSupported(child, false));
-}
-
-function projectedSlotName(node: TemplateNode): string {
-  if (node.kind !== "element") return "";
-  for (const attribute of node.attributes) {
-    if (attribute.kind === "literal" && attribute.name === "slot") return attribute.value;
-  }
-  return "";
-}
-
-function factoryInvocationOptions(
-  invocation: ElementNode,
-  definition: ComponentDefinition,
-): FactoryInvocationOptions | undefined {
-  if (invocation.flow !== undefined || invocation.ref !== undefined || (invocation.events?.length ?? 0) > 0) return undefined;
-  const projectedSlots = invocation.children.map(projectedSlotName);
-  const declaredSlots = new Set((definition.slots ?? []).map((slot) => slot.name ?? ""));
-  if (projectedSlots.length > 0 && (
-    !invocation.children.every((child) => staticProjectionSupported(child)) ||
-    projectedSlots.some((slot) => !declaredSlots.has(slot))
-  )) return undefined;
-  const propAttributes = new Map(Object.keys(definition.contract.props).map((name) => [propAttributeName(name), name]));
-  const attributes: [string, string][] = [];
-  const props: [string, unknown][] = [];
-  const literals: [string, string][] = [];
-  for (const attribute of invocation.attributes) {
-    if (attribute.kind !== "literal" || attribute.name === "data-component") return undefined;
-    literals.push([attribute.name, attribute.value]);
-    const propName = propAttributes.get(attribute.name.toLowerCase());
-    if (propName === undefined) {
-      attributes.push([attribute.name, attribute.value]);
-      continue;
-    }
-    // Factory options reserve these keys for invocation data, not component props.
-    if (propName === "attributes" || propName === "children" || propName === "slots") return undefined;
-    const contract = definition.contract.props[propName]!;
-    const input = contract.type === "boolean" && attribute.value === "" ? true : attribute.value;
-    const parsed = parseTypedValue(input, contract.type);
-    if (!parsed.ok) return undefined;
-    props.push([propName, parsed.value]);
-  }
-  return { attributes, props, literals, projectedSlots };
-}
-
-/**
- * Checks the invocations a factory-compiled parent contains. Such a parent emits plain DOM, so an
- * invocation becomes a factory call carrying static invocation data and projected nodes grouped by
- * the child's declared slots. A parent the general runtime renders has no such limit: it renders
- * the invocation itself.
- */
-function assertCompilableInvocations(
-  node: ComponentGraphNode,
-  invoked: ReadonlyMap<string, string>,
-  nodes: ReadonlyMap<string, ComponentGraphNode>,
-): void {
-  visitComponentNodes(node.definition.template, (invocation) => {
-    const target = invoked.get(invocation.name);
-    if (target === undefined) return;
-    const options = factoryInvocationOptions(invocation, nodes.get(target)!.definition);
-    if (options === undefined) {
-      diagnostic(
-        "HN009",
-        `Compiled invocation <${invocation.name}> cannot yet carry dynamic or unsupported attributes, projected children, ` +
-        "events, refs, or structural flow. A component the general runtime renders can.",
-        node.url,
-        getDiagnosticLocation(invocation),
-      );
-    }
-    if (Object.entries(nodes.get(target)!.definition.contract.props).some(([name, prop]) =>
-      prop.required && !options.props.some(([provided]) => provided === name)
-    )) {
-      diagnostic(
-        "HN014",
-        `Compiled invocation <${invocation.name}> requires an input that the compiled invocation did not provide. ` +
-          "A component the general runtime renders can.",
-        node.url,
-        getDiagnosticLocation(invocation),
-      );
-    }
-  });
-}
-
 function supportSource(
   imports: ReadonlySet<string>,
   runtimeRendered: ReadonlyMap<string, ComponentDefinition>,
@@ -395,83 +279,6 @@ $1manageComponentLifecycle(`,
   return `${imports.join("\n")}\n${routed}`;
 }
 
-function routeComponentInvocations(
-  module: string,
-  node: ComponentGraphNode,
-  invoked: ReadonlyMap<string, string>,
-  nodes: ReadonlyMap<string, ComponentGraphNode>,
-): string {
-  if (invoked.size === 0) return module;
-  const imports: string[] = [];
-  let routed = module;
-  for (const [tag, url] of invoked) {
-    const target = nodes.get(url)!;
-    const factory = `create${target.definition.contract.name}`;
-    imports.push(`import { ${factory} } from ${JSON.stringify(componentId(url))};`);
-    const creation = `document.createElement(${JSON.stringify(tag)})`;
-    const options: Array<ReturnType<typeof factoryInvocationOptions>> = [];
-    visitComponentNodes(node.definition.template, (invocation) => {
-      if (invocation.name !== tag) return;
-      options.push(factoryInvocationOptions(invocation, target.definition));
-    });
-    let invocation = 0;
-    const removeAttributeLines = new Set<string>();
-    const variables = new Map<string, FactoryInvocationOptions>();
-    routed = routed.split("\n").flatMap((line) => {
-      const match = line.match(
-        new RegExp(`^(\\s*)const ([A-Za-z_$][A-Za-z0-9_$]*) = ${escapePattern(creation)};$`),
-      );
-      if (match === null) return removeAttributeLines.has(line) ? [] : [line];
-      const literalOptions = options[invocation++]!;
-      if (literalOptions === undefined) return [line];
-      variables.set(match[2]!, literalOptions);
-      for (const [name, value] of literalOptions.literals) {
-        removeAttributeLines.add(`${match[1]}${match[2]}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(value)});`);
-      }
-      const properties = [
-        ...(literalOptions.attributes.length === 0 ? [] : [`attributes: ${JSON.stringify(Object.fromEntries(literalOptions.attributes))}`]),
-        ...literalOptions.props.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`),
-      ];
-      const factoryOptions = properties.length === 0 ? "" : `({ ${properties.join(", ")} })`;
-      return literalOptions.projectedSlots.length > 0 ? [line] : [`${match[1]}const ${match[2]} = ${factory}(${factoryOptions});`];
-    }).join("\n");
-    if (variables.size === 0) {
-      diagnostic("HN013", `The native generator did not expose compiled invocation <${tag}>.`, node.url);
-    }
-    for (const [variable, invocationOptions] of variables) {
-      if (invocationOptions.projectedSlots.length > 0) {
-        const content = `${variable}Children`;
-        const slotEntries = new Map<string, string[]>();
-        for (const [index, slot] of invocationOptions.projectedSlots.entries()) {
-          const nodes = slotEntries.get(slot) ?? [];
-          nodes.push(`${content}[${index}]`);
-          slotEntries.set(slot, nodes);
-        }
-        const properties = [
-          ...(invocationOptions.attributes.length === 0 ? [] : [`attributes: ${JSON.stringify(Object.fromEntries(invocationOptions.attributes))}`]),
-          ...invocationOptions.props.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`),
-          ...(slotEntries.get("") === undefined ? [] : [`children: [${slotEntries.get("")!.join(", ")}]`]),
-          ...(slotEntries.size === (slotEntries.has("") ? 1 : 0) ? [] : [
-            `slots: { ${[...slotEntries.entries()].filter(([slot]) => slot !== "").map(([slot, nodes]) =>
-              `${JSON.stringify(slot)}: [${nodes.join(", ")}]`).join(", ")} }`,
-          ]),
-        ];
-        const compiled = `${variable}Projected`;
-        routed = routed.replace(
-          new RegExp(`^(\\s*)([A-Za-z_$][A-Za-z0-9_$]*)\\.append\\(${escapePattern(variable)}\\);$`, "m"),
-          `$1const ${content} = Array.from(${variable}.childNodes);\n$1const ${compiled} = ${factory}({ ${properties.join(", ")} });\n$1$2.append(${compiled});`,
-        );
-      }
-      // A delegated root carries every owner's token.
-      const tag = JSON.stringify(node.definition.contract.tag);
-      routed = routed.replace(
-        `${variable}.setAttribute("data-component", ${tag});`,
-        `${variable}.setAttribute("data-component", [${variable}.getAttribute("data-component"), ${tag}].filter(Boolean).join(" "));`,
-      );
-    }
-  }
-  return `${imports.join("\n")}\n${routed}`;
-}
 
 function visitTemplate(node: TemplateNode, capabilities: Set<string>): void {
   if (node.kind === "slot") {
@@ -584,6 +391,9 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
         noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
         directExtend,
+        // Each component the template invokes, by the module exporting its factory.
+        invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
+          [tag, { module: componentId(url), definition: graph.nodes.get(url)!.definition }])),
       }));
       const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
       if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
@@ -612,12 +422,9 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         styleId,
       );
       const invoked = invocations.edges.get(node.id) ?? new Map<string, string>();
+      // A compiled template imports the factories it invokes; the general runtime renders its own.
       if (invoked.size > 0 && module.includes("manageComponentLifecycle")) {
-        // The general runtime renders this template, so it renders the invocations too.
         module = routeRenderedInvocations(module, invoked, graph.nodes, renderedComponents);
-      } else {
-        assertCompilableInvocations(node, invoked, graph.nodes);
-        module = routeComponentInvocations(module, node, invoked, graph.nodes);
       }
       module = routeSupportImports(module, supportImports);
       components.set(resolvedComponentId(node.id), module);

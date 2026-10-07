@@ -44,13 +44,25 @@ export interface GenerationOptions {
    * path does not cover yet keeps the fallback. Off by default.
    */
   readonly directExtend?: boolean;
+  /**
+   * The components this definition's template invokes, by tag: the module exporting each one's
+   * factory, and its definition. A compiled invocation calls that factory, as live lowering
+   * renders the registered component; a tag not listed stays a plain custom element.
+   */
+  readonly invocations?: ReadonlyMap<string, Invoked>;
+}
+
+/** A component another's template invokes: the module exporting its factory, and its definition. */
+export interface Invoked {
+  readonly module: string;
+  readonly definition: ComponentDefinition;
 }
 
 export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend !== false);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend !== false, options?.invocations);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;

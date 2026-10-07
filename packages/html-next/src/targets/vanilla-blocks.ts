@@ -30,6 +30,7 @@ import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, typeAtKey, type TypeNode } from "../type-system.js";
 import { kebabCase } from "../names.js";
 import { runtimeProps } from "./shared.js";
+import type { Invoked } from "../generate.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
 const NESTED = 1 << 30;
@@ -170,11 +171,36 @@ interface Block {
   readonly parent: Block | undefined;
   /** A read below walks up through this block's record, which then links its parent's (`u`). */
   needsParent?: boolean;
+  /** Components the block invokes, each where a placeholder holds its place. */
+  readonly invocations: Invocation[];
+}
+
+/**
+ * A component the template invokes, created through its factory where the placeholder sits, as
+ * live lowering puts the component's root in place of the invocation.
+ */
+interface Invocation {
+  readonly site: number;
+  readonly factory: string;
+  /** Literal prop attributes, which the component reads as HTML input. */
+  readonly html: readonly (readonly [string, string])[];
+  /** Literal attributes that are not props: the component's root takes them as an invocation's. */
+  readonly attributes: readonly (readonly [string, string])[];
+  /** Bound props: each starts as its attribute text, then applies as its value whenever what it read changes. */
+  readonly props: readonly { readonly name: string; readonly attribute: string; readonly expression: Lowered; readonly record: string;
+    /** The prop's type, which a bound value must satisfy to be written (unknown, `undefined`, for a select prop). */
+    readonly type: unknown }[];
+  readonly events: Block["events"];
+  readonly ref?: { readonly name: string; readonly iterated: boolean } | undefined;
+  /** The parent's own content, projected into the component's slots. */
+  readonly projection?: Block | undefined;
+  /** The template's root: the parent delegates its root to this component and shares it. */
+  readonly root: boolean;
 }
 
 /** Whether a block, or a region below it, listens: removing it must stop those listeners. */
 function disposable(block: Block): boolean {
-  return block.events.length > 0 ||
+  return block.events.length > 0 || block.invocations.length > 0 ||
     block.regions.some((region) => [region.block, ...region.arms ?? []].some(disposable));
 }
 
@@ -563,6 +589,8 @@ function listOwned(region: Region): boolean {
 function readsPosition(block: Block): boolean {
   return block.bindings.some((binding) => binding.expression.positional === true ||
       binding.parts?.some((part) => typeof part !== "string" && part.positional === true) === true) ||
+    block.invocations.some((invocation) => invocation.props.some((prop) => prop.expression.positional === true) ||
+      invocation.projection !== undefined && readsPosition(invocation.projection)) ||
     block.regions.some((region) => region.test?.positional === true || region.list?.positional === true ||
       region.kind !== "each" && [region.block, ...region.arms ?? []].some(readsPosition));
 }
@@ -696,7 +724,8 @@ class Planner {
   readonly initializers: string[] = [];
   readonly handlers = new Map<string, HandlerPlan>();
 
-  constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition) {
+  constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition,
+    readonly invocations: ReadonlyMap<string, Invoked> = new Map()) {
     const types: TypeScope = { get: () => undefined };
     declareTypes(types, definition);
     this.scope = { roots, aliases: [], level: 0, types, computed: (index) => this.computedLowered(index) };
@@ -860,6 +889,7 @@ class Planner {
     const block: Block = {
       id: this.blocks.length, spec: undefined, sites: [], bindings: [], regions: [], row,
       svg: root ? element.name === "svg" : svg, events: [], refs: [], selects: [], alias, level: outer.level, parent: root ? undefined : outer.block,
+      invocations: [],
     };
     this.blocks.push(block);
     const scope: Scope = { ...outer, block };
@@ -871,8 +901,9 @@ class Planner {
       return block;
     }
     const spec = this.element(block, element, [], scope, root, svg);
-    // The root's own element is the factory's; its children clone from a fragment.
-    (block as { spec: unknown }).spec = root ? ["", [], ...spec.slice(2)] : spec;
+    // The root's own element is the factory's; its children clone from a fragment. An invocation's
+    // block starts from its placeholder, and its node becomes the component's root.
+    (block as { spec: unknown }).spec = spec === 5 ? 5 : root ? ["", [], ...spec.slice(2)] : spec;
     return block;
   }
 
@@ -884,8 +915,13 @@ class Planner {
     return block.sites.length - 1;
   }
 
-  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] {
-    if (EXCLUDED.has(node.name) || node.name.includes("-")) notYetDirect();
+  element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] | 5 {
+    if (EXCLUDED.has(node.name)) notYetDirect();
+    // A component the graph compiles renders through its factory; any other custom element is an
+    // element, as an unregistered one is to live lowering.
+    // A root that is another component's invocation delegates to it: they share its root.
+    const invoked = (!root || this.definition.root?.kind === "component") && node.name.includes("-") ? this.invocations.get(node.name) : undefined;
+    if (invoked !== undefined) return this.invocation(block, node, path, scope, invoked, parentSvg);
     if (node.ref !== undefined) {
       block.refs.push({ site: this.site(block, path), name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) });
     }
@@ -971,6 +1007,48 @@ class Planner {
   }
 
   /**
+   * Plans an invocation as live lowering treats one: literal props are the component's HTML input,
+   * other literals and every non-prop binding go to its root, bound props apply as values, listeners
+   * and the ref follow its root, and the children are this template's content projected into it.
+   */
+  invocation(block: Block, node: ElementNode, path: readonly number[], scope: Scope, invoked: Invoked, svg: boolean): 5 {
+    const site = this.site(block, path);
+    const contract = invoked.definition.contract;
+    const propOf = (name: string): string | undefined =>
+      Object.keys(contract.props).find((prop) => kebabCase(prop) === name.toLowerCase());
+    const html: [string, string][] = [];
+    const attributes: [string, string][] = [];
+    const props: { name: string; attribute: string; expression: Lowered; record: string; type: unknown }[] = [];
+    const rest: ElementNode["attributes"][number][] = [];
+    for (const attribute of node.attributes) {
+      const prop = attribute.kind === "property" || attribute.kind === "directive" || attribute.kind === "attribute" && attribute.target !== undefined
+        ? undefined : propOf(attribute.name);
+      if (attribute.kind === "literal") (prop === undefined ? attributes : html).push([prop ?? attribute.name, attribute.value]);
+      else if (attribute.kind === "directive" || attribute.kind === "attribute" && attribute.twoWay === true) notYetDirect();
+      else if (prop !== undefined && attribute.kind === "attribute") {
+        // Re-applied exactly when what it read changes, as its live effect re-runs.
+        const recording = this.recording(scope);
+        const contract = invoked.definition.contract.props[prop]!;
+        props.push({ name: prop, attribute: attribute.name, expression: this.checked(attribute.expressionPlan!, recording), record: recording.record!,
+          type: contract.select === undefined ? contract.type : undefined });
+      } else rest.push(attribute);
+    }
+    // Every other binding targets the component's root, which the site holds once it is created.
+    this.element(block, { kind: "element", name: "div", attributes: rest, children: [] }, path, scope, true, svg);
+    const carriers = node.children.filter((child) => child.kind === "element" && child.name === "template" &&
+      child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot"));
+    if (carriers.length > 0) notYetDirect();
+    const projection = node.children.length === 0 ? undefined : this.block({ kind: "element", name: "template", attributes: [], children: node.children },
+      false, { ...scope, level: scope.level + 1 }, false, svg, false);
+    block.invocations.push({
+      site, factory: `create${contract.name}`, html, attributes, props, projection, root: path.length === 0 && block.parent === undefined,
+      events: (node.events ?? []).map((event) => ({ site, name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers })),
+      ref: node.ref === undefined ? undefined : { name: node.ref, iterated: iteratedRefNames(this.definition).has(node.ref) },
+    });
+    return 5;
+  }
+
+  /**
    * Plans children from position `start` under `path`. A `<template>` without a flow is a fragment
    * carrier: its children take its place (`$value` a text node, `$html` a range of its own).
    */
@@ -982,8 +1060,9 @@ class Planner {
         ? this.carrier(block, child, path, index, scope, svg)
         : [this.child(block, parent, child, [...path, index], scope, svg)];
       for (const item of planned) {
-        items.push(item);
-        // A region is an anchor pair, so the next child sits two nodes on.
+        // An invoked component's placeholder is an empty Text, which its root replaces.
+        items.push(item === 5 ? 0 : item);
+        // A region is an anchor pair, so the next child sits two nodes on; an invocation's placeholder is one.
         index += item === 1 || item === 2 || item === 3 || item === 4 ? 2 : 1;
       }
     }
@@ -1189,13 +1268,13 @@ class Planner {
  * Plans a component for direct-extend emission, or returns undefined when it uses a feature the
  * subset does not cover yet (the caller keeps the general-runtime fallback).
  */
-export function blockPlan(definition: ComponentDefinition): BlockPlan | undefined {
+export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>): BlockPlan | undefined {
   try {
     const arms = rootArms(definition.template);
-    if (definition.root?.kind === "component" || arms === undefined && definition.template.flow !== undefined) return undefined;
+    if (arms === undefined && definition.template.flow !== undefined) return undefined;
 
     const roots = compileRoots(definition);
-    const planner = new Planner(roots, definition);
+    const planner = new Planner(roots, definition, invocations);
     // A root `$match` renders the arm its tests choose (read with `evalValue`, unchecked), each its own root.
     const nodes = (arms ?? [definition.template]).map((arm) => { const { flow: _flow, ...body } = arm; return body; });
     const armBlocks = nodes.map((node) => planner.block(node, false, planner.scope, true, false));
@@ -1335,7 +1414,20 @@ function regionOuter(block: Block): number {
     if (region.test !== undefined) mask |= outerOf(region.test);
     if (region.list !== undefined) mask |= outerOf(region.list) | (region.list.nested ? NESTED : 0);
     if (region.kind !== "each") for (const body of [region.block, ...region.arms ?? []]) {
-      mask |= body.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | regionOuter(body);
+      mask |= body.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | invocationOuter(body) | regionOuter(body);
+    }
+  }
+  return mask;
+}
+
+/** What a block's invocations read besides its item: their bound props and projected content. */
+function invocationOuter(block: Block): number {
+  let mask = 0;
+  for (const invocation of block.invocations) {
+    for (const prop of invocation.props) mask |= outerOf(prop.expression);
+    const projection = invocation.projection;
+    if (projection !== undefined) {
+      mask |= projection.bindings.reduce((all, binding) => all | outerOf(finalExpression(binding)), 0) | invocationOuter(projection) | regionOuter(projection);
     }
   }
   return mask;
@@ -1347,6 +1439,7 @@ export function emitBlocks(
   definition: ComponentDefinition,
   version: string,
   rootLines: readonly string[],
+  invocations?: ReadonlyMap<string, Invoked>,
 ): string {
   const { contract } = definition;
   const blocks = plan.blocks;
@@ -1376,6 +1469,11 @@ export function emitBlocks(
         if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
       });
     });
+    block.invocations.forEach((invocation, index) => {
+      if (block.sites[invocation.site]!.length > 0 && !written.has(invocation.site)) entries.push(`a${invocation.site}: ${sites[invocation.site]}`);
+      entries.push(`h${index}: undefined`, ...invocation.projection === undefined ? [] : [`j${index}: undefined`],
+        ...invocation.props.map((_, at) => `q${index}_${at}: undefined`));
+    });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
       if (region.kind !== "each") {
@@ -1391,9 +1489,71 @@ export function emitBlocks(
     });
     return entries;
   };
-  /** The update body: guard groups in first-binding order, then regions. */
+  /**
+   * Creates the block's invocations when it first renders, as live lowering puts each component's
+   * root in its invocation's place, then applies their bound props whenever those re-run.
+   */
+  const invoke = (block: Block): string[] => block.invocations.flatMap((invocation, index) => {
+    const site = field(block, invocation.site);
+    const projection = invocation.projection;
+    const make = projection === undefined ? undefined : `m${projection.id}(d${projection.needsParent === true ? ", undefined, r" : ""})`;
+    const ref = invocation.ref;
+    const refKey = ref === undefined ? "" : JSON.stringify(ref.name);
+    // What the parent bound on the invocation moves with the component's root when a root switch replaces it.
+    const follow = [
+      `${site} = root;`,
+      ...invocation.root ? ["followShared(I, previous, root);"] : [],
+      ...ref === undefined ? [] : [ref.iterated
+        ? `{ const list = I.r[${refKey}]; const at = list?.indexOf(previous) ?? -1; if (at >= 0) list[at] = root; }`
+        : `if (I.r[${refKey}] === previous) I.r[${refKey}] = root;`],
+      ...block.bindings.filter((binding) => binding.site === invocation.site && binding.kind === "property").flatMap((binding) => {
+        const value = `x${block.bindings.indexOf(binding)}`;
+        return [`const ${binding.exact} = [];`, `const ${value} = ${convertible(binding.expression)};`,
+          `r.v${block.bindings.indexOf(binding)} = ${binding.exact};`,
+          `${binding.expression.fails ? `if (${value} !== NONCONFORMING) ` : ""}root[${JSON.stringify(binding.name)}] = ${value};`];
+      }),
+    ];
+    return [
+      `  if (r.h${index} === undefined) {`,
+      ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
+      `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
+      // A bound prop is first its attribute's text, which the component reads as HTML input, then its value.
+      ...invocation.props.flatMap((prop, at) => [
+        `    const ${prop.record} = [], y${at} = ${convertible(prop.expression)};`,
+        `    r.q${index}_${at} = ${prop.record};`,
+        `    { const t = propText(${JSON.stringify(prop.type)}, y${at}, ${JSON.stringify(prop.attribute)}); if (t !== null) H[${JSON.stringify(prop.name)}] = t; }`,
+      ]),
+      `    r.h${index} = invoke(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
+        make === undefined ? "" : ", ...projected(j.n)"} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
+      `    ${site} = r.h${index}.e;`,
+      // The shared root carries both markers, and this component's lifecycle rides its owner's.
+      ...invocation.root ? [
+        `    I.e = ${site};`,
+        `    I.L = delegateLifecycle(r.h${index});`,
+        // Outer to inner, as live's lineage lists a delegated root's components.
+        `    I.e.setAttribute("data-component", \`${contract.tag} \${I.e.getAttribute("data-component")}\`);`,
+      ] : [],
+      ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (y${at} !== NONCONFORMING) ` : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`),
+      ...ref === undefined ? [] : [ref.iterated ? `    (I.r[${refKey}] ??= []).push(${site});` : `    I.r[${refKey}] = ${site};`],
+      ...invocation.events.map((event) => `    r.z.push(${listener(event, `r.h${index}`, true)});`),
+      ...projection === undefined ? [] : [`    r.z.push(() => dispose(r.j${index}));`],
+      `  } else {`,
+      ...projection === undefined ? [] : [`    p${projection.id}(r.j${index}, c, d);`],
+      ...invocation.props.flatMap((prop, at) => [
+        `    if (${guard(maskOf(prop.expression))}) {`,
+        `      const ${prop.record} = [], x = ${convertible(prop.expression)};`,
+        `      if (c === -1${rootsWritten(prop.expression)} || readsChanged(r.q${index}_${at}, ${prop.record})) {`,
+        `        r.q${index}_${at} = ${prop.record};`,
+        `        ${prop.expression.fails ? "if (x !== NONCONFORMING) " : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, x);`,
+        "      }",
+        "    }",
+      ]),
+      "  }",
+    ];
+  });
+  /** The update body: invocations, guard groups in first-binding order, then regions. */
   const patch = (block: Block): string[] => {
-    const lines: string[] = [];
+    const lines: string[] = [...invoke(block)];
     // One group per mask, except that writes to one element's attributes and classes keep their
     // authored order (it decides the order attributes and class tokens are created in).
     const groups: Array<{ readonly mask: number; readonly bindings: Binding[] }> = [];
@@ -1573,7 +1733,7 @@ export function emitBlocks(
         ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} } }`
         : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
-        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | regionOuter(region.block);
+        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | invocationOuter(region.block) | regionOuter(region.block);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c, d);`);
       for (const root of selectors(region)) {
         lines.push(`  if (c !== -1 && c & ${rootBit(root)}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
@@ -1582,7 +1742,8 @@ export function emitBlocks(
     return lines;
   };
 
-  const prototype = (block: Block): string => `buildTemplate(T${block.id}${block.svg ? ", document, 1" : ""})`;
+  const prototype = (block: Block): string => block.spec === 5 ? 'document.createTextNode("")'
+    : `buildTemplate(T${block.id}${block.svg ? ", document, 1" : ""})`;
   const body: string[] = [];
   /** Listeners and refs of a block, and what disposing its record stops. */
   const ownership = (block: Block, sites: readonly string[], record: string, indent: string): string[] => {
@@ -1609,11 +1770,13 @@ export function emitBlocks(
     if (stops.length > 0) lines.push(`${indent}${record}.z = [${stops.join(", ")}];`);
     return lines;
   };
-  const listener = (event: Block["events"][number], target: string): string => {
+  /** A listener; on an invocation (`invoked`), `target` is the component's handle and it follows its root. */
+  const listener = (event: Block["events"][number], target: string, invoked = false): string => {
+    const element = invoked ? "event.currentTarget" : target;
     const filter = event.modifiers.some((modifier) => !["capture", "once", "passive", "prevent", "stop"].includes(modifier))
-      ? `if (!eventPasses(event, ${target}, ${JSON.stringify(event.modifiers)})) return; ` : "";
+      ? `if (!eventPasses(event, ${element}, ${JSON.stringify(event.modifiers)})) return; ` : "";
     const effects = `${event.modifiers.includes("prevent") ? "event.preventDefault(); " : ""}${event.modifiers.includes("stop") ? "event.stopPropagation(); " : ""}`;
-    return `listen(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")})`;
+    return `${invoked ? "listenRoot" : "listen"}(I, ${target}, ${JSON.stringify(event.name)}, (event) => { ${filter}${effects}${event.handler}(event); }, ${event.modifiers.includes("capture")}, ${event.modifiers.includes("passive")}, ${event.modifiers.includes("once")})`;
   };
   const armIds = new Set(plan.arms?.blocks.map((block) => block.id) ?? []);
   for (const block of blocks.slice(1)) {
@@ -1655,6 +1818,7 @@ export function emitBlocks(
     );
   }
   const propNames = Object.keys(contract.props);
+  const delegated = plan.root.spec === 5;
   const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
   /** Whether the props' `data-<name>` the root's template binds itself, which is then its output. */
   const boundProps = (node: ElementNode): string[] => propNames.filter((name) =>
@@ -1710,7 +1874,7 @@ export function emitBlocks(
   const rootWalk: string[] = [];
   const rootSites = walk("element", root.sites, rootWalk, "t");
   const rootEntries = fields(root, rootSites);
-  if (root.bindings.some((binding) => root.sites[binding.site]!.length === 0)) rootEntries.unshift("n: element");
+  if (delegated || root.bindings.some((binding) => root.sites[binding.site]!.length === 0)) rootEntries.unshift("n: element");
   if (plan.arms === undefined) body.push(
     "  const p0 = (r, c, d) => {",
     ...patch(root).map((line) => `  ${line}`),
@@ -1725,7 +1889,7 @@ export function emitBlocks(
     ]),
   );
   const instance = plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
-    blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
+    blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
@@ -1743,7 +1907,7 @@ export function emitBlocks(
       ...root.bindings.filter((binding) => binding.kind === "control").map((binding) => `    bindControl(I, ${siteOf(binding.site)}, ${binding.path});`),
       "  }",
     ] : [],
-    "  return element;",
+    delegated ? "  return I.e;" : "  return element;",
     "}",
   );
   /** Creates the root with the factory's attributes, then the template's literals, then its marker. */
@@ -1772,17 +1936,23 @@ export function emitBlocks(
     });
   }
   const factory = [
-    `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}) {`,
-    propNames.length === 0 && !slotted ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
-    ...plan.arms === undefined ? [
+    // `html` is an invocation's literal props, which a compiled parent passes as HTML input.
+    `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 ? ", html" : ""}) {`,
+    propNames.length === 0 && !slotted && !delegated ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
+    ...delegated ? [
+      // The root is the invoked component's, created when the root block first renders.
+      "  const element = document.createTextNode(\"\");",
+      `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(undefined, D, S.n, v, componentProps, [], html);`]),
+    ] : plan.arms === undefined ? [
       ...element(definition.template.name, rootLines),
       ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(boundProps(definition.template))});`]),
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(boundProps(definition.template))}, html);`]),
     ] : [
       // The props choose the arm, as live's factory chooses it, before the root exists.
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : ["  acceptProps(undefined, D, S.n, v, componentProps, []);"]),
+      ...(propNames.length === 0 ? [] : ["  acceptProps(undefined, D, S.n, v, componentProps, [], html);"]),
     ],
     ...plan.initializers,
     ...(plan.computeds.length === 0 ? [] : [
@@ -1813,7 +1983,7 @@ export function emitBlocks(
         ...element(node.name, armLiterals(node), "  ", "").map((line) => `  ${line}`),
       ]),
       "  }",
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, Q[a]);`]),
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, Q[a], html);`]),
     ],
     ...body,
   ];
@@ -1836,16 +2006,22 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot"]
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot", "armElement", "replaceRoot", "invoke",
+    "bindProp", "listenRoot", "projected", "propText", "delegateLifecycle", "followShared", "passThrough"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
-  const specs = blocks.flatMap((block) => built(block) ? [`const T${block.id} = ${JSON.stringify(block.spec)};`] : []);
+  const specs = blocks.flatMap((block) => built(block) && block.spec !== 5 ? [`const T${block.id} = ${JSON.stringify(block.spec)};`] : []);
 
   const prototypes = blocks.filter(built).map((block) => `P${block.id}`);
   return [
     `// Generated by HTML Next ${version} for Vanilla DOM. Do not edit.`,
     `import { ${helpers.join(", ")} } from "@nextwebwg/html-next/generated-runtime";`,
+    // Each invoked component's factory, from its own module.
+    ...[...new Set(blocks.flatMap((block) => block.invocations.map((invocation) => invocation.factory)))].map((factory) => {
+      const invoked = [...invocations?.values() ?? []].find((candidate) => `create${candidate.definition.contract.name}` === factory)!;
+      return `import { ${factory} } from ${JSON.stringify(invoked.module)};`;
+    }),
     ...(definition.controller === undefined ? [] : [`import * as controller from ${JSON.stringify(definition.controller)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
@@ -1879,11 +2055,12 @@ function armRoot(node: ElementNode, definition: ComponentDefinition): ArmRoot {
   let style = "";
   const written = [stateAttribute(definition.contract.tag), ...Object.keys(definition.contract.props).map((name) => `data-${kebabCase(name)}`)];
   for (const attribute of node.attributes) {
+    // Every literal renders on the arm's root; class and style are also the arm's own tokens and properties.
+    if (attribute.kind === "literal") literals[attribute.name] = attribute.value;
     if (attribute.kind === "literal" && attribute.name === "class") classes.push(...attribute.value.split(/\s+/));
     else if (attribute.kind === "attribute" && attribute.target === "class") classes.push(attribute.name);
     else if (attribute.kind === "literal" && attribute.name === "style") style += `;${attribute.value}`;
     else if (attribute.kind === "attribute" && attribute.target === "style") styles.push(attribute.name);
-    else if (attribute.kind === "literal") literals[attribute.name] = attribute.value;
     else if (attribute.kind === "attribute") written.push(attribute.name);
     // A reflecting property writes its attribute: `.disabled` writes `disabled`.
     else if (attribute.kind === "property") written.push(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());

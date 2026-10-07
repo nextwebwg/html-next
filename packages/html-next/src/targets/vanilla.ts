@@ -22,6 +22,7 @@ import { kebabCase } from "../names.js";
 import { dependentPropTypeSource, selectorGenerics, serializedDefinition } from "./shared.js";
 import { targetComponent } from "./backend.js";
 import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
+import type { Invoked } from "../generate.js";
 
 function js(value: string): string {
   return JSON.stringify(value);
@@ -1272,11 +1273,19 @@ function renderAttributes(
   }
 }
 
+/** Whether a template invokes one of the given components, in its fallbacks too. */
+function invokesAny(node: TemplateNode, invocations: ReadonlyMap<string, Invoked>): boolean {
+  if (node.kind === "text") return false;
+  if (node.kind === "slot") return (node.fallback ?? []).some((child) => invokesAny(child, invocations));
+  return invocations.has(node.name) || node.children.some((child) => invokesAny(child, invocations));
+}
+
 export function generateVanilla(
   definition: ComponentDefinition,
   version: string,
   noContextReaders = false,
   directExtend = false,
+  invocations?: ReadonlyMap<string, Invoked>,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
   const target = targetComponent(definition);
@@ -1288,7 +1297,9 @@ export function generateVanilla(
   const hasRequired = props.some(([, prop]) => prop.required);
   // A root `$match` renders the arm the props choose; the runtime makes that choice, as it does in HTML.
   const arms = rootArms(template);
-  const direct = directReactivePlan(definition, noContextReaders);
+  // A template invoking a compiled component renders through its factory, on the direct path.
+  const invokes = invocations !== undefined && invokesAny(template, invocations);
+  const direct = invokes ? undefined : directReactivePlan(definition, noContextReaders);
   const directHasLifecycle = direct !== undefined && hasDirectLifecycleEvent(template);
   const directHasDisconnect = direct !== undefined && hasDirectDisconnectEvent(template);
   const directDispatches = directHasDispatch(direct);
@@ -1328,14 +1339,14 @@ export function generateVanilla(
   const directOutputEquality = directRendered.some((variable) => variable !== undefined);
   const directInitialOutputEquality = directOutputEquality &&
     directRendered.every((variable) => variable !== undefined);
-  const directProps = direct === undefined ? directPropPlan(definition) : undefined;
+  const directProps = direct === undefined && !invokes ? directPropPlan(definition) : undefined;
   const directPropSingle = directProps !== undefined && directProps.props.size === 1;
   // Only a component the other direct paths decline and that would otherwise need the general
   // runtime is planned: static output already needs no runtime at all.
   const runtimeFallback = direct === undefined && directProps === undefined && (
-    arms !== undefined || props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
+    invokes || arms !== undefined || props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
   );
-  const blocks = directExtend && runtimeFallback ? blockPlan(definition) : undefined;
+  const blocks = directExtend && runtimeFallback ? blockPlan(definition, invocations) : undefined;
   const needsRuntime = runtimeFallback && blocks === undefined;
   // A handler's write that fails a numeric state's type warns once, as the live runtime warns.
   const directWarns = direct !== undefined && [...direct.handlers.values()].some(({ declaration }) => declaration.steps.some((step) => {
@@ -1750,7 +1761,7 @@ export function generateVanilla(
     const rootLines: string[] = [];
     const literals = { ...template, attributes: template.attributes.filter((attribute) => attribute.kind === "literal") };
     renderAttributes(literals, "element", rootLines, contract.props, { value: 0 }, "  ", undefined, undefined, true);
-    return { module: emitBlocks(blocks, definition, version, rootLines), declaration };
+    return { module: emitBlocks(blocks, definition, version, rootLines, invocations), declaration };
   }
   return { module: `${lines.join("\n")}\n`, declaration };
 }
