@@ -229,29 +229,46 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "list.js"), `export default (host) => {
       host.on("connect", () => { host.state.ready = true; host.state.rows = [{ id: 1, label: "one" }, { id: 2, label: "two" }]; });
     };`);
-    await writeFile(join(root, "main.js"), `export { createXList } from ${JSON.stringify(componentsModule)};`);
+    // Arithmetic is not on the direct path yet, so this component still needs the general runtime.
+    await writeFile(join(root, "counter.html"), `<template component="x-counter" controller="./list.js" status="early" summary="Counter.">
+      <defs><state name="count" type="number" value="1"></state></defs>
+      <output $value="count + 1"></output>
+    </template>`);
     const aliases = {
       "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
       "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
     };
-    const bundle = async (experimentalDirectExtend: boolean): Promise<string> => {
-      const outDir = join(root, experimentalDirectExtend ? "direct" : "runtime");
+    const bundle = async (entries: string[], experimentalDirectExtend: boolean): Promise<{ text: string; manifest: any }> => {
+      const outDir = join(root, `${entries.length}-${experimentalDirectExtend ? "direct" : "runtime"}`);
+      await writeFile(join(root, "main.js"), `export { ${entries.map((entry) => `createX${entry[0]!.toUpperCase()}${entry.slice(1, -5)}`).join(", ")} } from ${JSON.stringify(componentsModule)};`);
       await build({
         root,
         logLevel: "silent",
-        plugins: [htmlNext.vite({ entries: ["list.html"], root, manifestFile: false, experimentalDirectExtend })],
+        plugins: [htmlNext.vite({ entries, root, manifestFile: "html-next.manifest.json", experimentalDirectExtend })],
         resolve: { alias: aliases },
         build: { minify: false, outDir, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
       });
-      return readFile(join(outDir, "app.js"), "utf8");
+      return {
+        text: await readFile(join(outDir, "app.js"), "utf8"),
+        manifest: JSON.parse(await readFile(join(outDir, "html-next.manifest.json"), "utf8")),
+      };
     };
-    const runtime = await bundle(false);
-    const direct = await bundle(true);
-    assert.match(runtime, /function manageComponentLifecycle/);
-    assert.doesNotMatch(direct, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
-    assert.match(direct, /function attachGeneratedController/);
-    assert.match(direct, /class KeyedList/);
-    assertClosedOverEntries(direct);
+    const runtime = await bundle(["list.html"], false);
+    const direct = await bundle(["list.html"], true);
+    assert.match(runtime.text, /function manageComponentLifecycle/);
+    assert.equal(runtime.manifest.directExtend, undefined);
+    assert.doesNotMatch(direct.text, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
+    assert.match(direct.text, /function attachGeneratedController/);
+    assert.match(direct.text, /class KeyedList/);
+    assert.deepEqual(direct.manifest.directExtend, { applied: true, runtimeComponents: [] });
+    assertClosedOverEntries(direct.text);
+
+    // One component that still needs the general runtime keeps the whole graph on today's output,
+    // so the option never adds the direct helpers next to the runtime.
+    const mixedRuntime = await bundle(["list.html", "counter.html"], false);
+    const mixedDirect = await bundle(["list.html", "counter.html"], true);
+    assert.equal(mixedDirect.text, mixedRuntime.text);
+    assert.deepEqual(mixedDirect.manifest.directExtend, { applied: false, runtimeComponents: ["x-counter"] });
   });
 
   it("turns sibling component invocations from one resource into compiled factory calls", async () => {

@@ -36,8 +36,10 @@ export interface HtmlNextNativePluginOptions {
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
   /**
-   * Experimental: compile eligible controller components (declared state, `$if`, keyed `$each`)
-   * to direct DOM updates instead of the general runtime. Other components are unchanged.
+   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
+   * DOM updates instead of the general runtime. Until the direct path covers every feature, a graph
+   * with any component that still needs the general runtime builds exactly as without this option
+   * (its direct helpers would only add bytes); the manifest names those components.
    */
   readonly experimentalDirectExtend?: boolean;
 }
@@ -78,6 +80,13 @@ export interface HtmlNextBuildManifest {
     readonly strategy: "external-custom-element";
     readonly usedBy: readonly string[];
   }[];
+  /** Present when `experimentalDirectExtend` was requested. */
+  readonly directExtend?: {
+    /** Whether the graph was compiled on the direct path. */
+    readonly applied: boolean;
+    /** Components that still need the general runtime; any one keeps the whole graph off the direct path. */
+    readonly runtimeComponents: readonly string[];
+  };
 }
 
 interface CompiledGraph {
@@ -533,16 +542,30 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
     ),
   );
 
-  for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
+  const sortedNodes = [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url));
+  const generateGraph = (directExtend: boolean) => sortedNodes.map((node) => {
     const definition: ComponentDefinition = node.controller === undefined
       ? node.definition
       : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
     const artifacts = generateComponent(definition, {
       noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
-      directExtend: options.experimentalDirectExtend === true,
+      directExtend,
     });
     const artifact = artifacts.find((candidate) => candidate.path === `vanilla/${definition.contract.name}.js`);
     if (artifact === undefined) throw new Error(`No native module was generated for ${definition.contract.tag}.`);
+    return { node, definition, artifacts, artifact };
+  });
+  const requested = options.experimentalDirectExtend === true;
+  let generated = generateGraph(requested);
+  // ponytail: all or nothing per graph. Direct helpers next to the general runtime only add bytes,
+  // so one component the direct path does not cover yet keeps the graph on today's output.
+  const runtimeComponents = requested
+    ? generated.filter(({ artifact }) => artifact.content.includes('"@nextwebwg/html-next/runtime"'))
+      .map(({ definition }) => definition.contract.tag).sort()
+    : [];
+  if (runtimeComponents.length > 0) generated = generateGraph(false);
+
+  for (const { node, definition, artifacts, artifact } of generated) {
     const encodedURL = encodeURIComponent(node.id);
     const styleId = `${stylePrefix}${encodedURL}.css`;
     let module = artifact.content.replace(
@@ -634,6 +657,9 @@ async function compileGraph(options: HtmlNextNativePluginOptions): Promise<Compi
         capabilities: sortedCapabilities,
       }),
       dynamicBoundaries: Object.freeze(dynamicManifest),
+      ...(requested ? {
+        directExtend: Object.freeze({ applied: runtimeComponents.length === 0, runtimeComponents: Object.freeze(runtimeComponents) }),
+      } : {}),
     }),
   });
 }
