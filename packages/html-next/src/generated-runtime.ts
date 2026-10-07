@@ -7,6 +7,7 @@ import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
+import { stateAttributeValue } from "./component-styles.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   createComputed,
@@ -479,6 +480,10 @@ export function writeHtmlRange(start: Comment, html: string): void {
   clearRegion(start, end as Comment);
   end.before(sanitizeFragment(html, start.ownerDocument, markContentOnly));
 }
+
+/** `data-<tag>-state` for the props and state `:host-state()` rules name, as live writes it. */
+export const hostState = (names: readonly string[], values: readonly unknown[]): string =>
+  stateAttributeValue(names, (name) => values[names.indexOf(name)]);
 
 /** Records a value a non-idempotent binding read, so it re-runs only when one of them changed. */
 export const rec = (reads: unknown[], value: unknown): unknown => (reads.push(value), value);

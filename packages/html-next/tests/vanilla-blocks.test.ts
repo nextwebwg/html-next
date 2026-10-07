@@ -35,9 +35,11 @@ function reference(text: string): string {
   const named = controlled ? { ...definition, controller: "./controller.js" } : definition;
   const root = definition.template.name;
   return [
-    'import { manageComponentLifecycle } from "@nextwebwg/html-next/runtime";',
+    'import { manageComponentLifecycle, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
     ...controlled ? ['import * as controller from "./controller.js";'] : [],
-    `const definition = ${serializedDefinition(named)};`,
+    // Registered as a live document registers it, with its styles and their `:host-state()` names.
+    `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
+    "registerComponentDefinitions([definition]);",
     "export function createReference() {",
     root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
     `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
@@ -116,7 +118,6 @@ describe("direct-extend Vanilla generation", () => {
     props: component(`${state}<prop name="size" type="number" default="1">Size.</prop>`, '<p $value="ready"></p>'),
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
     "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
-    "host state": component(state, '<p $value="ready"></p><style>:host-state([ready]) { color: red; }</style>'),
     slot: component(state, "<p><slot></slot></p>"),
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
@@ -673,6 +674,21 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.s31 = 5; host.state.s32 = 50; note(host, "s31"); },
       (host) => { host.state.s33 = 50; host.state.s0 = 9; host.root.querySelector("input").value = "again"; note(host, "s33"); },
       (host) => { host.state.s32 = 51; note(host, "s32"); },
+    ]);
+  });
+
+  it("keeps the :host-state attribute in step like the general runtime", async () => {
+    const text = component(`
+      <state name="ready" type="boolean" value="false"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
+      <state name="selected" type="number" nullable></state>
+      <state name="tone" type="string" value=""></state>`, `
+      <section><p>{tone}</p></section><style>:host-state([ready]) { color: red; } :host-state([tone="loud"]) { color: blue; }
+      :host-state([selected]) { outline: 1px solid; }</style>`);
+    await same(text, [
+      (host) => { host.state.tone = "loud"; host.state.selected = 2; },
+      (host) => { host.state.tone = ""; host.state.selected = 0; },
+      (host) => { host.state.ready = false; },
     ]);
   });
 

@@ -20,6 +20,7 @@ import {
 } from "../expression.js";
 import type { CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
+import { stateAttribute } from "../component-styles.js";
 import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
@@ -89,7 +90,7 @@ interface Lowered {
   readonly key: string;
 }
 
-type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range";
+type BindingKind = "attribute" | "url" | "class" | "style" | "property" | "value" | "text" | "mixed" | "control" | "html" | "range" | "hoststate";
 
 interface Binding {
   readonly site: number;
@@ -1125,10 +1126,20 @@ export function blockPlan(definition: ComponentDefinition): BlockPlan | undefine
     if (Object.keys(definition.contract.props).length > 0 ||
       (definition.slots?.length ?? 0) > 0 || definition.root?.kind === "component" ||
       rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
-    if (compileComponentStylesForBuild(definition.css, definition).stateNames.length > 0) return undefined;
+
     const roots = compileRoots(definition);
     const planner = new Planner(roots, definition);
     const root = planner.block(definition.template, false, planner.scope, true, false);
+    // `:host-state()` rules test `data-<tag>-state`, kept in step with the props and state they name.
+    const states = compileComponentStylesForBuild(definition.css, definition).stateNames;
+    if (states.length > 0) {
+      const values = states.map((name) => lower({ kind: "id", name }, planner.scope));
+      const reads = values.reduce<Reads>((all, value) => merge(all, value), none("", ""));
+      root.bindings.push({
+        site: planner.site(root, []), kind: "hoststate", name: stateAttribute(definition.contract.tag), initial: "undefined",
+        expression: { ...none(`hoststate`, `hostState(${JSON.stringify(states)}, [${values.map((value) => value.source).join(", ")}])`), ...reads },
+      });
+    }
     return { roots, root, blocks: planner.blocks, initializers: planner.initializers, handlers: [...planner.handlers.values()],
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]) };
   } catch (error) {
@@ -1377,6 +1388,10 @@ export function emitBlocks(
           case "text":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) ${site}.data = ${last} = ${output};`);
             break;
+          case "hoststate":
+            lines.push(`    const ${output} = ${value};`,
+              `    if (${output} !== ${last}) writeAttribute(${site}, ${JSON.stringify(binding.name)}, (${last} = ${output}) === "" ? null : ${output});`);
+            break;
           case "style":
             lines.push(`    const ${output} = toText(${value});`,
               `    if (${output} !== ${last}) ${site}.style.setProperty(${JSON.stringify(binding.name)}, ${last} = ${output});`);
@@ -1621,7 +1636,7 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat"]
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 
