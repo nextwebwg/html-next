@@ -8,13 +8,29 @@ import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
-import { generateComponent, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { generateComponent as generateCompiled, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { liveReference } from "./live-reference.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const runtimePath = new URL("../src/runtime.ts", import.meta.url).pathname;
 const generatedRuntimePath = new URL("../src/generated-runtime.ts", import.meta.url).pathname;
+
+/**
+ * With HTMLNEXT_LIVE_REFERENCE=1, each generated Vanilla module is the live runtime's reference
+ * instead (`live-reference.ts`), under the same factory name, so these browser scripts read what
+ * live does: compiled output must match it.
+ */
+const liveMode = process.env.HTMLNEXT_LIVE_REFERENCE === "1";
+const generateComponent: typeof generateCompiled = (definition, options) => {
+  const artifacts = generateCompiled(definition, options);
+  if (!liveMode) return artifacts;
+  return artifacts.map((artifact) => artifact.path !== `vanilla/${definition.contract.name}.js` ? artifact : {
+    ...artifact, content: `${liveReference(definition)}\nexport { createReference as create${definition.contract.name} };`,
+  });
+};
+/** A compiled module never imports the live runtime (the live reference does, by definition). */
+const assertCompiled = (module: string): void => { if (!liveMode) assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/); };
 const nodeModulesPath = new URL("../node_modules", import.meta.url).pathname;
 const reactiveFixtureUrl = new URL("../benchmarks/fixtures/reactive-counter.html", import.meta.url);
 const computedFixtureUrl = new URL("../benchmarks/fixtures/computed-counter.html", import.meta.url);
@@ -647,7 +663,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
     const module = generateComponent(definition)
       .find((artifact) => artifact.path === "vanilla/ReactiveCounter.js")?.content;
     assert.ok(module);
-    assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(module);
 
     await mkdir(join(directory, "vanilla"), { recursive: true });
     await mkdir(join(directory, "styles"), { recursive: true });
@@ -664,7 +680,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const computedDefinition = parseComponent(
@@ -674,7 +690,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
     const computedModule = generateComponent(computedDefinition)
       .find((artifact) => artifact.path === "vanilla/ComputedCounter.js")?.content;
     assert.ok(computedModule);
-    assert.doesNotMatch(computedModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(computedModule);
     await writeFile(join(directory, "styles/computed-counter.css"), "");
     const computedEntryPath = join(directory, "vanilla/ComputedCounter.js");
     computedBundlePath = join(directory, "computed-bundle.js");
@@ -688,13 +704,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const selectiveModule = generateComponent(parseComponent(selectiveSource, "split-counter.html"))
       .find((artifact) => artifact.path === "vanilla/SplitCounter.js")?.content;
     assert.ok(selectiveModule);
-    assert.doesNotMatch(selectiveModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(selectiveModule);
     await writeFile(join(directory, "styles/split-counter.css"), "");
     const selectiveEntryPath = join(directory, "vanilla/SplitCounter.js");
     selectiveBundlePath = join(directory, "selective-bundle.js");
@@ -708,7 +724,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const liveBranchModule = generateComponent(parseComponent(liveBranchSource, "live-branch.html"))
@@ -727,7 +743,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const roundedModule = generateComponent(parseComponent(roundedSource, "rounded-counter.html"))
@@ -746,7 +762,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const mixedModule = generateComponent(parseComponent(mixedSource, "mixed-counter.html"))
@@ -765,13 +781,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const dataAttributeModule = generateComponent(parseComponent(dataAttributeSource, "data-counter.html"))
       .find((artifact) => artifact.path === "vanilla/DataCounter.js")?.content;
     assert.ok(dataAttributeModule);
-    assert.doesNotMatch(dataAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(dataAttributeModule);
     await writeFile(join(directory, "styles/data-counter.css"), "");
     const dataAttributeEntryPath = join(directory, "vanilla/DataCounter.js");
     dataAttributeBundlePath = join(directory, "data-attribute-bundle.js");
@@ -785,13 +801,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const ariaAttributeModule = generateComponent(parseComponent(ariaAttributeSource, "aria-counter.html"))
       .find((artifact) => artifact.path === "vanilla/AriaCounter.js")?.content;
     assert.ok(ariaAttributeModule);
-    assert.doesNotMatch(ariaAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(ariaAttributeModule);
     await writeFile(join(directory, "styles/aria-counter.css"), "");
     const ariaAttributeEntryPath = join(directory, "vanilla/AriaCounter.js");
     ariaAttributeBundlePath = join(directory, "aria-attribute-bundle.js");
@@ -805,13 +821,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const htmlAttributeModule = generateComponent(parseComponent(htmlAttributeSource, "title-counter.html"))
       .find((artifact) => artifact.path === "vanilla/TitleCounter.js")?.content;
     assert.ok(htmlAttributeModule);
-    assert.doesNotMatch(htmlAttributeModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(htmlAttributeModule);
     await writeFile(join(directory, "styles/title-counter.css"), "");
     const htmlAttributeEntryPath = join(directory, "vanilla/TitleCounter.js");
     htmlAttributeBundlePath = join(directory, "html-attribute-bundle.js");
@@ -825,13 +841,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const propertyModule = generateComponent(parseComponent(propertySource, "value-counter.html"))
       .find((artifact) => artifact.path === "vanilla/ValueCounter.js")?.content;
     assert.ok(propertyModule);
-    assert.doesNotMatch(propertyModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(propertyModule);
     await writeFile(join(directory, "styles/value-counter.css"), "");
     const propertyEntryPath = join(directory, "vanilla/ValueCounter.js");
     propertyBundlePath = join(directory, "property-bundle.js");
@@ -845,13 +861,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const booleanModule = generateComponent(parseComponent(booleanSource, "boolean-toggle.html"))
       .find((artifact) => artifact.path === "vanilla/BooleanToggle.js")?.content;
     assert.ok(booleanModule);
-    assert.doesNotMatch(booleanModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(booleanModule);
     await writeFile(join(directory, "styles/boolean-toggle.css"), "");
     const booleanEntryPath = join(directory, "vanilla/BooleanToggle.js");
     booleanBundlePath = join(directory, "boolean-bundle.js");
@@ -865,13 +881,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const styleModule = generateComponent(parseComponent(styleSource, "style-counter.html"))
       .find((artifact) => artifact.path === "vanilla/StyleCounter.js")?.content;
     assert.ok(styleModule);
-    assert.doesNotMatch(styleModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(styleModule);
     await writeFile(join(directory, "styles/style-counter.css"), "");
     const styleEntryPath = join(directory, "vanilla/StyleCounter.js");
     styleBundlePath = join(directory, "style-bundle.js");
@@ -885,13 +901,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const boundTextModule = generateComponent(parseComponent(boundTextSource, "bound-text.html"))
       .find((artifact) => artifact.path === "vanilla/BoundText.js")?.content;
     assert.ok(boundTextModule);
-    assert.doesNotMatch(boundTextModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(boundTextModule);
     await writeFile(join(directory, "styles/bound-text.css"), "");
     const boundTextEntryPath = join(directory, "vanilla/BoundText.js");
     boundTextBundlePath = join(directory, "bound-text-bundle.js");
@@ -905,13 +921,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const boundCheckModule = generateComponent(parseComponent(boundCheckSource, "bound-check.html"))
       .find((artifact) => artifact.path === "vanilla/BoundCheck.js")?.content;
     assert.ok(boundCheckModule);
-    assert.doesNotMatch(boundCheckModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(boundCheckModule);
     await writeFile(join(directory, "styles/bound-check.css"), "");
     const boundCheckEntryPath = join(directory, "vanilla/BoundCheck.js");
     boundCheckBundlePath = join(directory, "bound-check-bundle.js");
@@ -925,13 +941,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const boundChoiceModule = generateComponent(parseComponent(boundChoiceSource, "bound-choice.html"))
       .find((artifact) => artifact.path === "vanilla/BoundChoice.js")?.content;
     assert.ok(boundChoiceModule);
-    assert.doesNotMatch(boundChoiceModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(boundChoiceModule);
     await writeFile(join(directory, "styles/bound-choice.css"), "");
     const boundChoiceEntryPath = join(directory, "vanilla/BoundChoice.js");
     boundChoiceBundlePath = join(directory, "bound-choice-bundle.js");
@@ -945,13 +961,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const boundRangeModule = generateComponent(parseComponent(boundRangeSource, "bound-range.html"))
       .find((artifact) => artifact.path === "vanilla/BoundRange.js")?.content;
     assert.ok(boundRangeModule);
-    assert.doesNotMatch(boundRangeModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(boundRangeModule);
     await writeFile(join(directory, "styles/bound-range.css"), "");
     const boundRangeEntryPath = join(directory, "vanilla/BoundRange.js");
     boundRangeBundlePath = join(directory, "bound-range-bundle.js");
@@ -965,13 +981,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const modifierModule = generateComponent(parseComponent(modifierSource, "event-modifier.html"))
       .find((artifact) => artifact.path === "vanilla/EventModifier.js")?.content;
     assert.ok(modifierModule);
-    assert.doesNotMatch(modifierModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(modifierModule);
     await writeFile(join(directory, "styles/event-modifier.css"), "");
     const modifierEntryPath = join(directory, "vanilla/EventModifier.js");
     modifierBundlePath = join(directory, "event-modifier-bundle.js");
@@ -985,13 +1001,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const selfModule = generateComponent(parseComponent(selfSource, "event-self.html"))
       .find((artifact) => artifact.path === "vanilla/EventSelf.js")?.content;
     assert.ok(selfModule);
-    assert.doesNotMatch(selfModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(selfModule);
     await writeFile(join(directory, "styles/event-self.css"), "");
     const selfEntryPath = join(directory, "vanilla/EventSelf.js");
     selfBundlePath = join(directory, "event-self-bundle.js");
@@ -1005,13 +1021,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const filteredEventModule = generateComponent(parseComponent(filteredEventSource, "event-filter.html"))
       .find((artifact) => artifact.path === "vanilla/EventFilter.js")?.content;
     assert.ok(filteredEventModule);
-    assert.doesNotMatch(filteredEventModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(filteredEventModule);
     await writeFile(join(directory, "styles/event-filter.css"), "");
     const filteredEventEntryPath = join(directory, "vanilla/EventFilter.js");
     filteredEventBundlePath = join(directory, "event-filter-bundle.js");
@@ -1025,13 +1041,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const eventOptionsModule = generateComponent(parseComponent(eventOptionsSource, "event-options.html"))
       .find((artifact) => artifact.path === "vanilla/EventOptions.js")?.content;
     assert.ok(eventOptionsModule);
-    assert.doesNotMatch(eventOptionsModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(eventOptionsModule);
     await writeFile(join(directory, "styles/event-options.css"), "");
     const eventOptionsEntryPath = join(directory, "vanilla/EventOptions.js");
     eventOptionsBundlePath = join(directory, "event-options-bundle.js");
@@ -1045,13 +1061,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const onceModule = generateComponent(parseComponent(onceSource, "event-once.html"))
       .find((artifact) => artifact.path === "vanilla/EventOnce.js")?.content;
     assert.ok(onceModule);
-    assert.doesNotMatch(onceModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(onceModule);
     await writeFile(join(directory, "styles/event-once.css"), "");
     const onceEntryPath = join(directory, "vanilla/EventOnce.js");
     onceBundlePath = join(directory, "event-once-bundle.js");
@@ -1065,13 +1081,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const dispatchModule = generateComponent(parseComponent(dispatchSource, "event-dispatch.html"))
       .find((artifact) => artifact.path === "vanilla/EventDispatch.js")?.content;
     assert.ok(dispatchModule);
-    assert.doesNotMatch(dispatchModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(dispatchModule);
     await writeFile(join(directory, "styles/event-dispatch.css"), "");
     const dispatchEntryPath = join(directory, "vanilla/EventDispatch.js");
     dispatchBundlePath = join(directory, "event-dispatch-bundle.js");
@@ -1085,13 +1101,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const computedDispatchModule = generateComponent(parseComponent(computedDispatchSource, "computed-event-dispatch.html"))
       .find((artifact) => artifact.path === "vanilla/ComputedEventDispatch.js")?.content;
     assert.ok(computedDispatchModule);
-    assert.doesNotMatch(computedDispatchModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(computedDispatchModule);
     await writeFile(join(directory, "styles/computed-event-dispatch.css"), "");
     const computedDispatchEntryPath = join(directory, "vanilla/ComputedEventDispatch.js");
     computedDispatchBundlePath = join(directory, "computed-event-dispatch-bundle.js");
@@ -1105,13 +1121,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const inlineExpressionModule = generateComponent(parseComponent(inlineExpressionSource, "inline-expression.html"))
       .find((artifact) => artifact.path === "vanilla/InlineExpression.js")?.content;
     assert.ok(inlineExpressionModule);
-    assert.doesNotMatch(inlineExpressionModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(inlineExpressionModule);
     await writeFile(join(directory, "styles/inline-expression.css"), "");
     const inlineExpressionEntryPath = join(directory, "vanilla/InlineExpression.js");
     inlineExpressionBundlePath = join(directory, "inline-expression-bundle.js");
@@ -1125,13 +1141,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const inlineAttributesModule = generateComponent(parseComponent(inlineAttributesSource, "inline-attributes.html"))
       .find((artifact) => artifact.path === "vanilla/InlineAttributes.js")?.content;
     assert.ok(inlineAttributesModule);
-    assert.doesNotMatch(inlineAttributesModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(inlineAttributesModule);
     await writeFile(join(directory, "styles/inline-attributes.css"), "");
     const inlineAttributesEntryPath = join(directory, "vanilla/InlineAttributes.js");
     inlineAttributesBundlePath = join(directory, "inline-attributes-bundle.js");
@@ -1145,13 +1161,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const guardedHandlerModule = generateComponent(parseComponent(guardedHandlerSource, "guarded-handler.html"))
       .find((artifact) => artifact.path === "vanilla/GuardedHandler.js")?.content;
     assert.ok(guardedHandlerModule);
-    assert.doesNotMatch(guardedHandlerModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(guardedHandlerModule);
     await writeFile(join(directory, "styles/guarded-handler.css"), "");
     const guardedHandlerEntryPath = join(directory, "vanilla/GuardedHandler.js");
     guardedHandlerBundlePath = join(directory, "guarded-handler-bundle.js");
@@ -1165,13 +1181,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const computedGuardModule = generateComponent(parseComponent(computedGuardSource, "computed-guard.html"))
       .find((artifact) => artifact.path === "vanilla/ComputedGuard.js")?.content;
     assert.ok(computedGuardModule);
-    assert.doesNotMatch(computedGuardModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(computedGuardModule);
     await writeFile(join(directory, "styles/computed-guard.css"), "");
     const computedGuardEntryPath = join(directory, "vanilla/ComputedGuard.js");
     computedGuardBundlePath = join(directory, "computed-guard-bundle.js");
@@ -1185,13 +1201,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const refActionModule = generateComponent(parseComponent(refActionSource, "ref-action.html"))
       .find((artifact) => artifact.path === "vanilla/RefAction.js")?.content;
     assert.ok(refActionModule);
-    assert.doesNotMatch(refActionModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(refActionModule);
     await writeFile(join(directory, "styles/ref-action.css"), "");
     const refActionEntryPath = join(directory, "vanilla/RefAction.js");
     refActionBundlePath = join(directory, "ref-action-bundle.js");
@@ -1205,13 +1221,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const literalTextModule = generateComponent(parseComponent(literalTextSource, "literal-text.html"))
       .find((artifact) => artifact.path === "vanilla/LiteralText.js")?.content;
     assert.ok(literalTextModule);
-    assert.doesNotMatch(literalTextModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(literalTextModule);
     await writeFile(join(directory, "styles/literal-text.css"), "");
     const literalTextEntryPath = join(directory, "vanilla/LiteralText.js");
     literalTextBundlePath = join(directory, "literal-text-bundle.js");
@@ -1225,13 +1241,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const literalNativeModule = generateComponent(parseComponent(literalNativeSource, "literal-native.html"))
       .find((artifact) => artifact.path === "vanilla/LiteralNative.js")?.content;
     assert.ok(literalNativeModule);
-    assert.doesNotMatch(literalNativeModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(literalNativeModule);
     await writeFile(join(directory, "styles/literal-native.css"), "");
     const literalNativeEntryPath = join(directory, "vanilla/LiteralNative.js");
     literalNativeBundlePath = join(directory, "literal-native-bundle.js");
@@ -1245,13 +1261,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const staticComputedModule = generateComponent(parseComponent(staticComputedSource, "static-computed.html"))
       .find((artifact) => artifact.path === "vanilla/StaticComputed.js")?.content;
     assert.ok(staticComputedModule);
-    assert.doesNotMatch(staticComputedModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(staticComputedModule);
     await writeFile(join(directory, "styles/static-computed.css"), "");
     const staticComputedEntryPath = join(directory, "vanilla/StaticComputed.js");
     staticComputedBundlePath = join(directory, "static-computed-bundle.js");
@@ -1265,13 +1281,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const readOnlyModule = generateComponent(parseComponent(readOnlySource, "read-only-label.html"))
       .find((artifact) => artifact.path === "vanilla/ReadOnlyLabel.js")?.content;
     assert.ok(readOnlyModule);
-    assert.doesNotMatch(readOnlyModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(readOnlyModule);
     await writeFile(join(directory, "styles/read-only-label.css"), "");
     const readOnlyEntryPath = join(directory, "vanilla/ReadOnlyLabel.js");
     readOnlyBundlePath = join(directory, "read-only-bundle.js");
@@ -1285,13 +1301,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const stringModule = generateComponent(parseComponent(stringSource, "string-tabs.html"))
       .find((artifact) => artifact.path === "vanilla/StringTabs.js")?.content;
     assert.ok(stringModule);
-    assert.doesNotMatch(stringModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(stringModule);
     await writeFile(join(directory, "styles/string-tabs.css"), "");
     const stringEntryPath = join(directory, "vanilla/StringTabs.js");
     stringBundlePath = join(directory, "string-bundle.js");
@@ -1305,13 +1321,13 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
 
     const formatModule = generateComponent(parseComponent(formatSource, "format-counter.html"))
       .find((artifact) => artifact.path === "vanilla/FormatCounter.js")?.content;
     assert.ok(formatModule);
-    assert.doesNotMatch(formatModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(formatModule);
     await writeFile(join(directory, "styles/format-counter.css"), "");
     const formatEntryPath = join(directory, "vanilla/FormatCounter.js");
     formatBundlePath = join(directory, "format-bundle.js");
@@ -1325,7 +1341,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
   });
 
@@ -1352,21 +1368,25 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).ReactiveCounter;
           const component = api.createReactiveCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           const before = output.textContent;
           (component as HTMLButtonElement).click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = output.textContent;
           component.remove();
           (component as HTMLButtonElement).click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = output.textContent;
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           (component as HTMLButtonElement).click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { before, connected, detached, reconnected: output.textContent };
         });
-        assert.deepEqual(result, { before: "0", connected: "1", detached: "1", reconnected: "2" });
+        // A click in the same task as remove() still reaches the instance: like live, the disconnect
+        // is observed after the task, so that click counts and shows once the root reconnects.
+        assert.deepEqual(result, { before: "0", connected: "1", detached: "1", reconnected: "3" });
       } finally {
         await browser.close();
       }
@@ -1384,10 +1404,11 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).ComputedCounter;
           const component = api.createComputedCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           const before = output.textContent;
           (component as HTMLButtonElement).click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { before, after: output.textContent };
         });
         assert.deepEqual(result, { before: "2", after: "4" });
@@ -1408,15 +1429,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).SplitCounter;
           const component = api.createSplitCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const buttons = Array.from(component.querySelectorAll("button"));
           const outputs = Array.from(component.querySelectorAll("output"));
           const values = () => outputs.map((output) => output.textContent);
           const initial = values();
           buttons[1]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterRight = values();
           buttons[0]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, afterRight, afterLeft: values() };
         });
         assert.deepEqual(result, {
@@ -1441,14 +1463,15 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).LiveBranch;
           const component = api.createLiveBranch();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const buttons = component.querySelectorAll("button");
           const output = component.querySelector("output")!;
           const initial = output.textContent;
           buttons[1]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterRight = output.textContent;
           buttons[0]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, afterRight, afterLeft: output.textContent };
         });
         assert.deepEqual(result, { initial: "11", afterRight: "12", afterLeft: "12" });
@@ -1469,15 +1492,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).RoundedCounter;
           const component = api.createRoundedCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           const initial = output.textContent;
           for (let index = 0; index < 4; index += 1) {
             component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = output.textContent;
           component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, afterEqual, afterChanged: output.textContent };
         });
         assert.deepEqual(result, { initial: "0", afterEqual: "0", afterChanged: "1" });
@@ -1498,15 +1522,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).MixedCounter;
           const component = api.createMixedCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const outputs = Array.from(component.querySelectorAll("output"));
           const values = () => outputs.map((output) => output.textContent);
           for (let index = 0; index < 4; index += 1) {
             component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = values();
           component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { afterEqual, afterChanged: values() };
         });
         assert.deepEqual(result, { afterEqual: ["0.4", "0"], afterChanged: ["0.5", "1"] });
@@ -1527,14 +1552,15 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).DataCounter;
           const component = api.createDataCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           for (let index = 0; index < 4; index += 1) {
             component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = { value: output.textContent, bucket: component.getAttribute("data-bucket") };
           component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { afterEqual, afterChanged: { value: output.textContent, bucket: component.getAttribute("data-bucket") } };
         });
         assert.deepEqual(result, {
@@ -1558,16 +1584,17 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).AriaCounter;
           const component = api.createAriaCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           for (let index = 0; index < 4; index += 1) {
             component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = {
             value: component.getAttribute("aria-valuenow"),
             text: component.getAttribute("aria-valuetext"),
           };
           component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return {
             afterEqual,
             afterChanged: {
@@ -1597,13 +1624,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).TitleCounter;
           const component = api.createTitleCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           for (let index = 0; index < 4; index += 1) {
             component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = { output: component.querySelector("output")!.textContent, title: component.getAttribute("title") };
           component.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { afterEqual, afterChanged: { output: component.querySelector("output")!.textContent, title: component.getAttribute("title") } };
         });
         assert.deepEqual(result, {
@@ -1627,15 +1655,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).ValueCounter;
           const component = api.createValueCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const button = component.querySelector("button")!;
           const input = component.querySelector("input")!;
           for (let index = 0; index < 4; index += 1) {
             button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
           const afterEqual = { output: component.querySelector("output")!.textContent, value: input.value };
           button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { afterEqual, afterChanged: { output: component.querySelector("output")!.textContent, value: input.value } };
         });
         assert.deepEqual(result, {
@@ -1659,6 +1688,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).BooleanToggle;
           const component = api.createBooleanToggle();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
           const snapshot = () => ({
@@ -1670,22 +1700,24 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           });
           const initial = snapshot();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
           initial: { expanded: "false", hidden: "", open: false, checked: false, output: "true" },
           connected: { expanded: "true", hidden: null, open: true, checked: true, output: "false" },
           detached: { expanded: "true", hidden: null, open: true, checked: true, output: "false" },
-          reconnected: { expanded: "false", hidden: "", open: false, checked: false, output: "true" },
+          // The click in the same task as remove() toggled it back; a second toggle shows on reconnect.
+          reconnected: { expanded: "true", hidden: null, open: true, checked: true, output: "false" },
         });
       } finally {
         await browser.close();
@@ -1704,27 +1736,30 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).StyleCounter;
           const component = api.createStyleCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           const chart = component.querySelector("svg")!;
           const snapshot = () => ({ count: chart.style.getPropertyValue("--count"), output: output.textContent });
           const initial = snapshot();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
           initial: { count: "0", output: "0" },
           connected: { count: "1", output: "1" },
           detached: { count: "1", output: "1" },
-          reconnected: { count: "2", output: "2" },
+          // The click in the same task as remove() counts, as in live.
+          reconnected: { count: "3", output: "3" },
         });
       } finally {
         await browser.close();
@@ -1743,23 +1778,25 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).BoundText;
           const component = api.createBoundText();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
           const snapshot = () => ({ value: input.value, output: output.textContent });
           const initial = snapshot();
           input.value = "Changed";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           input.value = "Detached";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           input.value = "Reconnected";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
@@ -1785,23 +1822,25 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).BoundCheck;
           const component = api.createBoundCheck();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
           const snapshot = () => ({ checked: input.checked, output: output.textContent });
           const initial = snapshot();
           input.checked = true;
           input.dispatchEvent(new Event("change", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           input.checked = false;
           input.dispatchEvent(new Event("change", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           input.checked = false;
           input.dispatchEvent(new Event("change", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
@@ -1827,6 +1866,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).BoundChoice;
           const component = api.createBoundChoice();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const textarea = component.querySelector("textarea")!;
           const select = component.querySelector("select")!;
           const output = component.querySelector("output")!;
@@ -1834,16 +1874,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const initial = snapshot();
           textarea.value = "two";
           textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const textChanged = snapshot();
           select.value = "one";
           select.dispatchEvent(new Event("change", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const selectChanged = snapshot();
           component.remove();
           textarea.value = "detached";
           textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, textChanged, selectChanged, detached: snapshot() };
         });
         assert.deepEqual(result, {
@@ -1869,23 +1909,25 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).BoundRange;
           const component = api.createBoundRange();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
           const snapshot = () => ({ value: input.value, number: input.valueAsNumber, output: output.textContent });
           const initial = snapshot();
           input.value = "25";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           input.value = "50";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           input.value = "75";
           input.dispatchEvent(new Event("input", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
@@ -1914,6 +1956,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           let bubbled = 0;
           main.addEventListener("click", () => { bubbled += 1; });
           main.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const button = component.querySelector("button")!;
           const output = component.querySelector("output")!;
           const dispatch = () => button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -1921,14 +1964,17 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           component.remove();
           const detached = { accepted: dispatch(), bubbled, output: output.textContent };
           main.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const reconnected = { accepted: dispatch(), bubbled, output: output.textContent };
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { connected, detached, reconnected: { ...reconnected, output: output.textContent } };
         });
+        // A click in the same task as remove() still reaches the instance: like live, the disconnect
+        // is observed after the task, so that click counts and shows once the root reconnects.
         assert.deepEqual(result, {
           connected: { accepted: false, bubbled: 0, output: "0" },
-          detached: { accepted: true, bubbled: 0, output: "0" },
-          reconnected: { accepted: false, bubbled: 0, output: "2" },
+          detached: { accepted: false, bubbled: 0, output: "0" },
+          reconnected: { accepted: false, bubbled: 0, output: "3" },
         });
       } finally {
         await browser.close();
@@ -1947,18 +1993,19 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).EventSelf;
           const component = api.createEventSelf();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const button = component.querySelector("button")!;
           const inner = component.querySelector("span")!;
           const output = component.querySelector("output")!;
           inner.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const innerClick = output.textContent;
           button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const buttonClick = output.textContent;
           component.remove();
           button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { innerClick, buttonClick, detached: output.textContent };
         });
         assert.deepEqual(result, { innerClick: "0", buttonClick: "1", detached: "1" });
@@ -1980,6 +2027,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const component = api.createEventFilter();
           const main = document.querySelector("main")!;
           main.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const keys = component.querySelector<HTMLButtonElement>(".keys")!;
           const inner = component.querySelector("span")!;
           const mouse = component.querySelector<HTMLButtonElement>(".mouse")!;
@@ -1994,17 +2042,17 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const inexactKey = snapshot(dispatchKey(keys, { key: "Enter", ctrlKey: true, shiftKey: true }));
           const plainKey = snapshot(keys.dispatchEvent(new Event("keydown", { bubbles: true, cancelable: true })));
           const matchedKey = snapshot(dispatchKey(keys, { key: "Enter", ctrlKey: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterKey = output.textContent;
           const middleMouse = mouse.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 1 }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterMiddle = output.textContent;
           const plainMouse = mouse.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterPlainMouse = output.textContent;
           component.remove();
           const detached = dispatchKey(keys, { key: "Enter", ctrlKey: true });
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { innerKey, wrongKey, inexactKey, plainKey, matchedKey, afterKey, middleMouse, afterMiddle, plainMouse, afterPlainMouse, detached, afterDetached: output.textContent };
         });
         assert.deepEqual(result, {
@@ -2018,7 +2066,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           afterMiddle: "1",
           plainMouse: true,
           afterPlainMouse: "2",
-          detached: true,
+          detached: false,
           afterDetached: "2",
         });
       } finally {
@@ -2039,6 +2087,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const component = api.createEventOptions();
           const main = document.querySelector("main")!;
           main.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const button = component.querySelector("button")!;
           const inner = component.querySelector("span")!;
           const output = component.querySelector("output")!;
@@ -2049,30 +2098,33 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           main.addEventListener("click", () => order.push("main-bubble"));
           const dispatch = () => inner.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
           const connected = dispatch();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connectedResult = { accepted: connected, order: [...order], output: output.textContent };
           component.remove();
           order.length = 0;
           const detached = dispatch();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detachedResult = { accepted: detached, order: [...order], output: output.textContent };
           main.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           order.length = 0;
           const reconnected = dispatch();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { connected: connectedResult, detached: detachedResult, reconnected: { accepted: reconnected, order, output: output.textContent } };
         });
+        // A click in the same task as remove() still reaches the instance: like live, the disconnect
+        // is observed after the task, so that click counts and shows once the root reconnects.
         assert.deepEqual(result, {
           connected: { accepted: true, order: ["main-capture", "button-after"], output: "1" },
-          detached: { accepted: true, order: ["button-after", "inner-target"], output: "1" },
-          reconnected: { accepted: true, order: ["main-capture", "button-after"], output: "2" },
+          detached: { accepted: true, order: ["button-after"], output: "1" },
+          reconnected: { accepted: true, order: ["main-capture", "button-after"], output: "3" },
         });
       } finally {
         await browser.close();
       }
     });
 
-    it(`${name} resets a direct once listener for each connected period`, async () => {
+    it(`${name} consumes a direct once listener once, across connected periods, as live does`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -2091,22 +2143,24 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }));
           const initiallyDetached = dispatch("Enter");
           main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const nonmatchingConsumes = dispatch("Escape");
           const sameConnection = dispatch("Enter");
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const afterFirstConnection = output.textContent;
           component.remove();
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detachedAgain = dispatch("Enter");
           main.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const reconnected = dispatch("Enter");
           const consumedAgain = dispatch("Enter");
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initiallyDetached, nonmatchingConsumes, sameConnection, afterFirstConnection, detachedAgain, reconnected, consumedAgain, afterReconnect: output.textContent };
         });
         assert.deepEqual(result, {
@@ -2117,7 +2171,8 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           detachedAgain: true,
           reconnected: true,
           consumedAgain: true,
-          afterReconnect: "1",
+          // A `.once` listener is consumed for the instance's life, not each connected period (live's rule).
+          afterReconnect: "0",
         });
       } finally {
         await browser.close();
@@ -2145,19 +2200,22 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
             });
           });
           document.querySelector("main")!.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connectedOutput = output.textContent;
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { events, connectedOutput, detachedOutput: output.textContent };
         });
+        // A click in the same task as remove() still reaches the instance: like live, the disconnect
+        // is observed after the task, so that click counts and shows once the root reconnects.
         assert.deepEqual(result, {
-          events: [{ detail: 1, bubbles: false, composed: false, cancelable: true }],
+          events: [{ detail: 1, bubbles: false, composed: false, cancelable: true }, { detail: 2, bubbles: false, composed: false, cancelable: true }],
           connectedOutput: "1",
           detachedOutput: "1",
         });
@@ -2180,18 +2238,21 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const events: unknown[] = [];
           component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
           document.querySelector("main")!.append(component);
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connectedOutput = output.textContent;
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { events, connectedOutput, detachedOutput: output.textContent };
         });
-        assert.deepEqual(result, { events: [2, 4], connectedOutput: "5", detachedOutput: "5" });
+        // A click in the same task as remove() still reaches the instance: like live, the disconnect
+        // is observed after the task, so that click counts and shows once the root reconnects.
+        assert.deepEqual(result, { events: [2, 4, 6, 8], connectedOutput: "5", detachedOutput: "5" });
       } finally {
         await browser.close();
       }
@@ -2210,13 +2271,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const component = api.createInlineExpression();
           const output = component.querySelector("output")!;
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = output.textContent;
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = output.textContent;
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached: output.textContent };
         });
         assert.deepEqual(result, { initial: "1", connected: "2", detached: "2" });
@@ -2245,13 +2307,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
             value: input.value,
           });
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = snapshot();
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached: snapshot() };
         });
         assert.deepEqual(result, {
@@ -2278,15 +2341,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const events: unknown[] = [];
           component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const output = component.querySelector("output")!;
           component.click();
           component.click();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = output.textContent;
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { events, connected, detached: output.textContent };
         });
         assert.deepEqual(result, { events: [1, 2], connected: "2", detached: "2" });
@@ -2309,14 +2373,15 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const events: unknown[] = [];
           component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const outputs = component.querySelectorAll("output");
           component.click();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = Array.from(outputs, (output) => output.textContent);
           component.remove();
           component.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { events, connected, detached: Array.from(outputs, (output) => output.textContent) };
         });
         assert.deepEqual(result, { events: [2], connected: ["2", "1"], detached: ["2", "1"] });
@@ -2340,8 +2405,9 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const button = component.querySelector("button")!;
           const output = component.querySelector("output")!;
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = {
             count: output.textContent,
             invalid: inputs[0]!.validity.valueMissing,
@@ -2349,7 +2415,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           };
           component.remove();
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { connected, detached: output.textContent };
         });
         assert.deepEqual(result, {
@@ -2375,13 +2441,14 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const status = component.querySelector("output.status")!;
           const count = component.querySelector("button output")!;
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = { status: status.textContent, count: count.textContent };
           component.querySelector("button")!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = { status: status.textContent, count: count.textContent };
           component.remove();
           component.querySelector("button")!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached: { status: status.textContent, count: count.textContent } };
         });
         assert.deepEqual(result, {
@@ -2417,14 +2484,15 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
             count: output.textContent,
           });
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = snapshot();
           input.value = "Draft";
           component.querySelector("button")!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           component.querySelector("button")!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached: snapshot() };
         });
         assert.deepEqual(result, {
@@ -2455,6 +2523,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const events: unknown[] = [];
           component.addEventListener("saved", (event) => events.push((event as CustomEvent).detail));
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const snapshot = () => ({
             status: status.textContent,
             count: count.textContent,
@@ -2466,19 +2535,20 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           const initial = snapshot();
           input.value = "Draft";
           buttons[0]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           buttons[1]!.click();
           const connected = { ...snapshot(), events: [...events] };
           component.remove();
           buttons[0]!.click();
           buttons[1]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached: { ...snapshot(), events } };
         });
         assert.deepEqual(result, {
           initial: { status: "Ready!", count: "0", dataStatus: "Ready!", ready: true, style: "Ready", value: "Ready!" },
           connected: { status: "Ready!", count: "1", dataStatus: "Ready!", ready: true, style: "Ready", value: "Draft", events: ["Ready!"] },
-          detached: { status: "Ready!", count: "1", dataStatus: "Ready!", ready: true, style: "Ready", value: "Draft", events: ["Ready!"] },
+          // The save in the same task as remove() still dispatches, as in live.
+          detached: { status: "Ready!", count: "1", dataStatus: "Ready!", ready: true, style: "Ready", value: "Draft", events: ["Ready!", "Ready!"] },
         });
       } finally {
         await browser.close();
@@ -2509,11 +2579,12 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
             grandchildTitle: component.querySelector("article.child > span > strong")?.getAttribute("title"),
           });
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = snapshot();
           input.value = "Draft";
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           component.remove();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, detached: snapshot() };
         });
         assert.deepEqual(result, {
@@ -2537,6 +2608,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).StringTabs;
           const component = api.createStringTabs();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const buttons = component.querySelectorAll("button");
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
@@ -2548,15 +2620,16 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           });
           const initial = snapshot();
           buttons[1]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           buttons[0]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           buttons[0]!.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
@@ -2582,6 +2655,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           }).FormatCounter;
           const component = api.createFormatCounter();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const button = component.querySelector("button")!;
           const input = component.querySelector("input")!;
           const output = component.querySelector("output")!;
@@ -2592,22 +2666,24 @@ describe.skipIf(!enabled)("generated Vanilla AOT runtime", () => {
           });
           const initial = snapshot();
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const connected = snapshot();
           component.remove();
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = snapshot();
           document.querySelector("main")!.append(component);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           button.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, connected, detached, reconnected: snapshot() };
         });
         assert.deepEqual(result, {
           initial: { label: "Step 0", value: "Step 0", output: "Step 0" },
           connected: { label: "Step 1", value: "Step 1", output: "Step 1" },
           detached: { label: "Step 1", value: "Step 1", output: "Step 1" },
-          reconnected: { label: "Step 2", value: "Step 2", output: "Step 2" },
+          // The click in the same task as remove() counts, as in live.
+          reconnected: { label: "Step 3", value: "Step 3", output: "Step 3" },
         });
       } finally {
         await browser.close();
@@ -2638,7 +2714,7 @@ describe.skipIf(!enabled)("generated Vanilla handler value dependencies", () => 
       const artifacts = generateComponent(parseComponent(source));
       const module = artifacts.find(({ path }) => path.startsWith("vanilla/") && path.endsWith(".js"));
       assert.ok(module);
-      assert.doesNotMatch(module.content, /@nextwebwg\/html-next\/runtime/);
+      assertCompiled(module.content);
       await writeFile(join(directory, module.path), module.content);
       const css = artifacts.find(({ path }) => path.endsWith(".css"));
       assert.ok(css);
@@ -2651,7 +2727,7 @@ describe.skipIf(!enabled)("generated Vanilla handler value dependencies", () => 
       entryPoints: [entryPath], outfile: bundlePath, bundle: true, format: "iife",
       globalName: "HandlerValues", platform: "browser", target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
   });
 
@@ -2676,9 +2752,10 @@ describe.skipIf(!enabled)("generated Vanilla handler value dependencies", () => 
           const first = api.createSetInput();
           const second = api.createSequentialSets();
           document.querySelector("main")!.append(first, second);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           first.click();
           second.click();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           return [first.querySelector("output")?.textContent, second.querySelector("output")?.textContent];
         });
         assert.deepEqual(result, ["1", "2"]);
@@ -2732,7 +2809,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
     const singleDefinition = parseComponent(`<template component="single-prop" status="experimental" summary="Single prop.">
       <props><prop name="value" type="number" default="1">Value.</prop></props>
@@ -2741,7 +2818,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
     const singleModule = generateComponent(singleDefinition)
       .find((artifact) => artifact.path === "vanilla/SingleProp.js")?.content;
     assert.ok(singleModule);
-    assert.doesNotMatch(singleModule, /@nextwebwg\/html-next\/runtime/);
+    assertCompiled(singleModule);
     await writeFile(join(directory, "styles/single-prop.css"), "");
     await writeFile(join(directory, "vanilla/SingleProp.js"), singleModule);
     const singleEntryPath = join(directory, "single.ts");
@@ -2760,7 +2837,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
       platform: "browser",
       target: ["es2022"],
       loader: { ".css": "empty" },
-      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath },
+      alias: { "@nextwebwg/html-next/generated-runtime": generatedRuntimePath, "@nextwebwg/html-next/runtime": runtimePath },
     });
     const mixedEntryPath = join(directory, "mixed.ts");
     mixedBundlePath = join(directory, "mixed.js");
@@ -2812,24 +2889,27 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           const root = create();
           document.querySelector("main")!.append(root);
           await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const initial = root.value;
           update(root, { value: 2 });
           const synchronous = root.value;
-          await Promise.resolve();
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const updated = root.value;
           root.remove();
           await new Promise((resolve) => setTimeout(resolve, 0));
           update(root, { value: 3 });
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const detached = root.value;
           document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           await new Promise((resolve) => setTimeout(resolve, 0));
           const reconnected = root.value;
           root.remove();
           await new Promise((resolve) => setTimeout(resolve, 0));
           root.value = "999";
           document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           await new Promise((resolve) => setTimeout(resolve, 0));
           return { initial, synchronous, updated, detached, reconnected, restored: root.value };
         });
@@ -2875,7 +2955,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
           await new Promise((resolve) => setTimeout(resolve, 0));
           const output = root.querySelector("output")!;
           const label = root.querySelector("span")!;
-          const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
+          const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await new Promise((resolve) => setTimeout(resolve, 0)); };
           const initial = {
             mixed: label.textContent,
             // Template-bound attributes show defaults; the unbound label default is not reflected.
@@ -2916,6 +2996,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
             reflected: root.getAttribute("data-count"),
           };
           document.querySelector("main")!.append(root);
+          await new Promise((resolve) => setTimeout(resolve, 0));
           await new Promise((resolve) => setTimeout(resolve, 0));
           const reconnected = {
             text: output.textContent,
@@ -2981,6 +3062,7 @@ describe.skipIf(!enabled)("generated Vanilla AOT props", () => {
         }).MixedProps;
         const root = api.createDemoProps();
         document.querySelector("main")!.append(root);
+        await new Promise((resolve) => setTimeout(resolve, 0));
         const stop = api.observeDocument();
         await new Promise((resolve) => setTimeout(resolve, 0));
         stop();

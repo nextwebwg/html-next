@@ -279,7 +279,11 @@ interface CompiledHandle {
   readonly v: readonly unknown[];
   readonly H: ComponentHost;
   /** Its props: their latest inputs and the explicit ones; values follow the state's in `v`. */
-  readonly B?: { readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string> };
+  readonly B?: {
+    readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string>;
+    /** Applies props, as `updateComponentProps` applies a live instance's. */
+    readonly u?: (props: Readonly<Record<string, unknown>>) => void;
+  };
   /** Its projected nodes and the slot each is for. */
   readonly J?: readonly (readonly [Node, string])[];
   /** The components it delegates its root to, which share it. */
@@ -3597,8 +3601,9 @@ export function updateComponentProps(
   props: Readonly<Record<string, unknown>>,
 ): void {
   const instance = runtimeInstance(element);
-  if (instance === undefined) return;
-  applyComponentProps(instance, props);
+  // A compiled root takes them through its own prop channel, which applies them as below.
+  if (instance === undefined) compiledHandle(element)?.B?.u?.(props);
+  else applyComponentProps(instance, props);
 }
 
 /** Applies props to one named instance, which a shared root makes explicit. */
