@@ -12,93 +12,32 @@ import { generateComponent, type Invoked } from "../src/generate.js";
 import { compactTypeAt, conforms, type CompactType } from "../src/generated-runtime.js";
 import { parseComponent } from "../src/source-parser.js";
 import { visitSelected } from "../src/selection.js";
-import { serializedDefinition } from "../src/targets/shared.js";
-import { blockPlan, compactSource, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
+import { liveReference } from "./live-reference.js";
+import { compactSource, compactType, lowerExpression } from "../src/targets/vanilla-blocks.js";
 import { normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, type TypeNode } from "../src/type-system.js";
 
 const source = fileURLToPath(new URL("../src/", import.meta.url));
 const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
 
-function vanilla(text: string, directExtend: boolean, invocations?: ReadonlyMap<string, Invoked>): string {
+function vanilla(text: string, invocations?: ReadonlyMap<string, Invoked>): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
   const named = definition.controller === undefined ? definition : { ...definition, controller: `./${definition.controller.split("/").at(-1)}` };
-  return generateComponent(named, { directExtend, ...invocations === undefined ? {} : { invocations } }).find((artifact) => artifact.path.endsWith(".js"))!.content;
+  return generateComponent(named, invocations === undefined ? {} : { invocations }).find((artifact) => artifact.path.endsWith(".js"))!.content;
 }
 
 /** A graph of components (the first one invokes the rest), each compiled with the others as invocations. */
 function graph(texts: readonly string[]): { readonly entry: string; readonly modules: ReadonlyMap<string, string> } {
   const definitions = texts.map((text) => parseComponent(text, new URL("component.html", fixtures).href));
   const invocations = new Map(definitions.map((definition) => [definition.contract.tag, { module: `./${definition.contract.name}.js`, definition }]));
-  const modules = new Map(texts.map((text, index) => [`./${definitions[index]!.contract.name}.js`, vanilla(text, true, invocations)]));
+  const modules = new Map(texts.map((text, index) => [`./${definitions[index]!.contract.name}.js`, vanilla(text, invocations)]));
   return { entry: modules.get(`./${definitions[0]!.contract.name}.js`)!, modules };
 }
 
-/**
- * The reference every compiled module is held to: the live runtime attached to a fresh root, as
- * generated output's general-runtime fallback attached it, rendering the same definition.
- */
+/** The live reference for a component (and the components it invokes); see `live-reference.ts`. */
 function reference(text: string, invoked: readonly string[] = []): string {
   const definition = parseComponent(text, new URL("component.html", fixtures).href);
-  // Components the root's template invokes, which live lowering renders from their registered definitions.
-  const others = invoked.map((other) => parseComponent(other, new URL("component.html", fixtures).href));
-  const controlled = definition.controller !== undefined;
-  const named = controlled ? { ...definition, controller: `./${definition.controller!.split("/").at(-1)}` } : definition;
-  const root = definition.template.name;
-  return [
-    'import { componentRootIndex, getComponentHost, manageComponentLifecycle, observeDocument, registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
-    'export { updateComponentProps as update } from "@nextwebwg/html-next/runtime";',
-    ...controlled ? [`import * as controller from ${JSON.stringify(named.controller)};`] : [],
-    // Registered as a live document registers it, with its styles and their `:host-state()` names.
-    `const definition = { ...${serializedDefinition(named)}, css: ${JSON.stringify(definition.css)} };`,
-    `registerComponentDefinitions([definition${others.map((other) => `, { ...${serializedDefinition(other)}, css: ${JSON.stringify(other.css)} }`).join("")}]);`,
-    // A live document is observed, so an invocation a region renders later lowers too. A root lowered
-    // from its invocation gets its controller as the browser loader gives one: once per host, on connect.
-    ...others.length > 0 ? [controlled ? [
-      "const initialized = new WeakSet();",
-      "observeDocument(document, { onConnect(element, connected) {",
-      `  if (connected.contract.tag !== ${JSON.stringify(definition.contract.tag)}) return;`,
-      "  const host = getComponentHost(element);",
-      "  if (initialized.has(host)) return;",
-      "  initialized.add(host);",
-      "  let cleanup; let disconnected = false;",
-      "  void Promise.resolve(controller.default(host)).then((result) => { if (typeof result !== \"function\") return; if (disconnected) result(); else cleanup = result; });",
-      "  return () => { disconnected = true; cleanup?.(); };",
-      "} });",
-    ].join("\n") : "observeDocument(document);"] : [],
-    "export function createReference(options = {}) {",
-    "  const { attributes = {}, children = [], slots = {}, ...props } = options;",
-    // A graph (and a root delegated to another component) is lowered from its invocation, as a live
-    // document lowers it.
-    ...others.length > 0 ? [
-      `  const invocation = document.createElement(${JSON.stringify(definition.contract.tag)});`,
-      "  for (const [name, value] of Object.entries(attributes)) invocation.setAttribute(name, String(value));",
-      "  for (const [name, value] of Object.entries(props)) if (value !== undefined && value !== null && value !== false) invocation.setAttribute(name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value === true ? \"\" : typeof value === \"string\" ? value : JSON.stringify(value));",
-      "  for (const child of children) invocation.append(child);",
-      "  for (const [name, nodes] of Object.entries(slots)) for (const child of nodes) { if (typeof child !== \"string\") child.setAttribute(\"slot\", name); invocation.append(child); }",
-      "  return invocation;",
-      "}",
-    ] : [
-
-    // A root `$match` starts on the arm the props choose, as the general runtime's factories chose it.
-    root === "template" ? "  const arm = definition.template.children[componentRootIndex(definition, props)], element = document.createElement(arm.name);"
-      : root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
-    "  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));",
-    // Then the root's literals, as generated factories merge them: class and style combine, else the factory's win.
-    `  const node = ${root === "template" ? "arm" : "definition.template"};`,
-    "  for (const attribute of node.attributes) {",
-    "    if (attribute.kind !== \"literal\") continue;",
-    "    if (attribute.name === \"class\" || attribute.name === \"style\") element.setAttribute(attribute.name, [attribute.value, element.getAttribute(attribute.name)].filter(Boolean).join(attribute.name === \"class\" ? \" \" : \"; \"));",
-    "    else if (!element.hasAttribute(attribute.name)) element.setAttribute(attribute.name, attribute.value);",
-    "  }",
-    `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
-    // A factory's children and named slots, as the general runtime's factories projected them.
-    "  const projected = [];",
-    "  for (const [name, nodes] of [[\"\", children], ...Object.entries(slots)]) for (const child of nodes) projected.push([typeof child === \"string\" ? document.createTextNode(child) : child, name]);",
-    `  manageComponentLifecycle(element, definition, { props, projected${controlled ? ", controller" : ""} });`,
-    "  return element;",
-    "}",
-    ],
-  ].join("\n");
+  const named = definition.controller === undefined ? definition : { ...definition, controller: `./${definition.controller.split("/").at(-1)}` };
+  return liveReference(named, invoked.map((other) => parseComponent(other, new URL("component.html", fixtures).href)));
 }
 
 const component = (defs: string, body: string, controller = true): string =>
@@ -144,7 +83,7 @@ afterEach(() => {
 
 describe("direct-extend Vanilla generation", () => {
   it("compiles the benchmark shape without the general runtime, parser or type system", async () => {
-    const module = vanilla(benchmarkShape, true);
+    const module = vanilla(benchmarkShape);
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime|const definition|manageComponentLifecycle/);
     assert.match(module, /^import \{ attachGeneratedController, buildTemplate, clearRegion, KeyedList, readMember, toAttribute, toText, trackContainer, visitSelected, writeAttribute, writeText \} from "@nextwebwg\/html-next\/generated-runtime";$/m);
     await transform(module, { loader: "js", format: "esm" });
@@ -156,44 +95,18 @@ describe("direct-extend Vanilla generation", () => {
   it("keeps the indexed lifecycle coordinator out of every other generated bundle", async () => {
     const index = /(?:^|\/)src\/generated-lifecycle-index\.ts$/;
     const props = await readFile(new URL("../benchmarks/fixtures/prop-button.html", import.meta.url), "utf8");
-    const older = await bundle(vanilla(props, true));
+    const older = await bundle(vanilla(props));
     assert.ok(older.inputs.some((path) => path.endsWith("src/generated-lifecycle.ts")));
     assert.equal(older.inputs.some((path) => index.test(path)), false);
-    assert.ok((await bundle(vanilla(benchmarkShape, true), true)).inputs.some((path) => index.test(path)));
+    assert.ok((await bundle(vanilla(benchmarkShape), true)).inputs.some((path) => index.test(path)));
   });
 
-  it("keeps the flag-off output byte-identical", () => {
-    assert.equal(vanilla(benchmarkShape, false), generateComponent(parseComponent(benchmarkShape, new URL("component.html", fixtures).href))
-      .find((artifact) => artifact.path.endsWith(".js"))!.content.replace(/import \* as controller from "[^"]*";/, 'import * as controller from "./controller.js";'));
-    assert.match(vanilla(benchmarkShape, false), /manageComponentLifecycle/);
-  });
-
-  const state = '<state name="ready" type="boolean" value="false"></state><state name="rows" type="list(object({ id: number, label: string, user: object({ name: string }) }))" value="[]"></state>';
-  const notYetDirect: Record<string, string> = {
-    "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
-    event_listener: component(state, '<p><span on:click="go"></span></p>'),
-  };
-  for (const [name, text] of Object.entries(notYetDirect)) {
-    it(`keeps today's module for a feature not on the direct path yet: ${name}`, () => {
-      let off: string;
-      try {
-        off = vanilla(text, false);
-      } catch {
-        return; // The authoring itself is rejected before generation; nothing to compare.
-      }
-      assert.equal(vanilla(text, true), off);
-    });
-  }
-
-  it("plans the supported shapes it should", () => {
-    const plan = (text: string) => blockPlan(parseComponent(text, new URL("component.html", fixtures).href));
-    assert.notEqual(plan(benchmarkShape), undefined);
-    assert.notEqual(plan(component(state, '<p from:data-n="rows.length" class:on="ready and not ready"><b>{ready}</b></p>')), undefined);
-    for (const text of Object.values(notYetDirect)) {
-      let parsed;
-      try { parsed = parseComponent(text, new URL("component.html", fixtures).href); } catch { continue; }
-      assert.equal(blockPlan(parsed), undefined, text);
+  it("compiles every component without the general runtime", () => {
+    // What the parser accepts compiles; anything it rejects never reaches the generator.
+    for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="x"></p>')]) {
+      assert.doesNotMatch(vanilla(text), /@nextwebwg\/html-next\/runtime/);
     }
+    assert.throws(() => vanilla(component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>')), /HC013/);
   });
 });
 
@@ -1173,7 +1086,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { const list = host.state.rows; const first = list[0]; list[0] = list[3]; list[3] = first; },
       (host) => { host.state.selected = 2; host.state.rows[1].label = "x"; },
       (host) => { host.state.rows = host.state.rows.filter((row: { id: number }) => row.id !== 2).concat([{ id: 9, label: "n" }]); },
-      (host) => { host.state.rows = [...host.state.rows].reverse(); },
+      (host) => { host.state.rows = [...host.state.rows].toReversed(); },
       (host) => { host.state.rows = []; },
       (host) => { host.state.rows = [{ id: 5, label: "five" }]; },
     ];
@@ -1283,7 +1196,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const tag = `<template component="x-tag" status="early" summary="Tag.">
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>
       <button from:data-tone="tone" type="button">{label}</button></template>`;
-    assert.match(vanilla(tag, true), /manageGeneratedProps/, "the child stays on the compact path");
+    assert.match(vanilla(tag), /manageGeneratedProps/, "the child stays on the compact path");
     await same([parent(`
       <section><x-tag tone="warn" label="Hi"></x-tag><x-tag tone="bad"></x-tag><x-tag from:label="label" from:tone="flag ? 'warn' : 'nope'"></x-tag></section>`), tag], [
       (_host, update) => { update({ flag: true }); },

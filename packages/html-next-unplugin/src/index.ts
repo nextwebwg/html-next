@@ -50,13 +50,6 @@ export interface HtmlNextNativePluginOptions {
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
-  /**
-   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
-   * DOM updates instead of the general runtime. Until the direct path covers every feature, a graph
-   * with any component that still needs the general runtime builds exactly as without this option
-   * (its direct helpers would only add bytes); the manifest names those components.
-   */
-  readonly experimentalDirectExtend?: boolean;
 }
 
 export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
@@ -95,13 +88,6 @@ export interface HtmlNextBuildManifest {
     readonly strategy: "external-custom-element";
     readonly usedBy: readonly string[];
   }[];
-  /** Present when `experimentalDirectExtend` was requested. */
-  readonly directExtend?: {
-    /** Whether the graph was compiled on the direct path. */
-    readonly applied: boolean;
-    /** Components that still need the general runtime; any one keeps the whole graph off the direct path. */
-    readonly runtimeComponents: readonly string[];
-  };
 }
 
 interface CompiledGraph {
@@ -206,34 +192,12 @@ function collectInvocationEdges(
   return { edges, dynamicUses };
 }
 
-function supportSource(
-  imports: ReadonlySet<string>,
-  runtimeRendered: ReadonlyMap<string, ComponentDefinition>,
-): string {
+function supportSource(imports: ReadonlySet<string>): string {
   const lines: string[] = [];
   // Generated modules import whichever helpers their features use; re-exporting the whole entry
   // keeps every one of them resolvable, and the bundler still drops what nothing imports.
   for (const source of ["@nextwebwg/html-next/generated-runtime", "@nextwebwg/html-next/runtime"]) {
     if (imports.has(source)) lines.push(`export * from ${JSON.stringify(source)};`);
-  }
-  if (runtimeRendered.size > 0) {
-    // Components another component's template invokes, where the general runtime renders that
-    // template. It builds them from these definitions; their styles arrive through the CSS each
-    // generated module imports, so the registered copies carry none.
-    const definitions = [...runtimeRendered.values()]
-      .map((definition) => JSON.stringify({ ...definition, css: "" }));
-    lines.push(
-      'import { registerComponentDefinitions } from "@nextwebwg/html-next/runtime";',
-      `const renderedComponents = [
-${definitions.map((text) => `  ${text},`).join("\n")}
-];`,
-      "let registered = false;",
-      "export function registerRenderedComponents(root) {",
-      "  if (registered) return;",
-      "  registered = true;",
-      "  registerComponentDefinitions(renderedComponents, root);",
-      "}",
-    );
   }
   return lines.length === 0 ? "export {};\n" : `${lines.join("\n")}\n`;
 }
@@ -250,35 +214,6 @@ function routeSupportImports(module: string, imports: Set<string>): string {
   }
   return routed;
 }
-
-/**
- * Wires the components a runtime-rendered template invokes. The runtime renders the template, so
- * the invocations stay in it; it needs their definitions registered, and each one's stylesheet has
- * to reach the build even though nothing imports its factory.
- */
-function routeRenderedInvocations(
-  module: string,
-  invoked: ReadonlyMap<string, string>,
-  nodes: ReadonlyMap<string, ComponentGraphNode>,
-  rendered: Map<string, ComponentDefinition>,
-): string {
-  const imports = [`import { registerRenderedComponents } from ${JSON.stringify(supportModule)};`];
-  for (const [, url] of invoked) {
-    const target = nodes.get(url)!;
-    rendered.set(url, target.definition);
-    if (target.definition.css !== "") {
-      imports.push(`import ${JSON.stringify(`${stylePrefix}${encodeURIComponent(url)}.css`)};`);
-    }
-  }
-  const call = "  registerRenderedComponents(element.ownerDocument);";
-  const routed = module.replace(
-    /^(\s*)manageComponentLifecycle\(/m,
-    `${call}
-$1manageComponentLifecycle(`,
-  );
-  return `${imports.join("\n")}\n${routed}`;
-}
-
 
 function visitTemplate(node: TemplateNode, capabilities: Set<string>): void {
   if (node.kind === "slot") {
@@ -346,8 +281,6 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   const manifestComponents: HtmlNextBuildManifest["components"][number][] = [];
   const allCapabilities = new Set<string>();
   const supportImports = new Set<string>();
-  /** Definitions the general runtime builds because a runtime-rendered template invokes them. */
-  const renderedComponents = new Map<string, ComponentDefinition>();
   const dynamicBoundaries = new Map<string, HtmlNextDynamicBoundary>();
   const generatedNames = new Map<string, string>();
 
@@ -383,14 +316,13 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   );
 
   const sortedNodes = [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url));
-  const generateGraph = (directExtend: boolean) => sortedNodes.flatMap((node) => {
+  const generated = sortedNodes.flatMap((node) => {
     try {
       const definition: ComponentDefinition = node.controller === undefined
         ? node.definition
         : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
         noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
-        directExtend,
         // Each component the template invokes, by the module exporting its factory.
         invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
           [tag, { module: componentId(url), definition: graph.nodes.get(url)!.definition }])),
@@ -403,15 +335,6 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       return [];
     }
   });
-  const requested = options.experimentalDirectExtend !== false;
-  let generated = generateGraph(requested);
-  // ponytail: all or nothing per graph. Direct helpers next to the general runtime only add bytes,
-  // so one component the direct path does not cover yet keeps the graph on today's output.
-  const runtimeComponents = requested
-    ? generated.filter(({ artifact }) => artifact.content.includes('"@nextwebwg/html-next/runtime"'))
-      .map(({ definition }) => definition.contract.tag).sort()
-    : [];
-  if (runtimeComponents.length > 0) generated = generateGraph(false);
 
   for (const { node, definition, artifacts, artifact } of generated) {
     try {
@@ -421,11 +344,6 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         `../styles/${definition.contract.tag}.css`,
         styleId,
       );
-      const invoked = invocations.edges.get(node.id) ?? new Map<string, string>();
-      // A compiled template imports the factories it invokes; the general runtime renders its own.
-      if (invoked.size > 0 && module.includes("manageComponentLifecycle")) {
-        module = routeRenderedInvocations(module, invoked, graph.nodes, renderedComponents);
-      }
       module = routeSupportImports(module, supportImports);
       components.set(resolvedComponentId(node.id), module);
       styles.set(`${resolvedStylePrefix}${encodedURL}.css`, artifacts.find((candidate) => candidate.path === `styles/${definition.contract.tag}.css`)!.content);
@@ -489,7 +407,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     components,
     publicComponents,
     styles,
-    support: supportSource(supportImports, renderedComponents),
+    support: supportSource(supportImports),
     sourceFiles: Object.freeze([...new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url))), ...installed.map((library) => library.manifest)]),
     manifest: Object.freeze({
       mode: "native-application-or-library-build",
@@ -505,9 +423,6 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         capabilities: sortedCapabilities,
       }),
       dynamicBoundaries: Object.freeze(dynamicManifest),
-      ...(requested ? {
-        directExtend: Object.freeze({ applied: runtimeComponents.length === 0, runtimeComponents: Object.freeze(runtimeComponents) }),
-      } : {}),
     }),
   });
 }

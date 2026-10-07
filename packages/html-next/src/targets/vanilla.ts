@@ -19,7 +19,7 @@ import { parseTypeExpression, parseTypedValue } from "../type-system.js";
 import { isUrlAttribute } from "../sanitize.js";
 import { getDomInterface, resolveDomProperty } from "../platform.js";
 import { kebabCase } from "../names.js";
-import { dependentPropTypeSource, selectorGenerics, serializedDefinition } from "./shared.js";
+import { dependentPropTypeSource, selectorGenerics } from "./shared.js";
 import { targetComponent } from "./backend.js";
 import { blockPlan, emitBlocks } from "./vanilla-blocks.js";
 import type { Invoked } from "../generate.js";
@@ -1284,7 +1284,6 @@ export function generateVanilla(
   definition: ComponentDefinition,
   version: string,
   noContextReaders = false,
-  directExtend = false,
   invocations?: ReadonlyMap<string, Invoked>,
 ): { readonly module: string; readonly declaration: string } {
   const { contract, template } = definition;
@@ -1346,8 +1345,8 @@ export function generateVanilla(
   const runtimeFallback = direct === undefined && directProps === undefined && (
     invokes || arms !== undefined || props.length > 0 || (definition.declarations?.length ?? 0) > 0 || definition.controller !== undefined
   );
-  const blocks = directExtend && runtimeFallback ? blockPlan(definition, invocations) : undefined;
-  const needsRuntime = runtimeFallback && blocks === undefined;
+  // Everything the compact paths do not cover compiles to blocks; there is no runtime fallback.
+  const blocks = runtimeFallback ? blockPlan(definition, invocations) : undefined;
   // A handler's write that fails a numeric state's type warns once, as the live runtime warns.
   const directWarns = direct !== undefined && [...direct.handlers.values()].some(({ declaration }) => declaration.steps.some((step) => {
     if (step.kind !== "set") return false;
@@ -1365,16 +1364,12 @@ export function generateVanilla(
     ...(generatedRuntimeImports.length === 0
       ? []
       : [`import { ${generatedRuntimeImports.join(", ")} } from "@nextwebwg/html-next/generated-runtime";`]),
-    ...(needsRuntime
-      ? [`import { ${arms === undefined ? "" : "componentRootIndex, "}manageComponentLifecycle } from "@nextwebwg/html-next/runtime";`]
-      : []),
     ...(definition.controller === undefined ? [] : [`import * as controller from ${js(definition.controller)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
-    ...(needsRuntime ? [`const definition = ${serializedDefinition(definition)};`, ""] : []),
     ...(directWarns ? ["const W = { f: import.meta.url };", ""] : []),
     `export function create${contract.name}(options${hasRequired ? "" : " = {}"}) {`,
-    `  const { attributes = {}, children = [], slots = {}${needsRuntime || directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
+    `  const { attributes = {}, children = [], slots = {}${directProps !== undefined ? ", ...componentProps" : ""} } = options;`,
     "  const projected = [];",
     ...(direct === undefined
       ? []
@@ -1418,18 +1413,8 @@ export function generateVanilla(
       renderNode(child, lines, counter, "element", contract.props, valueCounter, contract.tag, "slots", directRender, directPropRender);
     }
   };
-  if (arms === undefined) {
-    renderRoot(template);
-  } else {
-    lines.push("  const root = componentRootIndex(definition, componentProps);", "  let element;");
-    for (const [index, arm] of arms.entries()) {
-      lines.push(index === 0 ? "  if (root === 0) {" : index === arms.length - 1 ? "  } else {" : `  } else if (root === ${index}) {`);
-      const start = lines.length;
-      renderRoot(arm);
-      for (let line = start; line < lines.length; line += 1) lines[line] = `  ${lines[line]}`;
-    }
-    lines.push("  }");
-  }
+  // A root `$match` always compiles to blocks.
+  if (blocks === undefined) renderRoot(template);
   if (directRender !== undefined) {
     const directPlan = directRender.plan;
     const selective = directSelectiveUpdates;
@@ -1723,13 +1708,6 @@ export function generateVanilla(
         lines.push("  });");
       }
     }
-  }
-  if (needsRuntime) {
-    lines.push(
-      "  manageComponentLifecycle(element, definition, { props: componentProps, projected,",
-      ...(definition.controller === undefined ? [] : ["    controller,"]),
-      "  });",
-    );
   }
   lines.push("  return element;", "}", "");
 

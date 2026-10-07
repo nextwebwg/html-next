@@ -184,7 +184,7 @@ describe("HTML Next unplugin", () => {
     assert.doesNotMatch(polymorphic, /function manageComponentLifecycle|function componentRootIndex/);
   });
 
-  it("compiles controller components directly with experimentalDirectExtend", async () => {
+  it("compiles controller components directly", async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-vite-direct-extend-"));
     temporary.push(root);
     await writeFile(join(root, "list.html"), `<template component="x-list" controller="./list.js" status="early" summary="List.">
@@ -197,7 +197,6 @@ describe("HTML Next unplugin", () => {
     await writeFile(join(root, "list.js"), `export default (host) => {
       host.on("connect", () => { host.state.ready = true; host.state.rows = [{ id: 1, label: "one" }, { id: 2, label: "two" }]; });
     };`);
-    // Arithmetic is not on the direct path yet, so this component still needs the general runtime.
     await writeFile(join(root, "counter.html"), `<template component="x-counter" controller="./list.js" status="early" summary="Counter.">
       <defs><state name="count" type="number" value="1"></state></defs>
       <output $value="count + 1"></output>
@@ -206,13 +205,13 @@ describe("HTML Next unplugin", () => {
       "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
       "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,
     };
-    const bundle = async (entries: string[], experimentalDirectExtend: boolean): Promise<{ text: string; manifest: any }> => {
-      const outDir = join(root, `${entries.length}-${experimentalDirectExtend ? "direct" : "runtime"}`);
+    const bundle = async (entries: string[]): Promise<{ text: string; manifest: any }> => {
+      const outDir = join(root, `out-${entries.length}`);
       await writeFile(join(root, "main.js"), `export { ${entries.map((entry) => `createX${entry[0]!.toUpperCase()}${entry.slice(1, -5)}`).join(", ")} } from ${JSON.stringify(componentsModule)};`);
       await build({
         root,
         logLevel: "silent",
-        plugins: [htmlNext.vite({ entries, root, manifestFile: "html-next.manifest.json", experimentalDirectExtend })],
+        plugins: [htmlNext.vite({ entries, root, manifestFile: "html-next.manifest.json" })],
         resolve: { alias: aliases },
         build: { minify: false, outDir, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
       });
@@ -221,22 +220,15 @@ describe("HTML Next unplugin", () => {
         manifest: JSON.parse(await readFile(join(outDir, "html-next.manifest.json"), "utf8")),
       };
     };
-    const runtime = await bundle(["list.html"], false);
-    const direct = await bundle(["list.html"], true);
-    assert.match(runtime.text, /function manageComponentLifecycle/);
-    assert.equal(runtime.manifest.directExtend, undefined);
-    assert.doesNotMatch(direct.text, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
-    assert.match(direct.text, /function attachGeneratedController/);
-    assert.match(direct.text, /class KeyedList\b|KeyedList = class\b/);
-    assert.deepEqual(direct.manifest.directExtend, { applied: true, runtimeComponents: [] });
-    assertClosedOverEntries(direct.text);
-
-    // One component that still needs the general runtime keeps the whole graph on today's output,
-    // so the option never adds the direct helpers next to the runtime.
-    const mixedRuntime = await bundle(["list.html", "counter.html"], false);
-    const mixedDirect = await bundle(["list.html", "counter.html"], true);
-    assert.equal(mixedDirect.text, mixedRuntime.text);
-    assert.deepEqual(mixedDirect.manifest.directExtend, { applied: false, runtimeComponents: ["x-counter"] });
+    // Every component compiles directly; nothing in the graph pulls in the general runtime.
+    for (const entries of [["list.html"], ["list.html", "counter.html"]]) {
+      const { text, manifest } = await bundle(entries);
+      assert.doesNotMatch(text, /manageComponentLifecycle|function parseTypedValue|function parseExpression/);
+      assert.match(text, /function attachGeneratedController/);
+      assert.match(text, /class KeyedList\b|KeyedList = class\b/);
+      assert.equal(manifest.directExtend, undefined);
+      assertClosedOverEntries(text);
+    }
   });
 
   it("keeps the direct benchmark entry within its gzip ceiling", async () => {
@@ -251,7 +243,7 @@ describe("HTML Next unplugin", () => {
       root,
       configFile: false,
       logLevel: "silent",
-      plugins: [htmlNext.vite({ entries: ["benchmark-app.html"], root, manifestFile: false, experimentalDirectExtend: true })],
+      plugins: [htmlNext.vite({ entries: ["benchmark-app.html"], root, manifestFile: false })],
       resolve: { alias: {
         "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname,
         "@nextwebwg/html-next/runtime": new URL("../../html-next/src/runtime.ts", import.meta.url).pathname,

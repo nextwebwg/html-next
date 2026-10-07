@@ -79,12 +79,12 @@ function moduleBytes(result: BuildResult): Readonly<Record<string, number>> {
   );
 }
 
-async function generatedFixture(name: string, targetGzip: number, directExtend = false): Promise<GeneratedMeasurement> {
+async function generatedFixture(name: string, targetGzip: number): Promise<GeneratedMeasurement> {
   const sourceURL = new URL(`../benchmarks/fixtures/${name}.html`, import.meta.url);
   const source = await readFile(sourceURL, "utf8");
   const definition = parseComponent(source, sourceURL.href);
   // Each fixture is its own closed graph, as a build compiles it: nothing reads its state as context.
-  const module = generateComponent(definition, { directExtend, noContextReaders: true })
+  const module = generateComponent(definition, { noContextReaders: true })
     .find((artifact) => artifact.path === `vanilla/${definition.contract.name}.js`)?.content;
   if (module === undefined) throw new Error(`The ${name} fixture produced no Vanilla module.`);
   const result = await bundle({
@@ -119,15 +119,16 @@ const staticGenerated = await generatedFixture("static-card", 2_500);
 const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
 const propGenerated = await generatedFixture("prop-button", 5_000);
 const computedGenerated = await generatedFixture("computed-counter", 5_000);
-const keyedGenerated = await generatedFixture("keyed-list", Number.POSITIVE_INFINITY);
-const dataGenerated = await generatedFixture("data-read", Number.POSITIVE_INFINITY);
-const controllerGenerated = await generatedFixture("controller-lifecycle", Number.POSITIVE_INFINITY);
+// These compiled through the general runtime (~39 KB) until every component compiled directly.
+const keyedGenerated = await generatedFixture("keyed-list", 7_700);
+const dataGenerated = await generatedFixture("data-read", 7_550);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 6_750);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
 // uses, 25 B for a host root that follows a root `$match` switch, as live's does, and 50 B for the
 // node methods through which keyed lists also hold rows of several nodes.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_150, true);
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_150);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];

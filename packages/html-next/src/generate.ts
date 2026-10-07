@@ -39,12 +39,6 @@ export interface GenerationOptions {
   /** A closed component graph proves no descendant reads this definition's state through <context>. */
   readonly noContextReaders?: boolean;
   /**
-   * Experimental: compile controller components (declared state, `$if`, keyed `$each`) to direct
-   * DOM updates instead of the general-runtime fallback. A component using a feature the direct
-   * path does not cover yet keeps the fallback. Off by default.
-   */
-  readonly directExtend?: boolean;
-  /**
    * The components this definition's template invokes, by tag: the module exporting each one's
    * factory, and its definition. A compiled invocation calls that factory, as live lowering
    * renders the registered component; a tag not listed stays a plain custom element.
@@ -62,7 +56,7 @@ export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.directExtend !== false, options?.invocations);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;

@@ -9,6 +9,7 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
 import { generateComponent, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { liveReference } from "./live-reference.js";
 import { parseComponent } from "../src/source-parser.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
@@ -3140,7 +3141,8 @@ describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
   let directory = "";
   const bundles = new Map<string, string>();
   const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
-  // Each fixture builds twice: the general-runtime fallback (live behavior) and the direct path.
+  // Each fixture builds twice: the live runtime attached to the definition (the reference) and the
+  // compiled module.
   const components = [
     { name: "parity", source: "parity.html", controller: "controller.js", factory: "createXParity" },
     { name: "benchmark", source: "benchmark-app.html", controller: "benchmark-controller.js", factory: "createBenchmarkApp" },
@@ -3154,16 +3156,20 @@ describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
       const controller = await readFile(new URL(component.controller, fixtures), "utf8");
       for (const directExtend of [false, true]) {
         const variant = join(directory, component.name, directExtend ? "direct" : "runtime");
-        const artifacts = generateComponent(parseComponent(text, component.source), { directExtend });
+        const definition = parseComponent(text, component.source);
+        const artifacts = generateComponent(definition);
         for (const artifact of artifacts) {
           const path = join(variant, artifact.path);
           await mkdir(join(path, ".."), { recursive: true });
           await writeFile(path, artifact.content);
         }
         const module = artifacts.find((artifact) => artifact.path.startsWith("vanilla/") && artifact.path.endsWith(".js"))!;
-        assert.equal(module.content.includes("@nextwebwg/html-next/runtime"), !directExtend);
+        assert.doesNotMatch(module.content, /@nextwebwg\/html-next\/runtime/);
         await writeFile(join(variant, "vanilla", "controller.js"), controller);
-        await writeFile(join(variant, "entry.js"), `import { ${component.factory} as create } from "./${module.path}";\n${actions}`);
+        await writeFile(join(variant, "vanilla", "reference.js"), liveReference({ ...definition, controller: "./controller.js" }));
+        await writeFile(join(variant, "entry.js"), directExtend
+          ? `import { ${component.factory} as create } from "./${module.path}";\n${actions}`
+          : `import { createReference as create } from "./vanilla/reference.js";\n${actions}`);
         const outfile = join(variant, "bundle.js");
         await build({
           entryPoints: [join(variant, "entry.js")],

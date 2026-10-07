@@ -51,12 +51,11 @@ import htmlNext from "@nextwebwg/html-next-unplugin/vite";
 export default defineConfig({
   plugins: [htmlNext({
     entries: ["src/app.html"],
-    experimentalDirectExtend: true,
   })],
 });
 ```
 
-The benchmark uses `experimentalDirectExtend: true`. This enables direct DOM generation for supported components; the build manifest reports where it applies. [Finish the Vite setup →](https://nextwebwg.org/html-next/usage)
+The build compiles every component to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and controller need. The bundle carries no template interpreter, and each component imports only the helpers its features use. [Finish the Vite setup →](https://nextwebwg.org/html-next/usage)
 
 For the browser runtime, server rendering, or component tooling:
 

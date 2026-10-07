@@ -262,7 +262,6 @@ export default defineConfig({
   plugins: [htmlNext({
     entries: ["src/components/app.html"],
     mode: "application",
-    experimentalDirectExtend: true,
   })],
 });
 ```
@@ -273,7 +272,7 @@ import { createApp } from "virtual:html-next/components";
 document.body.append(createApp());
 ```
 
-`experimentalDirectExtend: true` enables direct DOM generation for supported components, as used in the benchmark. The manifest’s `directExtend` field records whether it applies and which components use runtime fallbacks.
+Each component compiles to direct DOM code: a cloned template plus the exact updates its state, conditions, lists, props, slots, and controller need. The bundle carries no template interpreter, and each component imports only the helpers its features use.
 
 In application mode, the virtual module exports one `create<Name>` function for each component declared in the configured
 application entries. A linked `<link rel="component">` dependency used as an empty custom-element
