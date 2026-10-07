@@ -60,6 +60,15 @@ function sanitizeDefault(fragment: DocumentFragment): void {
  * Do not call native setHTML(): Firefox currently parses malformed table content differently,
  * which would make server output and hydration depend on the user's browser.
  */
+const CONTENT_ONLY = Symbol.for("@nextwebwg/html-next.content-only.v1");
+
+/**
+ * Marks an element `$html` inserted: it is content, never a component invocation or definition,
+ * whichever bundle (live or generated) inserted it.
+ */
+export const markContentOnly = (element: Element): void => { (element as Element & { [CONTENT_ONLY]?: true })[CONTENT_ONLY] = true; };
+export const isContentOnly = (element: Element): boolean => (element as Element & { [CONTENT_ONLY]?: true })[CONTENT_ONLY] === true;
+
 export function sanitizeFragment(
   html: string,
   document: Document,

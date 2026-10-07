@@ -97,7 +97,7 @@ The full matrix is dev-only; CI runs a smaller regression comparison against mai
 
 ## Install and verify
 
-Use Node 22 or Node 24 and pnpm through Corepack:
+Use Node 22.22.2+ or Node 24.15+ and pnpm through Corepack:
 
 ```sh
 corepack pnpm install --frozen-lockfile

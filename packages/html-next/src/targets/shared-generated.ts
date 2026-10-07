@@ -108,3 +108,38 @@ export const DISPATCH_TARGETS_SOURCE = `export function dispatchToTargets(record
     if (target.isConnected) send(target);
   }
 }`;
+
+/**
+ * One MutationObserver per document watches every bound select's option list, which no native event
+ * reports; each select runs only its own check, once per batch of records.
+ */
+export const OPTION_WATCH_SOURCE = `const optionWatches = new WeakMap<Document, { readonly observer: MutationObserver; readonly checks: Map<HTMLSelectElement, () => void> }>();
+
+function watchOptions(select: HTMLSelectElement, check: () => void): () => void {
+  const document = select.ownerDocument;
+  let watch = optionWatches.get(document);
+  if (watch === undefined) {
+    const checks = new Map<HTMLSelectElement, () => void>();
+    const observer = new MutationObserver((records) => {
+      const changed = new Set<HTMLSelectElement>();
+      for (const record of records) {
+        const select = (record.target.nodeType === 1 ? record.target as Element : record.target.parentElement)?.closest('select');
+        if (select) changed.add(select);
+      }
+      for (const select of changed) checks.get(select)?.();
+    });
+    watch = { observer, checks };
+    optionWatches.set(document, watch);
+  }
+  watch.observer.observe(select, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['value'] });
+  watch.checks.set(select, check);
+  const current = watch;
+  return () => {
+    if (current.checks.get(select) === check) current.checks.delete(select);
+    if (current.checks.size === 0 && optionWatches.get(document) === current) {
+      current.observer.disconnect();
+      optionWatches.delete(document);
+    }
+  };
+}
+`;

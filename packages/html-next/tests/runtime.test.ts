@@ -13,13 +13,11 @@ import { parseComponent } from "../src/source-parser.js";
 const enabled = process.env.HTMLNEXT_BROWSER_TEST === "1";
 const fixtureUrl = new URL("./runtime.html", import.meta.url);
 const runtimeUrl = new URL("../src/live.ts", import.meta.url);
-const generatedRuntimeUrl = new URL("../src/generated-runtime.ts", import.meta.url);
 /** The general runtime on its own: what a build-time graph ships, with no component parser. */
 const runtimeOnlyUrl = new URL("../src/runtime.ts", import.meta.url);
 
 describe.skipIf(!enabled)("browser runtime", () => {
   let bundlePath = "";
-  let generatedBundlePath = "";
   let runtimeOnlyBundlePath = "";
   let temporaryDirectory = "";
   let source = "";
@@ -31,7 +29,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
 
     temporaryDirectory = await mkdtemp(join(tmpdir(), "html-next-runtime-"));
     bundlePath = join(temporaryDirectory, "runtime.js");
-    generatedBundlePath = join(temporaryDirectory, "generated-runtime.js");
     runtimeOnlyBundlePath = join(temporaryDirectory, "runtime-only.js");
     await build({
       entryPoints: [runtimeOnlyUrl.pathname],
@@ -56,15 +53,6 @@ describe.skipIf(!enabled)("browser runtime", () => {
       format: "iife",
       globalName: "HtmlRuntime",
       outfile: bundlePath,
-      platform: "browser",
-      target: ["es2022"],
-    });
-    await build({
-      entryPoints: [generatedRuntimeUrl.pathname],
-      bundle: true,
-      format: "iife",
-      globalName: "HtmlGeneratedRuntime",
-      outfile: generatedBundlePath,
       platform: "browser",
       target: ["es2022"],
     });
@@ -3212,7 +3200,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
       }
     });
 
-    it(`${name} parses boolean HTML attributes and checks typed generated updates`, async () => {
+    it(`${name} parses boolean HTML attributes`, async () => {
       const browser = await browserType.launch({ headless: true });
       try {
         const page = await browser.newPage();
@@ -3223,40 +3211,18 @@ describe.skipIf(!enabled)("browser runtime", () => {
             `<x-boolean id="bare" enabled></x-boolean>` +
             `<x-boolean id="explicit-true" enabled="true"></x-boolean>` +
             `<x-boolean id="explicit-false" enabled="false"></x-boolean>` +
-            `<x-boolean id="default"></x-boolean>` +
-            `<div id="generated"></div>`,
+            `<x-boolean id="default"></x-boolean>`,
         );
         await page.addScriptTag({ path: bundlePath });
-        await page.addScriptTag({ path: generatedBundlePath });
-        const result = await page.evaluate(`(async () => {
+        // Compiled prop updates are held to the live runtime's in tests/vanilla-blocks.test.ts.
+        const result = await page.evaluate(`(() => {
           window.HtmlRuntime.lowerDocument();
-          const interpreted = ["bare", "explicit-true", "explicit-false", "default"].map(id =>
+          return ["bare", "explicit-true", "explicit-false", "default"].map(id =>
             document.getElementById(id).getAttribute("data-enabled")
           );
-          const generated = document.getElementById("generated");
-          let applied;
-          window.HtmlGeneratedRuntime.manageGeneratedProps(generated, [{
-            name: "enabled", attribute: "data-enabled", value: false, type: "boolean", required: false
-          }], (_name, value) => { applied = value; });
-          const values = [];
-          for (const value of [true, false]) {
-            window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: value });
-            await new Promise(resolve => setTimeout(resolve, 0));
-            values.push(applied);
-          }
-          let invalid = false;
-          try { window.HtmlGeneratedRuntime.updateGeneratedProps(generated, { enabled: "false" }); }
-          catch (error) { invalid = String(error).includes("HR002"); }
-          await new Promise(resolve => setTimeout(resolve, 0));
-          return { interpreted, generated: values, invalid, typeMismatch: generated.validity.typeMismatch };
         })()`);
 
-        assert.deepEqual(result, {
-          interpreted: ["true", "true", "false", "true"],
-          generated: [true, false],
-          invalid: false,
-          typeMismatch: true,
-        });
+        assert.deepEqual(result, ["true", "true", "false", "true"]);
       } finally {
         await browser.close();
       }

@@ -166,7 +166,19 @@ export function literalAttribute(value: string): string {
 }
 
 export function serializedDefinition(definition: ComponentDefinition): string {
-  const props = Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [
+  const props = runtimeProps(definition);
+  const runtime = {
+    contract: { tag: definition.contract.tag, props },
+    template: definition.template,
+    ...(definition.declarations === undefined ? {} : { declarations: definition.declarations }),
+    ...(definition.root === undefined ? {} : { root: definition.root }),
+  };
+  return `{...${JSON.stringify(runtime)},source:{file:import.meta.url},css:""}`;
+}
+
+/** The parts of each prop's contract that the runtime reads. */
+export function runtimeProps(definition: ComponentDefinition): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(definition.contract.props).map(([name, prop]) => [
     name,
     {
       type: prop.type,
@@ -182,13 +194,6 @@ export function serializedDefinition(definition: ComponentDefinition): string {
       ...("default" in prop ? { default: prop.default } : {}),
     },
   ]));
-  const runtime = {
-    contract: { tag: definition.contract.tag, props },
-    template: definition.template,
-    ...(definition.declarations === undefined ? {} : { declarations: definition.declarations }),
-    ...(definition.root === undefined ? {} : { root: definition.root }),
-  };
-  return `{...${JSON.stringify(runtime)},source:{file:import.meta.url},css:""}`;
 }
 
 function isBooleanAttributeBinding(

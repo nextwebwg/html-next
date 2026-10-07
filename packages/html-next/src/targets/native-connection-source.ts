@@ -1,27 +1,36 @@
-/** Shared native DOM connection observation; framework ownership stays with each target. */
-export const NATIVE_CONNECTION_SOURCE = `interface ConnectionHub {
+/**
+ * Native DOM connection observation; framework ownership stays with each target. A document has one
+ * MutationObserver for every HTML Next runtime and generated module on it: the hub lives on the
+ * document under the shared runtime key, in the shape the live runtime and compiled roots use.
+ */
+export const NATIVE_CONNECTION_SOURCE = `type DocumentMutationSubscriber = (mutations: readonly MutationRecord[]) => void;
+interface DocumentMutationHub {
   readonly observer: MutationObserver;
-  readonly checks: Set<() => void>;
+  readonly subscribers: Set<DocumentMutationSubscriber>;
 }
 
-const connectionHubs = new WeakMap<Document, ConnectionHub>();
+const runtimeKey = Symbol.for('@nextwebwg/html-next.runtime.v1');
 
 function observeConnection(element: Element, check: () => void): () => void {
   const document = element.ownerDocument;
-  let hub = connectionHubs.get(document);
+  const state = ((document as unknown as Record<symbol, { mutationHub?: DocumentMutationHub }>)[runtimeKey] ??= {});
+  let hub = state.mutationHub;
   if (hub === undefined) {
-    const checks = new Set<() => void>();
-    const observer = new MutationObserver(() => { for (const current of checks) current(); });
+    const Observer = document.defaultView?.MutationObserver ?? MutationObserver;
+    const subscribers = new Set<DocumentMutationSubscriber>();
+    const observer = new Observer((mutations) => { for (const notify of Array.from(subscribers)) notify(mutations); });
+    hub = { observer, subscribers };
+    state.mutationHub = hub;
     observer.observe(document, { childList: true, subtree: true });
-    hub = { observer, checks };
-    connectionHubs.set(document, hub);
   }
-  hub.checks.add(check);
+  const shared = hub;
+  const subscriber: DocumentMutationSubscriber = () => check();
+  shared.subscribers.add(subscriber);
   return () => {
-    hub!.checks.delete(check);
-    if (hub!.checks.size === 0) {
-      hub!.observer.disconnect();
-      connectionHubs.delete(document);
+    shared.subscribers.delete(subscriber);
+    if (shared.subscribers.size === 0 && state.mutationHub === shared) {
+      shared.observer.disconnect();
+      delete state.mutationHub;
     }
   };
 }

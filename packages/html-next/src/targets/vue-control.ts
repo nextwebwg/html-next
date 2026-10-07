@@ -1,4 +1,5 @@
 /** Native control bindings and state preservation during Vue hydration. */
+import { OPTION_WATCH_SOURCE } from "./shared-generated.js";
 export const VUE_CONTROL_PATH = "vue/control.ts";
 export const VUE_CONTROL_SPECIFIER = "./control";
 
@@ -15,8 +16,8 @@ const connectedControls = new WeakSet<Control>();
 const boundValues = new WeakMap<Control, unknown>();
 const selectOptions = new WeakMap<HTMLSelectElement, readonly (readonly [HTMLOptionElement, string])[]>();
 const selectBindings = new WeakMap<HTMLSelectElement, BoundControl>();
-const selectObservers = new WeakMap<HTMLSelectElement, MutationObserver>();
-
+const selectWatches = new WeakMap<HTMLSelectElement, () => void>();
+${OPTION_WATCH_SOURCE}
 function currentOptions(element: HTMLSelectElement): readonly (readonly [HTMLOptionElement, string])[] {
   return Array.from(element.options, (option) => [option, option.value] as const);
 }
@@ -161,12 +162,10 @@ export const vBindControl = {
     if (element instanceof HTMLSelectElement) {
       selectBindings.set(element, binding.value);
       selectOptions.set(element, currentOptions(element));
-      const observer = new MutationObserver(() => {
+      selectWatches.set(element, watchOptions(element, () => {
         const current = selectBindings.get(element);
         if (current !== undefined && optionsChanged(element)) writeBoundControl(element, current);
-      });
-      observer.observe(element, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["value"] });
-      selectObservers.set(element, observer);
+      }));
     }
   },
   updated(element: Control, binding: { value: BoundControl }): void {
@@ -183,8 +182,8 @@ export const vBindControl = {
     if (element instanceof HTMLSelectElement) {
       selectOptions.delete(element);
       selectBindings.delete(element);
-      selectObservers.get(element)?.disconnect();
-      selectObservers.delete(element);
+      selectWatches.get(element)?.();
+      selectWatches.delete(element);
     }
   },
 };
