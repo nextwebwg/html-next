@@ -248,7 +248,8 @@ describe("application platform", () => {
       await expect.poll(async () => await (await fetch(server.url + "src/")).text(), { timeout: 10_000 }).toContain("Source route");
       expect(await (await fetch(server.url + "items/with.dots/")).text()).toContain("kit: with.dots");
     } finally { await server.close(); }
-  }, 30_000);
+    // Windows runners measured 18-30 s for these four updates; each still has its own 10 s limit.
+  }, 60_000);
 
   it("rejects unsafe entries and leaves the last successful output intact after failure", async () => {
     const root = await app();
