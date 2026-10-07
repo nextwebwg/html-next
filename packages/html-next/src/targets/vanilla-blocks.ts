@@ -663,7 +663,7 @@ export function emitBlocks(
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
     `  const R = { n: element${rootEntries.map((entry) => `, ${entry}`).join("")} };`,
-    "  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), controller);",
+    "  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), C);",
     "  return element;",
     "}",
   );
@@ -696,6 +696,8 @@ export function emitBlocks(
     ...specs,
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     `const S = { n: ${JSON.stringify(plan.roots.map((item) => item.name))}, t: ${JSON.stringify(plan.roots.map((item) => item.type))}, f: import.meta.url };`,
+    // Only the default export is read, and only on first connect, so bundlers need no namespace object.
+    "const C = (host) => controller.default(host);",
     "",
     source,
     "",

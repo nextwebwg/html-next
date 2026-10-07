@@ -608,7 +608,8 @@ export function attachGeneratedController(
   spec: GeneratedStateSpec,
   values: unknown[],
   update: GeneratedUpdate,
-  controller: { readonly default: (host: never) => unknown },
+  /** Calls the controller module's default export; read when the root first connects, as live does. */
+  controller: (host: never) => unknown,
 ): void {
   const { n: names, t: types, f: file } = spec;
   const scheduler = new ReactiveScheduler();
@@ -813,7 +814,7 @@ export function attachGeneratedController(
       return;
     }
     started = true;
-    void Promise.resolve(controller.default(host as never)).then((result) => {
+    void Promise.resolve(controller(host as never)).then((result) => {
       if (typeof result !== "function") return;
       if (gone) (result as () => void)();
       else cleanup = result as () => void;

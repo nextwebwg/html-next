@@ -274,7 +274,7 @@ describe("generated controller host", () => {
     let host: any;
     attachGeneratedController(root, spec(["rows", "selected"], [["l", ["o", ["id", "n", "label", "s"]]], ["u", "n", "z"]]), values,
       (changed, dirty) => { log.push(`render ${changed} ${dirty.size}`); },
-      { default: (value: unknown) => { host = value; } });
+      (value: unknown) => { host = value; });
     assert.deepEqual(log, ["render -1 0"]);
     document.body.append(root);
     await flush();
@@ -314,7 +314,7 @@ describe("generated controller host", () => {
     const sizes: number[] = [];
     let host: any;
     attachGeneratedController(root, spec(["items"], [["l", "?"]]), [[]], (_changed, dirty) => { sizes.push(dirty.size); },
-      { default: (value: unknown) => { host = value; } });
+      (value: unknown) => { host = value; });
     document.body.append(root);
     await flush();
     const node: Record<string, unknown> = { name: "a" };
@@ -340,7 +340,7 @@ describe("generated controller host", () => {
     attachGeneratedController(root, spec(["rows"], [["l", ["o", ["id", "n", "label", "s"]]]]), [[]],
       (changed, dirty) => { renders.push([changed, dirty.size]); },
       // The controller's cleanup writes while the root is still connected, just before it disconnects.
-      { default: (value: unknown) => { host = value; return () => { host.state.rows[0].label = "z"; }; } });
+      (value: unknown) => { host = value; return () => { host.state.rows[0].label = "z"; }; });
     document.body.append(root);
     await flush();
     host.state.rows = [{ id: 0, label: "a" }];
@@ -361,13 +361,11 @@ describe("generated controller host", () => {
     const root = document.createElement("div");
     const log: string[] = [];
     let resolve!: (value: () => void) => void;
-    attachGeneratedController(root, spec(["on"], ["b"]), [false], (changed) => { log.push(`render ${changed}`); }, {
-      default: (host: any) => {
-        log.push("controller");
-        host.on("connect", () => { log.push("connect"); host.state.on = !host.state.on; return () => log.push("connect cleanup"); });
-        host.on("disconnect", () => { log.push("disconnect"); });
-        return new Promise<() => void>((done) => { resolve = done; });
-      },
+    attachGeneratedController(root, spec(["on"], ["b"]), [false], (changed) => { log.push(`render ${changed}`); }, (host: any) => {
+      log.push("controller");
+      host.on("connect", () => { log.push("connect"); host.state.on = !host.state.on; return () => log.push("connect cleanup"); });
+      host.on("disconnect", () => { log.push("disconnect"); });
+      return new Promise<() => void>((done) => { resolve = done; });
     });
     document.body.append(root);
     await flush();
@@ -391,7 +389,7 @@ describe("generated controller host", () => {
     const root = document.createElement("div");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let host: any;
-    attachGeneratedController(root, spec(["a"], ["s"]), ["x"], () => {}, { default: (value: unknown) => { host = value; } });
+    attachGeneratedController(root, spec(["a"], ["s"]), ["x"], () => {}, (value: unknown) => { host = value; });
     document.body.append(root);
     return flush().then(() => {
       host.data.x = 1;
