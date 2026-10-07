@@ -1,8 +1,8 @@
 # Framework comparison benchmark
 
 `scripts/framework-benchmark.ts` measures keyed component rendering against framework controls on
-[the public js-framework-benchmark fork](https://github.com/nextwebwg/js-framework-benchmark/tree/1c5c091eb0dbc2316f4ad3b23658fe2be617747e),
-pinned to `1c5c091eb0dbc2316f4ad3b23658fe2be617747e`. It replaces the untracked harness that
+[the public js-framework-benchmark fork](https://github.com/nextwebwg/js-framework-benchmark/tree/1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a),
+pinned to `1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a`. It replaces the untracked harness that
 produced the [October 2026 rendering results](./runtime-performance.md#keyed-component-rendering-confirmed-october-2026-results);
 the protocol and scoring are unchanged. Scoring lives in `scripts/framework-benchmark-score.ts` and
 is unit tested.

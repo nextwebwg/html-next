@@ -25,7 +25,7 @@ import {
 } from "./framework-benchmark-score.js";
 
 const REPOSITORY = "https://github.com/nextwebwg/js-framework-benchmark";
-const PIN = "1c5c091eb0dbc2316f4ad3b23658fe2be617747e";
+const PIN = "1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a";
 /** Control lockfiles at the pin; setup refuses a checkout whose dependencies differ. */
 const LOCKFILES = {
   "react-hooks": "bee80a1ff6b695518e5f19961a408c9a6b8cbafa78143a9dc6d4252b4003bb62",
