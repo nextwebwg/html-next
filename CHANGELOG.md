@@ -18,6 +18,7 @@
 - Simplify the public performance documentation and package READMEs.
 - Server rendering uses jsdom 30.0.1 (previously 27.4.0). jsdom 30 declares Node `^22.22.2 || ^24.15.0`, narrower than HTML Next's `>=22.13 <23 || >=24 <25`.
 - `html-next-check`, installed with `@nextwebwg/html-next-unplugin`, checks native, Vue, React, and Svelte component graphs without writing build output. One run reports independent declaration, binding, resource, and backend errors as source links or JSON, for CI and editor adapters to run beside TypeScript.
+- A consumer's `<template slot>` renders lazily for every slot, including one that exposes no props. Previously such a slot inserted the inert `<template>` and its content never rendered. The children render in the consumer's scope only while the slot renders, afresh each time, and nothing inside is created, fetched or bound while the slot is hidden. `host.slots` lists the elements the template renders while its slot renders, and none otherwise; for a slot with props it previously listed the `<template>` itself. Plain projection stays eager.
 
 ## 1.0.0-alpha.32
 
