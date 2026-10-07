@@ -27,14 +27,14 @@ Save this as `counter.html`. Click the count as guests arrive, then Reset for th
   </defs>
   <div>
     <button type="button" on:click="increment">
-      Count: <span $value="$count"></span>
+      Count: {$count}
     </button>
     <button type="button" on:click="reset">Reset</button>
   </div>
 </template>
 ```
 
-`$value` connects the span to `count`. The handlers update that state when either button is clicked. The rendered root is the `div` containing both buttons.
+`{$count}` renders the current value of `count` inline; state and props are referenced with `$`. The handlers update that state when either button is clicked. The rendered root is the `div` containing both buttons.
 
 Add a `<style>` inside the definition when it needs scoped CSS. An optional `controller="./counter.js"` connects an ordinary ES module for imperative behavior. Start with the markup and add JavaScript where you need it.
 

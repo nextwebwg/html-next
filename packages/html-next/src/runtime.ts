@@ -104,6 +104,24 @@ interface SlotInsertion {
   readonly nodes: readonly Node[];
 }
 
+/**
+ * Records the projected nodes a freshly prepared invocation renders in no slot. The components
+ * inside them are not instantiated by the same pass: they wait, like a branch whose condition is
+ * not met, until a slot renders them and lowering finds them in the document. Hidden content costs
+ * no instance, no bindings and no nested lowering.
+ */
+function recordUnrendered(invocation: PreparedInvocation, unrendered: Set<Node>): void {
+  const placed = new Set(invocation.context.slotInsertions.flatMap((insertion) => insertion.nodes));
+  for (const node of invocation.context.projectedNodes) if (!placed.has(node)) unrendered.add(node);
+}
+
+/** Whether `element` sits in projected content no slot renders yet (see `recordUnrendered`). */
+function withinUnrendered(element: Element, unrendered: ReadonlySet<Node>): boolean {
+  if (unrendered.size === 0) return false;
+  for (let node: Node | null = element; node !== null; node = node.parentNode) if (unrendered.has(node)) return true;
+  return false;
+}
+
 interface PropInput {
   readonly value: unknown;
   readonly source: "html" | "value";
@@ -1018,6 +1036,8 @@ interface ProjectedTemplate {
 }
 
 const projectedTemplates = new WeakMap<HTMLTemplateElement, ProjectedTemplate>();
+/** The element roots each consumer `<template slot>` renders, one set per outlet rendering it now. */
+const templateRenderings = new WeakMap<HTMLTemplateElement, Set<Element[]>>();
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
@@ -2430,20 +2450,24 @@ function renderSlot(
     ? node.name ?? ""
     : toText(evaluateCompiled(node.nameExpression, scope));
   const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
+  const props = node.props ?? [];
+  const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
+  // A consumer's <template slot> renders lazily, like an $if body: only while this outlet renders,
+  // in the consumer's scope, and afresh each time. Plain projection stays eager.
+  const lazy = props.length > 0 || carrier !== undefined;
   const renderScoped = (existing?: readonly Node[]): Node[] => {
-    const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
     const authored = projectedTemplates.get(carrier);
     if (authored === undefined && projectedSlotParser === undefined) {
       fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
     }
-    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, node.props!.map((prop) => prop.name));
+    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
     const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
     const projectionContext = authored === undefined ? context : Object.create(context, {
       definition: { value: authored.context.definition, enumerable: true },
       refs: { value: authored.context.refs, enumerable: true },
     }) as RuntimeRenderContext;
-    for (const prop of node.props!) {
+    for (const prop of props) {
       ownEffect(context, scope, () => {
         const value = evalConforming(prop.expression, scope, context.definition);
         if (value !== NONCONFORMING) projectedScope.set(prop.name, value);
@@ -2460,6 +2484,15 @@ function renderSlot(
       return adopted;
     })();
     for (const child of rendered) markProjectedRoot(child);
+    // host.slots lists these roots while this outlet renders them, following a component's lowered root.
+    const roots = rendered.filter((child): child is Element => child.nodeType === 1);
+    roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
+    ownEffect(context, scope, () => {
+      let renderings = templateRenderings.get(carrier);
+      if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
+      renderings.add(roots);
+      return () => { renderings.delete(roots); };
+    });
     return rendered;
   };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
@@ -2477,7 +2510,7 @@ function renderSlot(
       }
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
-    if ((node.props?.length ?? 0) > 0) {
+    if (lazy) {
       const adopted = renderScoped(hydrating.content);
       return [hydrating.markers[0]!, ...adopted, ...hydrating.markers.slice(1)];
     }
@@ -2493,13 +2526,13 @@ function renderSlot(
   const instruction = (target: string, data: string): Node => renderedFormMark(document, target, data);
   const ranged = (nodes: Node[], fallback: boolean): Node[] => {
     if (nodes.length === 0) return [instruction("marker", `slot=${quoted(name)}`)];
-    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}${(node.props?.length ?? 0) > 0 ? ' scoped=""' : ""}`;
+    const data = `slot=${quoted(name)}${fallback ? ' fallback=""' : ""}${lazy ? ' scoped=""' : ""}`;
     return [instruction("start", data), ...nodes, instruction("end", "")];
   };
   if (assigned.length === 0) {
     return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
   }
-  if ((node.props?.length ?? 0) > 0) {
+  if (lazy) {
     return ranged(renderScoped(), false);
   }
   if (context.committed) {
@@ -2935,7 +2968,24 @@ function prepareRuntimeInvocation(
       hydratedNodes = [];
     }
   }
-  const children = hydration ? hydratedNodes! : Array.from(invocation.childNodes);
+  const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
+  const projected = hydration ? children : Array.from(invocation.childNodes);
+  // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
+  // The projection follows that root, so a slot that renders again inserts it, not the invocation
+  // element lowering replaced. A later root switch calls the same rebind with the new root.
+  for (const node of children) {
+    if (node.nodeType !== 1 || !(node as Element).localName.includes("-")) continue;
+    let current: Node = node;
+    whenLowered(node as Element, (root) => {
+      for (const nodes of [children, projected]) {
+        const index = nodes.indexOf(current);
+        if (index >= 0) nodes[index] = root;
+      }
+      const slot = projectedSlotNames.get(current);
+      if (slot !== undefined) projectedSlotNames.set(root, slot);
+      current = root;
+    });
+  }
   const instance: RuntimeInstance = {
     definition,
     ...(parent === undefined ? {} : { parent }),
@@ -2951,7 +3001,7 @@ function prepareRuntimeInvocation(
     owned: renderOwned(),
     rootNode,
     rootElement: createSignal<Element | undefined>(undefined),
-    projection: { nodes: hydration ? hydratedNodes! : Array.from(invocation.childNodes), slotNames: projectedSlotNames },
+    projection: { nodes: projected, slotNames: projectedSlotNames },
   };
   if (Object.keys(definition.contract.props).length > 0) {
     instance.effects.push(createEffect(scope.scheduler, () => {
@@ -3250,12 +3300,14 @@ function lowerRenderedComponents(
     }
     const prepared: PreparedInvocation[] = [];
     const pendingOwners = new WeakMap<Element, RuntimeInstance>();
+    const unrendered = new Set<Node>();
     for (const element of nested) {
       const live = registry.definitions.get(element.localName);
       if (live === undefined) continue;
       const { definition } = live;
       if (
         contentOnly.has(element) ||
+        withinUnrendered(element, unrendered) ||
         supersededInvocations.has(element) ||
         alreadyLowered(element, definition.contract.tag) ||
         root.defaultView?.customElements.get(definition.contract.tag) !== undefined ||
@@ -3264,6 +3316,7 @@ function lowerRenderedComponents(
       const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners));
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
+      recordUnrendered(invocation, unrendered);
     }
     if (prepared.length === 0) return lowered;
     commitRuntimeInvocations(registry, prepared);
@@ -3367,10 +3420,12 @@ function lowerScopes(
   const lowered: Element[] = [];
   const prepared: PreparedInvocation[] = [];
   const pendingOwners = new WeakMap<Element, RuntimeInstance>();
+  const unrendered = new Set<Node>();
   const prepare = (live: LiveDefinition, element: Element, hydration: boolean): boolean => {
     const { definition } = live;
     if (
       contentOnly.has(element) ||
+      !hydration && withinUnrendered(element, unrendered) ||
       supersededInvocations.has(element) ||
       // Already lowered here: a repeat pass must not build this component onto its own root a
       // second time. Another component still may, which is how a delegated root lowers.
@@ -3382,6 +3437,7 @@ function lowerScopes(
     const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners));
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
+    if (!hydration) recordUnrendered(invocation, unrendered);
     return true;
   };
   const collect = (byTag: ReadonlyMap<string, LiveDefinition>, elements: Iterable<Element>): void => {
@@ -3805,9 +3861,10 @@ export interface ComponentHost {
   readonly refs: Readonly<Record<string, Element | readonly Element[]>>;
   /**
    * The elements a consumer projected, by slot name, in document order; `default` reads the
-   * unnamed slot. Empty while a slot shows its fallback. A component lowers into one tree with
-   * no shadow boundary, so a query rooted at `root` cannot tell projected content from the
-   * component's own output: this is the only way to enumerate it.
+   * unnamed slot. Empty while a slot shows its fallback. A consumer's `<template slot>` contributes
+   * the elements it renders while its slot renders, and nothing otherwise. A component lowers into
+   * one tree with no shadow boundary, so a query rooted at `root` cannot tell projected content
+   * from the component's own output: this is the only way to enumerate it.
    */
   readonly slots: Readonly<Record<string, readonly Element[]>>;
   /**
@@ -3968,9 +4025,12 @@ export function getComponentHost(element: Element): ComponentHost | undefined {
     const slot = key === "default" ? "" : key;
     // Hydration records each node's slot; a client-rendered instance carries the author's own
     // `slot` attribute instead, and an unmarked node belongs to the unnamed slot either way.
-    return projection.nodes.filter((node): node is Element =>
-      node.nodeType === 1 &&
-      (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") === slot
+    // A consumer's <template slot> contributes what its outlets render now, in document order.
+    return projection.nodes.flatMap((node): Element[] =>
+      node.nodeType !== 1 || (projection.slotNames.get(node) ?? (node as Element).getAttribute("slot") ?? "") !== slot ? []
+        : !(node instanceof HTMLTemplateElement) ? [node as Element]
+          : [...templateRenderings.get(node) ?? []].flat().sort((a, b) =>
+            (a.compareDocumentPosition(b) & 4 /* DOCUMENT_POSITION_FOLLOWING */) !== 0 ? -1 : 1)
     );
   };
   const slots = new Proxy({}, {

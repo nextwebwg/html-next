@@ -28,7 +28,7 @@ HTML Next brings markup, state, events, slots, and scoped styles together in one
     </handler>
   </defs>
   <button type="button" on:click="increment">
-    Count: <span $value="$count"></span>
+    Count: {$count}
   </button>
 </template>
 ```
