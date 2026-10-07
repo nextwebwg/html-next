@@ -175,6 +175,17 @@ byte budgets.
 | Lifecycle | The shared document `MutationObserver` coordinator, `isConnected`, `getRootNode()`, `contains()`, `WeakRef`, `FinalizationRegistry` | A scope-exact fast path that skips the per-node marker walk |
 | Scheduling | `queueMicrotask` through the existing `ReactiveScheduler` | None |
 
+### Indexed equality selection
+
+The platform's `Map` already indexes keyed rows, and `classList.toggle(name, force)` applies the
+selected state. The remaining gap is routing a changed outer value to the affected bindings.
+For `class:danger="row.id = selected"` with `$key="row.id"`, the existing row map can find both
+the previous and next selected rows. Reuse that map rather than allocate a second index. Keep the
+expression's strict equality semantics: `Map` uses SameValueZero for lookup, but `NaN = NaN`
+still evaluates to false. Other comparands retain ordinary reactive evaluation.
+When an ordinary binding on the same element reads that outer root, retain the ordinary scheduler
+group so attribute creation keeps authored order.
+
 The platform has no keyed reconciliation and no reactive binding of template parts; DOM Parts and
 Template Instantiation have not shipped. These helpers are the smallest layer that binds cloned DOM
 to declared state while keeping the controller contract. If `ChildNodePart`/`AttributePart` ship, the

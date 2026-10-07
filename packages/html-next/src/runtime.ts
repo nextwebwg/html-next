@@ -14,6 +14,7 @@ import {
   dimensionType,
   evaluate,
   type CompiledExpression,
+  type ExpressionNode,
   evaluateCompiled,
   toAttribute,
   toText,
@@ -23,6 +24,7 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
+import { keyedEquality, visitSelected } from "./selection.js";
 import {
   createComputed,
   createEffect,
@@ -888,6 +890,9 @@ interface HydrationRange {
   readonly content: readonly Node[];
 }
 
+/** Weak tags reuse the existing effect ownership; row removal releases every indexed binding. */
+const indexedSelections = new WeakMap<ReactiveEffect, string>();
+
 /**
  * What one rendering of the root owns: its effects, including those later `$if`/`$each` renders
  * add. A root switch stops them all and starts afresh.
@@ -925,6 +930,13 @@ class RenderOwned {
     this.effects.delete(effect);
   }
 
+  select(root: string): void {
+    for (const entry of this.#entries) {
+      if (entry instanceof RenderOwned) entry.select(root);
+      else if (indexedSelections.get(entry) === root) entry.schedule();
+    }
+  }
+
   stop(): void {
     if (this.#stopped) return;
     this.#stopped = true;
@@ -956,6 +968,11 @@ interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
+  readonly selection?: {
+    readonly key: CompiledExpression;
+    readonly scope: ReactiveScope;
+    readonly bindings: ReadonlyMap<CompiledExpression, CompiledExpression>;
+  };
   root?: Element;
   readonly projectedNodes: readonly Node[];
   readonly projectedSlotNames: WeakMap<Node, string>;
@@ -1586,6 +1603,31 @@ function renderEachRegion(
   }
   let blocks = new Map<unknown, EachBlock>();
   const { flow: _flow, ...body } = node;
+  const bindings = new Map<CompiledExpression, CompiledExpression>();
+  if (flow.keyPlan !== undefined && node.kind === "element") {
+    const find = (element: ElementNode): void => {
+      for (const attribute of element.attributes) {
+        if (attribute.kind !== "attribute" || attribute.target !== "class" || attribute.expressionPlan === undefined) continue;
+        const root = keyedEquality(attribute.expressionPlan.ast, flow.keyPlan!.ast, flow.item);
+        if (root !== undefined && root !== flow.index) {
+          // Keep one scheduler group when another binding on this element reads the same root;
+          // otherwise routing only the class effect would change authored attribute creation order.
+          const shared = element.attributes.some((other) => other.kind !== "literal" &&
+            other.expressionPlan?.dependencies.some((path) => path === root || path.startsWith(`${root}.`)) === true &&
+            (other.kind !== "attribute" || other.target !== "class" ||
+              keyedEquality(other.expressionPlan.ast, flow.keyPlan!.ast, flow.item) !== root));
+          if (shared) continue;
+          bindings.set(attribute.expressionPlan, compileExpression(root));
+        }
+      }
+      for (const child of element.children) if (child.kind === "element" && child.flow === undefined) find(child);
+    };
+    find(body as ElementNode);
+  }
+  const roots = new Set([...bindings.values()].map((expression) => expression.source));
+  const selection = bindings.size === 0 ? undefined : { key: flow.keyPlan!, scope, bindings };
+  const rowContext = selection === undefined ? context
+    : Object.create(context, { selection: { value: selection } }) as RuntimeRenderContext;
   const nativePlan = node.kind === "element" ? nativeTemplatePlan(node as ElementNode, document, context) : undefined;
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
@@ -1614,7 +1656,7 @@ function renderEachRegion(
       if (block === undefined) {
         local ??= typedLayer(scope, locals, { [flow.item]: itemType });
         const owned = renderOwned(context.owned);
-        const blockContext = ownedContext(context, owned);
+        const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, blockContext)
@@ -1666,6 +1708,20 @@ function renderEachRegion(
     blocks = next;
     syncContainingSelect(end);
   });
+  for (const root of roots) {
+    let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
+    ownEffect(context, scope, () => {
+      const value = scope.read(root);
+      const type = scope.typeOfDeclaredPath?.(root);
+      // Routing does not evaluate a row binding or emit its diagnostics while the list is empty.
+      const next = type !== undefined && value !== undefined && value !== ABSENT &&
+        !conformsAtReference(value, type) ? NONCONFORMING : value;
+      if (previous === NONCONFORMING || next === NONCONFORMING) {
+        for (const block of blocks.values()) block.owned.select(root);
+      } else visitSelected(blocks, previous, next, (block) => block.owned.select(root));
+      previous = next;
+    }, 0);
+  }
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
 }
 
@@ -1841,14 +1897,35 @@ function bindElementAttributes(
   context: RuntimeRenderContext,
   invocation?: InvocationBinding,
 ): void {
-  const own = (run: () => void | (() => void), priority?: number): void => {
+  const own = (run: () => void | (() => void), priority?: number): ReactiveEffect => {
     const effect = ownEffect(context, scope, run, priority);
     invocation?.effects.push(effect);
+    return effect;
   };
   for (const attribute of node.attributes) {
     if (attribute.kind === "attribute") {
-      own(() => {
-        const value = evalConforming(attribute.expression, scope, context.definition);
+      const selection = invocation === undefined && attribute.target === "class" &&
+        scope.parent === context.selection?.scope ? context.selection : undefined;
+      const root = attribute.expressionPlan === undefined ? undefined : selection?.bindings.get(attribute.expressionPlan);
+      const effect = own(() => {
+        let value: Value | typeof NONCONFORMING;
+        if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
+        else {
+          const expression = attribute.expressionPlan!.ast as Extract<ExpressionNode, { kind: "binary" }>;
+          const outerFirst = expression.left.kind === "id" && expression.left.name === root.source;
+          // Validate each operand through the existing evaluator, retaining expression equality.
+          let item: Value | typeof NONCONFORMING;
+          let outer: Value | typeof NONCONFORMING;
+          if (outerFirst) {
+            outer = untracked(() => evalConforming(root, scope, context.definition));
+            item = evalConforming(selection.key, scope, context.definition);
+          } else {
+            item = evalConforming(selection.key, scope, context.definition);
+            outer = untracked(() => evalConforming(root, scope, context.definition));
+          }
+          value = item === NONCONFORMING || outer === NONCONFORMING ? NONCONFORMING
+            : expression.op === "=" ? item === outer : item !== outer;
+        }
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
         if (value === NONCONFORMING) return;
@@ -1884,6 +1961,7 @@ function bindElementAttributes(
           setAttribute(target, attribute.name, toAttribute(value, attribute.name));
         }
       });
+      if (root !== undefined) indexedSelections.set(effect, root.source);
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         own(() => {
           const target = rootTarget(element, invocation);

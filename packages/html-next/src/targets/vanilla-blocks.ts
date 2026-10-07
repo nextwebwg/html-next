@@ -11,6 +11,7 @@ import type { ExpressionNode } from "../expression.js";
 import { compactTypeAt, conforms, type CompactType } from "../generated-runtime.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { isUrlAttribute } from "../sanitize.js";
+import { keyedEquality } from "../selection.js";
 import { rootArms, type ComponentDefinition, type ElementNode, type TemplateNode } from "../template.js";
 import { declarationTypeNode, type TypeNode } from "../type-system.js";
 
@@ -523,6 +524,15 @@ export function emitBlocks(
 ): string {
   const { contract } = definition;
   const blocks = plan.blocks;
+  const selectorRoot = (binding: Binding, region: Region): number => {
+    if (binding.kind !== "class") return -1;
+    const name = keyedEquality(JSON.parse(binding.expression.key), JSON.parse(region.key!.key), region.alias!);
+    return plan.roots.findIndex((root) => root.name === name && !mayContain(root.type));
+  };
+  const selectors = (region: Region): number[] => [...new Set(region.block.bindings
+    .map((binding) => selectorRoot(binding, region)).filter((index) => index >= 0))];
+  const selected = [...new Set(blocks.flatMap((block) => block.regions
+    .flatMap((region) => region.kind === "each" ? selectors(region) : [])))];
   const field = (block: Block, site: number): string =>
     block.sites[site]!.length === 0 ? "r.n" : `r.a${site}`;
   /** Record fields for a block: sites the patch writes, last values, and region state. */
@@ -613,8 +623,12 @@ export function emitBlocks(
         return;
       }
       lines.push(`  if (${guard(maskOf(region.list!) | NESTED)}) r.L${index}.update(${region.list!.source}, d, c);`);
-      const outer = region.block.bindings.reduce((mask, binding) => mask | outerOf(finalExpression(binding)), 0);
+      const outer = region.block.bindings.reduce((mask, binding) => mask |
+        (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c);`);
+      for (const root of selectors(region)) {
+        lines.push(`  if (c !== -1 && c & ${1 << root}${outer === 0 ? "" : ` && !(c & ${outer})`}) visitSelected(r.L${index}.m, s${root}, v[${root}], p${child}, c);`);
+      }
     });
     return lines;
   };
@@ -659,12 +673,14 @@ export function emitBlocks(
   const rootWalk: string[] = [];
   const rootSites = walk("element", root.sites, rootWalk, "t");
   const rootEntries = fields(root, rootSites);
+  if (root.bindings.some((binding) => root.sites[binding.site]!.length === 0)) rootEntries.unshift("n: element");
   body.push(
     "  const p0 = (r, c, d) => {",
     ...patch(root).map((line) => `  ${line}`),
+    ...selected.map((root) => `    s${root} = v[${root}];`),
     "  };",
     ...rootWalk.map((line) => `  ${line}`),
-    `  const R = { n: element${rootEntries.map((entry) => `, ${entry}`).join("")} };`,
+    `  const R = { ${rootEntries.join(", ")} };`,
     "  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), C);",
     "  return element;",
     "}",
@@ -681,11 +697,12 @@ export function emitBlocks(
     `  element.setAttribute("data-component", ${JSON.stringify(contract.tag)});`,
     ...(rootChildren ? ["  element.append((P0 ??= buildTemplate(T0)).cloneNode(true));"] : []),
     `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
+    ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...body,
   ];
   const source = factory.join("\n");
   const helpers = ["attachGeneratedController", "buildTemplate", "clearRegion", "KeyedList", "readMember", "toAttribute",
-    "toText", "trackContainer", "truthy", "writeAttribute", "writeText"].filter((name) => name === "attachGeneratedController" ||
+    "toText", "trackContainer", "truthy", "visitSelected", "writeAttribute", "writeText"].filter((name) => name === "attachGeneratedController" ||
     new RegExp(`\\b${name}\\b`).test(source));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
   const prototypes = blocks.filter((block) => block.id !== 0 || rootChildren).map((block) => `P${block.id}`);

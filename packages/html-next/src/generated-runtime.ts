@@ -23,6 +23,7 @@ import { parseTypedValue, parseTypeExpression } from "./type-system.js";
 export { toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { KeyedList } from "./keyed.js";
+export { visitSelected } from "./selection.js";
 
 export interface GeneratedEvent {
   readonly name: string;

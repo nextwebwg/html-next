@@ -1,0 +1,116 @@
+{
+  "complete": true,
+  "runner_success": true,
+  "standard_samples": false,
+  "cpu_samples": 5,
+  "protocol": "reduced",
+  "measuredAt": "20261007T031232Z",
+  "frameworks": [
+    "html-next-vite-candidate",
+    "html-next-live-candidate",
+    "solid"
+  ],
+  "benchmarks": [
+    "01_run1k",
+    "02_replace1k",
+    "03_update10th1k_x16",
+    "04_select1k",
+    "05_swap1k",
+    "06_remove-one-1k",
+    "07_create10k",
+    "08_create1k-after1k_x2",
+    "09_clear1k_x8"
+  ],
+  "direct_extend": true,
+  "environment": {
+    "chrome": "153.0.8010.12",
+    "cpu": "Apple M4 Pro",
+    "os": "macOS 26.5.2",
+    "platform": "darwin-arm64",
+    "node": "v24.20.0",
+    "benchmark": {
+      "repository": "https://github.com/nextwebwg/js-framework-benchmark",
+      "revision": "1c5c091eb0dbc2316f4ad3b23658fe2be617747e",
+      "lockfileSha256": {
+        "react-hooks": "bee80a1ff6b695518e5f19961a408c9a6b8cbafa78143a9dc6d4252b4003bb62",
+        "vue": "7b04dd5631706be5c254647a2c4fe6aee7b8c9c359edaa44422cb3e44b7fdb82",
+        "svelte": "26f8c3a37e22b9c561f14944a4d5f797a235d4c57fc6dc4dfd8547569573613a",
+        "solid": "50878ee6d9d788bd5a8a7ef1cb0d61b81d1e95264ef8be0017b54311c01e75c8"
+      }
+    },
+    "htmlNext": {
+      "commit": "49ec4001d69a1aebbeacf93c60611c56b11330d4",
+      "dirty": true
+    }
+  },
+  "bundles": {
+    "html-next-vite-candidate": {
+      "sha256": "f6bf3f227e690e6ac21f5bca43e384832cee07dddbdb2b14dbba10d5b74e3e0f",
+      "raw": 22313,
+      "gzip": 8347,
+      "directExtend": {
+        "applied": true,
+        "runtimeComponents": []
+      }
+    },
+    "html-next-live-candidate": {
+      "sha256": "edda001ec188411c0277797d48681478da38621a928837f059b8185547591396",
+      "raw": 170154,
+      "gzip": 56168
+    },
+    "solid": {
+      "sha256": "9a7954aedff39e0f0107a9223f717bdcee63a1609b5bb2626065283f633314fe",
+      "raw": 11563,
+      "gzip": 4812
+    }
+  },
+  "vite_gzip_bytes": 8347,
+  "live_gzip_bytes": 56168,
+  "median_ms": {
+    "html-next-live-candidate-v1.0.0-alpha.31+edda001ec188-keyed": {
+      "01_run1k": 31.7,
+      "02_replace1k": 35.8,
+      "03_update10th1k_x16": 20.8,
+      "04_select1k": 5.7,
+      "05_swap1k": 28.9,
+      "06_remove-one-1k": 23.4,
+      "07_create10k": 337.7,
+      "08_create1k-after1k_x2": 41.3,
+      "09_clear1k_x8": 18.9
+    },
+    "html-next-vite-candidate-v1.0.0-alpha.31+f6bf3f227e69-keyed": {
+      "01_run1k": 23.3,
+      "02_replace1k": 25.1,
+      "03_update10th1k_x16": 21.7,
+      "04_select1k": 4.2,
+      "05_swap1k": 20.8,
+      "06_remove-one-1k": 14.2,
+      "07_create10k": 259.2,
+      "08_create1k-after1k_x2": 27.6,
+      "09_clear1k_x8": 11.9
+    },
+    "solid-v1.9.3-keyed": {
+      "01_run1k": 24.7,
+      "02_replace1k": 26.8,
+      "03_update10th1k_x16": 17.6,
+      "04_select1k": 4.8,
+      "05_swap1k": 21.3,
+      "06_remove-one-1k": 13.1,
+      "07_create10k": 266.9,
+      "08_create1k-after1k_x2": 27.7,
+      "09_clear1k_x8": 12.5
+    }
+  },
+  "scores": {
+    "html-next-live-candidate-v1.0.0-alpha.31+edda001ec188-keyed": 1.4228804126856853,
+    "html-next-vite-candidate-v1.0.0-alpha.31+f6bf3f227e69-keyed": 1.0394139719165498,
+    "solid-v1.9.3-keyed": 1.0348413701799937
+  },
+  "controls": {
+    "solid": "solid-v1.9.3-keyed"
+  },
+  "vite_score": 1.0394139719165498,
+  "vite_vs_solid": 1.0044186499190313,
+  "live_score": 1.4228804126856853,
+  "live_vs_solid": 1.3749744199327851
+}

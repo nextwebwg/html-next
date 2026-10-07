@@ -16,8 +16,9 @@ These are the owner's targets, set on 2026-10-06.
   workloads. Svelte 5.42.1 is reported but not gated.
 - **Live runtime.** The live runtime must stay competitive: no regressions, and it should share the
   gains.
-- **No bundle bloat.** The compiled entry must shrink at every milestone. Live may grow by at most
-  +2 KB gzip in total, and preferably not at all.
+- **Bundle cost.** Prefer smaller compiled output. The owner accepts a small increase, including
+  roughly 50 B gzip for selection, when it improves performance against Solid. Live may grow by
+  at most +2 KB gzip in total, and preferably not at all.
 - **Coverage.** Everything the live runtime supports must work when compiled. The general-runtime
   fallback (`notYetDirect()`) is transitional.
 - **Starting point.** Experiments always start from the current improved state, never the original
@@ -33,7 +34,7 @@ These are the owner's targets, set on 2026-10-06.
 | Harness keeps out of the shared Playwright browser cache | Merged: nextwebwg/html-next#152 (`bb67645`) |
 | Plain-object template reads (another session) | Merged: nextwebwg/html-next#154 (`009a08a`) |
 | Fork entry `frameworks/keyed/html-next` runs the improved runtime | Merged: nextwebwg/js-framework-benchmark#2 (`1c5c091`); the harness pins this commit |
-| **M0 + M1, compiled direct path behind `experimentalDirectExtend`** | **Open: nextwebwg/html-next#155**, branch `matthew-dean/compiled-direct-extend` (this branch) |
+| **M0 + M1, compiled direct path behind `experimentalDirectExtend`** | **Merged: nextwebwg/html-next#155** (`eba4fa0`) |
 
 M1 moves components with controllers, structured state and keyed lists off
 `manageComponentLifecycle`. With the option on, the benchmark component's Vite entry is **8,051 B
@@ -68,14 +69,26 @@ with standard samples (15, or 25 for select) unless marked otherwise.
   gated target is not met yet: the direct path beats Vue, React and Svelte, but not Solid. This is one sweep;
   confirm it with a second.
 
+- **Keyed selection screen after simplification**, 2026-10-07 (ledger
+  `benchmarks/framework-results/20261007T031232Z-49ec400.json`): all nine workloads, compiled/live/Solid,
+  reduced samples (5; 15 for select). Compiled selection is **4.2 ms** against Solid's **4.8 ms**;
+  live is **5.7 ms**. The compiled weighted ratio is **1.004× Solid**, and live is **1.375×**.
+  The overall target remains unmet and this screen needs standard-sample confirmation.
+  Compiled gzip-6 is **8,347 B** (+48 B over M1); live is **56,168 B** (+738 B).
+  Both renderers reuse their existing keyed row map for equality/inequality class bindings whose
+  comparand is the loop key. Other comparands retain ordinary evaluation. Live bindings sharing
+  an element with ordinary reads of the same root retain their scheduling order.
+  `pnpm verify:pr`, focused three-engine runtime and generated-component tests, and the framework
+  smoke/parity checks pass.
+
 ## Required next work
 
 In order. Each item is screened first (see Working method), then confirmed.
 
-1. **Equality selector. Required: deferred in M1, not optional.** M1's plan rejected a selector
+1. **Equality selector. Key-aligned class bindings implemented and screened; confirmation remains.** M1's plan rejected a selector
    index as worth about 0.1 ms, but the measured `04_select1k` is 7.1 ms against Solid's 5.5. It is the second-largest remaining share and the one the owner explicitly requires.
-   Today every row's `class:danger="row.id = selected"` binding re-evaluates when `selected`
-   changes. Solid's `createSelector` touches only the two affected rows.
+   Before the selector, every row's `class:danger="row.id = selected"` binding re-evaluated when
+   `selected` changed. With `$key="row.id"`, the new path touches only the affected rows.
    - **Allowed.** The owner allowed this in decision 1 (an outer scalar change may re-evaluate only
      the affected rows; getter counts and repeated warnings for unchanged results are not a
      contract).
