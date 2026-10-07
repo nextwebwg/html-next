@@ -151,9 +151,10 @@ describe("generateComponent", () => {
     const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
     const providerOutput = artifacts(provider);
     const readerOutput = artifacts(reader);
-    // A compiled provider is found through its root's compiled handle; it needs no runtime.
+    // A compiled reader finds its compiled provider's root among its ancestors (tests/vanilla-blocks.test.ts).
     assert.doesNotMatch(providerOutput.get("vanilla/XSteps.js")!, /@nextwebwg\/html-next\/runtime/);
-    assert.match(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.doesNotMatch(readerOutput.get("vanilla/XStep.js")!, /@nextwebwg\/html-next\/runtime/);
+    assert.match(readerOutput.get("vanilla/XStep.js")!, /readContext\(I, X, \d+, "x-steps", "current"/);
     assert.match(providerOutput.get("vue/XSteps.vue")!, /provide\('html-next:x-steps:current', current\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /inject<any>\('html-next:x-steps:current'\)/);
     assert.match(readerOutput.get("vue/XStep.vue")!, /const props = defineProps/);
