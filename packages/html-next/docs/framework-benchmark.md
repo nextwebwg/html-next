@@ -52,8 +52,9 @@ fork revision and lockfile hashes are therefore the checked values, not assumpti
   With `--reference=HEAD` and a clean tree it is an A/A control; entry positions are fixed here, so it
   includes any position effect as well as noise.
 - `--record`: also write the summary to the ledger (below).
-- `--direct-extend`: build the Vite entry with the unplugin's `experimentalDirectExtend`. Also
-  accepted by `verify:frameworks` and `smoke:frameworks`.
+- `--direct-extend`: build the Vite entry with the unplugin's `experimentalDirectExtend` (see
+  [the compiled direct path](./compiled-direct-path.md)). Also accepted by `verify:frameworks` and
+  `smoke:frameworks`.
 
 Each run writes `packages/html-next/.benchmark/runs/<UTC stamp>/` with the runner's `results/`,
 `traces/`, `runner.log`, `server.log`, `command.json` and `summary.json`. Raw results and traces stay
