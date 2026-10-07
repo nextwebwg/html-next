@@ -7,7 +7,7 @@
   "type": "module",
   "packageManager": "pnpm@11.25.0",
   "engines": {
-    "node": ">=22.13 <23 || >=24 <25"
+    "node": ">=22.22.2 <23 || >=24.15 <25"
   },
   "scripts": {
     "audit:native": "pnpm --filter @nextwebwg/html-next audit:native",
