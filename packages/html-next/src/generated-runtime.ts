@@ -7,7 +7,8 @@ import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "
 import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
-import { stateAttributeValue } from "./component-styles.js";
+import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
+import { renderedFormMark } from "./rendered-form.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   createComputed,
@@ -531,11 +532,11 @@ export function manageProps(instance: GeneratedInstance, element: Element): void
 
 /**
  * A prototype for cloning: `[tag, [name, value, ...], ...children]`, where an empty tag is a
- * fragment, a string is text, 0 is an empty Text a `$value` writes, 1 is a `$if` anchor pair and
- * 2 is a `$each` anchor pair.
+ * fragment, a string is text, 0 is an empty Text a `$value` writes, 1 is a `$if` anchor pair,
+ * 2 is a `$each` anchor pair, 3 is an `$html` range and 4 is a slot's placeholder pair.
  */
 export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
-type TemplateChild = string | 0 | 1 | 2 | 3 | TemplateSpec;
+type TemplateChild = string | 0 | 1 | 2 | 3 | 4 | TemplateSpec;
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -556,7 +557,7 @@ export function buildTemplate(spec: TemplateSpec, doc: Document = document, svg?
     if (typeof child === "object") node.append(buildTemplate(child, doc, inSvg && spec[0] !== "foreignObject" ? 1 : 0));
     else if (typeof child === "string" || child === 0) node.append(doc.createTextNode(child === 0 ? "" : child));
     else {
-      const prefix = child === 2 ? "html-next:each-" : child === 3 ? "html-next:html-" : "html-next:";
+      const prefix = child === 2 ? "html-next:each-" : child === 3 ? "html-next:html-" : child === 4 ? "html-next:slot-" : "html-next:";
       node.append(doc.createComment(`${prefix}start`), doc.createComment(`${prefix}end`));
     }
   }
@@ -856,6 +857,60 @@ export interface GeneratedInstance {
   readonly w: (index: number, value: unknown) => void;
   /** The instance's props, set before attaching so `host.props` can read them. */
   readonly B?: GeneratedPropRecord;
+  /** The projected nodes and the slot each is for, set before attaching, and `host.slots` over them. */
+  readonly J?: Projection;
+  readonly Y?: Readonly<Record<string, readonly Element[]>>;
+}
+
+/** Each projected node and the name of the slot it is for (`""` for the unnamed slot). */
+export type Projection = readonly (readonly [node: Node, slot: string])[];
+
+/**
+ * A factory's projection, as the live runtime takes a factory's: `children` for the unnamed slot,
+ * then each named slot's nodes; strings become text and elements are marked projected.
+ */
+export function project(
+  instance: { J?: Projection; Y?: Readonly<Record<string, readonly Element[]>> },
+  children: readonly (string | Node)[], slots: Readonly<Record<string, readonly (string | Node)[]>>,
+): Projection {
+  const projected: [Node, string][] = [];
+  for (const [name, nodes] of [["", children], ...Object.entries(slots)] as const) {
+    for (const child of nodes) {
+      const node = typeof child === "string" ? document.createTextNode(child) : child;
+      markProjectedRoot(node);
+      projected.push([node, name]);
+    }
+  }
+  const into = (key: string): Element[] => projected
+    .filter(([node, name]) => node.nodeType === 1 && name === (key === "default" ? "" : key)).map(([node]) => node as Element);
+  // A host lists the elements a slot was given, in order; `default` reads the unnamed slot.
+  instance.Y = new Proxy({}, {
+    get: (_target, key) => typeof key === "string" ? into(key) : undefined,
+    has: (_target, key) => typeof key === "string" && into(key).length > 0,
+  });
+  return instance.J = projected;
+}
+
+/**
+ * Renders a slot between its placeholders as the live runtime renders one: the nodes projected into
+ * it, or its fallback, between rendered-form marks; a slot with neither leaves one marker. Returns
+ * the node its fallback goes before, when the fallback renders.
+ */
+export function fillSlot(start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean): ChildNode | undefined {
+  const doc = start.ownerDocument!;
+  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const slot = `slot="${name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
+  if (assigned.length === 0 && !fallback) {
+    start.replaceWith(renderedFormMark(doc, "marker", slot));
+    end.remove();
+    return undefined;
+  }
+  const close = renderedFormMark(doc, "end", "") as ChildNode;
+  start.replaceWith(renderedFormMark(doc, "start", assigned.length === 0 ? `${slot} fallback=""` : slot));
+  end.replaceWith(close);
+  if (assigned.length === 0) return close;
+  close.before(...assigned);
+  return undefined;
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */
@@ -1189,7 +1244,7 @@ export function attachGeneratedController(
       get: (_target, key) => typeof key !== "string" ? undefined : spec.z === undefined ? recorded[key] : spec.z(recorded, key),
       has: (_target, key) => typeof key === "string" && recorded[key] !== undefined,
     }),
-    slots: new Proxy({}, {
+    slots: handle.Y ?? new Proxy({}, {
       get: (_target, key) => typeof key === "string" ? [] : undefined,
       has: () => false,
     }),
@@ -1207,7 +1262,8 @@ export function attachGeneratedController(
     },
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(root, event, detail, spec.d?.[event]),
   });
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign });
+  // The handle is the lifecycle record too: inspection and serialization read its values and host.
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {
@@ -1236,6 +1292,6 @@ export function attachGeneratedController(
       });
     }
     return disconnect;
-  }, { S: spec, v: values, H: host });
+  }, handle);
   return handle;
 }

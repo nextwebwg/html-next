@@ -138,6 +138,42 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     assert.equal(runtime.getComponentHost(element), undefined);
   });
 
+  it("serializes props and projection, and hydrates live to the same instance", async () => {
+    const card = parseComponent(`<template component="x-card" status="early" summary="Card.">
+      <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
+        <prop name="count" type="integer" default="1">Count.</prop>
+        <state name="open" type="boolean" value="true"></state></defs>
+      <article from:data-tone="tone"><header><slot name="head">Untitled</slot></header><p>{count}</p>
+        <div $if="open"><slot></slot></div><footer><slot name="foot"><em>{tone}</em></slot></footer></article></template>`, "file:///card.html");
+    const { runtime, document } = await load(card);
+    const head = document.createElement("h2");
+    head.textContent = "Head";
+    // Carried projection (what no outlet renders) keeps its slot only through a `slot` attribute, for
+    // live instances too: the rendered form records no other name for it.
+    const lost = document.createElement("i");
+    lost.setAttribute("slot", "gone");
+    const element = runtime.factory({ tone: "warn", count: 3, children: ["Body ", document.createElement("hr")], slots: { head: [head], gone: [lost] } });
+    const container = document.createElement("main");
+    container.append(element);
+    document.body.append(container);
+    await flush();
+    const compiled = runtime.inspectInstance(element) as Record<string, unknown>;
+    assert.deepEqual(compiled, {
+      tag: "x-card", explicit: ["count", "tone"], props: { tone: "warn", count: 3 }, state: { open: true },
+      slots: { "": ["Body ", "<hr>"], gone: ['<i slot="gone"></i>'], head: ["<h2>Head</h2>"] }, delegates: [],
+    });
+    const html = runtime.serializeRenderedForm(container);
+    const server = document.createElement("main");
+    server.innerHTML = html;
+    document.body.append(server);
+    runtime.registerComponentDefinitions([card]);
+    runtime.lowerDocument(document);
+    await flush();
+    const adopted = server.firstElementChild!;
+    assert.deepEqual(runtime.inspectInstance(adopted), compiled);
+    assert.equal(adopted.outerHTML, element.outerHTML);
+  });
+
   it("gives an adopted control its bound value unless the user edited it before hydration", async () => {
     const control = parseComponent(`<template component="x-control" status="early" summary="Control.">
       <defs><state name="title" type="string" value="Bound"></state><state name="on" type="boolean" value="true"></state>

@@ -26,6 +26,7 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
+import { documentParsesInstructions, renderedFormMark } from "./rendered-form.js";
 import { assignedPropValue, invocationValue, reflectedPropValue } from "./prop-values.js";
 import { keyedEquality, visitSelected } from "./selection.js";
 import {
@@ -258,9 +259,13 @@ function runtimeInstance(element: Element): RuntimeInstance | undefined {
 
 /** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
 interface CompiledHandle {
-  readonly S: { readonly n: readonly string[]; readonly g: string };
+  readonly S: { readonly n: readonly string[]; readonly g: string; readonly k?: number };
   readonly v: readonly unknown[];
   readonly H: ComponentHost;
+  /** Its props: their latest inputs and the explicit ones; values follow the state's in `v`. */
+  readonly B?: { readonly D: { readonly props: Readonly<Record<string, unknown>> }; readonly i: Readonly<Record<string, PropInput>>; readonly x: ReadonlySet<string> };
+  /** Its projected nodes and the slot each is for. */
+  readonly J?: readonly (readonly [Node, string])[];
 }
 
 /** The compiled handle of a generated root, which the live runtime's instance map never holds. */
@@ -269,9 +274,15 @@ function compiledHandle(element: Element): CompiledHandle | undefined {
   return handle?.H === undefined ? undefined : handle as CompiledHandle;
 }
 
-/** A compiled root's declared state, as `instanceRecord` reports a live instance's. */
-function compiledState(handle: CompiledHandle): Record<string, Value> {
-  return Object.fromEntries(handle.S.n.map((name, index) => [name, handle.v[index] as Value]));
+/** A compiled root's record, as `instanceRecord` reports a live instance's: computeds are not state. */
+function compiledRecord(handle: CompiledHandle): RenderedInstanceRecord {
+  const names = Object.keys(handle.B?.D.props ?? {});
+  return {
+    explicit: [...handle.B?.x ?? []],
+    inputs: { ...handle.B?.i },
+    props: Object.fromEntries(names.map((name, index) => [name, handle.v[handle.S.n.length + index]])),
+    state: Object.fromEntries(handle.S.n.slice(0, handle.S.k).map((name, index) => [name, handle.v[index] as Value])),
+  };
 }
 
 function registryFor(root: Document): DocumentRegistry {
@@ -2354,27 +2365,6 @@ function pseudoAttributes(data: string): Map<string, string> {
   return attributes;
 }
 
-const piParsingByDocument = new WeakMap<Document, boolean>();
-function documentParsesInstructions(document: Document): boolean {
-  let piParsing = piParsingByDocument.get(document);
-  if (piParsing === undefined) {
-    const probe = document.createElement("div");
-    probe.innerHTML = '<?probe x="1"?>';
-    piParsing = probe.firstChild?.nodeType === 7;
-    piParsingByDocument.set(document, piParsing);
-  }
-  return piParsing;
-}
-/**
- * A rendered-form mark: a processing instruction, or, where the parser does not produce them, the
- * comment it would produce instead, so a lowered DOM and a hydrated DOM hold the same nodes.
- */
-function renderedFormMark(document: Document, target: string, data: string): Node {
-  return documentParsesInstructions(document)
-    ? document.createProcessingInstruction(target, data)
-    : document.createComment(`?${target}${data === "" ? "" : ` ${data}`}?`);
-}
-
 function serverMark(node: Node): ServerMark | undefined {
   if (node.nodeType === 7) {
     const pi = node as ProcessingInstruction;
@@ -2583,12 +2573,11 @@ export function serializeRenderedForm(container: Element): string {
       const records = Object.fromEntries([instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, instanceRecord(entry)]));
       copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue(records)]));
     } else if (compiled !== undefined) {
-      const record: RenderedInstanceRecord = { explicit: [], inputs: {}, props: {}, state: compiledState(compiled) };
-      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue({ [compiled.S.g]: record })]));
+      copy.setAttribute(INSTANCE_ATTRIBUTE, JSON.stringify([1, encodeHydrationValue({ [compiled.S.g]: compiledRecord(compiled) })]));
     }
-    const projection = instance?.projection;
-    if (projection === undefined) return;
-    const unrendered = projection.nodes.filter((node) => !original.contains(node));
+    const projected = instance?.projection?.nodes ?? compiled?.J?.map(([node]) => node);
+    if (projected === undefined) return;
+    const unrendered = projected.filter((node) => !original.contains(node));
     if (unrendered.length === 0) return;
     const carrier = clone.ownerDocument.createElement("template");
     for (const node of unrendered) carrier.content.append(node.cloneNode(true));
@@ -2637,23 +2626,29 @@ export function inspectInstance(element: Element): unknown {
   const instance = runtimeInstance(element);
   if (instance !== undefined) return inspectRuntimeInstance(instance);
   const handle = compiledHandle(element);
-  return handle === undefined ? undefined : {
-    tag: handle.S.g, explicit: [], props: {}, state: compiledState(handle), slots: {}, delegates: [],
-  };
+  if (handle === undefined) return undefined;
+  const record = compiledRecord(handle);
+  return { tag: handle.S.g, explicit: [...record.explicit].sort(), props: record.props, state: record.state,
+    slots: inspectedSlots(handle.J ?? []), delegates: [] };
+}
+
+/** Each slot's projected nodes, as inspection shows them. */
+function inspectedSlots(projected: readonly (readonly [Node, string])[]): Record<string, string[]> {
+  const slots: Record<string, string[]> = {};
+  for (const [node, slot] of projected) {
+    (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
+  }
+  // Order across slots is not observable; order within a slot is.
+  return Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function inspectRuntimeInstance(instance: RuntimeInstance): unknown {
   const props: Record<string, unknown> = {};
   for (const name of Object.keys(instance.definition.contract.props)) props[name] = instance.scope.get(name);
-  const slots: Record<string, string[]> = {};
-  for (const node of instance.projection?.nodes ?? []) {
-    const slot = instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
-    (slots[slot] ??= []).push(node instanceof Element ? node.outerHTML.replace(/ data-slotted=""/g, "") : node.textContent ?? "");
-  }
-  // Order across slots is not observable; order within a slot is.
-  const sorted = Object.fromEntries(Object.entries(slots).sort(([a], [b]) => a.localeCompare(b)));
+  const slots = inspectedSlots((instance.projection?.nodes ?? []).map((node) => [node,
+    instance.projection!.slotNames.get(node) ?? (node instanceof Element ? node.getAttribute("slot") ?? "" : "")]));
   return { tag: instance.definition.contract.tag, explicit: [...instance.explicit].sort(), props,
-    state: instanceRecord(instance).state, slots: sorted, delegates: instance.delegates.map(inspectRuntimeInstance) };
+    state: instanceRecord(instance).state, slots, delegates: instance.delegates.map(inspectRuntimeInstance) };
 }
 
 function renderTemplateNode(

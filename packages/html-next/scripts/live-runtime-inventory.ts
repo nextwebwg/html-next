@@ -26,6 +26,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/format.ts",
     "packages/html-next/src/hydration-value.ts",
     "packages/html-next/src/reactivity.ts",
+    "packages/html-next/src/rendered-form.ts",
     "packages/html-next/src/runtime.ts",
     "packages/html-next/src/selection.ts",
   ],

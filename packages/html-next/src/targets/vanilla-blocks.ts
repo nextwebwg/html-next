@@ -118,7 +118,7 @@ interface Binding {
 }
 
 interface Region {
-  readonly kind: "if" | "each" | "with" | "match";
+  readonly kind: "if" | "each" | "with" | "match" | "slot";
   /** The start anchor's site; the end anchor follows it in the prototype. */
   readonly site: number;
   /** The body (`$if`, `$with`, `$each` rows); a `$match` has one per arm instead. */
@@ -139,6 +139,10 @@ interface Region {
   readonly positional?: boolean;
   /** `$match`: the matched expression, bound to its alias in the arms. */
   readonly matched?: Lowered | undefined;
+  /** A slot's name: a literal, or an expression evaluated when the slot renders. */
+  readonly slot?: string | Lowered;
+  /** A slot has fallback content, which renders when nothing is projected into it. */
+  readonly fallback?: boolean;
 }
 
 interface Block {
@@ -589,6 +593,17 @@ function maskOf(value: Lowered): number {
   return value.bits | (value.nested || value.item ? NESTED : 0);
 }
 
+/** The dynamic slot names a body reads as it renders: outside its own regions, fallbacks included. */
+function dynamicSlotNames(children: readonly TemplateNode[]): CompiledExpression[] {
+  return children.flatMap((child): CompiledExpression[] => {
+    if (child.kind === "slot") {
+      if (child.flow !== undefined) return [];
+      return [...child.nameExpression === undefined ? [] : [child.nameExpression], ...dynamicSlotNames(child.fallback ?? [])];
+    }
+    return child.kind === "element" && child.flow === undefined ? dynamicSlotNames(child.children) : [];
+  });
+}
+
 /** The mask of an outer-state sweep: what a row reads that is not its own item. */
 function outerOf(value: Lowered): number {
   return value.bits | (value.nested ? NESTED : 0);
@@ -967,7 +982,7 @@ class Planner {
       for (const item of planned) {
         items.push(item);
         // A region is an anchor pair, so the next child sits two nodes on.
-        index += item === 1 || item === 2 || item === 3 ? 2 : 1;
+        index += item === 1 || item === 2 || item === 3 || item === 4 ? 2 : 1;
       }
     }
     return items;
@@ -990,7 +1005,15 @@ class Planner {
   }
 
   child(block: Block, parent: ElementNode, node: TemplateNode, path: number[], scope: Scope, svg: boolean): unknown {
-    if (node.kind === "slot") notYetDirect();
+    if (node.kind === "slot") {
+      if (node.flow !== undefined || (node.props?.length ?? 0) > 0) notYetDirect();
+      // The name is read when the slot renders, without reference checks, as live evaluates it.
+      const slot = node.nameExpression === undefined ? node.name ?? "" : lower(node.nameExpression.ast, scope);
+      const fallback = this.block({ kind: "element", name: "template", attributes: [], children: node.fallback ?? [] },
+        false, { ...scope, level: scope.level + 1 }, false, svg, false);
+      block.regions.push({ kind: "slot", site: this.site(block, path), block: fallback, slot, fallback: (node.fallback?.length ?? 0) > 0 });
+      return 4;
+    }
     if (node.kind === "text") {
       if (node.segments !== undefined) {
         const parts = node.segments.map((segment) => segment.expressionPlan === undefined ? segment.value : this.checked(segment.expressionPlan, scope));
@@ -1017,7 +1040,17 @@ class Planner {
     const site = this.site(block, path);
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
     /** A decision rebuilds its body whenever what it read changes, as its live effect re-runs. */
-    const decide = (lowerDecision: (decisionScope: Scope) => Lowered): { test: Lowered; recorded: string | undefined } => {
+    const decide = (lowerTest: (decisionScope: Scope) => Lowered): { test: Lowered; recorded: string | undefined } => {
+      // A body's dynamic slot names are read as it renders, so a change rebuilds it, as live's region
+      // effect re-runs; a name reading the region's own alias changes only with the decision.
+      const own = new Set([flow.kind === "with" || flow.kind === "match" ? flow.alias : undefined]);
+      const names = dynamicSlotNames(node.children).filter((name) => !name.dependencies.some((dependency) => own.has(dependency)));
+      const lowerDecision = (decisionScope: Scope): Lowered => {
+        const test = lowerTest(decisionScope);
+        if (names.length === 0) return test;
+        const read = names.map((name) => lower(name.ast, decisionScope));
+        return { ...read.reduce<Reads>((all, name) => merge(all, name), test) as Lowered, source: `(${[...read.map((name) => name.source), test.source].join(", ")})` };
+      };
       const exact = lowerDecision(scope);
       // A decision that reads only roots rebuilds on their change bits, which are exactly live's notifications.
       if (!exact.nested && !exact.item) return { test: exact, recorded: undefined };
@@ -1156,7 +1189,7 @@ class Planner {
  */
 export function blockPlan(definition: ComponentDefinition): BlockPlan | undefined {
   try {
-    if ((definition.slots?.length ?? 0) > 0 || definition.root?.kind === "component" ||
+    if (definition.root?.kind === "component" ||
       rootArms(definition.template) !== undefined || definition.template.flow !== undefined) return undefined;
 
     const roots = compileRoots(definition);
@@ -1326,7 +1359,7 @@ export function emitBlocks(
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
       if (region.kind !== "each") {
-        entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`);
+        entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`, ...region.kind === "slot" ? [`f${index}: undefined`] : []);
         if (region.recorded !== undefined) entries.push(`q${index}: undefined`);
       } else {
         const child = region.block.id;
@@ -1442,8 +1475,31 @@ export function emitBlocks(
       }
       lines.push("  }");
     }
-    block.regions.forEach((region, index) => {
+    // Slots fill last, in the order live assembles their parents (deepest first, then document
+    // order), so when two outlets share a name the one live's assembly appends last holds the nodes.
+    const order = (index: number): number[] => block.sites[block.regions[index]!.site]!;
+    const sequence = [...block.regions.keys()].sort((left, right) => {
+      const a = block.regions[left]!.kind === "slot", b = block.regions[right]!.kind === "slot";
+      if (a !== b) return a ? 1 : -1;
+      if (!a) return left - right;
+      const [x, y] = [order(left), order(right)];
+      const [px, py] = [x.slice(0, -1), y.slice(0, -1)];
+      for (let step = 0; step < Math.min(px.length, py.length); step += 1) if (px[step] !== py[step]) return px[step]! - py[step]!;
+      return py.length - px.length || x.at(-1)! - y.at(-1)!;
+    });
+    sequence.map((index) => [block.regions[index]!, index] as const).forEach(([region, index]) => {
       const child = region.block.id;
+      if (region.kind === "slot") {
+        // Filled once, when its block first renders; then only its fallback updates.
+        const body = `r.b${index}`;
+        const name = typeof region.slot === "string" ? JSON.stringify(region.slot) : `toText(${region.slot!.source})`;
+        const make = `m${child}(d${region.block.needsParent === true ? ", undefined, r" : ""})`;
+        lines.push(
+          `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}); if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
+          `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
+        );
+        return;
+      }
       if (region.kind !== "each") {
         const test = region.test!;
         const body = `r.b${index}`;
@@ -1596,11 +1652,13 @@ export function emitBlocks(
     ]),
   );
   const propNames = Object.keys(contract.props);
-  const instance = propNames.length > 0 || plan.handlers.length > 0 ||
+  const slotted = blocks.some((block) => block.regions.some((region) => region.kind === "slot"));
+  const instance = propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
+    ...(slotted ? ["  const J = project(I, children, slots);"] : []),
     `  attachGeneratedController(element, S, v, (c, d) => p0(R, c, d), ${definition.controller === undefined ? "undefined" : "C"}${
       plan.computeds.length > 0 || instance ? `, ${plan.computeds.length > 0 ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
     ...(propNames.length > 0 ? ["  manageProps(I, element);"] : []),
@@ -1619,7 +1677,7 @@ export function emitBlocks(
   );
   const factory = [
     `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}) {`,
-    propNames.length === 0 ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
+    propNames.length === 0 && !slotted ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
     definition.template.name === "svg"
       ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");'
       : `  const element = document.createElement(${JSON.stringify(definition.template.name)});`,
@@ -1676,7 +1734,7 @@ export function emitBlocks(
     "dispose", "shapeItems", "loopRecord", "IndexedList", "PositionalList", "iteratedRef", "writeControl", "writeHtml", "writeHtmlRange",
     "bindControl", "formatOf", "isFunctionValue", "isNativeEvent", "keywordFormat", "urlFormat", "emailFormat", "dateFormat",
     "monthFormat", "weekFormat", "timeFormat", "datetimeLocalFormat", "datetimeFormat", "colorFormat", "colorHexFormat",
-    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected"]
+    "lengthFormat", "percentageFormat", "durationFormat", "hostState", "acceptProps", "manageProps", "checkSelected", "project", "fillSlot"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}`));
   const specs = blocks.flatMap((block) => block.id === 0 && !rootChildren ? [] : [`const T${block.id} = ${JSON.stringify(block.spec)};`]);
 

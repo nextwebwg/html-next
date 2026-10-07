@@ -46,7 +46,10 @@ function reference(text: string): string {
     root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
     "  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));",
     `  element.setAttribute("data-component", ${JSON.stringify(definition.contract.tag)});`,
-    `  manageComponentLifecycle(element, definition, { props${controlled ? ", controller" : ""} });`,
+    // A factory's children and named slots, as the general runtime's factories projected them.
+    "  const projected = [];",
+    "  for (const [name, nodes] of [[\"\", children], ...Object.entries(slots)]) for (const child of nodes) projected.push([typeof child === \"string\" ? document.createTextNode(child) : child, name]);",
+    `  manageComponentLifecycle(element, definition, { props, projected${controlled ? ", controller" : ""} });`,
     "  return element;",
     "}",
   ].join("\n");
@@ -120,7 +123,6 @@ describe("direct-extend Vanilla generation", () => {
   const notYetDirect: Record<string, string> = {
     "nonconforming initial": component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>'),
     "root match": component(state, '<template $match><a $when="ready">A</a><b $else>B</b></template>'),
-    slot: component(state, "<p><slot></slot></p>"),
     "custom element": component(state, "<p><x-other></x-other></p>"),
     "is attribute": component(state, '<p><span is="x-span"></span></p>'),
     event_listener: component(state, '<p><span on:click="go"></span></p>'),
@@ -279,7 +281,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   };
 
   /** Builds `text` on one path, runs `steps` with a render and a snapshot after each, and reconnects. */
-  async function run(text: string, directExtend: boolean, steps: readonly Step[], options?: Record<string, unknown>): Promise<Run> {
+  /** Factory options, or a function making them in the run's document (for projected nodes). */
+  type Options = Record<string, unknown> | ((document: Document) => Record<string, unknown>);
+
+  async function run(text: string, directExtend: boolean, steps: readonly Step[], options?: Options): Promise<Run> {
     const { text: code } = await bundle(directExtend
       ? `${vanilla(text, true)}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`
       : reference(text));
@@ -302,7 +307,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
     const factory = Object.entries(module).find(([name]) => name.startsWith("create"))![1] as (options?: Record<string, unknown>) => Element;
     const update = (props: Record<string, unknown>): void => (module.update as (element: Element, props: Record<string, unknown>) => void)(element, props);
-    const element = factory(options);
+    const element = factory(typeof options === "function" ? options(window.document) : options);
     const snapshots: string[] = [];
     const identities: string[] = [];
     let previous = new Map<string, Element>();
@@ -332,7 +337,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     return { snapshots, identities, warnings, errors, events: log.events };
   }
 
-  async function same(text: string, steps: readonly Step[], options?: Record<string, unknown>): Promise<Run> {
+  async function same(text: string, steps: readonly Step[], options?: Options): Promise<Run> {
     // The compared module must be the direct one: a fallback would compare the general runtime with itself.
     assert.doesNotMatch(vanilla(text, true), /@nextwebwg\/html-next\/runtime/, "compiles directly");
     const live = await run(text, false, steps, options);
@@ -781,6 +786,19 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ], { amount: 3, label: "ok" });
   });
 
+  it("writes URL sinks, form properties, boolean defaults and escaped literals like the general runtime", async () => {
+    await same(propsShape(`
+      <prop name="target" type="string" default="https://example.test">Target.</prop>
+      <prop name="destination" type="string">Destination.</prop>
+      <prop name="disabled" type="boolean" default="false">Disabled.</prop>
+      <prop name="selected" type="boolean" default="false">Selected.</prop>`, `
+      <section><a from:href="target">Link</a><button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; \\{literal}</button></section>`), [
+      (_host, update) => { update({ target: "javascript:alert(1)", destination: "/go", disabled: true }); },
+      (_host, update) => { update({ target: " JAVASCRIPT:x", selected: true }); },
+      (_host, update) => { update({ target: "/relative", disabled: false, destination: undefined }); },
+    ]);
+  });
+
   it("types a select prop by its selector's current value", async () => {
     const select = (from: string) => propsShape(`
       ${from}
@@ -799,6 +817,63 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (_host, update) => { update({ value: "x" }); },
       (_host, update) => { update({ value: 9, mode: "text" }); },
     ], { mode: "number", value: "7" });
+  });
+
+  const slotsShape = (defs: string, body: string): string =>
+    `<template component="x-shape" controller="./slots-controller.js" status="early" summary="Shape.">
+    <defs><state name="open" type="boolean" value="false"></state><state name="label" type="string" value="L"></state>${defs}</defs>${body}</template>`;
+  const projection = (document: Document): Record<string, unknown> => {
+    const element = (tag: string, text: string): Element => { const node = document.createElement(tag); node.textContent = text; return node; };
+    return { children: ["Hello ", element("b", "world")], slots: { head: [element("h1", "Title"), element("small", "sub")], unknown: [element("i", "lost")] } };
+  };
+
+  it("projects children and named slots, and renders fallbacks, like the general runtime", async () => {
+    const text = slotsShape("", `
+      <section><header><slot name="head"><em>{label}</em></slot></header><main><slot></slot></main>
+        <footer><slot name="tail">Tail {label}<b $if="open">open</b></slot></footer><aside><slot name="missing"></slot></aside></section>`);
+    const steps: Step[] = [(host) => { host.state.label = "M"; }, (host) => { host.state.open = false; }];
+    await same(text, steps, projection);
+    await same(text, steps);
+  });
+
+  it("moves projected nodes with the region that renders their slot", async () => {
+    await same(slotsShape(`<state name="shown" type="boolean" value="true"></state>`, `
+      <section><div $if="shown"><slot></slot></div><p $if="not shown"><slot name="head">none</slot></p><slot name="tail"></slot></section>`), [
+      (host) => { host.state.shown = false; },
+      (host) => { host.state.shown = true; },
+      (host) => { host.state.label = "x"; },
+    ], projection);
+  });
+
+  it("gives projected nodes to the outlet live's assembly appends last when two share a name", async () => {
+    // Static names are unique, so outlets share one only in rows or through a dynamic name.
+    for (const body of [
+      '<section><ul><li $each="n of rows" $key="n" from:data-id="n"><slot name="head">row</slot></li></ul></section>',
+      '<section><slot from:name="which"></slot><div><slot name="head"></slot></div></section>',
+      '<section><div><slot name="head"></slot></div><slot from:name="which"></slot></section>',
+      '<section><div><slot from:name="which"></slot></div><p><slot name="head"></slot></p><b $if="open"><slot from:name="other"></slot></b></section>',
+    ]) {
+      await same(slotsShape(`<state name="which" type="string" value="head"></state><state name="other" type="string" value="head"></state>
+        <state name="rows" type="list(integer)" value="[1, 2]"></state>`, body), [
+        (host) => { host.state.open = false; },
+        (host) => { host.state.open = true; host.state.rows = [2, 1, 3]; },
+        (host) => { host.state.rows = [4]; },
+      ], projection);
+    }
+  });
+
+  it("names a slot by its expression when it renders", async () => {
+    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
+      <section><div $if="open"><slot from:name="which">fallback {which}</slot></div></section>`), [
+      (host) => { host.state.which = "default"; },
+      (host) => { host.state.open = false; },
+      (host) => { host.state.which = ""; host.state.open = true; },
+    ], projection);
+    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
+      <section><slot from:name="which">fallback {which}</slot><p $with="label as l"><slot from:name="which">{l}</slot></p></section>`), [
+      (host) => { host.state.which = "default"; },
+      (host) => { host.state.which = ""; },
+    ], projection);
   });
 
   it("fails a moved duplicate key before writing any row", async () => {

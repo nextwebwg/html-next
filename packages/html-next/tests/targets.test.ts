@@ -1469,15 +1469,16 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     await transform(module, { loader: "js" });
   });
 
-  it("keeps unsafe attribute sinks on the complete runtime path", () => {
+  it("compiles URL attribute sinks with their checks", () => {
     const module = generated(componentSource(
       "demo-link",
       `<prop name="target" type="string" default="https://example.test">Target.</prop>`,
       `<a from:href="target"><slot></slot></a>`,
     )).get("vanilla/DemoLink.js")!;
 
-    assert.match(module, /html-next\/runtime/);
-    assert.doesNotMatch(module, /html-next\/generated-runtime/);
+    // tests/vanilla-blocks.test.ts holds the written URLs to the live runtime's.
+    assert.doesNotMatch(module, /html-next\/runtime/);
+    assert.match(module, /writeUrlAttribute\(/);
   });
 
   it("compiles a read-only primitive reactive leaf without the full runtime", async () => {
