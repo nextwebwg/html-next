@@ -2,6 +2,7 @@ import {
   normalizeType,
   parseTypedValue,
   parseTypeExpression,
+  typeCheck,
   type TerminalTypeName,
   type TypeInput,
   type TypeIssue,
@@ -9,7 +10,8 @@ import {
 import type { PropType } from "./types.js";
 import type { ComponentContract } from "./types.js";
 import { selectedPropType } from "./contract.js";
-import { boundFailures } from "./value-constraints.js";
+import { boundFailures, type ValueBounds } from "./value-constraints.js";
+import type { TypeCheck } from "./type-checks.js";
 
 /** One normalized validation failure. Structured values always include a stable path. */
 export interface ValidityError {
@@ -183,6 +185,65 @@ export function validate(value: unknown, constraint: Constraint = {}, source: "h
   return errors.length === 0 ? VALID : { valid: false, errors };
 }
 
+/** What a declared prop's validation reads besides its type: requiredness, permitted values and bounds. */
+export interface PropRule extends ValueBounds {
+  readonly required: boolean;
+  readonly values?: readonly (string | number | boolean)[];
+}
+
+/**
+ * One declared prop's failures, as `validate` reports its constraint followed by its `values` check:
+ * `check` is its (selected) type's check, `terminal` that type's terminal name, and `bounds` is
+ * `boundFailures` when the prop declares any bound (none otherwise, so a build can leave it out).
+ */
+export function propFailures(
+  name: string, value: unknown, check: TypeCheck, terminal: string | undefined, prop: PropRule,
+  source: "html" | "value", bounds?: typeof boundFailures,
+): ValidityError[] {
+  if (isEmpty(value)) return prop.required ? [{ reason: "valueMissing", message: "This field is required.", path: name }] : [];
+  const errors: ValidityError[] = [];
+  const result = check(value, "$", source);
+  const parsed = result.ok ? result.value : value;
+  if (!result.ok) for (const error of typeErrors(result.issues, terminal)) errors.push({ ...error, path: name });
+  if (bounds !== undefined) for (const failure of bounds(parsed, terminal ?? "", prop)) errors.push({ ...failure, path: name });
+  if (prop.values !== undefined && !prop.values.some((choice) => choice === parsed)) {
+    errors.push({ reason: "typeMismatch", message: `Value must be one of ${prop.values.map(String).join(", ")}.`, path: name });
+  }
+  return errors;
+}
+
+/** Whether a prop declares a bound, which `propFailures` checks through `boundFailures`. */
+export const hasBounds = (prop: ValueBounds): boolean =>
+  prop.min !== undefined || prop.max !== undefined || prop.minLength !== undefined || prop.maxLength !== undefined || prop.pattern !== undefined;
+
+/**
+ * Validate declared props through one read surface. `checks` gives a prop's type check and terminal
+ * name, chosen by its selector's value for a select prop (null when no option matches), and `bounds`
+ * its `boundFailures` when it declares a bound. Live and compiled components share this.
+ */
+export function propsValidity<P extends PropRule & { readonly select?: { readonly from: string } }>(
+  props: Readonly<Record<string, P>>,
+  checks: (prop: P, selector: unknown) => { readonly c: TypeCheck; readonly t?: string | undefined } | null,
+  bounds: (prop: P) => typeof boundFailures | undefined,
+  read: (name: string) => unknown,
+  readSelector: (name: string) => unknown = read,
+  readSource: (name: string) => "html" | "value" = () => "html",
+): Validity {
+  const errors: ValidityError[] = [];
+  for (const [name, prop] of Object.entries(props)) {
+    const value = read(name);
+    const chosen = checks(prop, prop.select === undefined ? undefined : readSelector(prop.select.from));
+    if (chosen === null) {
+      if (value !== null && value !== undefined && value !== "") errors.push({
+        reason: "typeMismatch", message: `No type option matches the value of \`${prop.select!.from}\`.`, path: name,
+      });
+      continue;
+    }
+    errors.push(...propFailures(name, value, chosen.c, chosen.t, prop, readSource(name), bounds(prop)));
+  }
+  return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
+}
+
 /** Validate declared prop values through one read surface, shared by live and generated targets. */
 export function validateComponentProps(
   contract: ComponentContract,
@@ -190,34 +251,10 @@ export function validateComponentProps(
   readSelector: (name: string) => unknown = read,
   readSource: (name: string) => "html" | "value" = () => "html",
 ): Validity {
-  const errors: ValidityError[] = [];
-  for (const [name, prop] of Object.entries(contract.props)) {
-    const value = read(name);
-    const selected = selectedPropType(contract, prop, prop.select === undefined ? {}
-      : { [prop.select.from]: readSelector(prop.select.from) });
-    if (selected === null) {
-      if (value !== null && value !== undefined && value !== "") errors.push({
-        reason: "typeMismatch", message: `No type option matches the value of \`${prop.select!.from}\`.`, path: name,
-      });
-      continue;
-    }
-    const result = validate(value, {
-      type: selected, required: prop.required,
-      ...(prop.min === undefined ? {} : { min: prop.min }),
-      ...(prop.max === undefined ? {} : { max: prop.max }),
-      ...(prop.minLength === undefined ? {} : { minLength: prop.minLength }),
-      ...(prop.maxLength === undefined ? {} : { maxLength: prop.maxLength }),
-      ...(prop.pattern === undefined ? {} : { pattern: prop.pattern }),
-    }, readSource(name));
-    errors.push(...result.errors.map((error) => ({ ...error, path: name })));
-    const parsed = parseTypedValue(value, selected, "$", readSource(name));
-    const compared = parsed.ok ? parsed.value : value;
-    if (value !== null && value !== undefined && value !== "" && prop.values !== undefined &&
-        !prop.values.some((choice) => choice === compared)) {
-      errors.push({ reason: "typeMismatch", message: `Value must be one of ${prop.values.map(String).join(", ")}.`, path: name });
-    }
-  }
-  return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
+  return propsValidity(contract.props, (prop, selector) => {
+    const selected = selectedPropType(contract, prop, prop.select === undefined ? {} : { [prop.select.from]: selector });
+    return selected === null ? null : { c: typeCheck(selected), t: terminalName(selected) };
+  }, (prop) => hasBounds(prop) ? boundFailures : undefined, read, readSelector, readSource);
 }
 
 const NATIVE_REASONS: ReadonlyArray<Exclude<ValidityReason, "schemaMismatch" | "untrustedValue">> = [

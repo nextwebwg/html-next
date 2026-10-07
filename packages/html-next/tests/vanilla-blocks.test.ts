@@ -92,15 +92,6 @@ describe("direct-extend Vanilla generation", () => {
     assert.deepEqual(inputs.filter((path) => forbidden.test(path)), []);
   });
 
-  it("keeps the indexed lifecycle coordinator out of every other generated bundle", async () => {
-    const index = /(?:^|\/)src\/generated-lifecycle-index\.ts$/;
-    const props = await readFile(new URL("../benchmarks/fixtures/prop-button.html", import.meta.url), "utf8");
-    const older = await bundle(vanilla(props));
-    assert.ok(older.inputs.some((path) => path.endsWith("src/generated-lifecycle.ts")));
-    assert.equal(older.inputs.some((path) => index.test(path)), false);
-    assert.ok((await bundle(vanilla(benchmarkShape), true)).inputs.some((path) => index.test(path)));
-  });
-
   it("compiles every component without the general runtime", () => {
     // What the parser accepts compiles; anything it rejects never reaches the generator.
     for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="x"></p>')]) {
@@ -601,7 +592,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   // The older direct paths compile these primitive, controller-free shapes; they must match live too.
   const older = (defs: string, body: string): string => component(defs, body, false);
-  const fire = (target: any, type: string, init: EventInit & { key?: string } = {}): boolean => {
+  const fire = (target: any, type: string, init: EventInit & { key?: string; ctrlKey?: boolean } = {}): boolean => {
     const event = type === "keydown" ? new KeyboardEvent(type, { bubbles: true, cancelable: true, ...init })
       : type === "click" ? new MouseEvent(type, { bubbles: true, cancelable: true, ...init }) : new Event(type, { bubbles: true, cancelable: true, ...init });
     target.dispatchEvent(event);
@@ -634,6 +625,315 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   };
   for (const [name, [text, steps]] of Object.entries(olderShapes)) {
     it(`matches live for the older direct shape: ${name}`, async () => { await same(text, steps); });
+  }
+
+  // Shapes the former compact Vanilla emitters compiled, driven through their DOM and props: every
+  // control, button and key filter, three times, with declared events and focus logged.
+  const poke = (host: any, update: (props: Record<string, unknown>) => void, round: number): void => {
+    const root: Element = host.root;
+    if (round === 0) root.addEventListener("saved", (event) => log(`saved ${JSON.stringify((event as CustomEvent).detail)}`));
+    update(round === 0 ? { label: "Hi", value: 5 } : round === 1 ? { label: null, value: "bad" } : { label: undefined, value: undefined });
+    for (const control of root.querySelectorAll<HTMLInputElement>("input, textarea, select")) {
+      if (control.type === "checkbox") control.click();
+      else if (control instanceof HTMLSelectElement) { control.value = round === 1 ? "one" : "two"; fire(control, "change"); }
+      else { control.value = control.type === "range" || control.type === "number" ? String(40 + round) : `typed${round}`; fire(control, "input"); }
+    }
+    for (const button of root.querySelectorAll("button")) {
+      const inner = button.querySelector("span");
+      if (inner !== null) log(`inner ${fire(inner, "click")}`);
+      log(`click ${fire(button, "click")}`);
+      log(`ctrl ${fire(button, "keydown", { key: "Enter", ctrlKey: true })}`);
+      log(`enter ${fire(button, "keydown", { key: "Enter" })}`);
+    }
+    log(`focus ${root.ownerDocument.activeElement?.localName}`);
+  };
+  const formerCompactShapes: Record<string, string> = {
+    "compiles simple numeric state directly to native browser primitives": `<template component="demo-counter" status="experimental" summary="Counter.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment">
+          <set name="count" expr:value="count + 1"></set>
+          <set name="count" expr:value="count + 1"></set>
+        </handler>
+      </defs>
+      <button type="button" on:click="increment"><output $value="count"></output></button>
+    </template>`,
+    "prunes directly compiled numeric updates by their static dependencies": `<template component="demo-split" status="experimental" summary="Split state.">
+      <defs>
+        <state type="number" name="left" value="1"></state>
+        <state type="number" name="right" value="10"></state>
+        <computed name="left1" from="left + 1"></computed>
+        <computed name="left2" from="left1 + 1"></computed>
+        <computed name="left3" from="left2 + 1"></computed>
+        <computed name="total" from="left3 + right"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+      </defs>
+      <section><button on:click="increaseLeft"><output $value="left3"></output></button><button on:click="increaseRight"><output $value="total"></output></button></section>
+    </template>`,
+    "removes unused direct numeric branches from generated output": `<template component="demo-live" status="experimental" summary="Live direct branch.">
+      <defs>
+        <state type="number" name="left" value="1"></state>
+        <state type="number" name="right" value="10"></state>
+        <computed name="visible" from="right + 1"></computed>
+        <computed name="unused1" from="left + 1"></computed>
+        <computed name="unused2" from="unused1 + 1"></computed>
+        <computed name="unused3" from="unused2 + 1"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+      </defs>
+      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="visible"></output></button></section>
+    </template>`,
+    "suppresses repeated direct rounded DOM output": `<template component="demo-round" status="experimental" summary="Rounded direct value.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="bucket"></output></button>
+    </template>`,
+    "gates only stabilizing direct bindings in a mixed output": `<template component="demo-mixed" status="experimental" summary="Mixed direct value.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
+    </template>`,
+    "compiles numeric data attributes with the direct native emitter": `<template component="demo-data" status="experimental" summary="Direct data binding.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
+    </template>`,
+    "compiles numeric ARIA attributes with the direct native emitter": `<template component="demo-aria" status="experimental" summary="Direct ARIA binding.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
+    </template>`,
+    "compiles numeric ordinary HTML attributes with the direct native emitter": `<template component="demo-title" status="experimental" summary="Direct HTML attribute binding.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance" from:title="bucket"><output $value="position"></output></button>
+    </template>`,
+    "compiles numeric native HTML properties with the direct emitter": `<template component="demo-value" status="experimental" summary="Direct HTML property binding.">
+      <defs>
+        <state type="number" name="position" value="0"></state>
+        <computed name="bucket" from="round(position)"></computed>
+        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+      </defs>
+      <button on:click="advance"><input type="number" .value="bucket"><output $value="position"></output></button>
+    </template>`,
+    "compiles primitive boolean state, attributes, and properties with the direct emitter": `<template component="demo-toggle" status="experimental" summary="Direct primitive toggle.">
+      <defs>
+        <state type="boolean" name="open" value="false"></state>
+        <computed name="closed" from="not open"></computed>
+        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+      </defs>
+      <button on:click="toggle" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+    </template>`,
+    "compiles primitive class tokens with the direct emitter": `<template component="demo-class-toggle" status="experimental" summary="Direct primitive class toggle.">
+      <defs>
+        <state type="boolean" name="open" value="false"></state>
+        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+      </defs>
+      <button on:click="toggle" class:open="open"><output $value="open"></output></button>
+    </template>`,
+    "compiles primitive HTML style values with the direct emitter": `<template component="demo-style-counter" status="experimental" summary="Direct primitive style counter.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment" style:--count="count"><output $value="count"></output></button>
+    </template>`,
+    "compiles primitive SVG style values with the direct emitter": `<template component="demo-svg-style-counter" status="experimental" summary="Direct primitive SVG style counter.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
+    </template>`,
+    "compiles direct text input bindings with the native dirty-value guard": `<template component="demo-bound-text" status="experimental" summary="Direct native text binding.">
+      <defs><state type="string" name="draft" value="Ready"></state></defs>
+      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
+    </template>`,
+    "compiles direct checkbox bindings with native checked synchronization": `<template component="demo-bound-check" status="experimental" summary="Direct native checkbox binding.">
+      <defs><state type="boolean" name="done" value="false"></state></defs>
+      <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
+    </template>`,
+    "compiles direct textarea and single-select bindings": `<template component="demo-bound-choice" status="experimental" summary="Direct native choice bindings.">
+      <defs><state type="string" name="choice" value="one"></state></defs>
+      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+    </template>`,
+    "compiles direct range bindings with native numeric synchronization": `<template component="demo-bound-range" status="experimental" summary="Direct native range binding.">
+      <defs><state type="number" name="position" value="0"></state></defs>
+      <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
+    </template>`,
+    "compiles static self handlers with a native target identity guard": `<template component="demo-event-self" status="experimental" summary="Direct native self modifier.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section><button on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`,
+    "compiles static filtered handlers with native event guards": `<template component="demo-event-filter" status="experimental" summary="Direct native event filter.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`,
+    "compiles static capture and passive listeners with native options": `<template component="demo-event-options" status="experimental" summary="Direct native event options.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+    </template>`,
+    "compiles static once listeners through the generated lifecycle coordinator": `<template component="demo-event-once" status="experimental" summary="Native once fallback.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+    </template>`,
+    "compiles static state-derived primitive event dispatch through generated runtime validation": `<template component="demo-event-dispatch" status="experimental" summary="Direct declared event dispatch.">
+      <defs>
+        <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+        <state type="number" name="count" value="0"></state>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save</button>
+    </template>`,
+    "compiles state-only boolean handler guards while preserving subsequent steps": `<template component="demo-guarded-handler" status="experimental" summary="Direct guarded handler.">
+      <defs>
+        <event name="saved" type="number"></event>
+        <state type="boolean" name="enabled" value="true"></state>
+        <state type="number" name="count" value="0"></state>
+        <handler name="advance"><set name="count" expr:value="count + 1" $if="enabled"></set><dispatch event="saved" expr:value="count" $if="enabled"></dispatch><set name="enabled" expr:value="not enabled"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="count"></output></button>
+    </template>`,
+    "pulls static primitive computed handler guards before each guarded step": `<template component="demo-computed-guard" status="experimental" summary="Computed guard direct path.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <state type="number" name="hits" value="0"></state>
+        <computed name="even" from="count % 2 = 0"></computed>
+        <handler name="advance"><set name="count" expr:value="count + 1"></set><set name="hits" expr:value="hits + 1" $if="even"></set></handler>
+      </defs>
+      <button on:click="advance"><output $value="count"></output><output $value="hits"></output></button>
+    </template>`,
+    "compiles static refs with native validation and focus handler steps": `<template component="demo-ref-action" status="experimental" summary="Direct static ref action.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="count"></output></section>
+    </template>`,
+    "compiles dependency-free primitive `$value` beside dynamic direct output": `<template component="demo-literal-text" status="experimental" summary="Direct literal text.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="count"></output></button></section>
+    </template>`,
+    "compiles dependency-free primitive native bindings beside dynamic direct output": `<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
+    </template>`,
+    "initializes transitively constant direct computeds during construction": `<template component="demo-static-computed" status="experimental" summary="Static computed direct construction.">
+      <defs>
+        <event name="saved" type="string"></event>
+        <state type="number" name="count" value="0"></state>
+        <computed name="prefix" from="'Ready'"></computed>
+        <computed name="label" from="concat(prefix, '!')"></computed>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
+      </defs>
+      <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
+    </template>`,
+    "pulls static primitive computed event detail through the generated dispatch boundary": `<template component="demo-computed-event-dispatch" status="experimental" summary="Direct computed declared event dispatch.">
+      <defs>
+        <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
+        <state type="number" name="count" value="0"></state>
+        <computed name="savedValue" from="count * 2"></computed>
+        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="savedValue"></dispatch></handler>
+      </defs>
+      <button on:click="save">Save <output $value="savedValue"></output></button>
+    </template>`,
+    "compiles a static primitive `$value` expression without the live runtime": `<template component="demo-inline-expression" status="experimental" summary="Direct inline text expression.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="count + 1"></output></button>
+    </template>`,
+    "compiles static primitive attribute, property, class, and style expressions directly": `<template component="demo-inline-attributes" status="experimental" summary="Direct inline native expressions.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+    </template>`,
+    "compiles dependency-free primitive `$value` expressions as direct text": `<template component="demo-static-directive" status="experimental" summary="Static directive text.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="'fixed'"></output></button>
+    </template>`,
+    "guards direct mutable numeric state against non-finite writes": `<template component="demo-typed-number" status="experimental" summary="Typed numeric state.">
+      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler></defs>
+      <button on:click="divide"><output $value="count"></output></button>
+    </template>`,
+    "includes set value dependencies even when they are not rendered": `<template component="demo-set-input" status="experimental" summary="Set input dependency.">
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="count + 1"></set></handler></defs>
+      <button on:click="save"><output $value="snapshot"></output></button>
+    </template>`,
+    "refreshes a computed before a later set reads it": `<template component="demo-sequential-sets" status="experimental" summary="Sequential sets.">
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" expr:value="count + 1"></set><set name="snapshot" expr:value="double"></set></handler></defs>
+      <button on:click="advance"><output $value="snapshot"></output></button>
+    </template>`,
+    "compiles static string modes to direct native text, attributes, and properties": `<template component="demo-tabs" status="experimental" summary="Direct string tabs.">
+      <defs>
+        <state type="string" name="tab" value="one"></state>
+        <handler name="showOne"><set name="tab" expr:value="'one'"></set></handler>
+        <handler name="showTwo"><set name="tab" expr:value="'two'"></set></handler>
+      </defs>
+      <section from:data-tab="tab" from:title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+    </template>`,
+    "compiles literal primitive concat expressions to direct string concatenation": `<template component="demo-label" status="experimental" summary="Direct formatted label.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <computed name="label" from="concat('Step ', count)"></computed>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
+    </template>`,
+    "preserves literal percent characters in direct concatenation": `<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
+      <defs>
+        <state type="number" name="count" value="0"></state>
+        <computed name="label" from="concat(count, '/%s')"></computed>
+        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      </defs>
+      <button on:click="increment"><output $value="label"></output></button>
+    </template>`,
+    "keeps numeric SVG data attributes on the direct native emitter": `<template component="demo-svg-data" status="experimental" summary="Direct SVG data binding.">
+      <defs>
+        <state type="number" name="size" value="24"></state>
+        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
+      </defs>
+      <button on:click="grow"><svg from:data-size="size"><path d="M0 0"></path></svg></button>
+    </template>`,
+    "compiles scalar prop reflection without the live interpreter": `<template component="demo-label" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Ready">Label.</prop></props><output from:data-label="label"><span $value="label"></span></output></template>`,
+    "compiles a scalar native property prop with the compact generated boundary": `<template component="demo-prop-value" status="experimental" summary="A target compiler fixture."><props><prop name="value" type="number" default="1">Value.</prop></props><input type="number" .value="value"></template>`,
+    "creates vanilla SVG subtrees in the SVG namespace": `<template component="demo-icon" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Close">Label.</prop></props><button from:aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path><foreignObject><span>html</span></foreignObject></svg></button></template>`,
+    "compiles a read-only primitive reactive leaf without the full runtime": `<template component="demo-derived" status="experimental" summary="Derived output.">
+      <defs><state type="number" name="count" value="0"></state></defs>
+      <output $value="count + 1"></output>
+    </template>`,
+    "compiles static prevent and stop handlers with native event calls": `<template component="demo-event-modifier" status="experimental" summary="Direct native event modifiers.">
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
+      <section><button on:click.prevent.stop="increment"><output $value="count"></output></button></section>
+    </template>`,
+  };
+  for (const [name, text] of Object.entries(formerCompactShapes)) {
+    it(`matches live for a former compact shape: ${name}`, async () => {
+      await same(text, [0, 1, 2].map((round) => (host, update) => poke(host, update, round)));
+    });
   }
 
   it("checks formatted and keyword state like the general runtime", async () => {
@@ -1192,11 +1492,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     }
   });
 
-  it("invokes a component the compact prop path compiles like live lowering", async () => {
+  it("invokes a scalar prop component like live lowering", async () => {
     const tag = `<template component="x-tag" status="early" summary="Tag.">
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>
       <button from:data-tone="tone" type="button">{label}</button></template>`;
-    assert.match(vanilla(tag), /manageGeneratedProps/, "the child stays on the compact path");
     await same([parent(`
       <section><x-tag tone="warn" label="Hi"></x-tag><x-tag tone="bad"></x-tag><x-tag from:label="label" from:tone="flag ? 'warn' : 'nope'"></x-tag></section>`), tag], [
       (_host, update) => { update({ flag: true }); },

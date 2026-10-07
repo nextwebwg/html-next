@@ -115,10 +115,15 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
   };
 }
 
-const staticGenerated = await generatedFixture("static-card", 2_500);
-const reactiveGenerated = await generatedFixture("reactive-counter", 5_000);
-const propGenerated = await generatedFixture("prop-button", 5_000);
-const computedGenerated = await generatedFixture("computed-counter", 5_000);
+// Every component compiles through the one block compiler, with live's semantics. The smaller
+// emitters these four fixtures once used (0.3–2 KB) did not match live: no slot markers, no host,
+// inspection or hydration, and their own prop validity messages. Exact output carries the compiled
+// root's handle, host and scheduler (~6.6 KB) and, with props, the live prop boundary and validity
+// with each prop's type compiled to its own checks (~4.4 KB more, from ~12 KB through the type system).
+const staticGenerated = await generatedFixture("static-card", 6_700);
+const reactiveGenerated = await generatedFixture("reactive-counter", 6_950);
+const propGenerated = await generatedFixture("prop-button", 11_150);
+const computedGenerated = await generatedFixture("computed-counter", 7_100);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
 const keyedGenerated = await generatedFixture("keyed-list", 7_700);
 const dataGenerated = await generatedFixture("data-read", 7_550);

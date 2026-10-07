@@ -1,13 +1,18 @@
 /** The complete HTML Next value-type grammar and its canonical runtime representation. */
 
 import { deepFreeze, isNativeEvent } from "./freeze.js";
-import { compileExpression } from "./expression.js";
-import { parseHtmlLiteral } from "./structured-input.js";
+import {
+  checkAbsent, checkBoolean, checkConstrained, checkEvent, checkFormat, checkFunction, checkInteger, checkKeyword, checkList,
+  checkNull, checkNumber, checkObject, checkRecord, checkSelectedType, checkSeparated, checkString, checkTrusted, checkUnion,
+  checkUnknown, typedText, type TextForm, type TypeCheck,
+} from "./type-checks.js";
 import {
   colorFormat, colorHexFormat, dateFormat, datetimeFormat, datetimeLocalFormat, durationFormat, emailFormat, keywordFormat,
   lengthFormat, monthFormat, percentageFormat, timeFormat, urlFormat, weekFormat,
 } from "./formats.js";
-import { boundFailures, type ValueBounds } from "./value-constraints.js";
+import type { ValueBounds } from "./value-constraints.js";
+
+export { browserTrusted, childPath, typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 
 export type TerminalTypeName =
   | "string"
@@ -401,196 +406,74 @@ function typescriptKey(value: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value) ? value : JSON.stringify(value);
 }
 
-function issue(reason: TypeIssueReason, message: string, path: string): TypedResult {
-  return { ok: false, issues: [{ reason, message, path }] };
-}
+const FORMATS: Readonly<Record<string, (value: string) => boolean>> = {
+  keyword: keywordFormat, url: urlFormat, email: emailFormat, date: dateFormat, month: monthFormat, week: weekFormat,
+  time: timeFormat, "datetime-local": datetimeLocalFormat, datetime: datetimeFormat, color: colorFormat,
+  "color-hex": colorHexFormat, length: lengthFormat, percentage: percentageFormat, duration: durationFormat,
+};
 
-/** Canonical structured-value path spelling shared by every typed and schema diagnostic. */
-export function childPath(path: string, key: string | number): string {
-  if (typeof key === "number") return `${path}[${key}]`;
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
-}
-
-function plainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  return prototype === Object.prototype || prototype === null;
-}
-
-const readStructuredExpression = (source: string) => compileExpression(source).ast;
-function structuredInput(value: unknown): unknown {
-  return parseHtmlLiteral(value, readStructuredExpression);
-}
-
-export function browserTrusted(value: unknown, type: "trusted-html" | "trusted-script"): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  if ((value as { kind?: unknown }).kind === type && "value" in value) return true;
-  const expected = type === "trusted-html" ? "TrustedHTML" : "TrustedScript";
-  return (value as { constructor?: { name?: string } }).constructor?.name === expected ||
-    Object.prototype.toString.call(value) === `[object ${expected}]`;
-}
-
-function validFormat(value: string, name: TerminalTypeName): boolean {
+function terminalCheck(name: TerminalTypeName): TypeCheck {
   switch (name) {
-    case "keyword": return keywordFormat(value);
-    case "url": return urlFormat(value);
-    case "email": return emailFormat(value);
-    case "date": return dateFormat(value);
-    case "month": return monthFormat(value);
-    case "week": return weekFormat(value);
-    case "time": return timeFormat(value);
-    case "datetime-local": return datetimeLocalFormat(value);
-    case "datetime": return datetimeFormat(value);
-    case "color-hex": return colorHexFormat(value);
-    case "color": return colorFormat(value);
-    case "length": return lengthFormat(value);
-    case "percentage": return percentageFormat(value);
-    case "duration": return durationFormat(value);
-    default: return false;
-  }
-}
-
-function parseTerminal(value: unknown, name: TerminalTypeName, path: string, source: "html" | "value"): TypedResult {
-  switch (name) {
-    case "string":
-      return typeof value === "string" ? { ok: true, value } : issue("typeMismatch", "Must be a string.", path);
-    case "keyword":
-    case "url":
-    case "email":
-    case "date":
-    case "month":
-    case "week":
-    case "time":
-    case "datetime-local":
-    case "datetime":
-    case "color":
-    case "color-hex":
-    case "length":
-    case "percentage":
-    case "duration":
-      return typeof value === "string" && validFormat(value, name)
-        ? { ok: true, value } : issue("typeMismatch", `Must be a valid ${name} value.`, path);
-    case "boolean":
-      if (typeof value === "boolean") return { ok: true, value };
-      if (source === "value") return issue("typeMismatch", "Must be true or false.", path);
-      if (value === "" || value === "true") return { ok: true, value: true };
-      if (value === "false") return { ok: true, value: false };
-      return issue("typeMismatch", "Must be true or false.", path);
-    case "number":
-    case "integer": {
-      const parsed = typeof value === "number" ? value :
-        source === "value" ? Number.NaN :
-        typeof value === "string" && (name === "integer" ? /^-?\d+$/.test(value)
-          : /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value))
-          ? Number(value) : Number.NaN;
-      if (!Number.isFinite(parsed)) return issue("badInput", `Must be ${name === "integer" ? "an integer" : "a finite number"}.`, path);
-      if (name === "integer" && !Number.isInteger(parsed)) return issue("typeMismatch", "Must be an integer.", path);
-      return { ok: true, value: parsed };
-    }
-    case "null": return value === null ? { ok: true, value: null } : issue("typeMismatch", "Must be null.", path);
-    case "absent": return value === undefined ? { ok: true, value: undefined } : issue("typeMismatch", "Must be absent.", path);
+    case "string": return checkString;
+    case "boolean": return checkBoolean;
+    case "number": return checkNumber;
+    case "integer": return checkInteger;
+    case "null": return checkNull;
+    case "absent": return checkAbsent;
     case "trusted-html":
-    case "trusted-script": return browserTrusted(value, name)
-      ? { ok: true, value }
-      : issue("untrustedValue", `Must be a ${name === "trusted-html" ? "TrustedHTML" : "TrustedScript"} value.`, path);
-    case "function": return typeof value === "function"
-      ? { ok: true, value }
-      : issue("typeMismatch", "Must be a function supplied through a property.", path);
-    case "event": return isNativeEvent(value)
-      ? { ok: true, value }
-      : issue("typeMismatch", "Must be a native Event value.", path);
-    case "unknown": return { ok: true, value };
+    case "trusted-script": return checkTrusted(name);
+    case "function": return checkFunction;
+    case "event": return checkEvent;
+    case "unknown": return checkUnknown;
+    default: return checkFormat(name, FORMATS[name]!);
   }
 }
 
-function parseNode(value: unknown, node: TypeNode, path: string, source: "html" | "value"): TypedResult {
+const terminalChecks = new Map<string, TypeCheck>();
+const nodeChecks = new WeakMap<TypeNode, TypeCheck>();
+
+/** A declared type's check, built once per type. */
+export function typeCheck(type: TypeInput): TypeCheck {
+  if (typeof type === "string") {
+    let check = terminalChecks.get(type);
+    if (check === undefined) terminalChecks.set(type, check = terminalCheck((normalizeType(type) as TerminalType).name));
+    return check;
+  }
+  const node = normalizeType(type);
+  let check = nodeChecks.get(node);
+  if (check === undefined) nodeChecks.set(node, check = buildCheck(node));
+  return check;
+}
+
+function buildCheck(node: TypeNode): TypeCheck {
   switch (node.kind) {
-    case "terminal": return parseTerminal(value, node.name, path, source);
-    case "separated-list": {
-      const input = typeof value === "string" ? value.split(node.separator === "space" ? /\s+/ : /\s*,\s*/)
-        : value;
-      if (!Array.isArray(input) || input.length === 0 || input.some((item) => item === "")) {
-        return issue("typeMismatch", "Must be a nonempty separated list.", path);
-      }
-      const issues = input.flatMap((item, index) => {
-        const result = parseNode(item, node.item, childPath(path, index), "value");
-        return result.ok ? [] : result.issues;
-      });
-      return issues.length === 0 ? { ok: true, value: input } : { ok: false, issues };
-    }
-    case "keyword": return value === node.value
-      ? { ok: true, value }
-      : issue("typeMismatch", `Must be ${JSON.stringify(node.value)}.`, path);
-    case "union": {
-      for (const member of node.members) {
-        const result = parseNode(value, member, path, source);
-        if (result.ok) return result;
-      }
-      return issue("typeMismatch", `Must match ${formatType(node)}.`, path);
-    }
-    case "selected": return issue("typeMismatch", `Type depends on the \`${node.from}\` declaration.`, path);
-    case "constrained": {
-      const parsed = parseNode(value, node.base, path, source);
-      if (!parsed.ok) return parsed;
-      if (node.values !== undefined && !node.values.some((choice) => choice === parsed.value)) {
-        return issue("typeMismatch", `Must be one of ${node.values.map(String).join(", ")}.`, path);
-      }
-      const base = node.base.kind === "terminal" ? node.base.name : "";
-      const failures = boundFailures(parsed.value, base, node);
-      return failures.length === 0 ? parsed : { ok: false, issues: failures.map((failure) => ({ ...failure, path })) };
-    }
-    case "list": {
-      const input = source === "html" ? structuredInput(value) : value;
-      if (!Array.isArray(input)) return issue("typeMismatch", "Must be a list.", path);
-      const output: unknown[] = [];
-      const issues: TypeIssue[] = [];
-      input.forEach((item, index) => {
-        const result = parseNode(item, node.item, childPath(path, index), "value");
-        if (result.ok) output.push(result.value);
-        else issues.push(...result.issues);
-      });
-      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
-    }
-    case "record": {
-      const input = source === "html" ? structuredInput(value) : value;
-      if (!plainObject(input)) return issue("typeMismatch", "Must be a string-keyed record.", path);
-      const output: Record<string, unknown> = {};
-      const issues: TypeIssue[] = [];
-      for (const [key, item] of Object.entries(input)) {
-        const result = parseNode(item, node.value, childPath(path, key), "value");
-        if (result.ok) output[key] = result.value;
-        else issues.push(...result.issues);
-      }
-      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
-    }
-    case "object": {
-      const input = source === "html" ? structuredInput(value) : value;
-      if (!plainObject(input)) return issue("typeMismatch", "Must be an object.", path);
-      const output: Record<string, unknown> = {};
-      const issues: TypeIssue[] = [];
-      const fields = new Map(node.fields.map((field) => [field.name, field]));
-      for (const field of node.fields) {
-        if (!(field.name in input)) {
-          if (!field.optional) issues.push({ reason: "typeMismatch", message: "Required field is absent.", path: childPath(path, field.name) });
-          continue;
-        }
-        const result = parseNode(input[field.name], field.type, childPath(path, field.name), "value");
-        if (result.ok) output[field.name] = result.value;
-        else issues.push(...result.issues);
-      }
-      for (const [key, item] of Object.entries(input)) {
-        if (fields.has(key)) continue;
-        if (node.open) output[key] = item;
-        else issues.push({ reason: "typeMismatch", message: "Field is not declared by this closed object type.", path: childPath(path, key) });
-      }
-      return issues.length === 0 ? { ok: true, value: output } : { ok: false, issues };
-    }
+    case "terminal": return typeCheck(node.name as TypeInput & string);
+    case "separated-list": return checkSeparated(typeCheck(node.item), node.separator === "space");
+    case "keyword": return checkKeyword(node.value);
+    case "union": return checkUnion(node.members.map(typeCheck), formatType(node));
+    case "selected": return checkSelectedType(node.from);
+    case "constrained": return checkConstrained(typeCheck(node.base), node.base.kind === "terminal" ? node.base.name : "", node);
+    case "list": return checkList(typeCheck(node.item));
+    case "record": return checkRecord(typeCheck(node.value));
+    case "object": return checkObject(node.fields.map((field) => [field.name, typeCheck(field.type), field.optional] as const), node.open);
   }
 }
 
 /** Parse and canonicalize a value at a typed boundary without implicit JS coercion. */
 export function parseTypedValue(value: unknown, type: TypeInput, path = "$", source: "html" | "value" = "html"): TypedResult {
-  return parseNode(value, normalizeType(type), path, source);
+  return typeCheck(type)(value, path, source);
+}
+
+export function textForm(type: TypeInput): TextForm {
+  const node = normalizeType(type);
+  switch (node.kind) {
+    case "list":
+    case "record":
+    case "object": return 1;
+    case "union": return 2;
+    case "separated-list": return node.separator === "space" ? " " : ", ";
+    default: return 0;
+  }
 }
 
 /** Serialize a value using its declared type, never JavaScript's object stringification. */
@@ -602,17 +485,7 @@ export function serializeTypedValue(value: unknown, type: TypeInput): string {
   if (node.kind === "terminal" && (node.name === "function" || node.name === "unknown")) {
     throw new TypeError(`The ${node.name} type is property-only and cannot be serialized.`);
   }
-  if (node.kind === "list" || node.kind === "record" || node.kind === "object" ||
-      (node.kind === "union" && typeof parsed.value === "object" && parsed.value !== null)) {
-    return JSON.stringify(parsed.value, (_key, item: unknown) => {
-      if (isNativeEvent(item)) throw new TypeError("Native event values cannot be serialized.");
-      return item;
-    });
-  }
-  if (node.kind === "separated-list") return (parsed.value as string[]).join(node.separator === "space" ? " " : ", ");
-  if (parsed.value === null) return "null";
-  if (parsed.value === undefined) return "";
-  return String(parsed.value);
+  return typedText(parsed.value, textForm(node));
 }
 
 /**

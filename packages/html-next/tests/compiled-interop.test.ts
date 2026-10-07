@@ -131,11 +131,13 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     document.body.append(element);
     await flush();
     const rendered = element.outerHTML;
+    const host = runtime.getComponentHost(element);
+    assert.ok(host, "a compiled root has its own host");
     runtime.registerComponentDefinitions([propDefinition]);
     runtime.lowerDocument(document);
     await flush();
     assert.equal(element.outerHTML, rendered);
-    assert.equal(runtime.getComponentHost(element), undefined);
+    assert.equal(runtime.getComponentHost(element), host);
   });
 
   it("serializes props and projection, and hydrates live to the same instance", async () => {

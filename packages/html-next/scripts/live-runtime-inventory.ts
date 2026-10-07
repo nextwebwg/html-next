@@ -37,6 +37,7 @@ export const liveRuntimeSubsystemModules = {
     "packages/html-next/src/freeze.ts",
     "packages/html-next/src/prop-values.ts",
     "packages/html-next/src/type-system.ts",
+    "packages/html-next/src/type-checks.ts",
     "packages/html-next/src/structured-input.ts",
     "packages/html-next/src/validate.ts",
     "packages/html-next/src/value-constraints.ts",

@@ -1,7 +1,6 @@
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
-import { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
@@ -23,28 +22,24 @@ import {
   untracked,
   type ReactiveOwner,
 } from "./reactivity.js";
-import { parseTypedValue, parseTypeExpression, type TypeNode } from "./type-system.js";
+import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { DataResource, type DataState } from "./data.js";
-import { selectedPropType } from "./contract.js";
 import { kebabCase } from "./names.js";
-import { assignedPropValue, conformsAtDestination, invocationValue, reflectedPropValue } from "./prop-values.js";
-import type { ComponentContract, PropContract, PropType } from "./types.js";
-import { validateComponentProps } from "./validate.js";
-import { manageElementValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
+import { propsValidity, type PropRule, type Validity } from "./validate.js";
+import type { boundFailures } from "./value-constraints.js";
+import { manageDerivedValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
 
 export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textCall, toAttribute, toText, truthy } from "./expression.js";
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
-
-export interface GeneratedEvent {
-  readonly name: string;
-  readonly type: string;
-  readonly detail: unknown;
-  readonly bubbles: boolean;
-  readonly composed: boolean;
-  readonly cancelable: boolean;
-}
+export { eventPasses } from "./event-filter.js";
+export {
+  checkAbsent, checkBoolean, checkConstrained, checkEvent, checkFormat, checkFunction, checkInteger, checkKeyword, checkList,
+  checkNull, checkNumber, checkObject, checkRecord, checkSelectedType, checkSeparated, checkString, checkTrusted, checkUnion,
+  checkUnknown,
+} from "./type-checks.js";
+export { boundFailures } from "./value-constraints.js";
 
 /** A declared event's detail check (or 0 for an untyped event) and its bubbles, composed and cancelable flags. */
 export type GeneratedEventDeclaration = readonly [check: ((detail: unknown) => boolean) | 0, bubbles: boolean, composed: boolean, cancelable: boolean];
@@ -54,7 +49,7 @@ const dispatchUndeclared = (target: Element | readonly Element[], name: string, 
   (target as Element).dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false }));
 
 /** The detail check of a typed event; only modules that declare one import it, and with it the type system. */
-export const detailCheck = (type: TypeNode) => (detail: unknown): boolean => parseTypedValue(detail, type, "$", "value").ok;
+export const detailCheck = (check: TypeCheck) => (detail: unknown): boolean => check(detail, "$", "value").ok;
 
 /**
  * Dispatches a component event as the live runtime does: a declared event checks its detail
@@ -97,242 +92,7 @@ export function rootValue(value: unknown, name: string): unknown {
   return value;
 }
 
-/** Validates and dispatches an event emitted by target-native generated code. */
-export function dispatchGeneratedEvent(target: EventTarget | null | undefined, event: GeneratedEvent): boolean {
-  if (event.detail !== undefined) {
-    const parsed = parseTypedValue(event.detail, parseTypeExpression(event.type));
-    if (!parsed.ok) fail("HR002", `Event \`${event.name}\` detail does not satisfy its declared type.`);
-  }
-  return target?.dispatchEvent(new CustomEvent(event.name, {
-    detail: event.detail,
-    bubbles: event.bubbles,
-    composed: event.composed,
-    cancelable: event.cancelable,
-  })) ?? false;
-}
-
-export type GeneratedPropType = "string" | "boolean" | "number" | readonly string[];
-
-export interface GeneratedProp {
-  readonly name: string;
-  /** The `data-<name>` attribute that records an explicit value on the root. */
-  readonly attribute: string;
-  /** The value the author or framework supplied; `undefined` when the prop was not set. */
-  readonly value: unknown;
-  /** The declared default, used for rendering but never reflected. */
-  readonly default?: unknown;
-  /**
-   * The template itself binds this attribute on the root, so it is template output and always shows
-   * the effective value (defaults included). Otherwise it only records explicit values.
-   */
-  readonly bound?: boolean;
-  readonly type: GeneratedPropType;
-  readonly required: boolean;
-}
-
 const generatedPropUpdaters = new WeakMap<Element, (props: Readonly<Record<string, unknown>>) => void>();
-
-interface ChoiceIssue { readonly path: string; readonly message: string; readonly reason: "valueMissing" | "typeMismatch" }
-
-function managedChoiceValidity(element: Element, issues: () => readonly ChoiceIssue[]): { refresh(): void; stop(): void } {
-  const target = element as Element & { validity?: ValidityState; validationMessage?: string; checkValidity?: () => boolean; reportValidity?: () => boolean; setCustomValidity?: (message: string) => void };
-  const ownValidity = !('validity' in target);
-  const ownCheck = !('checkValidity' in target);
-  const ownMessage = !('validationMessage' in target);
-  const ownReport = !('reportValidity' in target);
-  let failures: readonly ChoiceIssue[] = [];
-  let mirroredAria = false;
-  if (ownValidity) Object.defineProperty(target, "validity", { configurable: true, get: () => ({
-    valid: failures.length === 0,
-    valueMissing: failures.some((failure) => failure.reason === "valueMissing"),
-    typeMismatch: failures.some((failure) => failure.reason === "typeMismatch"),
-    patternMismatch: false, tooLong: false, tooShort: false, rangeUnderflow: false,
-    rangeOverflow: false, stepMismatch: false, badInput: false, customError: false,
-    errors: failures,
-  }) });
-  if (ownCheck) Object.defineProperty(target, "checkValidity", { configurable: true, value: () => failures.length === 0 });
-  if (ownMessage) Object.defineProperty(target, "validationMessage", { configurable: true, get: () => failures[0]?.message ?? "" });
-  if (ownReport) Object.defineProperty(target, "reportValidity", { configurable: true, value: () => failures.length === 0 });
-  const refresh = (): void => {
-    failures = issues();
-    target.setCustomValidity?.(failures[0]?.message ?? "");
-    if (!('setCustomValidity' in target)) {
-      if (failures.length > 0) {
-        element.setAttribute("data-invalid", "");
-        element.removeAttribute("data-valid");
-      } else {
-        element.removeAttribute("data-invalid");
-        element.setAttribute("data-valid", "");
-      }
-      if (failures.length > 0 && (!element.hasAttribute("aria-invalid") || mirroredAria)) {
-        element.setAttribute("aria-invalid", "true");
-        mirroredAria = true;
-      } else if (failures.length === 0 && mirroredAria) {
-        element.removeAttribute("aria-invalid");
-        mirroredAria = false;
-      }
-    }
-  };
-  return { refresh, stop: () => {
-    target.setCustomValidity?.("");
-    if (ownValidity) delete target.validity;
-    if (ownCheck) delete target.checkValidity;
-    if (ownMessage) delete target.validationMessage;
-    if (ownReport) delete target.reportValidity;
-    element.removeAttribute("data-invalid");
-    element.removeAttribute("data-valid");
-    if (mirroredAria) element.removeAttribute("aria-invalid");
-  } };
-}
-
-function propValue(input: unknown, type: GeneratedPropType): unknown {
-  if (type === "string" && typeof input === "string") return input;
-  if (type === "boolean" && typeof input === "boolean") return input;
-  if (type === "number" && typeof input === "number" && Number.isFinite(input)) return input;
-  if (Array.isArray(type) && typeof input === "string") return input;
-  return input;
-}
-
-function generatedPropIssues(prop: GeneratedProp, value: unknown): readonly ChoiceIssue[] {
-  if (value === null || value === undefined || value === "") {
-    return prop.required ? [{ path: prop.name, reason: "valueMissing", message: `\`${prop.name}\` is required.` }] : [];
-  }
-  const type = prop.type;
-  const valid = type === "string" ? typeof value === "string"
-    : type === "boolean" ? typeof value === "boolean"
-    : type === "number" ? typeof value === "number" && Number.isFinite(value)
-    : typeof value === "string" && (type as readonly string[]).includes(value);
-  return valid ? [] : [{ path: prop.name, reason: "typeMismatch", message: `Value does not satisfy \`${prop.name}\`.` }];
-}
-
-function assignedGeneratedProp(
-  prop: GeneratedProp,
-  input: unknown,
-): unknown {
-  if (input === null) {
-    return null;
-  }
-  if (input !== undefined) return propValue(input, prop.type);
-  return undefined;
-}
-
-/**
- * Installs the scalar prop boundary used by a directly compiled component. Explicit values are
- * reflected as `data-<name>` (defaults never are); that record is output, never read back. No
- * JavaScript properties are added to the element.
- */
-export function manageGeneratedProps(
-  element: Element,
-  props: readonly GeneratedProp[],
-  apply?: (name: string, value: unknown) => void,
-): () => void {
-  // `explicit` holds the supplied value (or undefined); `effective` adds the declared default.
-  const explicit = props.map((prop) => assignedGeneratedProp(prop, prop.value));
-  const effective = (index: number): unknown => explicit[index] === undefined
-    ? (props[index]!.default ?? null) : explicit[index];
-  const validity = props.length > 0
-    ? managedChoiceValidity(element, () => props.flatMap((prop, index) => generatedPropIssues(prop, effective(index))))
-    : undefined;
-  const byName = new Map(props.map((prop, index) => [prop.name, index]));
-  const dirty = new Set(props.map((_, index) => index));
-  let connected = false;
-  let pending = false;
-
-  const flush = (): void => {
-    pending = false;
-    if (!connected) return;
-    for (const index of dirty) {
-      const prop = props[index]!;
-      const value = prop.bound ? effective(index) : explicit[index];
-      const serialized = value === undefined || value === null ? null : String(value);
-      if (serialized === null) element.removeAttribute(prop.attribute);
-      else element.setAttribute(prop.attribute, serialized);
-      apply?.(prop.name, effective(index));
-    }
-    dirty.clear();
-    validity?.refresh();
-  };
-  const schedule = (index: number): void => {
-    dirty.add(index);
-    if (connected && !pending) {
-      pending = true;
-      queueMicrotask(flush);
-    }
-  };
-  generatedPropUpdaters.set(element, (next) => {
-    for (const [name, input] of Object.entries(next)) {
-      const index = byName.get(name);
-      if (index === undefined) continue;
-      const value = assignedGeneratedProp(props[index]!, input);
-      if (Object.is(explicit[index], value)) continue;
-      explicit[index] = value;
-      schedule(index);
-    }
-  });
-
-  const stopLifecycle = manageGeneratedLifecycle(
-    element,
-    () => {
-      connected = true;
-      for (let index = 0; index < props.length; index += 1) dirty.add(index);
-      flush();
-    },
-    () => {
-      connected = false;
-    },
-  );
-  return () => { stopLifecycle(); validity?.stop(); };
-}
-
-/** A compact equivalent of manageGeneratedProps for generated components with exactly one scalar prop. */
-export function manageGeneratedProp(
-  element: Element,
-  prop: GeneratedProp,
-  apply?: (value: unknown) => void,
-): () => void {
-  let explicit = assignedGeneratedProp(prop, prop.value);
-  let dirty = true;
-  let connected = false;
-  let pending = false;
-  const effective = (): unknown => explicit === undefined ? (prop.default ?? null) : explicit;
-  const validity = managedChoiceValidity(element, () => generatedPropIssues(prop, effective()));
-  const flush = (): void => {
-    pending = false;
-    if (!connected || !dirty) return;
-    dirty = false;
-    const value = prop.bound ? effective() : explicit;
-    const serialized = value === undefined || value === null ? null : String(value);
-    if (serialized === null) element.removeAttribute(prop.attribute);
-    else element.setAttribute(prop.attribute, serialized);
-    apply?.(effective());
-    validity?.refresh();
-  };
-  const schedule = (): void => {
-    dirty = true;
-    if (connected && !pending) {
-      pending = true;
-      queueMicrotask(flush);
-    }
-  };
-  generatedPropUpdaters.set(element, (next) => {
-    if (!Object.hasOwn(next, prop.name)) return;
-    const value = assignedGeneratedProp(prop, next[prop.name]);
-    if (!Object.is(explicit, value)) {
-      explicit = value;
-      schedule();
-    }
-  });
-  const stopLifecycle = manageGeneratedLifecycle(
-    element,
-    () => {
-      connected = true;
-      dirty = true;
-      flush();
-    },
-    () => { connected = false; },
-  );
-  return () => { stopLifecycle(); validity?.stop(); };
-}
 
 /** What a root `$match` arm writes on its root: its literals, class tokens, style and output attributes. */
 export type ArmRoot = readonly [
@@ -435,8 +195,8 @@ export function invoke(
  * A bound prop's first form, its attribute text, as live writes it on the invocation: none for a value
  * the prop's type does not take (a select prop's type is unknown until the component exists).
  */
-export function propText(type: PropType | null | undefined, value: unknown, attribute: string): string | null {
-  return value === NONCONFORMING || !conformsAtDestination(value as Value, type) ? null : toAttribute(value as Value, attribute);
+export function propText(type: CompactType | null, value: unknown, attribute: string): string | null {
+  return value === NONCONFORMING || !fits(value, type) ? null : toAttribute(value as Value, attribute);
 }
 
 /** The parent's projected content, by slot: elements with a `slot` attribute go to that slot, the rest to the unnamed one. */
@@ -455,17 +215,14 @@ export function projected(fragment: Node): { children: Node[]; slots: Record<str
  * Applies a parent's bound value to an invoked component's prop, as live's invocation binding does:
  * a value the prop's type (chosen by its selector) does not take is not applied at all.
  */
-export function bindProp(child: GeneratedInstance, name: string, value: unknown, declared?: PropType): void {
-  const record = child.B;
-  if (record === undefined) {
-    if (conformsAtDestination(value as Value, declared)) updateGeneratedProps(child.e, { [name]: value });
-    return;
-  }
-  const prop = record.D.props[name]!;
+export function bindProp(child: GeneratedInstance, name: string, value: unknown): void {
+  const record = child.B!;
+  const props = record.D.props;
+  const prop = props[name]!;
   const from = prop.select?.from;
-  const type = selectedPropType(record.D as ComponentContract, prop, from === undefined ? {}
-    : { [from]: record.v[Object.hasOwn(record.D.props, from) ? record.n.length + Object.keys(record.D.props).indexOf(from) : record.n.indexOf(from)] });
-  if (!conformsAtDestination(value as Value, type)) return;
+  const checks = chosen(props, prop, from === undefined ? {}
+    : { [from]: record.v[Object.hasOwn(props, from) ? record.n.length + Object.keys(props).indexOf(from) : record.n.indexOf(from)] });
+  if (!fits(value, checks?.m ?? null)) return;
   // The child's own channel: a root it shares answers to the component that delegates to it.
   record.u!({ [name]: value });
 }
@@ -685,9 +442,54 @@ interface GeneratedPropHandle {
   validate(): ReturnType<typeof validityState>;
 }
 
+/** A declared type, compiled: its check, terminal name, text form and compact type. */
+export interface PropChecks {
+  readonly c: TypeCheck;
+  readonly t?: string;
+  readonly j: TextForm;
+  readonly m: CompactType;
+}
+
+/**
+ * A declared prop, compiled: its rule and default, its type's checks (a select prop's are its options'),
+ * and `k`, `boundFailures`, when it declares a bound.
+ */
+export interface CompiledProp extends PropRule, Partial<PropChecks> {
+  readonly default?: unknown;
+  readonly k?: typeof boundFailures;
+  readonly select?: { readonly from: string; readonly options: readonly (PropChecks & { readonly value: unknown })[] };
+}
+
+type CompiledProps = Readonly<Record<string, CompiledProp>>;
+
+/** The checks of a prop's type, chosen by its selector's value as `selectedPropType` chooses; null when no option matches. */
+function chosen(props: CompiledProps, prop: CompiledProp, values: Readonly<Record<string, unknown>>): PropChecks | null {
+  if (prop.select === undefined) return prop as PropChecks;
+  const supplied = values[prop.select.from];
+  const value = supplied === undefined ? props[prop.select.from]?.default ?? null : supplied;
+  if (value === null) return null;
+  return prop.select.options.find((option) => option.value === value) ?? null;
+}
+
+/** An input through a prop's type (`invocationValue`): null stays null, and a value the type refuses is undefined. */
+function taken(checks: PropChecks | null, input: unknown, source: "html" | "value"): unknown {
+  if (input === null || checks === null) return input;
+  const parsed = checks.c(input, "$", source);
+  return parsed.ok ? parsed.value : undefined;
+}
+
+/** The `data-<name>` text of a value (`reflectedPropValue`): the type's form when the type takes it, else as given. */
+function reflected(value: unknown, checks: PropChecks | null): string {
+  const parsed = checks?.c(value, "$", "value");
+  return parsed?.ok === true ? typedText(parsed.value, checks!.j) : typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+}
+
+/** The destination check (`conformsAtDestination`) on a compact type, or on null, a select prop's type without an option. */
+const fits = (value: unknown, type: CompactType | null): boolean => value === ABSENT || type !== null && conforms(value, type);
+
 /** A compiled instance's props, as the live runtime keeps an instance's. */
 export interface GeneratedPropRecord {
-  readonly D: Pick<ComponentContract, "props">;
+  readonly D: { readonly props: CompiledProps };
   /** The state and computed names; each prop's root follows them, in the contract's order. */
   readonly n: readonly string[];
   readonly v: unknown[];
@@ -705,7 +507,7 @@ export interface GeneratedPropRecord {
   /** The factory's values, written raw on the root before it first renders its props. */
   readonly f: Readonly<Record<string, unknown>>;
   /** The props' validity, as the root reports it. */
-  readonly y: () => ReturnType<typeof validateComponentProps>;
+  readonly y: () => Validity;
   /** `host.props`. */
   readonly h: Readonly<Record<string, GeneratedPropHandle>>;
 }
@@ -717,11 +519,9 @@ export interface GeneratedPropRecord {
  * Fills each prop's root in `v`; `manageProps` takes over once the instance is attached.
  */
 export function acceptProps(
-  element: Element | undefined, D: Pick<ComponentContract, "props">, n: readonly string[], v: unknown[],
+  element: Element | undefined, D: GeneratedPropRecord["D"], n: readonly string[], v: unknown[],
   input: Readonly<Record<string, unknown>>, bound: readonly string[], html?: Readonly<Record<string, string>>,
 ): GeneratedPropRecord {
-  // An invocation's factory values only serve components the compact paths compile.
-  if (html !== undefined) input = {};
   const props = D.props;
   const names = Object.keys(props);
   // The factory's explicit values are recorded as `data-<name>`, raw, once the root exists (`manageProps`).
@@ -751,9 +551,9 @@ export function acceptProps(
       if (item === undefined || (prop.select !== undefined) !== pass) continue;
       // A selector that is state chooses with its initial value.
       const from = prop.select?.from;
-      // An invocation's bare boolean attribute is present, so it reads as true.
-      accepted[name] = invocationValue(prop, item.value, item.source, html !== undefined && item.source === "html", selectedPropType(D as ComponentContract, prop,
-        from === undefined || props[from] !== undefined ? accepted : { [from]: v[at(from)] }));
+      // An invocation's bare boolean attribute is HTML input "", which reads as true.
+      accepted[name] = taken(chosen(props, prop, from === undefined || props[from] !== undefined ? accepted : { [from]: v[at(from)] }),
+        item.value, item.source);
     }
   }
   for (const name of names) {
@@ -766,7 +566,8 @@ export function acceptProps(
     D, n, v, i: inputs, b: bound, w: raw, f: input,
     x: new Set(names.filter((name) => incoming[name] !== undefined && incoming[name]!.value !== null)),
     // Reads every prop's input and value, as live's validity does, so an effect reading it tracks them all.
-    y: () => validateComponentProps(D as ComponentContract,
+    y: () => propsValidity(props, (prop, selector) => chosen(props, prop, prop.select === undefined ? {} : { [prop.select.from]: selector }),
+      (prop) => prop.k,
       (name) => {
         trackProperty(inputs, name);
         if (inputs[name]?.present) return inputs[name]!.value;
@@ -805,20 +606,19 @@ export function manageProps(instance: GeneratedInstance): void {
   const at = (name: string): number => names.includes(name) ? n.length + names.indexOf(name) : n.indexOf(name);
   // The factory's explicit values, as its live attachment writes them before rendering.
   for (const name of record.w) {
-    instance.e.setAttribute(`data-${kebabCase(name)}`, reflectedPropValue(record.f[name], selectedPropType(D as ComponentContract, props[name]!, record.f)));
+    instance.e.setAttribute(`data-${kebabCase(name)}`, reflected(record.f[name], chosen(props, props[name]!, record.f)));
   }
   for (const name of record.b) record.w.delete(name);
   const changed = new Set<string>();
   let connected = false;
   let installed = false;
   /** The root's validity: every prop of every component sharing it, the owner's first, as live's. */
-  const shared = (): ReturnType<typeof validateComponentProps> => {
+  const shared = (): Validity => {
     const owner = (instance.e as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
     const errors = [owner ?? instance, ...owner?.D ?? []].flatMap((entry) => entry.B?.y().errors ?? []);
     return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
   };
-  const selected = (prop: PropContract, values: Readonly<Record<string, unknown>>): PropType | null =>
-    selectedPropType(D as ComponentContract, prop, values);
+  const selected = (prop: CompiledProp, values: Readonly<Record<string, unknown>>): PropChecks | null => chosen(props, prop, values);
   const reflect = (name: string): void => {
     const prop = props[name]!;
     const element = instance.e;
@@ -827,7 +627,7 @@ export function manageProps(instance: GeneratedInstance): void {
     const value = v[at(name)];
     // Null is "no value" at the attribute boundary: it removes the attribute.
     const text = value === undefined || value === ABSENT || value === null ? null
-      : reflectedPropValue(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
+      : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
     if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
     else element.setAttribute(`data-${kebabCase(name)}`, text);
   };
@@ -848,7 +648,7 @@ export function manageProps(instance: GeneratedInstance): void {
         return;
       }
       installed = true;
-      manageElementValidity(instance.e, {}, { derive: shared });
+      manageDerivedValidity(instance.e, shared);
       // Live reflects every explicit or bound prop as it adopts the root, then the factory's (and an
       // invocation's bound) values write their raw text again: those keep it.
       for (const name of names) if (!record.w.has(name)) reflect(name);
@@ -861,7 +661,7 @@ export function manageProps(instance: GeneratedInstance): void {
     generatedPropUpdaters.set(next, update);
     if (!installed) return;
     unmanageElementValidity(previous);
-    manageElementValidity(next, {}, { derive: shared });
+    manageDerivedValidity(next, shared);
     for (const name of names) reflect(name);
     job.schedule();
   };
@@ -877,7 +677,8 @@ export function manageProps(instance: GeneratedInstance): void {
       for (const [name, value] of Object.entries(input)) {
         const prop = props[name];
         if (prop === undefined || (prop.select !== undefined) !== pass) continue;
-        const accepted = assignedPropValue(prop, value, selected(prop, next));
+        // A framework's undefined returns the prop to its default (`assignedPropValue`).
+        const accepted = value !== undefined ? taken(selected(prop, next), value, "value") : prop.default === undefined ? null : prop.default;
         if (accepted !== undefined) next[name] = accepted;
       }
     }
@@ -895,7 +696,7 @@ export function manageProps(instance: GeneratedInstance): void {
       } else {
         explicit.add(name);
         if (!record.b.includes(name)) {
-          element.setAttribute(attribute, reflectedPropValue(value, selected(prop, next)));
+          element.setAttribute(attribute, reflected(value, selected(prop, next)));
           record.w.add(name);
         }
       }

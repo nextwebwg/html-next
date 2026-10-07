@@ -77,7 +77,7 @@ import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, root
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
-import { manageElementValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
+import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
 
 interface LiveDefinition {
   readonly wrapper?: Element;
@@ -2866,7 +2866,7 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
   instance.element = element;
   instance.validityCleanup?.();
   if (Object.keys(instance.definition.contract.props).length > 0) {
-    instance.validityCleanup = manageElementValidity(element, {}, { derive: () => rootPropValidity(instance) });
+    instance.validityCleanup = manageDerivedValidity(element, () => rootPropValidity(instance));
   }
   for (const delegate of instance.delegates) {
     delegate.element = element;
@@ -3132,7 +3132,7 @@ function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
     installPropReflection(instance);
     installStateAttribute(instance);
     if (owner.validityCleanup === undefined && Object.keys(instance.definition.contract.props).length > 0) {
-      owner.validityCleanup = manageElementValidity(root, {}, { derive: () => rootPropValidity(owner) });
+      owner.validityCleanup = manageDerivedValidity(root, () => rootPropValidity(owner));
     }
   }
 }

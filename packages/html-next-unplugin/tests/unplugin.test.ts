@@ -124,7 +124,7 @@ describe("HTML Next unplugin", () => {
       imports: ["@nextwebwg/html-next/generated-runtime"],
       capabilities: manifest.capabilities,
     });
-    assert.match(output, /function manageGeneratedProp(?:s)?/);
+    assert.match(output, /function acceptProps/);
   });
 
   it("resolves every helper a generated module imports through the shared support module", async () => {
@@ -172,11 +172,11 @@ describe("HTML Next unplugin", () => {
     };
 
     const once = await bundle("once.html", "createXOnce");
-    assert.match(once, /function manageGeneratedLifecycle/);
+    assert.match(once, /function manageIndexedLifecycle/);
     // Re-exporting the whole entry still leaves unused helpers and the general runtime out.
-    assert.doesNotMatch(once, /function manageGeneratedProps?\b|function manageComponentLifecycle/);
+    assert.doesNotMatch(once, /function acceptProps\b|function manageComponentLifecycle/);
     const dispatch = await bundle("dispatch.html", "createXDispatch");
-    assert.match(dispatch, /function dispatchGeneratedEvent/);
+    assert.match(dispatch, /function dispatchDeclared/);
     assert.doesNotMatch(dispatch, /function manageComponentLifecycle/);
     // A root `$match` compiles directly too: its root switch, without the general runtime.
     const polymorphic = await bundle("polymorphic.html", "createXPolymorphic");
@@ -654,6 +654,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
       build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
     });
     // `label` is not one of x-child's props, so it is an attribute the parent keeps writing on its root.
@@ -675,6 +676,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
       build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
     });
     // HTML input never meets the factory's own `attributes` option.
@@ -696,6 +698,7 @@ describe("HTML Next unplugin", () => {
       root,
       logLevel: "silent",
       plugins: [htmlNext.vite({ entries: ["app.html"], root, mode: "application" })],
+      resolve: { alias: { "@nextwebwg/html-next/generated-runtime": new URL("../../html-next/src/generated-runtime.ts", import.meta.url).pathname } },
       build: { minify: false, lib: { entry: join(root, "main.js"), formats: ["es"], fileName: () => "app.js", cssFileName: "components" } },
     });
     assert.match(await readFile(join(root, "dist/app.js"), "utf8"), /invoke\(I, createXChild\b/);
@@ -797,7 +800,8 @@ describe("HTML Next unplugin", () => {
     const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8")) as {
       dynamicBoundaries: Array<{ tag: string; strategy: string; usedBy: string[] }>;
     };
-    assert.match(output, /createElement\("x-runtime-card"\)/);
+    // The external element stays in the cloned template, for its own definition to upgrade.
+    assert.match(output, /\["x-runtime-card",/);
     assert.deepEqual(manifest.dynamicBoundaries, [{
       tag: "x-runtime-card",
       strategy: "external-custom-element",
