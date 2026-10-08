@@ -11,3 +11,6 @@ Use the symbol without words for GitHub avatars, favicons, app icons, and naviga
 | `html-next-mark-dark.svg` / `.png` | Symbol for dark backgrounds; the HTML Next orange mark is unchanged. |
 
 SVG files are the vector masters; every corresponding PNG is rendered from its SVG. Keep proportions, internal spacing, and colors intact. Do not crop the avatar padding or squeeze a lockup into a profile image. Use an empty image alt attribute when adjacent text already supplies the name; otherwise use "HTML Next".
+
+The masters use explicitly constructed lines and Bézier curves for both symbols and lettering, with no raster-derived contour polygons.
+The N retains 88 source units of horizontal clearance on both sides and vertical clearance above its top and below both lower tips.
