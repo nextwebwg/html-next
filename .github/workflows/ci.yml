@@ -103,8 +103,18 @@ jobs:
         with:
           deno-version: v2.x
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - working-directory: packages/htmlkit
-        run: deno run -A scripts/runtime-smoke.mjs && bun scripts/runtime-smoke.mjs
+      # An installed consumer, as users run it; inside the workspace Bun applies tsconfig paths to source.
+      - name: Install the packed packages in a consumer
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs" "$RUNNER_TEMP/consumer"
+          (cd packages/html-next && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
+          (cd packages/htmlkit && pnpm pack --pack-destination "$RUNNER_TEMP/packs")
+          cd "$RUNNER_TEMP/consumer"
+          echo '{"private":true,"type":"module"}' > package.json
+          npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/packs/*.tgz
+          cp "$GITHUB_WORKSPACE/packages/htmlkit/scripts/runtime-smoke.mjs" .
+      - working-directory: ${{ runner.temp }}/consumer
+        run: deno run -A runtime-smoke.mjs && bun runtime-smoke.mjs
 
   performance:
     name: Reactive performance against main

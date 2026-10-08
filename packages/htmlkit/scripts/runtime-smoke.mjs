@@ -1,9 +1,10 @@
 // Serves a generated page through application.fetch on the current runtime (Node, Deno, or Bun).
-// Run from packages/htmlkit after building: node|bun scripts/runtime-smoke.mjs, deno run -A scripts/runtime-smoke.mjs.
+// Run it in a project with the packed packages installed, as CI does: inside this workspace, Bun
+// applies tsconfig paths that point @nextwebwg/html-next at its TypeScript source.
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApplication } from "../dist/index.js";
+import { createApplication } from "@nextwebwg/htmlkit";
 
 const runtime = globalThis.Deno ? "Deno" : globalThis.Bun ? "Bun" : "Node";
 const root = await mkdtemp(join(tmpdir(), "htmlkit-runtime-"));
