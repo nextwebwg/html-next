@@ -1,0 +1,197 @@
+{
+  "complete": true,
+  "runner_success": true,
+  "standard_samples": true,
+  "cpu_samples": 15,
+  "protocol": "full_standard",
+  "measuredAt": "20261008T013021Z",
+  "frameworks": [
+    "html-next-vite-candidate",
+    "html-next-live-candidate",
+    "vanillajs",
+    "solid",
+    "vue",
+    "react-hooks",
+    "svelte"
+  ],
+  "benchmarks": [
+    "01_run1k",
+    "02_replace1k",
+    "03_update10th1k_x16",
+    "04_select1k",
+    "05_swap1k",
+    "06_remove-one-1k",
+    "07_create10k",
+    "08_create1k-after1k_x2",
+    "09_clear1k_x8"
+  ],
+  "environment": {
+    "chrome": "153.0.8010.12",
+    "cpu": "Apple M4 Pro",
+    "os": "macOS 26.5.2",
+    "platform": "darwin-arm64",
+    "node": "v24.11.1",
+    "benchmark": {
+      "repository": "https://github.com/nextwebwg/js-framework-benchmark",
+      "revision": "1ff9927d4cb4dcc2a3e37c1adf8d993f64f4e92a",
+      "lockfileSha256": {
+        "react-hooks": "bee80a1ff6b695518e5f19961a408c9a6b8cbafa78143a9dc6d4252b4003bb62",
+        "vue": "7b04dd5631706be5c254647a2c4fe6aee7b8c9c359edaa44422cb3e44b7fdb82",
+        "svelte": "26f8c3a37e22b9c561f14944a4d5f797a235d4c57fc6dc4dfd8547569573613a",
+        "solid": "50878ee6d9d788bd5a8a7ef1cb0d61b81d1e95264ef8be0017b54311c01e75c8"
+      }
+    },
+    "htmlNext": {
+      "commit": "5851b6e29e2e493a70e00d1085ef90fec8bc4f46",
+      "dirty": false
+    }
+  },
+  "bundles": {
+    "html-next-vite-candidate": {
+      "sha256": "ab245c7054ada544fa4cf237b8a77f9cf5bf15ec7e6116e1206f1c6c18b0d1cb",
+      "raw": 23346,
+      "gzip": 8862
+    },
+    "html-next-live-candidate": {
+      "sha256": "fb5facbe5806d14dbd8cb41bd8833a43b8fdb16a7593e19d50c4f185c676cd33",
+      "raw": 172240,
+      "gzip": 57249
+    },
+    "vanillajs": {
+      "sha256": "08a5cb7d5cec199396561ed28b3c2db77577f066480f33c19f22ce6b0b0c980f",
+      "raw": 9486,
+      "gzip": 2529
+    },
+    "solid": {
+      "sha256": "9a7954aedff39e0f0107a9223f717bdcee63a1609b5bb2626065283f633314fe",
+      "raw": 11563,
+      "gzip": 4812
+    },
+    "vue": {
+      "sha256": "0f618a0848dd47915c5b7c6f4dec5396eeee66b087eb398092ba1ad3f69e5402",
+      "raw": 65481,
+      "gzip": 25963
+    },
+    "react-hooks": {
+      "sha256": "501f594158cea6a26fa05d25f0bae6b2eb463a55fe0a6975594b5df3e13cd62a",
+      "raw": 194643,
+      "gzip": 61343
+    },
+    "svelte": {
+      "sha256": "38f1cfb64a26539ae1dad97f33e01f3b1211759a6e7fece1650d2a04c5b9c809",
+      "raw": 26953,
+      "gzip": 10722
+    }
+  },
+  "vite_gzip_bytes": 8862,
+  "live_gzip_bytes": 57249,
+  "median_ms": {
+    "html-next-live-candidate-v1.0.0-alpha.34+fb5facbe5806-keyed": {
+      "01_run1k": 28.6,
+      "02_replace1k": 34.6,
+      "03_update10th1k_x16": 17.7,
+      "04_select1k": 4.4,
+      "05_swap1k": 27.7,
+      "06_remove-one-1k": 18,
+      "07_create10k": 329,
+      "08_create1k-after1k_x2": 36.6,
+      "09_clear1k_x8": 14.8
+    },
+    "html-next-vite-candidate-v1.0.0-alpha.34+ab245c7054ad-keyed": {
+      "01_run1k": 23.7,
+      "02_replace1k": 23.9,
+      "03_update10th1k_x16": 15.3,
+      "04_select1k": 3.7,
+      "05_swap1k": 16.3,
+      "06_remove-one-1k": 14.8,
+      "07_create10k": 247.3,
+      "08_create1k-after1k_x2": 26.3,
+      "09_clear1k_x8": 10.3
+    },
+    "react-hooks-v19.2.0-keyed": {
+      "01_run1k": 27.9,
+      "02_replace1k": 31.1,
+      "03_update10th1k_x16": 22.8,
+      "04_select1k": 7.6,
+      "05_swap1k": 98.9,
+      "06_remove-one-1k": 15.2,
+      "07_create10k": 387.1,
+      "08_create1k-after1k_x2": 29.9,
+      "09_clear1k_x8": 17.6
+    },
+    "solid-v1.9.3-keyed": {
+      "01_run1k": 22.8,
+      "02_replace1k": 25,
+      "03_update10th1k_x16": 21.2,
+      "04_select1k": 5.1,
+      "05_swap1k": 16.5,
+      "06_remove-one-1k": 13.4,
+      "07_create10k": 262.4,
+      "08_create1k-after1k_x2": 25.7,
+      "09_clear1k_x8": 11.8
+    },
+    "svelte-v5.42.1-keyed": {
+      "01_run1k": 22.9,
+      "02_replace1k": 26,
+      "03_update10th1k_x16": 18.5,
+      "04_select1k": 7.5,
+      "05_swap1k": 18.4,
+      "06_remove-one-1k": 14.2,
+      "07_create10k": 257.7,
+      "08_create1k-after1k_x2": 25.9,
+      "09_clear1k_x8": 12.2
+    },
+    "vanillajs-keyed": {
+      "01_run1k": 21.6,
+      "02_replace1k": 22.9,
+      "03_update10th1k_x16": 14.1,
+      "04_select1k": 3.7,
+      "05_swap1k": 15.5,
+      "06_remove-one-1k": 13.7,
+      "07_create10k": 232.2,
+      "08_create1k-after1k_x2": 24.7,
+      "09_clear1k_x8": 10.8
+    },
+    "vue-v3.5.39-keyed": {
+      "01_run1k": 26.2,
+      "02_replace1k": 28.4,
+      "03_update10th1k_x16": 17.4,
+      "04_select1k": 5.3,
+      "05_swap1k": 20.6,
+      "06_remove-one-1k": 16.4,
+      "07_create10k": 282.8,
+      "08_create1k-after1k_x2": 27.9,
+      "09_clear1k_x8": 13.9
+    }
+  },
+  "scores": {
+    "html-next-live-candidate-v1.0.0-alpha.34+fb5facbe5806-keyed": 1.391056127547047,
+    "html-next-vite-candidate-v1.0.0-alpha.34+ab245c7054ad-keyed": 1.0642498351251177,
+    "react-hooks-v19.2.0-keyed": 1.4968689320496589,
+    "solid-v1.9.3-keyed": 1.1366263469251772,
+    "svelte-v5.42.1-keyed": 1.1574051476911829,
+    "vanillajs-keyed": 1.0076566650889605,
+    "vue-v3.5.39-keyed": 1.2362639893917857
+  },
+  "controls": {
+    "react-hooks": "react-hooks-v19.2.0-keyed",
+    "vue": "vue-v3.5.39-keyed",
+    "svelte": "svelte-v5.42.1-keyed",
+    "solid": "solid-v1.9.3-keyed"
+  },
+  "vite_score": 1.0642498351251177,
+  "vite_vs_react_hooks": 0.7109839828580335,
+  "vite_vs_vue": 0.8608596903713946,
+  "vite_vs_svelte": 0.9195136528017925,
+  "vite_vs_solid": 0.9363233907115969,
+  "vite_vs_gated_max": 0.9363233907115969,
+  "vite_vs_fastest_competitor": 0.9363233907115969,
+  "live_score": 1.391056127547047,
+  "live_vs_react_hooks": 0.9293105747356767,
+  "live_vs_vue": 1.125209615004167,
+  "live_vs_svelte": 1.2018748407348596,
+  "live_vs_solid": 1.2238464569382523,
+  "live_vs_gated_max": 1.2238464569382523,
+  "live_vs_fastest_competitor": 1.2238464569382523,
+  "gated_target_met": true
+}

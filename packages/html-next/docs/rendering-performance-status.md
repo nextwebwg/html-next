@@ -1,5 +1,12 @@
 # Rendering performance: status and next work
 
+**Current result (2026-10-08, 1.0.0-alpha.34, default Vite build, one full standard run, quiet
+machine):** 0.936× Solid, 0.920× Svelte, 0.861× Vue and 0.711× React Hooks; 8,862 B gzip
+([ledger](../benchmarks/framework-results/20261008T013021Z-5851b6e.json)). Against Solid it is
+slower only in remove-one (1.10×), create 1k (1.04×) and append (1.02×). The live runtime measures
+1.22× Solid. The history below predates every component compiling directly (#170); its results
+used the since-removed `--direct-extend` build.
+
 Status as of 2026-10-07. The Vite direct entry met the owner's performance target in two full
 standard sweeps: **0.988× and 0.982× Solid**, with both also below 0.99× Vue and React.
 The retained per-row insertion path reduces the compiled entry from **8,347 B to 8,281 B gzip**.
