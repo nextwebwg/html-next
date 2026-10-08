@@ -135,7 +135,7 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
 | Declared read | 7,455 | Cloned blocks and `DataResource` |
 | Controller lifecycle | 6,907 | Cloned blocks and the generated controller host |
-| Controller keyed list | 8,145 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
+| Controller keyed list | 8,140 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions remain attributable. They are not separate
 per-component runtimes: an application or library build combines the complete input graph,

@@ -73,7 +73,7 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
+import { definitionMayInvokeComponents, dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
 import type { WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
@@ -1263,31 +1263,43 @@ function renderDynamicNode(
   fragment?.append(start, end);
   let childOwned: RenderOwned | undefined;
   let adopting = existing !== undefined;
+  // What the body was built for: its element (none for a false `$if`; null before a build completes),
+  // its slot names' text, and the scope holding its alias.
+  let built: ElementNode | undefined | null = null;
+  let builtNames: readonly string[] = [];
+  let bodyScope = scope;
   ownEffect(context, scope, () => {
-    const test = node.flow?.kind === "if" ? evalConforming(node.flow.test, scope, context.definition) : undefined;
-    const aliased = node.flow?.kind === "with" ? evalConforming(node.flow.expr, scope, context.definition) : undefined;
-    const match = node.flow?.kind === "match" ? prepareMatch(node, scope, context.definition) : undefined;
+    const flow = node.flow!;
+    const test = flow.kind === "if" ? evalConforming(flow.test, scope, context.definition) : undefined;
+    const aliased = flow.kind === "with" ? evalConforming(flow.expr, scope, context.definition) : undefined;
+    const match = flow.kind === "match" ? prepareMatch(node, scope, context.definition) : undefined;
     if (test === NONCONFORMING || aliased === NONCONFORMING || match === NONCONFORMING) return;
+    const chosen = flow.kind === "if" ? truthy(test!) ? node : undefined : flow.kind === "with" ? node : match!.chosen;
+    const alias = flow.kind === "with" || flow.kind === "match" ? flow.alias : undefined;
+    const value = flow.kind === "with" ? aliased! : match?.value;
+    const names = chosen === undefined ? [] : dynamicSlotNames(chosen).map((name) => toText(evaluateCompiled(name,
+      match?.scope ?? (alias === undefined ? scope : layer(scope, { [alias]: value! })))));
+    // The body rebuilds only when its decision does: the `$if` result, the `$match` arm, or a slot
+    // name. Otherwise it stays, inputs and focus included, and its alias takes the new value.
+    if (chosen === built && names.length === builtNames.length && names.every((name, index) => name === builtNames[index])) {
+      if (alias !== undefined) bodyScope.set(alias, value!);
+      return;
+    }
+    built = null;
     childOwned?.stop();
-    childOwned = undefined;
     const previous = adopting ? rangeNodes(start, end).slice(1, -1) : [];
     if (!adopting) clearRange(start, end);
     childOwned = renderOwned(context.owned);
     const childContext = ownedContext(context, childOwned);
+    // The body's scope is its own, so writing its alias does not re-run this decision.
+    bodyScope = alias === undefined ? scope : flow.kind === "with"
+      ? typedLayer(scope, { [alias]: value! }, { [alias]: declaredExpressionType(flow.expressionPlan ?? flow.expr, scope) })
+      : layer(scope, { [alias]: value! });
     let rendered: Node[] = [];
-    if (node.flow?.kind === "if") {
-      if (truthy(test!)) {
-        const { flow: _flow, ...body } = node;
-        rendered = renderInstance(body, scope, document, passThrough, childContext, previous[0]);
-      }
-    } else if (node.flow?.kind === "with") {
-      const local = typedLayer(scope, { [node.flow.alias]: aliased! }, {
-        [node.flow.alias]: declaredExpressionType(node.flow.expressionPlan ?? node.flow.expr, scope),
-      });
-      const { flow: _flow, ...body } = node;
-      rendered = renderInstance(body, local, document, passThrough, childContext, previous[0]);
-    } else if (node.flow?.kind === "match") {
-      rendered = renderMatch(match!, document, childContext, previous[0]);
+    if (chosen !== undefined) {
+      // Render the body or winning arm, without its own flow marker, untracked: only the decision rebuilds it.
+      const { flow: _flow, ...body } = chosen;
+      rendered = untracked(() => renderInstance(body, bodyScope, document, flow.kind === "match" ? [] : passThrough, childContext, previous[0]));
     }
     const output = materialize(rendered, document);
     if (adopting) {
@@ -1295,6 +1307,8 @@ function renderDynamicNode(
       adopting = false;
     }
     end.before(...output);
+    built = chosen;
+    builtNames = names;
     syncContainingSelect(end);
   });
   return fragment === undefined ? rangeNodes(start, end) : [fragment];
@@ -1652,7 +1666,7 @@ function prepareMatch(
   node: ElementNode,
   scope: ReactiveScope,
   definition: ComponentDefinition,
-): { chosen: ElementNode | undefined; scope: ReactiveScope } | typeof NONCONFORMING {
+): { chosen: ElementNode | undefined; scope: ReactiveScope; value: Value | undefined } | typeof NONCONFORMING {
   const flow = node.flow as Extract<Flow, { kind: "match" }>;
   const value = flow.expr === undefined ? undefined : evalConforming(flow.expr, scope, definition);
   if (value === NONCONFORMING) return NONCONFORMING;
@@ -1663,24 +1677,11 @@ function prepareMatch(
     if (child.flow?.kind === "when") {
       const test = evalConforming(child.flow.test, matchScope, definition);
       if (test === NONCONFORMING) return NONCONFORMING;
-      if (truthy(test)) return { chosen: child, scope: matchScope };
+      if (truthy(test)) return { chosen: child, scope: matchScope, value };
     }
-    if (child.flow?.kind === "else") return { chosen: child, scope: matchScope };
+    if (child.flow?.kind === "else") return { chosen: child, scope: matchScope, value };
   }
-  return { chosen: undefined, scope: matchScope };
-}
-
-function renderMatch(
-  match: { chosen: ElementNode | undefined; scope: ReactiveScope },
-  document: Document,
-  context: RuntimeRenderContext,
-  candidate?: Node,
-): Node[] {
-  if (match.chosen === undefined) return [];
-
-  // Render the winning arm, ignoring its own $when/$else marker.
-  const { flow: _armFlow, ...armNode } = match.chosen;
-  return renderInstance(armNode, match.scope, document, [], context, candidate);
+  return { chosen: undefined, scope: matchScope, value };
 }
 
 function bindElement(

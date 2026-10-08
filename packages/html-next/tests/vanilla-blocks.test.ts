@@ -552,6 +552,53 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("keeps a region's body while its decision holds, with its inputs, focus and nodes, like the general runtime", async () => {
+    const text = component(`
+      <state name="count" type="number" value="1"></state>
+      <state name="user" type="object({ name: string })" value='{ "name": "Ada" }'></state>`, `
+      <section>
+        <div $if="$count > 0"><input data-id="if"><span>{$count}</span></div>
+        <div $with="$user as u"><input data-id="with"><span>{$u.name}</span></div>
+        <template $match="$count as n"><p $when="$n < 5"><input data-id="small">{$n}</p><p $else><input data-id="large">{$n}</p></template>
+      </section>`);
+    const field = (host: any, id: string): HTMLInputElement | null => host.root.querySelector(`[data-id="${id}"]`);
+    const run = await same(text, [
+      (host) => {
+        for (const id of ["if", "with", "small"]) field(host, id)!.value = `typed ${id}`;
+        field(host, "if")!.focus();
+        field(host, "if")!.setSelectionRange(1, 3);
+        host.state.count = 2;
+      },
+      (host) => {
+        for (const id of ["if", "with", "small"]) assert.equal(field(host, id)!.value, `typed ${id}`);
+        assert.equal(host.root.ownerDocument.activeElement, field(host, "if"));
+        assert.deepEqual([field(host, "if")!.selectionStart, field(host, "if")!.selectionEnd], [1, 3]);
+        host.state.user = { name: "Grace" };
+      },
+      (host) => {
+        assert.equal(field(host, "with")!.value, "typed with");
+        assert.match(host.root.textContent, /Grace/);
+        // The `$if` flips; the `$match` keeps its arm.
+        host.state.count = 0;
+      },
+      (host) => {
+        assert.equal(field(host, "if"), null);
+        assert.equal(field(host, "small")!.value, "typed small");
+        // The `$if` flips back; the `$match` switches arm.
+        host.state.count = 7;
+      },
+      (host) => {
+        assert.equal(field(host, "if")!.value, "");
+        host.state.user.name = "Lin";
+      },
+    ]);
+    assert.deepEqual(run.identities, [
+      "if:new,with:new,small:new", "if:same,with:same,small:same", "if:same,with:same,small:same",
+      "with:same,small:same", "if:new,with:same,large:new", "if:same,with:same,large:same", "if:same,with:same,large:same",
+    ]);
+    assert.match(run.snapshots.at(-2)!, /Lin/);
+  });
+
   it("binds form controls both ways, sanitizes $html and inlines template carriers like the general runtime", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
@@ -1168,6 +1215,15 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <section><slot from:name="$which">fallback {$which}</slot><p $with="$label as l"><slot from:name="$which">{$l}</slot></p></section>`), [
       (host) => { host.state.which = "default"; },
       (host) => { host.state.which = ""; },
+    ], projection);
+    // A name reading the region's alias, or inside the chosen `$match` arm, rebuilds that body too.
+    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
+      <section><p $with="$which as w"><slot from:name="$w">none {$w}</slot></p>
+        <template $match><div $when="$open"><slot from:name="$which">open</slot></div><div $else><slot from:name="$which">shut</slot></div></template></section>`), [
+      (host) => { host.state.which = "default"; },
+      (host) => { host.state.open = true; },
+      (host) => { host.state.which = "head"; },
+      (host) => { host.state.label = "kept"; },
     ], projection);
   });
 

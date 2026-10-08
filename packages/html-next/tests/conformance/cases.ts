@@ -492,6 +492,34 @@ const successes: ConformanceCase[] = [
     },
   },
   {
+    name: "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
+    source: scene({
+      defs:
+        `<state name="count" type="number" value="1"></state>` +
+        `<handler name="add"><set name="count" expr:value="$count + 1"></set></handler>` +
+        `<handler name="clear"><set name="count" value="0"></set></handler>`,
+      root:
+        `<div><button type="button" on:click="add">Add</button><button type="button" on:click="clear">Clear</button>` +
+        `<p class="if" $if="$count > 0"><input></p>` +
+        `<p class="with" $with="$count as n"><input><b>{$n}</b></p>` +
+        `<template $match="$count as n"><p class="small" $when="$n < 3"><input></p><p class="large" $else><input></p></template></div>`,
+      use: `<x-t id="kept"></x-t>`,
+    }),
+    expect: {
+      // Each input's region, its value, and whether it is the node typed into.
+      probe: `return qa('#kept input').map((input) => [input.parentElement.className, input.value, input.typed === true]).concat([[q('#kept b').textContent]]);`,
+      result: [["if", "", false], ["with", "", false], ["small", "", false], ["1"]],
+      after: [
+        {
+          action: `for (const input of document.querySelectorAll('#kept input')) { input.value = 'typed'; input.typed = true; } document.querySelectorAll('#kept button')[0].click();`,
+          result: [["if", "typed", true], ["with", "typed", true], ["small", "typed", true], ["2"]],
+        },
+        { action: `document.querySelectorAll('#kept button')[0].click();`, result: [["if", "typed", true], ["with", "typed", true], ["large", "", false], ["3"]] },
+        { action: `document.querySelectorAll('#kept button')[1].click();`, result: [["with", "typed", true], ["small", "", false], ["0"]] },
+      ],
+    },
+  },
+  {
     name: "fault tolerance: a missing nested read removes the attribute / renders empty, never throws",
     source: scene({
       defs: `<state type="object({ a: number })" name="obj" value="{ a: 1 }"></state>`,
