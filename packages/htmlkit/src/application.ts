@@ -43,6 +43,12 @@ function packageResource(path: string) {
 export async function createApplication(options: ApplicationOptions = {}, moduleServer?: ViteDevServer): Promise<Application> {
   const config = configure(options);
   const routes = await discoverRoutes(config.root, options);
+  // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
+  const headPath = join(config.root, "app/head.js");
+  const headScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
+  if (headScript !== undefined && /<!--|<\/?script/i.test(headScript)) {
+    throw new HtmlKitError("app/head.js cannot contain <!--, <script, or </script, which would end or nest its inline script.", headPath);
+  }
   const ownsServer = moduleServer === undefined;
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom",
     mode: "development", publicDir: false, server: { middlewareMode: true, watch: null, hmr: false },
@@ -195,6 +201,8 @@ export async function createApplication(options: ApplicationOptions = {}, module
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
           (definition, values) => invocation(definition, values, "htmlkit-head", "", false));
       }
+      // Set after loaders so a loader's head fields cannot supply unchecked script text.
+      if (headScript !== undefined) head = { ...head, script: headScript };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       let body = "";
       for (let i = layers.length - 1; i >= 0; i--) {

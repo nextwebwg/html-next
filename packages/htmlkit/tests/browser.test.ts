@@ -55,6 +55,7 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
           input.value = "edited before startup"; input.focus(); input.setSelectionRange(2, 8);
         });
         expect(await page.locator("output").textContent()).toBe("4");
+        expect(await page.evaluate(() => document.documentElement.dataset.prepaint)).toBe("true");
         released = true; release();
         const subject = page.locator('[data-component="home-page"]');
         await expect.poll(() => subject.getAttribute("data-connections")).toBe("1");

@@ -56,6 +56,8 @@ export async function fixture(): Promise<string> {
       return { props: { label: parent.owner + ': ' + params.slug, tags: ['a < b', 'quote " here'] },
         head: { title: params.slug } };
     }`);
+  // Runs during head parsing, before the body exists or anything paints.
+  await write(root, "app/head.js", "document.documentElement.dataset.prepaint = String(document.body === null);");
   await write(root, "public/mark.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="blue"/></svg>');
   return root;
 }

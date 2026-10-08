@@ -93,6 +93,13 @@ it does not select layouts, update a host document, or evaluate their bindings. 
 `style`, `script`, `base`, policy `meta` (`http-equiv`), and arbitrary body nodes are rejected.
 Component styles inside a carrier and controller references retain their normal behavior.
 
+An optional `app/head.js` is inlined as a classic script into every generated page head, after the
+charset declaration and before stylesheets, so it runs before first paint. Keep it to small,
+synchronous work that must precede rendering, such as applying a saved color theme; everything else
+belongs in a controller. It has no bindings or imports and cannot contain `<!--`, `<script`, or
+`</script`. A Content Security Policy must allow it, for example with a `'sha256-…'` hash of its
+text. Component carriers still cannot contain scripts.
+
 Head values may bind to the selected component's declared props, populated by its loader, using
 the existing HTML Next binding syntax:
 
