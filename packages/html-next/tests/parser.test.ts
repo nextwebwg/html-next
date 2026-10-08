@@ -679,13 +679,14 @@ describe("parseComponent", () => {
     const parse = (body: string) => parseComponent(`<template component="x-alias" status="early" summary="Aliases."><defs>
       <state name="draft" type="object({ owner: object({ name: string }), plan: string })" value="{ owner: { name: 'Ada' }, plan: 'free' }"></state>
       <state name="rows" type="list(object({ label: string }))" value="[]"></state>
+      <state name="tags" type="list(string)" value="[]"></state>
       <prop name="title" type="string">Title.</prop></defs><section>${body}</section></template>`);
     const writes = (node: unknown): unknown[] => {
       if (node === null || typeof node !== "object") return [];
       const own = (node as { twoWay?: boolean }).twoWay === true ? [(node as unknown as { writablePath: unknown }).writablePath] : [];
       return [...own, ...Object.values(node).flatMap(writes)];
     };
-    const loopIndex = { kind: "index", expression: { kind: "member", object: { kind: "id", name: "loop" }, key: "index" } };
+    const loopIndex = { kind: "index", item: "row", expression: { kind: "member", object: { kind: "id", name: "loop" }, key: "index" } };
     assert.deepEqual(writes(parse(`<div $with="$draft.owner as owner"><input bind:value="owner.name"></div>` +
       `<template $match="$draft as d"><input $when="$d.plan" bind:value="d.plan"><i $else></i></template>` +
       `<p $each="row of $rows"><input bind:value="row.label"></p>` +
@@ -693,7 +694,7 @@ describe("parseComponent", () => {
       ["draft", "owner", "name"],
       ["draft", "plan"],
       ["rows", loopIndex, "label"],
-      ["rows", { kind: "index", expression: { kind: "id", name: "i" } }, "label"],
+      ["rows", { kind: "index", item: "row", expression: { kind: "id", name: "i" } }, "label"],
     ]);
     const refused = (body: string, reason: RegExp) => assert.throws(() => parse(body), (error: unknown) =>
       error instanceof HtmlDiagnosticError && error.diagnostic.code === "HT005" && reason.test(error.diagnostic.message));
@@ -702,6 +703,7 @@ describe("parseComponent", () => {
     refused(`<p $each="row, i of $rows"><input bind:value="i"></p>`, /`i` is a loop index/);
     refused(`<div $with="$title as draft"><input bind:value="draft.plan"></div>`, /`draft` stands for `\$title`, which is not a writable state path/);
     refused(`<p $each="t of ['a']"><input bind:value="t"></p>`, /not declared state/);
+    refused(`<p $each="t of $tags"><input bind:value="t"></p>`, /`t` is a whole loop item; bind one of its fields/);
   });
 
   it("parses state-rooted two-way bindings, flow, content, refs, and events", () => {

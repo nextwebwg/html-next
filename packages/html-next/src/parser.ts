@@ -225,6 +225,11 @@ function writableAt(node: ExpressionNode, scope: ParseScope): Writable {
   if (alias.loops !== undefined && alias.loops !== loops) {
     return { reason: `\`${root}\` is an outer loop's item here; name that loop's index (\`${root}, i of …\`) to write through it` };
   }
+  // Replacing a whole loop item needs its live position; a field of it is written through the item.
+  const last = alias.path.at(-1);
+  if (rest.length === 0 && typeof last === "object" && last.item !== undefined) {
+    return { reason: `\`${root}\` is a whole loop item; bind one of its fields, or a field of its state path` };
+  }
   const at = alias.loops ?? local;
   return { path: [...alias.path, ...rest], ...at === undefined ? {} : { loops: at } };
 }
@@ -239,7 +244,7 @@ function withAliases(scope: ParseScope, flow: Flow | undefined): ParseScope {
         ? { reason: `\`${flow.item}\` is an item of a \`$where\`, \`$sort\`, or \`$limit\` list, whose positions differ from the state's` }
         : list.loops !== undefined ? { reason: `\`${flow.item}\` iterates an outer loop's item; name that loop's index to write through it` }
           : {
-              path: [...list.path, { kind: "index", expression: flow.index === undefined
+              path: [...list.path, { kind: "index", item: flow.item, expression: flow.index === undefined
                 ? { kind: "member", object: { kind: "id", name: "loop" }, key: "index" }
                 : { kind: "id", name: flow.index } }],
               ...flow.index === undefined ? { loops } : {},

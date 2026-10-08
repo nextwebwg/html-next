@@ -67,7 +67,8 @@ export interface CompiledExpression {
 export type WritablePathSegment =
   | string
   | number
-  | { readonly kind: "index"; readonly expression: ExpressionNode };
+  /** `item` names the loop item at this position, so a target may write through the item itself. */
+  | { readonly kind: "index"; readonly expression: ExpressionNode; readonly item?: string };
 export type WritablePath = readonly WritablePathSegment[];
 
 
