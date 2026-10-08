@@ -3,7 +3,7 @@ import { JSDOM } from "jsdom";
 import { afterEach, describe, it } from "vitest";
 
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
-import { KeyedList, NESTED, RAW, type DirtyObjects, type KeyedRow } from "../src/keyed.js";
+import { KeyedList, NESTED, POSITION, PositionalList, RAW, type DirtyObjects, type KeyedRow } from "../src/keyed.js";
 
 interface Item { id: unknown; label: string }
 interface Row extends KeyedRow { text: string }
@@ -270,5 +270,42 @@ describe("KeyedList", () => {
     keyed.update(value, new Map([[value[0], 1]]), NESTED);
     assert.deepEqual(rows(), before);
     assert.equal(keyed.m.size, 1);
+  });
+});
+
+describe("PositionalList", () => {
+  /** Ids of the rows each update re-ran for their position. */
+  function positional(counted: boolean) {
+    const { document, start, end } = fixture();
+    const moved: unknown[] = [];
+    const make = (item: unknown, j: number, l: number): KeyedRow => ({ k: undefined, i: item, n: document.createElement("li"), x: 0, y: 0, j, l });
+    const list = new PositionalList<KeyedRow>(start, end, make, (row, changed) => {
+      if (changed === POSITION) moved.push((row.i as Item).id);
+    }, (item) => (item as Item).id, "row");
+    list.q = counted;
+    const pool = items([1, 2, 3, 4, 5, 6]);
+    const step = (ids: readonly number[]): unknown[] => {
+      moved.length = 0;
+      list.update(ids.map((id) => pool[id - 1]), none, 2);
+      list.r.forEach((row, index) => assert.deepEqual([row.j, counted ? row.l : ids.length], [index, ids.length]));
+      return [...moved];
+    };
+    return step;
+  }
+
+  it("re-runs only rows whose position changed", () => {
+    const step = positional(false);
+    assert.deepEqual(step([1, 2, 3, 4, 5]), []);
+    assert.deepEqual(step([1, 2, 3, 4, 5, 6]), [], "an append moves nothing");
+    assert.deepEqual(step([1, 5, 3, 4, 2, 6]), [5, 2], "a swap moves two");
+    assert.deepEqual(step([1, 3, 4, 2, 6]), [3, 4, 2, 6], "a removal moves the rows after it");
+    assert.deepEqual(step([1, 3, 4, 2, 6]), []);
+  });
+
+  it("re-runs every row on a count change when rows read the count", () => {
+    const step = positional(true);
+    step([1, 2, 3]);
+    assert.deepEqual(step([1, 2, 3, 4]), [1, 2, 3]);
+    assert.deepEqual(step([2, 1, 3, 4]), [2, 1]);
   });
 });
