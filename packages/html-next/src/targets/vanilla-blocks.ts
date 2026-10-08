@@ -954,15 +954,24 @@ class Planner {
    * outer local's object, or a root's name, then each key; an index that is not a string or number
    * writes nothing. It runs in the control's listener, where the block's own item is `r.i`.
    */
-  writable(path: WritablePath, scope: Scope): string {
+  /** A two-way path's resolver, and whether it reads a row position (`rows[$loop.index]`), which the list must then keep. */
+  writable(path: WritablePath, scope: Scope): { source: string; positional: boolean } {
     const closure: Scope = { ...scope, closure: true };
-    const [root, ...steps] = path;
-    const local = scope.aliases.findLast((alias) => alias.name === root);
+    // A field of a loop item is written through the item itself, so the row needs no live position.
+    const at = path.findLastIndex((step, index) => index < path.length - 1 && typeof step === "object" && step.item !== undefined &&
+      scope.aliases.some((alias) => alias.kind === "item" && alias.name === step.item));
+    const through = at < 0 ? undefined : scope.aliases.findLast((alias) => alias.kind === "item" && alias.name === (path[at] as { item: string }).item);
+    const [root, ...steps] = through === undefined ? path : [undefined, ...path.slice(at + 1)];
+    const local = through ?? scope.aliases.findLast((alias) => alias.name === root);
     const first = local === undefined ? JSON.stringify(root) : aliasSource(closure, local);
-    const keys = steps.map((step) => typeof step === "object" ? lower(step.expression, closure).source : JSON.stringify(step));
+    const lowered = steps.map((step) => typeof step === "object" ? lower(step.expression, closure) : undefined);
+    const keys = steps.map((step, index) => lowered[index]?.source ?? JSON.stringify(step));
     const dynamic = steps.some((step) => typeof step === "object");
-    return `() => { const p = [${[first, ...keys].join(", ")}]; return ${dynamic
-      ? 'p.every((k, i) => i === 0 || typeof k === "string" || typeof k === "number") ? p : undefined' : "p"}; }`;
+    return {
+      source: `() => { const p = [${[first, ...keys].join(", ")}]; return ${dynamic
+        ? 'p.every((k, i) => i === 0 || typeof k === "string" || typeof k === "number") ? p : undefined' : "p"}; }`,
+      positional: lowered.some((key) => key?.positional === true),
+    };
   }
 
   /** A fresh reads array name for an exact binding. */
@@ -1060,9 +1069,11 @@ class Planner {
       }
       if (attribute.twoWay === true) {
         if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
+        const writable = this.writable(attribute.writablePath, scope);
         block.bindings.push({
-          site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name, expression, initial: "undefined",
-          exact: bindingScope.record, select: selectValue(attribute.name), path: this.writable(attribute.writablePath, scope),
+          site, kind: "control", name: svg ? svgAttributeName(attribute.name) : attribute.name,
+          expression: writable.positional ? { ...expression, positional: true } : expression, initial: "undefined",
+          exact: bindingScope.record, select: selectValue(attribute.name), path: writable.source,
           ...selectValue(attribute.name) ? { apply: this.checked(plan, { ...scope, closure: true }) } : {},
         });
         continue;
@@ -1128,14 +1139,18 @@ class Planner {
         content = { kind: attribute.name === "html" ? "html" : "value", expression: this.checked(attribute.expressionPlan!, scope) };
       } else if (prop !== undefined && attribute.kind === "attribute") {
         // A two-way prop applies as a value, and its control on the component's root writes back.
+        let positional = false;
         if (attribute.twoWay === true) {
           if (attribute.writablePath === undefined || attribute.writablePath.length < 2 && scope.aliases.some((alias) => alias.name === attribute.writablePath![0])) unreachable("a two-way binding writes a state-rooted path");
-          controls.push(this.writable(attribute.writablePath, scope));
+          const writable = this.writable(attribute.writablePath, scope);
+          controls.push(writable.source);
+          positional = writable.positional;
         }
         // Re-applied exactly when what it read changes, as its live effect re-runs.
         const recording = this.recording(scope);
         const contract = invoked.definition.contract.props[prop]!;
-        props.push({ name: prop, attribute: attribute.name, expression: this.checked(attribute.expressionPlan!, recording), record: recording.record!,
+        const expression = this.checked(attribute.expressionPlan!, recording);
+        props.push({ name: prop, attribute: attribute.name, expression: positional ? { ...expression, positional: true } : expression, record: recording.record!,
           type: contract.select === undefined ? compactSource(compactType(normalizeType(contract.type))) : "0" });
       } else rest.push(attribute);
     }
