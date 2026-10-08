@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.36
+
+### Changed
+
+- A new guide page, Versions and stability, says that alpha releases follow the proposal's live draft and may break components, sets out what 1.0 will promise within a major version, and shows how a library declares the tools versions it supports (`peerDependencies` today; the planned `htmlNext.snapshot` and `htmlNext.extensions` fields) and how extensions will be enabled. The READMEs, the library publishing guide, and the release mechanics link to it.
+
 ## 1.0.0-alpha.35
 
 ### Breaking

@@ -87,6 +87,6 @@ Importing `forms` pulls in no component runtime. Generated native components imp
 
 ## Built in the open
 
-HTML Next implements the [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and [HTML Forms](https://nextwebwg.org/html-forms/) proposals. The tools are available today as alpha releases. The proposals are at Stage 0; syntax and generated output may change.
+HTML Next implements the [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and [HTML Forms](https://nextwebwg.org/html-forms/) proposals. The tools are available today as alpha releases. The proposals are at Stage 0; syntax and generated output may change. [Versions and stability](https://nextwebwg.org/html-next/versions) explains what 1.0 will promise.
 
 [Documentation](https://nextwebwg.org/html-next/) · [Source](https://github.com/nextwebwg/html-next) · [Report an issue](https://github.com/nextwebwg/html-next/issues) · [MIT license](https://github.com/nextwebwg/html-next/blob/main/LICENSE)

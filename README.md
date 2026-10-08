@@ -46,7 +46,9 @@ reactive-runtime dependency, so importing that subpath pulls in nothing else; th
 consumes its validity model for form declarations but does not re-export request construction.
 
 > Stage 0: the syntax and generated package shape may change. The repository and its packages are
-> MIT-licensed and publish `1.0.0-alpha` prereleases to npm under the default `latest` tag.
+> MIT-licensed and publish `1.0.0-alpha` prereleases to npm under the default `latest` tag. Any alpha
+> may break a component; [Versions and stability](./docs/guide/versions.md) explains what 1.0 will promise
+> and how a library declares the versions it supports.
 
 ## Declarative Components delivery modes
 
