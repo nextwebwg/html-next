@@ -542,8 +542,11 @@ const successes: ConformanceCase[] = [
       result: { writes: null, sum: "3", count: "0" },
       after: [
         {
-          action: `window.attributeWrites = []; new MutationObserver((records) => { for (const record of records) window.attributeWrites.push(record.attributeName); })` +
-            `.observe(document.querySelector('#w'), { attributes: true, subtree: true }); document.querySelectorAll('#w button')[0].click();`,
+          // Screenshots hide the caret with an inline style on the controls, so their style is not watched.
+          action: `window.attributeWrites = []; const observer = new MutationObserver((records) => { for (const record of records) window.attributeWrites.push(record.attributeName); });` +
+            `for (const element of document.querySelectorAll('#w, #w p, #w option')) observer.observe(element, { attributes: true });` +
+            `for (const control of document.querySelectorAll('#w input, #w select')) observer.observe(control, { attributes: true, attributeFilter: ['value', 'checked', 'name', 'type', 'title', 'class', 'aria-invalid'] });` +
+            `document.querySelectorAll('#w button')[0].click();`,
           result: { writes: [], sum: "3", count: "0" },
         },
         { action: `window.attributeWrites = []; document.querySelectorAll('#w button')[1].click();`, result: { writes: [], sum: "3", count: "1" } },

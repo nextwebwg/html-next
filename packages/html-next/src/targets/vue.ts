@@ -572,7 +572,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
         const read = `readBoundControl(${control}) as any`;
         const update = node.name === "input" && attribute.name === "checked"
-          ? `(${control}.type !== 'radio' || ${control}.checked) && (${writable} = ${read})`
+          // Only an <input> binds checked, so the radio guard reads it as one.
+          ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
           : `${writable} = ${read}`;
         attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: ${quote(attribute.name as "value" | "checked")}, value: ${writable}, ${authoredDefault(attribute.name as "value" | "checked")} }`)}`);
         attributes.push(`@${event}=${bound(update)}`);
