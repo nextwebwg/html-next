@@ -113,8 +113,8 @@ interface Binding {
   readonly initial: string;
   /**
    * The name of the reads array of a binding that writes whenever what it read changed, as a live
-   * effect re-runs, rather than when its converted output differs: property writes, and the class
-   * attribute with the class toggles it overwrites.
+   * effect re-runs, rather than when its converted output differs: properties and bound control
+   * values, which the element itself may have changed.
    */
   readonly exact?: string | undefined;
   /** Mixed text: literal strings and lowered segments, joined in order. */
@@ -1051,23 +1051,19 @@ class Planner {
     const svg = parentSvg || node.name === "svg";
     const literal = (name: string): string | undefined =>
       literals.find((attribute) => attribute.name === name)?.value;
-    // A bound class attribute overwrites the class toggles, which then stay overwritten until their
-    // own inputs change, so on such an element both write exactly when their reads change.
-    const classOverwrites = node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === undefined &&
-      attribute.name === "class") && node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class");
     let content: Lowered | undefined;
-    let html: { readonly expression: Lowered; readonly record: string | undefined } | undefined;
+    let html: Lowered | undefined;
     const selectValue = (name: string): boolean => node.name === "select" && name === "value";
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
-      const exact = attribute.kind === "property" || attribute.kind === "directive" && attribute.name === "html" ||
-        attribute.kind === "attribute" && attribute.twoWay === true ||
-        classOverwrites && attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
+      // A property (a bound control's value included) is written with each new result, as the element
+      // may have changed it; every other binding writes only a result that differs from its last.
+      const exact = attribute.kind === "property" || attribute.kind === "attribute" && attribute.twoWay === true;
       const bindingScope = exact ? this.recording(scope) : scope;
       const plan = attribute.expressionPlan ?? compileExpression(attribute.expression);
       const expression = this.checked(plan, bindingScope);
       if (attribute.kind === "directive") {
-        if (attribute.name === "html") html = { expression, record: bindingScope.record };
+        if (attribute.name === "html") html = expression;
         else content = expression;
         continue;
       }
@@ -1091,7 +1087,7 @@ class Planner {
       if (attribute.target === "class") {
         // The root's invocation may carry the class, so its first evaluation always writes.
         const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
-        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial, exact: bindingScope.record });
+        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
         continue;
       }
       if (attribute.target === "style") {
@@ -1101,14 +1097,14 @@ class Planner {
       const name = svg ? svgAttributeName(attribute.name) : attribute.name;
       const value = literal(attribute.name);
       block.bindings.push({
-        site, kind: isUrlAttribute(name) ? "url" : "attribute", name, expression, exact: bindingScope.record,
-        initial: root || bindingScope.record !== undefined ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
+        site, kind: isUrlAttribute(name) ? "url" : "attribute", name, expression,
+        initial: root ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
       });
     }
     const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
     if (html !== undefined) {
-      // `$html` replaces the element's content with sanitized markup whenever what it read changes.
-      block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html.expression, initial: "undefined", exact: html.record });
+      // `$html` replaces the element's content with sanitized markup when that markup changes.
+      block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html, initial: "undefined" });
       return spec;
     }
     if (content !== undefined) {
@@ -1229,8 +1225,7 @@ class Planner {
         block.bindings.push({ site, kind: "text", name: "", expression: this.checked(directive.expressionPlan, scope), initial: '""' });
         return [0];
       }
-      const recording = this.recording(scope);
-      block.bindings.push({ site, kind: "range", name: "", expression: this.checked(directive.expressionPlan, recording), initial: "undefined", exact: recording.record });
+      block.bindings.push({ site, kind: "range", name: "", expression: this.checked(directive.expressionPlan, scope), initial: "undefined" });
       return [3];
     }
     return this.children(block, node, node.children, path, index, scope, svg);
@@ -1770,19 +1765,14 @@ export function emitBlocks(
         if (binding.exact !== undefined) {
           // Written whenever what it read changed, as its live effect re-runs (see `Binding.exact`).
           const value = `x${temporary++}`;
-          const expression = binding.kind === "class" ? truthiness(binding.expression, binding.exact) : binding.expression;
+          const expression = binding.expression;
           lines.push(`    const ${binding.exact} = [];`, `    const ${value} = ${convertible(expression)};`,
             // A full render (a reconnect) re-runs every live effect, and a root write notifies its
             // readers even when a later write in the batch restores it; nested reads compare values.
             `    if (c === -1${rootsWritten(expression)} || readsChanged(${last}, ${binding.exact})) {`,
             `      ${last} = ${binding.exact};`);
           const name = JSON.stringify(binding.name);
-          const write = binding.kind === "property" ? `${site}[${name}] = ${value};`
-            : binding.kind === "class" ? `${site}.classList.toggle(${name}, ${value});`
-            : binding.kind === "control" ? `writeControl(${site}, ${name}, ${value});`
-            : binding.kind === "html" ? `writeHtml(${site}, toText(${value}));`
-            : binding.kind === "range" ? `writeHtmlRange(${site}, toText(${value}));`
-            : `${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${name}, toAttribute(${value}, ${name}));`;
+          const write = binding.kind === "property" ? `${site}[${name}] = ${value};` : `writeControl(${site}, ${name}, ${value});`;
           lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${write}` : `      ${write}`, "    }");
           continue;
         }
@@ -1805,6 +1795,11 @@ export function emitBlocks(
             break;
           case "value":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) writeText(${site}, ${last} = ${output});`);
+            break;
+          case "html":
+          case "range":
+            lines.push(`    const ${output} = toText(${value});`,
+              `    if (${output} !== ${last}) ${binding.kind === "html" ? "writeHtml" : "writeHtmlRange"}(${site}, ${last} = ${output});`);
             break;
           case "text":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) ${site}.data = ${last} = ${output};`);
@@ -1898,13 +1893,13 @@ export function emitBlocks(
         const shown = region.kind === "match" ? `(${body} === undefined ? -1 : ${body}.s)` : `(${body} !== undefined)`;
         const marked = participating(region);
         const rebuild = [
-          ...marked && region.kind !== "with" ? [`      const vt${index} = ${shown};`] : [],
+          ...marked ? [`      const vt${index} = ${shown};`] : [],
           ...([region.block, ...region.arms ?? []].some(disposable) ? [`      dispose(${body});`] : []),
           `      ${body} = undefined;`,
           `      clearRegion(r.a${region.site}, r.e${index});`,
           `      if (${show}) { ${body} = ${make};${region.kind === "match" ? ` ${body}.s = t${index};` : ""} r.e${index}.before(${body}.n); }`,
           // A rebuild that keeps the same decision (a slot name changed) replaces nothing a transition should show.
-          ...!marked ? [] : region.kind === "with" ? ["      transitionChanged();"] : [`      if (vt${index} !== ${shown}) transitionChanged();`],
+          ...marked ? [`      if (vt${index} !== ${shown}) transitionChanged();`] : [],
         ];
         const reselect = selectOf(block, region.site);
         if (reselect !== undefined) rebuild.push(`      queueMicrotask(r.c${reselect});`);

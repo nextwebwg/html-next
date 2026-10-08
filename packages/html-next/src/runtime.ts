@@ -1146,18 +1146,28 @@ function setAttribute(element: Element, name: string, value: string | null): voi
   else element.setAttribute(name, value);
 }
 
-/** Set an element's whole content from a `$value` (escaped text) or `$html` (sanitized) directive. */
+/**
+ * An effect setting an element's whole content from a `$value` (escaped text) or `$html` (sanitized)
+ * directive. It writes only content that differs from what it last wrote.
+ */
 function applyContent(
   element: Element,
   directive: DirectiveAttribute,
   scope: ReactiveScope,
   document: Document,
   definition: ComponentDefinition,
-): void {
-  const value = evalConforming(directive.expression, scope, definition);
-  if (value === NONCONFORMING) return;
-  if (directive.name === "value") element.textContent = toText(value);
-  else element.replaceChildren(sanitizeFragment(toText(value), document, markContentOnly));
+): () => void {
+  let last: string | undefined;
+  return () => {
+    const value = evalConforming(directive.expression, scope, definition);
+    if (value === NONCONFORMING || toText(value) === last) return;
+    last = toText(value);
+    // `$value` keeps a sole Text child and writes its data, as compiled output's `writeText` does.
+    const text = element.firstChild;
+    if (directive.name !== "value") element.replaceChildren(sanitizeFragment(last, document, markContentOnly));
+    else if (last !== "" && text?.nodeType === 3 && text.nextSibling === null) (text as Text).data = last;
+    else element.textContent = last;
+  };
 }
 
 function compareValues(a: Value, b: Value): number {
@@ -1770,6 +1780,9 @@ function bindElementAttributes(
       const selection = invocation === undefined && attribute.target === "class" &&
         scope.parent === context.selection?.scope ? context.selection : undefined;
       const root = attribute.expressionPlan === undefined ? undefined : selection?.bindings.get(attribute.expressionPlan);
+      // What this binding last wrote, and where: a component's root switch gives it a new target.
+      let written: Element | undefined;
+      let last: unknown;
       const effect = own(() => {
         let value: Value | typeof NONCONFORMING;
         if (selection === undefined || root === undefined) value = evalConforming(attribute.expression, scope, context.definition);
@@ -1814,15 +1827,18 @@ function bindElementAttributes(
         }
         const target = valueTarget(element, invocation);
         if (target === undefined) return;
-        if (attribute.target === "class") {
-          target.classList.toggle(attribute.name, truthy(value));
-        } else if (attribute.target === "style") {
-          (target as HTMLElement).style.setProperty(attribute.name, toText(value));
-        } else if (attribute.twoWay === true && applyBoundControlValue(target, attribute.name, value)) {
-          // Native form-control properties carry the live value; no duplicate attribute write.
-        } else {
-          setAttribute(target, attribute.name, toAttribute(value, attribute.name));
-        }
+        // A bound control's value is a property write, made each time; native form-control
+        // properties carry the live value, so there is no duplicate attribute write.
+        if (attribute.twoWay === true && applyBoundControlValue(target, attribute.name, value)) return;
+        // Attribute, class and style bindings write only a result that differs from their last.
+        const output = attribute.target === "class" ? truthy(value)
+          : attribute.target === "style" ? toText(value) : toAttribute(value, attribute.name);
+        if (target === written && output === last) return;
+        written = target;
+        last = output;
+        if (attribute.target === "class") target.classList.toggle(attribute.name, output as boolean);
+        else if (attribute.target === "style") (target as HTMLElement).style.setProperty(attribute.name, output as string);
+        else setAttribute(target, attribute.name, output as string | null);
       });
       if (root !== undefined) indexedSelections.set(effect, selectedRoot(root));
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
@@ -1863,13 +1879,14 @@ function bindTemplateText(
   else {
     const segments = node.segments ?? [node];
     const accepted = segments.map((segment) => segment.expressionPlan === undefined ? segment.value : "");
+    let last: string | undefined;
     ownEffect(context, scope, () => {
       for (const [index, segment] of segments.entries()) {
         if (segment.expressionPlan === undefined) continue;
         const value = evalConforming(segment.expressionPlan.source, scope, context.definition);
         if (value !== NONCONFORMING) accepted[index] = toText(value);
       }
-      text.data = accepted.join("");
+      if (accepted.join("") !== last) text.data = last = accepted.join("");
     });
   }
 }
@@ -1993,7 +2010,7 @@ function instantiateNativeTemplate(
     if (action.kind === "attributes") bindElementAttributes(target as Element, action.node, scope, context);
     else if (action.kind === "events") bindEvents(target as Element, action.node, scope, context);
     else if (action.kind === "text") bindTemplateText(target as Text, action.node, scope, context);
-    else if (action.kind === "content") ownEffect(context, scope, () => applyContent(target as Element, action.directive, scope, document, context.definition));
+    else if (action.kind === "content") ownEffect(context, scope, applyContent(target as Element, action.directive, scope, document, context.definition));
   }
   return [element];
 }
@@ -2026,9 +2043,10 @@ function renderInstance(
     if (contentDirective !== undefined) {
       if (contentDirective.name === "value") {
         const text = document.createTextNode("");
+        let last: string | undefined;
         ownEffect(context, scope, () => {
           const value = evalConforming(contentDirective.expression, scope, context.definition);
-          if (value !== NONCONFORMING) text.data = toText(value);
+          if (value !== NONCONFORMING && toText(value) !== last) text.data = last = toText(value);
         });
         return [text];
       }
@@ -2036,11 +2054,12 @@ function renderInstance(
       const end = document.createComment("html-next:html-end");
       const fragment = document.createDocumentFragment();
       fragment.append(start, end);
+      let last: string | undefined;
       ownEffect(context, scope, () => {
         const value = evalConforming(contentDirective.expression, scope, context.definition);
-        if (value === NONCONFORMING) return;
+        if (value === NONCONFORMING || toText(value) === last) return;
         clearRange(start, end);
-        end.before(sanitizeFragment(toText(value), document, markContentOnly));
+        end.before(sanitizeFragment(last = toText(value), document, markContentOnly));
       });
       return [fragment];
     }
@@ -2159,7 +2178,7 @@ function renderInstance(
   if (invocation === undefined) bindElement(element, node, scope, context);
 
   if (contentDirective !== undefined) {
-    ownEffect(context, scope, () => applyContent(element, contentDirective, scope, document, context.definition));
+    ownEffect(context, scope, applyContent(element, contentDirective, scope, document, context.definition));
     bindEvents(element, node, scope, context, invocation);
     if (invocation !== undefined) settleInvocation(element, invocation);
     return [element];

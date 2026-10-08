@@ -607,6 +607,80 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("stops at an unchanged value: no write, effect, request or rebuild follows it, like the general runtime", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      return { ok: true, status: 200, json: async () => ({ n: url.split("=").at(-1) }), text: async () => "" };
+    };
+    const text = `<template component="x-shape" controller="./changes-controller.js" status="early" summary="Shape.">
+      <defs><state name="a" type="number" value="1"></state><state name="b" type="number" value="2"></state>
+        <state name="label" type="string" value="x"></state>
+        <state name="items" type="list(object({ name: string }))" value='[{ "name": "a" }, { "name": "b" }]'></state>
+        <computed name="sum" from="$a + $b"></computed>
+        <data name="feed" src="https://example.test/feed" type="object({ n: string })"><param name="n" from:value="$a + $b"></param></data></defs>
+      <section from:title="$a + $b" class:wide="$a + $b > 2" style:--n="$a + $b"><p>{$a + $b}</p><b $value="$sum"></b>
+        <i $html="concat('&lt;em&gt;', $a + $b, '&lt;/em&gt;')"></i><template $html="concat('&lt;u&gt;', $sum, '&lt;/u&gt;')"></template>
+        <span>{$items.0.name}</span><div $with="$sum as s"><input data-id="with">{$s}</div></section></template>`;
+    const log = (): string[] => (globalThis as any).directExtendLog.events;
+    // Each run counts its own requests from its first step on.
+    let base = 0;
+    const requested = (): void => { log().push(`requests ${requests.length - base}`); };
+    let observer: MutationObserver | undefined;
+    try {
+      const run = await same(text, [
+        (host) => {
+          // From here on, every DOM write the bindings make is an event (sorted: the modes order one flush differently).
+          const watch: MutationObserver = new (host.root.ownerDocument.defaultView.MutationObserver)((records: MutationRecord[]) => {
+            log().push(...records.map((record) =>
+              `write ${record.type} ${record.attributeName ?? ""} ${(record.target as Element).localName ?? record.target.parentNode?.nodeName}`).sort());
+          });
+          watch.observe(host.root, { subtree: true, attributes: true, characterData: true, childList: true });
+          observer = watch;
+          base = requests.length - 1;
+          requested();
+          // The same sum: no binding writes, no effect runs, no request goes out.
+          host.state.a = 2;
+          host.state.b = 1;
+        },
+        (host) => {
+          requested();
+          // An equal write notifies nothing.
+          host.state.label = "x";
+          host.state.items[0].name = "a";
+        },
+        (host) => {
+          // Writes inside the list change only the paths written, so `items.0.name` readers stay.
+          host.state.items.push({ name: "c" });
+          host.state.items[1].name = "z";
+        },
+        (host) => {
+          host.state.items[0].name = "q";
+          requested();
+        },
+        (host) => {
+          host.state.a = 5;
+        },
+        () => { requested(); observer?.disconnect(); },
+      ]);
+      assert.deepEqual(run.events, [
+        "effect first a", "effect sum 3", "effect label x",
+        // A swap that keeps the sum, an equal write, and writes inside the list: nothing ran, wrote or requested.
+        "requests 1", "requests 1",
+        "requests 1", "effect first q", "write characterData  SPAN",
+        // A new sum reaches its readers once: no class write (still wide), and the `$with` body kept its input.
+        "effect sum 6", "write attributes style section", "write attributes title section", "write characterData  B",
+        "write characterData  DIV", "write characterData  P", "write childList  i", "write childList  section", "write childList  section",
+        "requests 2",
+        // Reconnecting runs each effect once.
+        "effect first q", "effect sum 6", "effect label x",
+      ]);
+    } finally {
+      fetchStub = undefined;
+      observer?.disconnect();
+    }
+  });
+
   it("binds form controls both ways, sanitizes $html and inlines template carriers like the general runtime", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
