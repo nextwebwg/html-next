@@ -522,7 +522,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
             [row.getAttribute("data-index"), row.getAttribute("data-edge"), row.querySelector("span")!.textContent].join(" "));
           const initial = read();
           // An equal-keyed replacement reruns the list without changing any row's loop fields. Each
-          // run still gives every row a new loop record, so loop readers rerun and write again.
+          // run gives every row a new loop record, so loop readers rerun, but they write nothing new.
           const observer = new MutationObserver(() => undefined);
           observer.observe(list, { attributes: true, subtree: true });
           host.state.rows[1] = { id: 2 };
@@ -535,7 +535,7 @@ describe.skipIf(!enabled)("browser runtime", () => {
         }, JSON.stringify(definition));
         assert.deepEqual(actual, {
           initial: ["0 first 3", "1  3", "2 last 3"],
-          indexWrites: 3,
+          indexWrites: 0,
           reordered: ["0 first 2", "1 last 2"],
         });
       } finally { await browser.close(); }

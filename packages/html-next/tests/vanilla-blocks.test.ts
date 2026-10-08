@@ -618,7 +618,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <state name="label" type="string" value="x"></state>
         <state name="items" type="list(object({ name: string }))" value='[{ "name": "a" }, { "name": "b" }]'></state>
         <computed name="sum" from="$a + $b"></computed>
-        <data name="feed" src="https://example.test/feed" type="object({ n: string })"><param name="n" from:value="$a + $b"></param></data></defs>
+        <data name="feed" src="https://example.test/feed" type="object({ n: string })"><param name="n" from:value="$a + $b"></param><param name="note" expr:value="$label"></param></data></defs>
       <section from:title="$a + $b" class:wide="$a + $b > 2" style:--n="$a + $b"><p>{$a + $b}</p><b $value="$sum"></b>
         <i $html="concat('&lt;em&gt;', $a + $b, '&lt;/em&gt;')"></i><template $html="concat('&lt;u&gt;', $sum, '&lt;/u&gt;')"></template>
         <span>{$items.0.name}</span><div $with="$sum as s"><input data-id="with">{$s}</div></section></template>`;
@@ -657,7 +657,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         (host) => {
           host.state.items[0].name = "q";
           requested();
+          // An `expr` parameter is sampled when a request goes out; changing it requests nothing.
+          host.state.label = "y";
         },
+        () => { requested(); },
         (host) => {
           host.state.a = 5;
         },
@@ -667,13 +670,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         "effect first a", "effect sum 3", "effect label x",
         // A swap that keeps the sum, an equal write, and writes inside the list: nothing ran, wrote or requested.
         "requests 1", "requests 1",
-        "requests 1", "effect first q", "write characterData  SPAN",
+        "requests 1", "effect first q", "effect label y", "write characterData  SPAN", "requests 1",
         // A new sum reaches its readers once: no class write (still wide), and the `$with` body kept its input.
         "effect sum 6", "write attributes style section", "write attributes title section", "write characterData  B",
         "write characterData  DIV", "write characterData  P", "write childList  i", "write childList  section", "write childList  section",
         "requests 2",
         // Reconnecting runs each effect once.
-        "effect first q", "effect sum 6", "effect label x",
+        "effect first q", "effect sum 6", "effect label y",
       ]);
     } finally {
       fetchStub = undefined;

@@ -195,6 +195,8 @@ interface InvocationBinding {
   component: RuntimeInstance | undefined;
   /** Run against the component's root when it lowers and again whenever that root is replaced. */
   readonly effects: ReactiveEffect[];
+  /** Set while those runs re-apply every value, in order, even one a binding already wrote. */
+  reapplying?: boolean;
 }
 /** Bindings waiting for their component, keyed by invocation (or, when hydrating, its server root). */
 const pendingInvocationBindings = new WeakMap<Element, InvocationBinding[]>();
@@ -208,7 +210,11 @@ function committedComponent(root: Element, tag: string): RuntimeInstance | undef
 
 function followComponent(binding: InvocationBinding, component: RuntimeInstance): void {
   binding.component = component;
-  component.followers.push(() => { for (const effect of binding.effects) effect.execute(); });
+  component.followers.push(() => {
+    binding.reapplying = true;
+    try { for (const effect of binding.effects) effect.execute(); }
+    finally { binding.reapplying = false; }
+  });
 }
 
 /**
@@ -685,13 +691,15 @@ function readInvocation(
     effects.push(createEffect(scope.scheduler, () => () => resource.disconnect(), 0, active));
     effects.push(createEffect(scope.scheduler, () => {
       let valid = true;
-      const parameters = Object.fromEntries(data.parameters.map((parameter) => {
-        const result = parameter.mode === "from"
-          ? readParameter(parameter)
-          : untracked(() => readParameter(parameter));
-        if (parameter.mode === "from" && !result.valid) valid = false;
-        return [parameter.name, result.value];
-      }));
+      // The `from` parameters subscribe, and only a change to them requests again; the others only
+      // record what they accept. A request samples every parameter as it is sent.
+      const parameters: Record<string, Value> = {};
+      for (const parameter of data.parameters) {
+        if (parameter.mode !== "from") { untracked(() => readParameter(parameter)); continue; }
+        const result = readParameter(parameter);
+        if (!result.valid) valid = false;
+        parameters[parameter.name] = result.value;
+      }
       if (!valid) return;
       resource.update(parameters);
     }, 0, active));
@@ -1833,7 +1841,7 @@ function bindElementAttributes(
         // Attribute, class and style bindings write only a result that differs from their last.
         const output = attribute.target === "class" ? truthy(value)
           : attribute.target === "style" ? toText(value) : toAttribute(value, attribute.name);
-        if (target === written && output === last) return;
+        if (target === written && output === last && invocation?.reapplying !== true) return;
         written = target;
         last = output;
         if (attribute.target === "class") target.classList.toggle(attribute.name, output as boolean);

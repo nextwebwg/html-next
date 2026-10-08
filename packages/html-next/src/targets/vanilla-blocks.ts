@@ -2174,15 +2174,16 @@ export function emitBlocks(
       "  I.A = dataHandles(S, v, DT);"],
     ...plan.reads.flatMap((read, at) => {
       // A parameter that does not conform keeps the value it last accepted, and a `from` one holds the request.
-      const parameter = (value: Lowered, name: string, from: boolean): string =>
-        `const x = ${convertible(value)}; if (x === NONCONFORMING) { p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
+      const parameter = (value: Lowered, name: string, from: boolean, into = "p"): string =>
+        `const x = ${convertible(value)}; if (x === NONCONFORMING) { ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
       return [
         `  const DP${at} = {};`,
         `  let DQ${at}, DR${at};`,
-        // The `from` parameters, recorded so a change to what they read re-requests.
-        `  const DF${at} = () => { const p = {}; let ok = true; ${read.parameters.map((item) => item.from
+        // The `from` parameters, recorded so a change to what they read re-requests, and compared so an
+        // unchanged one requests nothing. The others only record what they accept.
+        `  const DF${at} = () => { const p = {}, s = {}; let ok = true; ${read.parameters.map((item) => item.from
           ? `{ const ${item.record} = []; ${parameter(item.recorded!, item.name, true)} DQ${at} = ${item.record}; }`
-          : `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return [p, ok]; };`,
+          : `{ ${parameter(item.value, item.name, false, "s")} }`).join(" ")} return [p, ok]; };`,
         // Every parameter, sampled again when the request is sent.
         `  const DS${at} = () => { const p = {}; ${read.parameters.map((item) => `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return p; };`,
       ];
