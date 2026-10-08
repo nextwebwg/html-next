@@ -597,6 +597,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       "with:same,small:same", "if:new,with:same,large:new", "if:same,with:same,large:same", "if:same,with:same,large:same",
     ]);
     assert.match(run.snapshots.at(-2)!, /Lin/);
+    // A `$match` that chose no arm stays empty while other state changes.
+    await same(component(`<state name="count" type="number" value="0"></state><state name="label" type="string" value="a"></state>`, `
+      <section><p>{$label}</p><template $match="$count as n"><b $when="$n = 1">one</b><i $when="$n = 2">two {$n}</i></template></section>`), [
+      (host) => { host.state.label = "b"; },
+      (host) => { host.state.count = 2; },
+      (host) => { host.state.count = 3; host.state.label = "c"; },
+      (host) => { host.state.label = "d"; },
+    ]);
   });
 
   it("binds form controls both ways, sanitizes $html and inlines template carriers like the general runtime", async () => {
