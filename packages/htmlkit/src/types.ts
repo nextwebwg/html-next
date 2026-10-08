@@ -17,6 +17,17 @@ export interface ApplicationOptions {
   readonly layout?: string | false;
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
   readonly layoutDefaults?: Readonly<Record<string, string | false>>;
+  /** An application generated in memory, such as from Markdown. Called again at each route discovery. */
+  readonly generate?: () => GeneratedApplication | Promise<GeneratedApplication>;
+}
+
+export interface GeneratedApplication {
+  /** Routes added after file and registered routes. */
+  readonly routes?: readonly RouteInput[];
+  /** Source text by absolute path (page, layout, and component resources, or app/head.js), read before the filesystem. */
+  readonly files?: ReadonlyMap<string, string>;
+  /** Extra public files, deployment-relative path to absolute file, served in development and copied by builds like public/. */
+  readonly publicFiles?: ReadonlyMap<string, string>;
 }
 
 export interface PageHead {
@@ -66,10 +77,13 @@ export interface ServerModule {
   readonly entries?: () => readonly Readonly<Record<string, string>>[] | Promise<readonly Readonly<Record<string, string>>[]>;
 }
 
-export interface RouteLayer { readonly component: string; readonly server?: string; }
+/** server is a loader module path, or the loader module itself for generated applications. */
+export interface RouteLayer { readonly component: string; readonly server?: string | ServerModule; }
 export interface RouteInput extends RouteLayer {
   readonly pattern: string;
   readonly layouts?: readonly RouteLayer[];
+  /** Per-segment numeric navigation order, as routeOrdering derives from file names; null is unordered. */
+  readonly order?: readonly (string | null)[];
 }
 export interface ApplicationRoute extends RouteLayer {
   /** The selected component tag, independent of the route pattern and source file. */
@@ -113,11 +127,19 @@ export interface Application {
   readonly base: string;
   readonly outDir: string;
   readonly routes: readonly ApplicationRoute[];
+  /** Extra public files from generate(), deployment-relative path to absolute file. */
+  readonly publicFiles: ReadonlyMap<string, string>;
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;
   navigation(options?: NavigationQuery): Promise<readonly NavigationItem[]>;
   /** Render a fresh declarative baseline without executing browser controllers. */
   render(pathname: string, signal?: AbortSignal): Promise<RenderedPage>;
+  /**
+   * Serve pages for a native Request, on any runtime with fetch types: GET and HEAD under base, 308 to
+   * a route's trailing-slash URL, 404, and 405. Documents include browser modules only when the
+   * serving adapter supplies them, as the development server does.
+   */
+  fetch(request: Request): Promise<Response>;
   close(): Promise<void>;
 }
 export interface BuildResult { readonly outDir: string; readonly routes: readonly string[]; readonly browserInputs: readonly string[]; }

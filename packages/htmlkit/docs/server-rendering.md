@@ -11,6 +11,10 @@ This is a tooling implementation design, not a component-language specification.
 
 ## Shared work and adapter responsibilities
 
+`Application.fetch(request)` is the request entry point that a production adapter will build on.
+Today the development server serves every page through it, and CI runs it on Deno and Bun. It still
+supplies the static `prerender` context described below.
+
 The current application pipeline already separates route matching and static entry enumeration.
 `entries()` is a deployment operation; `render()` matches a concrete pathname and runs a fresh
 layout/page loader chain. Both file and registered routes become the same `ApplicationRoute`.

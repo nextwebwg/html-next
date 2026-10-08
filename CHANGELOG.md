@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-alpha.37
+
+- HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
+- A tool can supply an HTMLKit application in memory with `generate()`: registered routes whose loaders may be module objects, source text by path for pages, layouts, components and `app/head.js`, and extra public files. It runs again whenever routes are rediscovered, so a development server reflects source edits without the tool writing files. Registered routes accept the same per-segment navigation `order` that `routeOrdering` derives from file names.
+
 ## 1.0.0-alpha.36
 
 - HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.

@@ -9,7 +9,8 @@ export function parameter(segment: string): string | undefined { return /^\[([A-
 export function validSegment(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !value.includes("/") && !/[\\\0?#]/.test(value);
 }
-export async function discoverRoutes(root = process.cwd(), options: Pick<ApplicationOptions, "routes" | "fileRoutes" | "layout" | "layoutDefaults" | "routeOrdering"> = {}): Promise<readonly ApplicationRoute[]> {
+export async function discoverRoutes(root = process.cwd(), options: Pick<ApplicationOptions, "routes" | "fileRoutes" | "layout" | "layoutDefaults" | "routeOrdering"> = {},
+  files?: ReadonlyMap<string, string>): Promise<readonly ApplicationRoute[]> {
   const routes: Omit<ApplicationRoute, "pageName">[] = [];
   const add = (input: RouteInput, order?: readonly (string | null)[]): void => {
     if (!/^\/(?:[^/]+\/)*$/.test(input.pattern)) throw new HtmlKitError("Route patterns require leading and trailing slashes.", input.component);
@@ -18,10 +19,13 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
     if (segments.some(segment => parameter(segment) === undefined && !/^[A-Za-z0-9_-]+$/.test(segment))) {
       throw new HtmlKitError("Route segments must be URL slugs or [named] parameters.", input.component);
     }
+    if (order !== undefined && (order.length !== segments.length || order.some(rank => rank !== null && !/^\d+$/.test(rank)))) {
+      throw new HtmlKitError("Route order needs one numeric string or null per segment.", input.component);
+    }
     const params = segments.flatMap(segment => parameter(segment) ?? []);
     if (new Set(params).size !== params.length) throw new HtmlKitError("Route parameter names must be unique.", input.component);
     const absolute = (layer: RouteLayer): RouteLayer => ({ component: resolve(root, layer.component),
-      ...(layer.server === undefined ? {} : { server: resolve(root, layer.server) }) });
+      ...(layer.server === undefined ? {} : { server: typeof layer.server === "string" ? resolve(root, layer.server) : layer.server }) });
     routes.push({ ...absolute(input), pattern: input.pattern, segments, params, layouts: (input.layouts ?? []).map(absolute), ...(order === undefined ? {} : { order }) });
   };
   const ordered = (name: string, source: string) => {
@@ -60,7 +64,7 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; present = false; }
     if (present) await visit(pages, [], []);
   }
-  for (const route of options.routes ?? []) add(route);
+  for (const route of options.routes ?? []) add(route, route.order);
   for (const prefix of Object.keys(options.layoutDefaults ?? {})) {
     if (!/^\/(?:[^/]+\/)*$/.test(prefix)) throw new HtmlKitError("Layout defaults require route-directory prefixes with leading and trailing slashes.", prefix);
   }
@@ -75,11 +79,13 @@ export async function discoverRoutes(root = process.cwd(), options: Pick<Applica
   const discovered: ApplicationRoute[] = [];
   const layoutDefaults = Object.entries(options.layoutDefaults ?? {}).sort(([a], [b]) => b.length - a.length);
   for (const route of routes) {
-    const identity = await realpath(route.component);
+    // Generated sources have no file, so their path is their identity.
+    const supplied = files?.get(route.component);
+    const identity = supplied === undefined ? await realpath(route.component) : route.component;
     let resource = pageFiles.get(identity);
     if (resource === undefined) {
       // Read declarations only. Route discovery never executes loaders or controllers.
-      resource = applicationResource(await readFile(identity, "utf8"), pathToFileURL(identity).href);
+      resource = applicationResource(supplied ?? await readFile(identity, "utf8"), pathToFileURL(identity).href);
       pageFiles.set(identity, resource);
     }
     const pageName = pageDefinition(resource, route.component).contract.tag;

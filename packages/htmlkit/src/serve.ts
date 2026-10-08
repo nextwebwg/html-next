@@ -9,7 +9,7 @@ import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
 import { configure, HtmlKitError, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
-import type { Application, ApplicationServer, ServerOptions } from "./types.js";
+import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
 
 const mime: Readonly<Record<string, string>> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
@@ -93,8 +93,21 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
     server: { host: options.host ?? "127.0.0.1", port: options.port ?? 3000,
       fs: { allow: [config.root, await realpath(config.root), await realpath(resolve(import.meta.dirname, "../../.."))] } },
     logLevel: "silent" });
+  // Browser modules and stylesheets for each served page, as Vite virtual modules.
+  const assets = (page: RenderedPage): string => {
+    const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
+    const id = `virtual:htmlkit/${graphId}`;
+    sources.set(id, browserSource(page.components, config.base));
+    const styles = stylesheetSources(page.components);
+    for (const [id, css] of styles) sources.set(id, css);
+    // Vite's HTML transformer applies its base to root-relative assets a second time.
+    // This document is already composed for its deployment URL; only modules use Vite.
+    return [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
+      `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
+      `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
+  };
   let application: Application;
-  try { application = await createApplication(options, vite); }
+  try { application = await createApplication(options, vite, assets); }
   catch (error) { await vite.close(); throw error; }
   let dirty = false;
   const change = () => {
@@ -108,26 +121,23 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
   vite.watcher.on("add", change).on("unlink", change).on("change", change);
   vite.middlewares.use((request, response, next) => {
     const pathname = requestPath(request);
-    if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@") ||
-      (/\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined)) { next(); return; }
+    if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     void (async () => {
+      if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
+      let file: string | undefined;
+      try { file = application.publicFiles.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a generated file. */ }
+      if (file === undefined && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
-      if (dirty) { application = await createApplication(options, vite); dirty = false; sources.clear(); }
-      const page = await application.render(pathname);
-      if (page.status === 200 && !pathname.endsWith("/")) { redirect(response, pathname); return; }
-      const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
-      const id = `virtual:htmlkit/${graphId}`;
-      sources.set(id, browserSource(page.components, config.base));
-      const styles = stylesheetSources(page.components);
-      for (const [id, css] of styles) sources.set(id, css);
-      const assets = [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +
-        `<script type="module" src="${escapeHTML(config.base + "@vite/client")}"></script>` +
-        `<script type="module" src="${escapeHTML(config.base + "@id/" + id)}"></script>`;
-      // Vite's HTML transformer applies its base to root-relative assets a second time.
-      // This document is already composed for its deployment URL; only modules use Vite.
-      const html = documentHTML(page.body, page.head, assets);
-      response.writeHead(page.status, { "content-type": "text/html; charset=utf-8" });
-      response.end(request.method === "HEAD" ? undefined : html);
+      if (file !== undefined) {
+        const body = await readFile(file);
+        response.writeHead(200, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
+        response.end(request.method === "HEAD" ? undefined : body);
+        return;
+      }
+      // The page itself comes from the runtime-neutral handler; this adapts Node's request and response.
+      const page = await application.fetch(new Request(new URL(pathname, "http://localhost"), { method: request.method! }));
+      response.writeHead(page.status, Object.fromEntries(page.headers));
+      response.end(page.body === null ? undefined : Buffer.from(await page.arrayBuffer()));
     })().catch(error => {
       vite.ssrFixStacktrace(error instanceof Error ? error : new Error(String(error)));
       response.writeHead(500, { "content-type": "text/html; charset=utf-8" });

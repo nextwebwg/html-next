@@ -59,6 +59,12 @@ export async function buildApplication(options: ApplicationOptions = {}): Promis
     const routes = await application.entries();
     if (routes.length === 0) throw new HtmlKitError("No pages found in app/pages or registered routes.", config.root);
     await copyPublic(resolve(config.root, "public"), stage);
+    for (const [path, file] of application.publicFiles) {
+      const target = resolve(stage, path);
+      if (!within(stage, target) || target === stage || await exists(target)) throw new HtmlKitError(`Public asset collision or escape at ${path}.`, file);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(file, target);
+    }
     if (await exists(join(stage, "_htmlkit"))) throw new HtmlKitError("Public asset collision: _htmlkit is reserved for generated assets.");
     const pages = [];
     const sources = new Map<string, string>();

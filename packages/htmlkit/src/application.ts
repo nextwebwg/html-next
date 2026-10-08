@@ -13,7 +13,7 @@ import { documentHTML, escapeHTML } from "./document.js";
 import { discoverRoutes, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, RenderedHead, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, RenderedHead, RenderedPage, RouteLayer, ServerModule } from "./types.js";
 
 function invocation(definition: ComponentDefinition, result: LoaderResult, id: string, child: string, nested: boolean): string {
   const props = result.props ?? {};
@@ -40,12 +40,16 @@ function packageResource(path: string) {
   return { url: pathToFileURL(path).href, trustRoot: pathToFileURL(directory + "/").href };
 }
 
-export async function createApplication(options: ApplicationOptions = {}, moduleServer?: ViteDevServer): Promise<Application> {
+/** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
+export async function createApplication(options: ApplicationOptions = {}, moduleServer?: ViteDevServer,
+  assets?: (page: RenderedPage) => string): Promise<Application> {
   const config = configure(options);
-  const routes = await discoverRoutes(config.root, options);
+  const generated = await options.generate?.() ?? {};
+  const files = generated.files ?? new Map<string, string>();
+  const routes = await discoverRoutes(config.root, { ...options, routes: [...options.routes ?? [], ...generated.routes ?? []] }, files);
   // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
   const headPath = join(config.root, "app/head.js");
-  const headScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
+  const headScript = files.get(headPath) ?? (existsSync(headPath) ? await readFile(headPath, "utf8") : undefined);
   if (headScript !== undefined && /<!--|<\/?script/i.test(headScript)) {
     throw new HtmlKitError("app/head.js cannot contain <!--, <script, or </script, which would end or nest its inline script.", headPath);
   }
@@ -59,7 +63,9 @@ export async function createApplication(options: ApplicationOptions = {}, module
     throw new HtmlKitError("Vite requires a runnable Node loader environment.");
   }
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
-    await environment.runner.import(layer.server) as ServerModule;
+    typeof layer.server === "string" ? await environment.runner.import(layer.server) as ServerModule : layer.server;
+  // Diagnostics name a loader's file, or its component when the loader is an in-memory module.
+  const origin = (layer: RouteLayer): string => typeof layer.server === "string" ? layer.server : layer.component;
 
   // Materialize entries once per application so loaders and navigation see the same catalog.
   const unenumerated: typeof routes[number][] = [];
@@ -72,16 +78,16 @@ export async function createApplication(options: ApplicationOptions = {}, module
         unenumerated.push(route); continue;
       }
       const entries = loaded.entries === undefined ? [{}] : await loaded.entries();
-      if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", route.server);
+      if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", origin(route));
       for (const entry of entries) {
         if (entry === null || typeof entry !== "object" || Object.keys(entry).sort().join(",") !== [...route.params].sort().join(",")) {
-          throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, route.server);
+          throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, origin(route));
         }
         const segments = route.segments.map(segment => {
           const name = parameter(segment);
           if (name === undefined) return segment;
           const value: unknown = entry[name];
-          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, route.server);
+          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, origin(route));
           return encodeURIComponent(value);
         });
         const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
@@ -125,12 +131,12 @@ export async function createApplication(options: ApplicationOptions = {}, module
         depth: parts.length - depth, pageName: route.pageName });
     }));
   };
-  return {
-    ...config, routes, navigation,
+  const application: Application = {
+    ...config, routes, navigation, publicFiles: generated.publicFiles ?? new Map<string, string>(),
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
-      if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, missing.server ?? missing.component);
+      if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, origin(missing));
       return [...paths.keys()].sort();
     },
     async render(pathname, signal = new AbortController().signal) {
@@ -154,7 +160,7 @@ export async function createApplication(options: ApplicationOptions = {}, module
         // The graph resolver is synchronous. Prepare its bare imports while asynchronously
         // reading each carrier, using Vite's ESM resolution from the consuming application.
         readComponent: async (url) => {
-          const source = await readFile(fileURLToPath(url), "utf8");
+          const source = files.get(fileURLToPath(url)) ?? await readFile(fileURLToPath(url), "utf8");
           const parsed = layerURLs.has(url) ? applicationResource(source, url) : parseComponentResource(source, url);
           if ("configuration" in parsed) resources.set(url, parsed);
           const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => definition.controller === undefined ? [] : [definition.controller])];
@@ -192,9 +198,9 @@ export async function createApplication(options: ApplicationOptions = {}, module
         const loaded = await module(layer);
         const context = { phase: "prerender" as const, url: new URL(url), base: config.base, params, parent,
           fetch: globalThis.fetch, signal, navigation: (query?: NavigationQuery) => navigation({ current: url.pathname, ...query }),
-          get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", layer.server); } };
+          get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", origin(layer)); } };
         const result = loaded.load === undefined ? {} : await loaded.load(context);
-        if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.server);
+        if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", origin(layer));
         results.push(result);
         parent = Object.freeze({ ...parent, ...result.data });
         const index = results.length - 1;
@@ -218,6 +224,16 @@ export async function createApplication(options: ApplicationOptions = {}, module
       return { status: 200, pathname: url.pathname, body: rendered.html, css: rendered.css, head,
         html: documentHTML(rendered.html, head), components };
     },
+    // Not a method of `this`: runtimes are handed the function itself, as in Deno.serve(application.fetch).
+    async fetch(request) {
+      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+      const { pathname } = new URL(request.url);
+      const page = await application.render(pathname, request.signal);
+      if (page.status === 200 && !pathname.endsWith("/")) return new Response(null, { status: 308, headers: { location: pathname + "/" } });
+      return new Response(request.method === "HEAD" ? null : documentHTML(page.body, page.head, assets?.(page)),
+        { status: page.status, headers: { "content-type": "text/html; charset=utf-8" } });
+    },
     async close() { if (ownsServer) await server.close(); },
   };
+  return application;
 }
