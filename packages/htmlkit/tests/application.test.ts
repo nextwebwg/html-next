@@ -67,7 +67,7 @@ describe("application platform", () => {
   it("inlines app/head.js before stylesheets and rejects text that would end its script", async () => {
     const root = await app();
     await write(root, "app/layouts/default.html", '<template component="app-layout"><link rel="stylesheet" href="/shared.css"><main><slot name="page"></slot></main></template>');
-    await rm(join(root, "app/layouts/default.server.ts"));
+    await write(root, "app/layouts/default.server.ts", 'export const load = () => ({ head: { title: "Loaded", script: "injected()" } });');
     const application = await createApplication({ root });
     try {
       const { html } = await application.render("/");
@@ -76,6 +76,14 @@ describe("application platform", () => {
     } finally { await application.close(); }
     await write(root, "app/head.js", 'console.log("</SCRIPT>");');
     await expect(createApplication({ root })).rejects.toThrow("app/head.js cannot contain");
+    // Without app/head.js, a loader's untyped head fields still cannot add a script.
+    await rm(join(root, "app/head.js"));
+    const unscripted = await createApplication({ root });
+    try {
+      const { html } = await unscripted.render("/");
+      expect(html).toContain("<title>Home &amp; kit</title>");
+      expect(html).not.toContain("injected()");
+    } finally { await unscripted.close(); }
   });
 
   it("discovers routes and named layouts without importing controllers", async () => {

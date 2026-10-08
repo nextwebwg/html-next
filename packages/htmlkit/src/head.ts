@@ -69,6 +69,8 @@ export async function renderHead(resource: ReturnType<typeof applicationResource
     for (let i = elements.length - 1; i >= 0; i--) if (replaced.has(identity(elements[i]!) ?? "")) elements.splice(i, 1);
     elements.push(...current);
   }
-  return { ...previous, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...result.head,
+  // Only PageHead fields: an untyped loader's extra head keys must not reach the document assembler.
+  const loaded = Object.entries(result.head ?? {}).filter(([name]) => name === "title" || name === "description" || name === "lang");
+  return { ...previous, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...Object.fromEntries(loaded),
     elements };
 }

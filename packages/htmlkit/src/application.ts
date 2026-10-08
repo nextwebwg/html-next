@@ -201,7 +201,6 @@ export async function createApplication(options: ApplicationOptions = {}, module
         head = await renderHead(resources.get(pathToFileURL(layer.component).href)!, layerDefinitions[index]!, result, head, url.href,
           (definition, values) => invocation(definition, values, "htmlkit-head", "", false));
       }
-      // Set after loaders so a loader's head fields cannot supply unchecked script text.
       if (headScript !== undefined) head = { ...head, script: headScript };
       const state: Record<string, Readonly<Record<string, unknown>>> = {};
       let body = "";
