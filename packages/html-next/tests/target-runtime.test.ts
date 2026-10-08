@@ -3343,9 +3343,10 @@ describe.skipIf(!enabled)("generated Vanilla direct-extend", () => {
           steps: Array<{ name: string; rows: number; same: number }>; warnings: string[]; errors: string[];
         }>;
         assert.deepEqual(compiled!.steps, live!.steps);
+        // Reconnecting keeps every row: the table's `$if` still holds, so nothing is rebuilt.
         assert.deepEqual(live!.steps.map((step) => [step.rows, step.same]), [
           [0, 0], [1000, 0], [1000, 0], [1000, 1000], [1000, 1000], [1000, 1000], [999, 999], [979, 979],
-          [1979, 979], [1979, 0], [1979, 1979], [0, 0], [10000, 0], [10000, 10000], [0, 0],
+          [1979, 979], [1979, 1979], [1979, 1979], [0, 0], [10000, 0], [10000, 10000], [0, 0],
         ]);
         assert.deepEqual([compiled!.warnings, compiled!.errors, live!.warnings, live!.errors], [[], [], [], []]);
       } finally {
