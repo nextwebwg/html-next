@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.35
+
+- CI runs the browser suites in Playwright's container image for the locked Playwright version, which already holds the browsers and their system libraries. A slow Ubuntu package mirror no longer holds a browser check past its 15-minute limit.
+
 ## 1.0.0-alpha.34
 
 ### Breaking
@@ -19,7 +23,6 @@
 - Compiled components follow the live runtime's slot rules. A consumer's `<template slot>` renders only while its outlet renders, `host.slots` lists what it renders, and a component projected into a slot is created only once a slot places it.
 - A compiled component bundles only the type checks its declared props and events use, not the type-expression parser, literal parser, unused formats or color keywords. Live type checks are built from the same combinators and are about 10% faster.
 - A document has one MutationObserver for connection tracking, shared by the live runtime, compiled components and the React, Svelte and Vue targets. Bound `<select>` elements in the Svelte and Vue targets share one observer per document for their option lists.
-- CI runs the browser suites in Playwright's container image for the locked Playwright version, which already holds the browsers and their system libraries. A slow Ubuntu package mirror no longer holds a browser check past its 15-minute limit.
 
 ### Added
 
