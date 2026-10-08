@@ -84,7 +84,7 @@ const featureSource = `<template component="x-feature" status="experimental" sum
     <input $ref="search" bind:value="query">
     <button type="button" on:click="flip"><template $value="$open"></template></button>
     <ul $if="$open">
-      <li $each="item, index of $items" $key="$item.id" $where="$item.done" $sort="name"><span $value="$item.name"></span></li>
+      <li $each="item, index of $items" $key="$item.id" $where="$item.done" $sort="item.name"><span $value="$item.name"></span></li>
     </ul>
     <template $match>
       <small $when="$size = 'sm'">small</small>

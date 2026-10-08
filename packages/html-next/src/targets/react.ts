@@ -285,7 +285,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const list = lowering.list(listAlias === undefined ? flow.listPlan.ast : { kind: "id", name: listAlias }, listScope, item, {
         ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
         itemScope: scoped,
-        sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
+        sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
         ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
       });
       const key = flow.keyPlan === undefined ? index : lowering.value(flow.keyPlan.ast, scoped);

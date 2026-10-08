@@ -1157,20 +1157,18 @@ function shapeList(
     const where = flow.where;
     result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
   }
-  if (flow.sort !== undefined) {
-    const keys = flow.sort.split(",").map((raw) => raw.trim()).filter((key) => key !== "");
-    // A `$sort` key is a bare field path on the item (unlike `$key`, which is an expression):
-    // `price,-name` sorts by item.price ascending then item.name descending. A scalar-item
-    // list sorts by the value itself; the key then only carries the ascending/descending sign.
-    const sortValue = (item: Value, field: string): Value =>
-      item !== null && typeof item === "object" && !Array.isArray(item)
-        ? evalValue(`$${flow.item}.${field}`, layer(scope, { [flow.item]: item }))
+  if (flow.sortKeys !== undefined) {
+    // A `$sort` key is a path from the loop item (unlike `$key`, which is an expression):
+    // `p.price,-p.name` sorts by price ascending then name descending, and `p` by the item itself.
+    // A scalar-item list sorts by the value itself; the key then only carries its direction.
+    const keys = flow.sortKeys;
+    const sortValue = (item: Value, path: readonly string[]): Value =>
+      path.length > 0 && item !== null && typeof item === "object" && !Array.isArray(item)
+        ? evalValue(`$${flow.item}.${path.join(".")}`, layer(scope, { [flow.item]: item }))
         : item;
     result.sort((a, b) => {
-      for (const key of keys) {
-        const descending = key.startsWith("-");
-        const field = descending ? key.slice(1).trim() : key;
-        const order = compareValues(sortValue(a, field), sortValue(b, field));
+      for (const { path, descending } of keys) {
+        const order = compareValues(sortValue(a, path), sortValue(b, path));
         if (order !== 0) return descending ? -order : order;
       }
       return 0;

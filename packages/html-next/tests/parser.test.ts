@@ -5,6 +5,7 @@ import { describe, it } from "vitest";
 import { HtmlDiagnosticError } from "../src/diagnostics.js";
 import { validateLiteralAttributeName } from "../src/language.js";
 import { parseComponent } from "../src/source-parser.js";
+import type { ElementNode } from "../src/template.js";
 import { formatType, normalizeType, parseTypeExpression, parseTypedValue, typeScriptType } from "../src/type-system.js";
 
 const fixtureUrl = new URL("./fixtures/x-button.html", import.meta.url);
@@ -90,6 +91,20 @@ describe("parseComponent", () => {
       <prop name="Name" type="string">Name.</prop><prop name="name" type="string">Name.</prop>
       </defs><p from:title="$Name">$name</p></template>`);
     expectDiagnostic("HT016", `<template component="x-names"><p $each="😀of [1]">Hi</p></template>`);
+  });
+
+  it("scopes $each, $with, and $match names to their own subtree", () => {
+    const source = (body: string) => `<template component="x-scope"><defs>
+      <state name="account" type="object({ owner: string, plan: string })" value="{ owner: 'Ada', plan: 'pro' }"></state>
+      <state name="rows" type="list(string)" value="[]"></state></defs><section>${body}</section></template>`;
+    const scoped = `<div $with="$account.owner as owner"><p>{$owner}</p></div>` +
+      `<template $match="$account.plan as plan"><b $when="$plan = 'pro'">{$plan}</b><i $else>{$plan}</i></template>` +
+      `<ul><li $each="row, i of $rows">{$row} {$i} {$loop.index}</li></ul>`;
+    assert.doesNotThrow(() => parseComponent(source(scoped)));
+    for (const outside of ["$owner", "$plan", "$row", "$i", "$loop.index"]) {
+      expectDiagnostic("HT003", source(`${scoped}<p>{${outside}}</p>`));
+      expectDiagnostic("HT003", source(`<p from:title="${outside}">${scoped}</p>`));
+    }
   });
 
   it("parses braced inline paths with literals, punctuation, and loop scope", () => {
@@ -627,6 +642,36 @@ describe("parseComponent", () => {
     );
   });
 
+  it("reads path fields without the $ marker and accepts it even though it is not required", () => {
+    const parse = (sort: string, path = "draft.title") => parseComponent(
+      `<template component="demo-paths" status="early" summary="Paths.">` +
+        `<defs><state type="object({ title: string })" name="draft" value="{ title: '' }"></state>` +
+        `<state type="list(object({ price: number, name: string }))" name="rows" value="[]"></state>` +
+        `<handler name="rename"><set name="${path}" value="b"></set></handler></defs>` +
+        `<section><input bind:value="${path}"><ul><li $each="row of $rows" $sort="${sort}">{$row.name}</li></ul></section></template>`,
+    );
+    const shape = (definition: ReturnType<typeof parse>) => {
+      const [input, list] = definition.template.children as ElementNode[];
+      const handler = definition.declarations?.find((declaration) => declaration.kind === "handler");
+      const flow = (list!.children[0] as ElementNode).flow;
+      return {
+        bind: input!.attributes[0]?.kind === "attribute" ? input!.attributes[0].writablePath : undefined,
+        set: handler?.kind === "handler" && handler.steps[0]?.kind === "set" ? handler.steps[0].writablePath : undefined,
+        sort: flow?.kind === "each" ? flow.sortKeys : undefined,
+      };
+    };
+    assert.deepEqual(shape(parse("row.price, -row.name, row")), {
+      bind: ["draft", "title"], set: ["draft", "title"],
+      sort: [{ path: ["price"], descending: false }, { path: ["name"], descending: true }, { path: [], descending: false }],
+    });
+    assert.deepEqual(shape(parse("$row.price, -$row.name, $row", "$draft.title")), shape(parse("row.price, -row.name, row")));
+    // A $sort key starts at the loop item, so a bare field is not read as one.
+    assert.throws(() => parse("price, -name"), /`\$sort` key `price` must be a path from the loop item `row`; did you mean `row\.price`\?/);
+    assert.throws(() => parse("-name"), /did you mean `-row\.name`\?/);
+    assert.throws(() => parse("item.price"), /HT023/);
+    expectDiagnostic("HT005", `<template component="demo-paths" status="early" summary="Paths."><defs><state type="number" name="count" value="0"></state></defs><input bind:value="$count + 1"></template>`);
+  });
+
   it("parses state-rooted two-way bindings, flow, content, refs, and events", () => {
     const definition = parseComponent(
       `<template component="demo-example" status="early" summary="Bindings.">` +
@@ -686,7 +731,7 @@ describe("parseComponent", () => {
         `</handler></defs>` +
         `<section from:data-ready="$hasQuery" class:active="$hasQuery" style:opacity="$hasQuery" $ref="root">` +
         `<input .value="$query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
-        `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-score,name" $limit="3" $key="$row.id">` +
+        `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-row.score,row.name" $limit="3" $key="$row.id">` +
         `<slot from:name="$row.id"><span $value="$i"></span></slot></li></ol>` +
         `<div $with="$form as current"><output $value="$current.selected"></output></div>` +
         `<div $match="$form as current"><span $when="$current.selected > 0">Selected</span><span $else>None</span></div>` +

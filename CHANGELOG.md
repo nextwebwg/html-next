@@ -2,6 +2,12 @@
 
 ## 1.0.0-alpha.35
 
+### Breaking
+
+- A `$sort` key is a path from the loop item, so a field can no longer be confused with the item: under `$each="p of $products"`, write `$sort="p.price,-p.name"`, and `$sort="p"` to sort by the item itself. A bare field such as `$sort="price"` is a parse error (`HT023`) that suggests `p.price`. Like `bind:` and `<set name>`, a key accepts a leading `$` even though it is not required (`$sort="$p.price"`).
+
+### Changed
+
 - The performance guide publishes js-framework-benchmark results again, measured on 1.0.0-alpha.34's default Vite build: 0.936× Solid, 0.920× Svelte, 0.861× Vue and 0.711× React Hooks, from 8,862 gzip bytes, with the raw results in the benchmark ledger.
 - CI runs the browser suites in Playwright's container image for the locked Playwright version, which already holds the browsers and their system libraries. A slow Ubuntu package mirror no longer holds a browser check past its 15-minute limit.
 
