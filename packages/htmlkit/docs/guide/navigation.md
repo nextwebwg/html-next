@@ -39,9 +39,12 @@ export async function load({ navigation }: LoadContext) {
 </template>
 ```
 
-Each item has `href`, a default `label` from the final URL segment (Home at the root),
-`current` (`page` or `false` for `aria-current`), `depth` relative to the selected subtree,
-and `pageName`. Project labels and visibility policy can be applied in the loader. The component
+Each item has `href`, a `label`, `current` (`page` or `false` for `aria-current`), `depth`
+relative to the selected subtree, and `pageName`. A page sets its label with
+`<meta name="htmlkit:label" content="Install">`; otherwise the label is the final URL segment
+(Home at the root). `<meta name="htmlkit:navigation" content="hidden">` keeps a routable page out of
+navigation, and alias routes (`htmlkit:alias`) never appear; visiting an alias marks its page's own
+entry current. Further policy can still be applied in the loader. The component
 renders native anchors in a flat list with `data-depth` on each item; it adds no controller or theme.
 
 `application.navigation({ from, current })` is also available outside loaders. `from` defaults

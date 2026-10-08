@@ -5,7 +5,7 @@ import type { Manifest, ManifestChunk } from "vite";
 import { createApplication } from "./application.js";
 import { browserSource, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
-import { configure, HtmlKitError, within } from "./config.js";
+import { configure, HtmlKitError, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { ApplicationOptions, BuildResult } from "./types.js";
@@ -37,7 +37,8 @@ async function canonicalDestination(path: string): Promise<string> {
   }
 }
 
-export async function buildApplication(options: ApplicationOptions = {}): Promise<BuildResult> {
+export async function buildApplication(input: ApplicationOptions = {}): Promise<BuildResult> {
+  const options = await withPlugins(input);
   const config = configure(options);
   const root = await realpath(config.root);
   const destination = await canonicalDestination(config.outDir);
@@ -69,6 +70,12 @@ export async function buildApplication(options: ApplicationOptions = {}): Promis
       for (const [id, css] of stylesheetSources(page.components)) sources.set(id, css);
     }
     const browserInputs = await bundleBrowser({ root: config.root, base: config.base, outDir: stage, sources });
+    for (const [path, file] of application.files) {
+      const target = join(stage, path);
+      if (await exists(target)) throw new HtmlKitError(`Generated file collision at ${path}.`, file);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(file, target);
+    }
     const manifest = JSON.parse(await readFile(join(stage, "_htmlkit/vite-manifest.json"), "utf8")) as Manifest;
     const bundles = new Map(Object.values(manifest).filter(chunk => chunk.isEntry).map(chunk => [chunk.name, chunk]));
     const delivery = [];

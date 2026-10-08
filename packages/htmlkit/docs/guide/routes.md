@@ -83,7 +83,10 @@ A layout uses normal component syntax:
 </template>
 ```
 
-`htmlkit:*` metadata configures the build and is removed from the generated document. Ordinary
+`htmlkit:*` metadata configures the build and is removed from the generated document. Inside a
+page's carrier, `htmlkit:layout` picks its layout, `htmlkit:label` and `htmlkit:navigation`
+(`content="hidden"`) shape [navigation](./navigation.md), and each `htmlkit:alias` adds a further
+route for the page, such as `content="/start/"`, relative to its page directory's prefix. Ordinary
 `title`, `meta`, and metadata `link` elements directly inside a selected carrier contribute to the
 document head. They are siblings of `<defs>`, the rendered root, and `<style>`; no `<head>` wrapper
 is needed. Keep only `htmlkit:page` and component dependency links at file scope. HTMLKit diagnoses

@@ -8,9 +8,9 @@ import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
 import { renderComponents } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
-import { configure, HtmlKitError } from "./config.js";
+import { configure, HtmlKitError, withPlugins } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
-import { discoverRoutes, matchRoute, parameter, validSegment } from "./routes.js";
+import { discover, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
 import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, RenderedHead, RenderedPage, RouteLayer, ServerModule } from "./types.js";
@@ -41,16 +41,20 @@ function packageResource(path: string) {
 }
 
 /** assets supplies a serving adapter's browser modules and stylesheets for fetch(). */
-export async function createApplication(options: ApplicationOptions = {}, moduleServer?: ViteDevServer,
+export async function createApplication(input: ApplicationOptions = {}, moduleServer?: ViteDevServer,
   assets?: (page: RenderedPage) => string): Promise<Application> {
+  const options = await withPlugins(input);
   const config = configure(options);
-  const routes = await discoverRoutes(config.root, options);
+  const { routes, sources, files } = await discover(config.root, { ...options, base: config.base });
   // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
   const headPath = join(config.root, "app/head.js");
-  const headScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
-  if (headScript !== undefined && /<!--|<\/?script/i.test(headScript)) {
-    throw new HtmlKitError("app/head.js cannot contain <!--, <script, or </script, which would end or nest its inline script.", headPath);
+  const fileScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
+  for (const [script, name, source] of [[options.headScript, "headScript", undefined], [fileScript, "app/head.js", headPath]] as const) {
+    if (script !== undefined && /<!--|<\/?script/i.test(script)) {
+      throw new HtmlKitError(`${name} cannot contain <!--, <script, or </script, which would end or nest its inline script.`, source);
+    }
   }
+  const headScript = [options.headScript, fileScript].filter(script => script !== undefined).join("\n") || undefined;
   const ownsServer = moduleServer === undefined;
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom",
     mode: "development", publicDir: false, server: { middlewareMode: true, watch: null, hmr: false },
@@ -61,7 +65,9 @@ export async function createApplication(options: ApplicationOptions = {}, module
     throw new HtmlKitError("Vite requires a runnable Node loader environment.");
   }
   const module = async (layer: RouteLayer): Promise<ServerModule> => layer.server === undefined ? {} :
-    await environment.runner.import(layer.server) as ServerModule;
+    typeof layer.server === "string" ? await environment.runner.import(layer.server) as ServerModule : layer.server;
+  // Diagnostics name a loader's file, or its component when a plugin supplies the loader module.
+  const origin = (layer: RouteLayer): string => typeof layer.server === "string" ? layer.server : layer.component;
 
   // Materialize entries once per application so loaders and navigation see the same catalog.
   const unenumerated: typeof routes[number][] = [];
@@ -74,16 +80,16 @@ export async function createApplication(options: ApplicationOptions = {}, module
         unenumerated.push(route); continue;
       }
       const entries = loaded.entries === undefined ? [{}] : await loaded.entries();
-      if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", route.server);
+      if (!Array.isArray(entries) || entries.length === 0) throw new HtmlKitError("entries() must return a nonempty array.", origin(route));
       for (const entry of entries) {
         if (entry === null || typeof entry !== "object" || Object.keys(entry).sort().join(",") !== [...route.params].sort().join(",")) {
-          throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, route.server);
+          throw new HtmlKitError(`Each entry must provide exactly these parameters: ${route.params.join(", ")}.`, origin(route));
         }
         const segments = route.segments.map(segment => {
           const name = parameter(segment);
           if (name === undefined) return segment;
           const value: unknown = entry[name];
-          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, route.server);
+          if (!validSegment(value)) throw new HtmlKitError(`Parameter ${name} must be a safe nonempty URL segment.`, origin(route));
           return encodeURIComponent(value);
         });
         const path = config.base + (segments.length === 0 ? "" : segments.join("/") + "/");
@@ -102,7 +108,8 @@ export async function createApplication(options: ApplicationOptions = {}, module
     }
     const prefix = config.base + from.slice(1);
     const depth = from.split("/").filter(Boolean).length;
-    const items = [...await concreteRoutes()].filter(([path]) => path.startsWith(prefix));
+    // Hidden pages and alias routes stay routable but out of navigation.
+    const items = [...await concreteRoutes()].filter(([path, route]) => path.startsWith(prefix) && !route.hidden && route.canonical === undefined);
     items.sort(([a, left], [b, right]) => {
       const aParts = a.slice(config.base.length).split("/").filter(Boolean);
       const bParts = b.slice(config.base.length).split("/").filter(Boolean);
@@ -122,17 +129,17 @@ export async function createApplication(options: ApplicationOptions = {}, module
     });
     return Object.freeze(items.map(([href, route]) => {
       const parts = href.slice(config.base.length).split("/").filter(Boolean);
-      return Object.freeze({ href, label: decodeURIComponent(parts.at(-1) ?? "Home"),
+      return Object.freeze({ href, label: route.label ?? decodeURIComponent(parts.at(-1) ?? "Home"),
         current: href === query.current ? "page" as const : "false" as const,
         depth: parts.length - depth, pageName: route.pageName });
     }));
   };
   const application: Application = {
-    ...config, routes, navigation,
+    ...config, routes, navigation, files,
     async entries() {
       const paths = await concreteRoutes();
       const missing = unenumerated[0];
-      if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, missing.server ?? missing.component);
+      if (missing !== undefined) throw new HtmlKitError(`Static entries() must enumerate parameters: ${missing.params.join(", ")}.`, origin(missing));
       return [...paths.keys()].sort();
     },
     async render(pathname, signal = new AbortController().signal) {
@@ -156,7 +163,7 @@ export async function createApplication(options: ApplicationOptions = {}, module
         // The graph resolver is synchronous. Prepare its bare imports while asynchronously
         // reading each carrier, using Vite's ESM resolution from the consuming application.
         readComponent: async (url) => {
-          const source = await readFile(fileURLToPath(url), "utf8");
+          const source = sources.get(fileURLToPath(url)) ?? await readFile(fileURLToPath(url), "utf8");
           const parsed = layerURLs.has(url) ? applicationResource(source, url) : parseComponentResource(source, url);
           if ("configuration" in parsed) resources.set(url, parsed);
           const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => definition.controller === undefined ? [] : [definition.controller])];
@@ -193,10 +200,12 @@ export async function createApplication(options: ApplicationOptions = {}, module
         signal.throwIfAborted();
         const loaded = await module(layer);
         const context = { phase: "prerender" as const, url: new URL(url), base: config.base, params, parent,
-          fetch: globalThis.fetch, signal, navigation: (query?: NavigationQuery) => navigation({ current: url.pathname, ...query }),
-          get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", layer.server); } };
+          fetch: globalThis.fetch, signal,
+          // An alias marks its page's own entry current.
+          navigation: (query?: NavigationQuery) => navigation({ current: route.canonical === undefined ? url.pathname : config.base + route.canonical.slice(1), ...query }),
+          get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", origin(layer)); } };
         const result = loaded.load === undefined ? {} : await loaded.load(context);
-        if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", layer.server);
+        if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", origin(layer));
         results.push(result);
         parent = Object.freeze({ ...parent, ...result.data });
         const index = results.length - 1;

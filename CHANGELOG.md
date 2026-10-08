@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-alpha.38
+
+- HTMLKit plugins add page formats. A plugin's `pages` compiler claims file extensions such as `.md` and turns each file into an HTML Next page resource; HTMLKit then routes, orders, watches, renders, and builds those pages like `.html` pages. While compiling, a page can resolve another page's URL with `page.href` and serve a referenced file with `page.asset`. A plugin's `config()` contributes options, including a layout whose loader is a module object and a `headScript` inlined before `app/head.js`.
+- `pages` lists the page directories and the URL prefix each serves, defaulting to `app/pages` at `/`. One directory may serve several prefixes.
+- Pages can set their navigation label (`htmlkit:label`), stay out of navigation (`htmlkit:navigation` with `content="hidden"`), and add alias routes (`htmlkit:alias`). An alias never appears in navigation and marks its page's own entry current.
+
 ## 1.0.0-alpha.37
 
 - HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.

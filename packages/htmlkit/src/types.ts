@@ -9,14 +9,46 @@ export interface ApplicationOptions {
   readonly outDir?: string;
   /** Discover app/pages by default; disable for an entirely registered route table. */
   readonly fileRoutes?: boolean;
+  /** Page directories and the URL prefixes they serve; defaults to app/pages at /. A directory may serve several prefixes. */
+  readonly pages?: readonly PageDirectory[];
   /** Strip numeric ordering prefixes from file-route segments; default false. */
   readonly routeOrdering?: boolean;
   /** Additional routes, using the same [param] pattern syntax as discovered pages. */
   readonly routes?: readonly RouteInput[];
-  /** Named layout; default.html is automatic when present. false disables it. */
-  readonly layout?: string | false;
+  /** Named layout, or a layout a plugin supplies; default.html is automatic when present. false disables it. */
+  readonly layout?: string | false | RouteLayer;
   /** Route-directory defaults, overridden by page metadata; longest prefix wins. */
   readonly layoutDefaults?: Readonly<Record<string, string | false>>;
+  readonly plugins?: readonly HtmlKitPlugin[];
+  /** A classic script inlined with app/head.js, before it, so it runs before first paint; plugins may set it. */
+  readonly headScript?: string;
+}
+
+export interface PageDirectory {
+  /** Relative to the application root, which must contain it. */
+  readonly dir: string;
+  /** URL prefix with leading and trailing slashes; default /. */
+  readonly prefix?: string;
+}
+
+export interface HtmlKitPlugin {
+  readonly name: string;
+  /** Options merged before the application starts, such as page directories or a layout. */
+  readonly config?: (options: ApplicationOptions) => ApplicationOptions | void | Promise<ApplicationOptions | void>;
+  /** Page files with these extensions compile to HTML Next page resources, then route like .html pages. */
+  readonly pages?: {
+    readonly extensions: readonly string[];
+    compile(source: string, page: PageContext): string | Promise<string>;
+  };
+}
+
+export interface PageContext {
+  /** The page's absolute source path. Diagnostics and relative references in its resource use it. */
+  readonly file: string;
+  /** Deployment URL of the page compiled from another absolute source path, in the first directory that serves it. */
+  href(target: string): string | undefined;
+  /** Serve a file inside the application root that the page references, and return its deployment URL. */
+  asset(file: string): string;
 }
 
 export interface PageHead {
@@ -66,7 +98,8 @@ export interface ServerModule {
   readonly entries?: () => readonly Readonly<Record<string, string>>[] | Promise<readonly Readonly<Record<string, string>>[]>;
 }
 
-export interface RouteLayer { readonly component: string; readonly server?: string; }
+/** server is a loader module path, or for a plugin's layout, the loader module itself. */
+export interface RouteLayer { readonly component: string; readonly server?: string | ServerModule; }
 export interface RouteInput extends RouteLayer {
   readonly pattern: string;
   readonly layouts?: readonly RouteLayer[];
@@ -78,6 +111,12 @@ export interface ApplicationRoute extends RouteLayer {
   readonly segments: readonly string[];
   readonly params: readonly string[];
   readonly layouts: readonly RouteLayer[];
+  /** From the page's htmlkit:label metadata; navigation otherwise labels the last URL segment. */
+  readonly label?: string;
+  /** htmlkit:navigation="hidden" metadata leaves the page out of navigation. */
+  readonly hidden?: boolean;
+  /** For an htmlkit:alias route, the pattern of the page's own route, which navigation marks current. */
+  readonly canonical?: string;
   /** Per-segment numeric file order; independent of URLs and component identity. */
   readonly order?: readonly (string | null)[];
 }
@@ -113,6 +152,8 @@ export interface Application {
   readonly base: string;
   readonly outDir: string;
   readonly routes: readonly ApplicationRoute[];
+  /** Files that plugin pages reference through PageContext.asset, by deployment-relative path. */
+  readonly files: ReadonlyMap<string, string>;
   /** Enumerate the exact deployment URLs, diagnosing omitted dynamic entries. */
   entries(): Promise<readonly string[]>;
   navigation(options?: NavigationQuery): Promise<readonly NavigationItem[]>;

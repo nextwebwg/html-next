@@ -26,3 +26,14 @@ export function configure(options: ApplicationOptions) {
   }
   return { root, base, origin: origin.origin, outDir };
 }
+
+const pluginsApplied = new WeakSet<ApplicationOptions>();
+/** Merge each plugin's config() once; options already merged pass through, so nested entry points don't repeat hooks. */
+export async function withPlugins(options: ApplicationOptions): Promise<ApplicationOptions> {
+  if (pluginsApplied.has(options) || options.plugins === undefined) return options;
+  let merged = options;
+  for (const plugin of options.plugins) merged = { ...merged, ...await plugin.config?.(merged), plugins: options.plugins };
+  merged = { ...merged };
+  pluginsApplied.add(merged);
+  return merged;
+}

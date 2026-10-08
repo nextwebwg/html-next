@@ -6,7 +6,7 @@ import { createServer, isRunnableDevEnvironment } from "vite";
 
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
-import { configure, HtmlKitError, within } from "./config.js";
+import { configure, HtmlKitError, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
@@ -36,7 +36,8 @@ function methodAllowed(request: IncomingMessage, response: ServerResponse): bool
   response.writeHead(405, { allow: "GET, HEAD" }); response.end(); return false;
 }
 
-export async function previewApplication(options: ServerOptions = {}): Promise<ApplicationServer> {
+export async function previewApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
+  const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   // Read deployment metadata, never loaders or page source. The same tree works on a static host.
   const manifest = JSON.parse(await readFile(join(config.outDir, "_htmlkit/manifest.json"), "utf8")) as { base: string };
@@ -81,7 +82,8 @@ export async function previewApplication(options: ServerOptions = {}): Promise<A
   return listen(server, options, base);
 }
 
-export async function devApplication(options: ServerOptions = {}): Promise<ApplicationServer> {
+export async function devApplication(input: ServerOptions = {}): Promise<ApplicationServer> {
+  const options = await withPlugins(input) as ServerOptions;
   const config = configure(options);
   const sources = new Map<string, string>();
   let watchReady!: () => void;
@@ -124,8 +126,16 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     void (async () => {
       if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
-      if (/\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
+      let file: string | undefined;
+      try { file = application.files.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a served file. */ }
+      if (file === undefined && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
+      if (file !== undefined) {
+        const body = await readFile(file);
+        response.writeHead(200, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
+        response.end(request.method === "HEAD" ? undefined : body);
+        return;
+      }
       // The page itself comes from the runtime-neutral handler; this adapts Node's request and response.
       const page = await application.fetch(new Request(new URL(pathname, "http://localhost"), { method: request.method! }));
       response.writeHead(page.status, Object.fromEntries(page.headers));
