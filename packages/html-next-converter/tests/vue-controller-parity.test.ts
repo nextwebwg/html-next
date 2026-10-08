@@ -303,7 +303,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
         assert.deepEqual(helperResults, [42, 42], "relative dynamic controller import differs");
         // Another prop changing does not rerun an effect that read only `amount`; `flat` stayed 0 through every click.
         const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
-        await live.evaluate(() => window.HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+        await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
+          updateComponentProps(element: Element, props: Record<string, unknown>): void;
+        } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
         await vue.evaluate(() => window.vueSetProps({ tone: "loud" }));
         await Promise.all([live, vue].map((page) => page.waitForTimeout(50)));
         const [toneLive, toneVue] = await Promise.all([snapshot(live), snapshot(vue)]);
@@ -426,7 +428,7 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
 declare global {
   interface Window {
     trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number; flatEffects?: number; amountEffects?: number };
-    HtmlNextLoader: { startBrowserComponents(): Promise<unknown>; updateComponentProps(element: Element, props: Record<string, unknown>): void };
+    HtmlNextLoader: { startBrowserComponents(): Promise<unknown> };
     vueSetProps(props: Record<string, unknown>): void;
     vueApp: { unmount(): void };
     delayController: boolean;
