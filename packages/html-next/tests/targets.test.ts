@@ -16,6 +16,7 @@ import { createElement } from "react";
 import { renderToString as renderReactToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
 
+import { generateSvelteOutput } from "../src/targets/svelte.js";
 import { generateComponent, generateReactComponent, generateVueComponent, vueHostArtifact, vueHtmlArtifact, vuePropsArtifact } from "../src/generate.js";
 import { parseComponent } from "../src/source-parser.js";
 import { renderComponents } from "../src/server.js";
@@ -694,6 +695,26 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
     assert.doesNotMatch(module, /manageComponentLifecycle|const definition/);
     assert.match(module, /document\.createElement\("article"\)/);
+  });
+
+  it("compiles two-way bindings through $each and $with aliases to their state paths in Vue, React and Svelte", async () => {
+    const definition = parseComponent(`<template component="x-alias-writes" status="experimental" summary="Alias writes.">
+      <defs><state name="draft" type="object({ owner: object({ name: string }) })" value="{ owner: { name: 'Ada' } }"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state></defs>
+      <section><div $with="$draft.owner as owner"><input bind:value="owner.name"></div>
+        <ul><li $each="row of $rows" $key="$row.id"><input bind:value="row.label"></li></ul></section>
+    </template>`);
+    const vue = generateVueComponent(definition);
+    compileVue(vue, "XAliasWrites.vue");
+    const react = generateReactComponent(definition);
+    await transform(react, { loader: "tsx", format: "esm" });
+    assert.match(vue, /draft\.owner\.name = readBoundControl\(/);
+    assert.match(vue, /rows\[loop\.index\]\.label = readBoundControl\(/);
+    assert.match(react, /\["owner", "name"\]/);
+    assert.match(react, /\[loop\.index, "label"\]/);
+    const svelte = Object.values(generateSvelteOutput(definition)).find((value): value is string => typeof value === "string" && value.includes("<script"))!;
+    assert.match(svelte, /htmlNextWritePath\(draft, \["owner", "name"\]/);
+    assert.match(svelte, /htmlNextWritePath\(rows, \[htmlNextRow0\.loop\.index, "label"\]/);
   });
 
   it("compiles numeric two-way controls directly through the shared control writer", () => {
