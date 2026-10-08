@@ -50,6 +50,11 @@ export interface GenerationOptions {
    * does not enable fails `HT024`.
    */
   readonly extensions?: readonly string[];
+  /**
+   * The Vanilla factory also adopts a server-rendered root, given as its third argument, binding that
+   * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
+   */
+  readonly hydrate?: boolean;
 }
 
 /** A component another's template invokes: the module exporting its factory, and its definition. */
@@ -63,7 +68,7 @@ export function generateComponent(
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;

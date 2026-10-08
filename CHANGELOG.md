@@ -5,6 +5,12 @@
 ### Added
 
 - The optional `transitions` extension animates what `$if`, `$each`, and `$match` add, remove, and move. `$transition` takes a keyframes name (a built-in `fade`, `fly`, `scale`, or `blur`, or any `@keyframes`) with an optional duration, easing, and delay; leaving plays it in reverse. `$transition-name` gives an element an identity, so one element can morph into another. The Vite plugin builds it with `extensions: ["transitions"]`, and `html-next-check` with `--extension transitions`. Without the option the directives fail `HT024`; an unknown extension name fails `HN013`, and a malformed value `HT025`. The live runtime and Vue, React, and Svelte conversion warn and build without animation. Components that do not use the directives compile exactly as before. See the new Transitions guide.
+- Compiled components can hydrate server output. With `generateComponent(definition, { hydrate: true })`, a component's factory takes a server-rendered root as its third argument, `create<Name>(options, html, root)`, and binds that DOM in place instead of creating its own. Hydration restores the instance's props and state from `data-html-next-instance`, adopts conditions, list rows, slot ranges, fallbacks, scoped renderings and nested components where the server rendered them, and keeps control values, focus and selection edited before startup. Each root connects, and its controller runs, once the outermost hydration has finished, in document order. A block whose server markup does not match its template is created afresh in its place. Modules generated without the option are unchanged.
+
+### Fixed
+
+- Hydration by the live runtime adopts a `<template $each>` row's server nodes instead of rendering the row again beside them, which showed each row twice.
+- A compiled component evaluates an empty object or list literal (`format($names, 'list', {}, $locale)`, `format([], 'list')`) and a call with no arguments as the live runtime does. They compiled to a missing argument, so the call rendered nothing.
 
 ### Changed
 

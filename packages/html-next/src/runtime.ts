@@ -7,7 +7,7 @@ import { fail } from "./diagnostics.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { eventPasses } from "./event-filter.js";
 import { isNativeEvent } from "./freeze.js";
-import { decodeHydrationValue, encodeHydrationValue } from "./hydration-value.js";
+import { encodeHydrationValue } from "./hydration-value.js";
 import type { ComponentGraph } from "./graph.js";
 import {
   ABSENT,
@@ -26,7 +26,10 @@ import {
   type Value,
 } from "./expression.js";
 import { kebabCase } from "./names.js";
-import { documentParsesInstructions, renderedFormMark } from "./rendered-form.js";
+import {
+  FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, serverMark, serverRanges,
+  type HydrationRange, type RenderedInstanceRecord,
+} from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
 import { keyedEquality, visitSelected } from "./selection.js";
 import {
@@ -826,15 +829,6 @@ function evalConforming(
 }
 
 
-interface HydrationRange {
-  readonly slot: string;
-  readonly fallback: boolean;
-  readonly scoped?: boolean;
-  /** The server's marker nodes: [start, end], or [marker] for an empty slot. */
-  readonly markers: readonly Node[];
-  readonly content: readonly Node[];
-}
-
 /** Weak tags reuse the existing effect ownership; row removal releases every indexed binding. */
 const indexedSelections = new WeakMap<ReactiveEffect, string>();
 
@@ -1552,11 +1546,23 @@ function renderEachRegion(
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
+        const existing = adopted === undefined ? [] : rangeNodes(adopted[0], adopted[1]).slice(1, -1);
+        // A row of several nodes (`<template $each>`) adopts each of its server nodes in turn.
+        const rows = adopted !== undefined && node.kind === "element" && node.name === "template" &&
+          !node.attributes.some((attribute) => attribute.kind === "directive");
+        let cursor = 0;
         const rendered = materialize(node.kind === "slot"
           ? renderSlot(body as SlotNode, local, document, blockContext)
+          : rows ? (body as ElementNode).children.flatMap((child) => {
+            const nodes = renderTemplateNode(child, local!, document, blockContext, existing[cursor]);
+            if (nodes[0] === existing[cursor]) cursor += nodes.length;
+            return nodes;
+          })
           : nativePlan !== undefined && adopted === undefined
             ? instantiateNativeTemplate(nativePlan, body as ElementNode, local, document, passThrough, blockContext)
             : renderInstance(body as ElementNode, local, document, passThrough, blockContext, adopted?.[0].nextSibling ?? undefined), document);
+        // What the row did not adopt is stale, as an adopted region's is.
+        for (const stale of existing) if (!rendered.includes(stale)) stale.parentNode?.removeChild(stale);
         const blockStart = adopted?.[0] ?? document.createComment("html-next:item-start");
         const blockEnd = adopted?.[1] ?? document.createComment("html-next:item-end");
         end.before(blockStart, ...rendered, blockEnd);
@@ -2401,138 +2407,6 @@ function renderSlot(
 
 // ---- Rendered form (spec: live-browser-distributable.md, "Rendered form") ----
 
-interface ServerMark { readonly target: string; readonly attributes: Map<string, string> }
-
-function pseudoAttributes(data: string): Map<string, string> {
-  const attributes = new Map<string, string>();
-  let rest = data.trim();
-  const references: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-  while (rest !== "") {
-    const match = /^([A-Za-z_:][-A-Za-z0-9._:]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')(?:\s+|$)/.exec(rest);
-    if (match === null || attributes.has(match[1]!)) return new Map();
-    const value = (match[2] ?? match[3]!).replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (_, body: string) =>
-      body.startsWith("#x") ? String.fromCodePoint(parseInt(body.slice(2), 16))
-        : body.startsWith("#") ? String.fromCodePoint(Number(body.slice(1))) : references[body]!);
-    attributes.set(match[1]!, value);
-    rest = rest.slice(match[0].length);
-  }
-  return attributes;
-}
-
-function serverMark(node: Node): ServerMark | undefined {
-  if (node.nodeType === 7) {
-    const pi = node as ProcessingInstruction;
-    return { target: pi.target, attributes: pseudoAttributes(pi.data) };
-  }
-  if (node.nodeType !== 8) return undefined;
-  if (documentParsesInstructions(node.ownerDocument!)) return undefined;   // a real comment is never a marker where PIs parse
-  const match = /^\?([A-Za-z][-A-Za-z0-9]*)(?:\s+([\s\S]*?))?\s*\??$/.exec((node as Comment).data);
-  return match === null ? undefined : { target: match[1]!, attributes: pseudoAttributes(match[2] ?? "") };
-}
-
-/** The slot ranges a server-rendered root owns, in document order, and its carried projection. */
-function serverRanges(root: Element, consume = true, tag?: string): { ranges: HydrationRange[]; carried: Node[] } | undefined {
-  const ranges: HydrationRange[] = [];
-  const inRanges = new Set<Node>();
-  const lineage = (root.getAttribute(COMPONENT_ATTRIBUTE) ?? "").split(/\s+/);
-  const tagIndex = tag === undefined ? -1 : lineage.indexOf(tag);
-  // The innermost delegated component wraps the outer component's projection in its own ranges.
-  const delegatedDepth = tagIndex < 0 ? 0 : lineage.length - tagIndex - 1;
-  const collect = (nodes: readonly Node[], into: HydrationRange[], depth = delegatedDepth): void => {
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index]!;
-      const mark = serverMark(node);
-      if (mark?.target === "marker" && mark.attributes.has("slot")) {
-        if (depth === 0) into.push({ slot: mark.attributes.get("slot")!, fallback: false, markers: [node], content: [] });
-        continue;
-      }
-      if (mark?.target === "start") {
-        let nesting = 1;
-        const content: Node[] = [];
-        let end: Node | undefined;
-        for (index += 1; index < nodes.length; index += 1) {
-          const inner = serverMark(nodes[index]!);
-          if (inner?.target === "start") nesting += 1;
-          else if (inner?.target === "end" && --nesting === 0) { end = nodes[index]; break; }
-          content.push(nodes[index]!);
-        }
-        if (mark.attributes.has("slot")) {
-          if (depth > 0) collect(content, into, depth - 1);
-          else into.push({ slot: mark.attributes.get("slot")!, fallback: mark.attributes.has("fallback"), scoped: mark.attributes.has("scoped"), markers: end ? [node, end] : [node], content });
-          for (const child of content) inRanges.add(child);
-        } else collect(content, into, depth);   // a page's own range is transparent
-        continue;
-      }
-      if (!(node instanceof Element)) continue;
-      if (node !== root && node.hasAttribute("data-component")) {
-        const nested = serverRanges(node, false);
-        for (const range of nested?.ranges ?? []) collect(range.content, into, depth);
-      } else collect(Array.from(node.childNodes), into, depth);
-    }
-  };
-  collect(Array.from(root.childNodes), ranges);
-  // The carrier is the <template> child that follows a `carrier` mark, outside every range.
-  const carrier = Array.from(root.children).find((child): child is HTMLTemplateElement =>
-    child instanceof HTMLTemplateElement && !inRanges.has(child) &&
-    child.previousSibling !== null && serverMark(child.previousSibling)?.target === "carrier");
-  if (ranges.length === 0 && carrier === undefined) return undefined;
-  const carried: Node[] = [];
-  if (carrier !== undefined && consume) {
-    for (const child of Array.from(carrier.content.childNodes)) carried.push(root.ownerDocument.adoptNode(child));
-    carrier.previousSibling!.remove();
-    carrier.remove();
-  } else if (carrier !== undefined) carried.push(...Array.from(carrier.content.childNodes));
-  return { ranges, carried };
-}
-
-/**
- * Serializes the rendered form. Like getHTML({ serializableShadowRoots }), it writes what
- * the live DOM does not hold: each component root's projected nodes that no slot currently renders,
- * in an inert trailing <template>.
- */
-const FORM_DEFAULTS_ATTRIBUTE = "data-html-next-form-defaults";
-const INSTANCE_ATTRIBUTE = "data-html-next-instance";
-
-interface RenderedInstanceRecord {
-  readonly explicit: readonly string[];
-  readonly inputs: Readonly<Record<string, PropInput>>;
-  readonly props: Readonly<Record<string, unknown>>;
-  readonly state: Readonly<Record<string, unknown>>;
-}
-
-const renderedInstanceRecords = new WeakMap<Element, Readonly<Record<string, RenderedInstanceRecord>>>();
-
-function renderedInstanceRecord(element: Element, tag: string): RenderedInstanceRecord | undefined {
-  let records = renderedInstanceRecords.get(element);
-  if (records === undefined) {
-    const serialized = element.getAttribute(INSTANCE_ATTRIBUTE);
-    if (serialized === null) return undefined;
-    let parsed: unknown;
-    try { parsed = JSON.parse(serialized); }
-    catch { fail("HR010", "Malformed rendered component instance record."); }
-    if (!Array.isArray(parsed) || parsed.length !== 2 || parsed[0] !== 1) {
-      fail("HR010", "Unsupported rendered component instance record.");
-    }
-    const decoded = decodeHydrationValue(parsed[1]);
-    if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-      fail("HR010", "Malformed rendered component instance record.");
-    }
-    records = decoded as Readonly<Record<string, RenderedInstanceRecord>>;
-    for (const record of Object.values(records)) {
-      if (record === null || typeof record !== "object" || !Array.isArray(record.explicit) ||
-        record.explicit.some((name) => typeof name !== "string") ||
-        [record.inputs, record.props, record.state].some((value) => value === null || typeof value !== "object" || Array.isArray(value)) ||
-        Object.values(record.inputs).some((input) => input === null || typeof input !== "object" ||
-          typeof input.present !== "boolean" || input.source !== "html" && input.source !== "value")) {
-        fail("HR010", "Malformed rendered component instance record.");
-      }
-    }
-    renderedInstanceRecords.set(element, records);
-    element.removeAttribute(INSTANCE_ATTRIBUTE);
-  }
-  return Object.hasOwn(records, tag) ? records[tag] : undefined;
-}
-
 function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
   return {
     explicit: [...instance.explicit],
@@ -2544,48 +2418,11 @@ function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
   };
 }
 
-interface SerializedFormDefaults {
-  readonly value?: string;
-  readonly valuePresent?: boolean;
-  readonly checked?: boolean;
-  readonly selected?: boolean;
-}
-
-function restoreSerializedFormDefaults(root: Element): void {
-  const controls = [root, ...Array.from(root.querySelectorAll(`[${FORM_DEFAULTS_ATTRIBUTE}]`))];
-  for (const element of controls) {
-    const serialized = element.getAttribute(FORM_DEFAULTS_ATTRIBUTE);
-    if (serialized === null) continue;
-    element.removeAttribute(FORM_DEFAULTS_ATTRIBUTE);
-    let defaults: SerializedFormDefaults;
-    try {
-      const parsed: unknown = JSON.parse(serialized);
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-      defaults = parsed as SerializedFormDefaults;
-    }
-    catch { continue; }
-    if (element instanceof HTMLInputElement) {
-      const value = element.value;
-      const checked = element.checked;
-      if (typeof defaults.value === "string") {
-        element.defaultValue = defaults.value;
-        if (defaults.valuePresent === false) element.removeAttribute("value");
-      }
-      if (typeof defaults.checked === "boolean") element.defaultChecked = defaults.checked;
-      element.value = value;
-      element.checked = checked;
-    } else if (element instanceof HTMLTextAreaElement && typeof defaults.value === "string") {
-      const value = element.value;
-      element.defaultValue = defaults.value;
-      element.value = value;
-    } else if (element instanceof HTMLOptionElement && typeof defaults.selected === "boolean") {
-      const selected = element.selected;
-      element.defaultSelected = defaults.selected;
-      element.selected = selected;
-    }
-  }
-}
-
+/**
+ * Serializes the rendered form. Like getHTML({ serializableShadowRoots }), it writes what
+ * the live DOM does not hold: each component root's projected nodes that no slot currently renders,
+ * in an inert trailing <template>.
+ */
 export function serializeRenderedForm(container: Element): string {
   const clone = container.cloneNode(true) as Element;
   const originals = [container, ...Array.from(container.querySelectorAll("*"))];

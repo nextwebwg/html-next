@@ -589,7 +589,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     }
     case "call": {
       const args = node.args.map((argument) => lower(argument, scope));
-      const reads = args.reduce<Reads>((all, argument) => merge(all, argument), none(key, ""));
+      const reads = args.reduce<Reads>((all, argument) => merge(all, argument), NO_READS);
       if (node.fn === "default") {
         if (args.length !== 2) return { ...none(key, "NONCONFORMING"), fails: true };
         const [value, fallback] = args as [Lowered, Lowered];
@@ -604,7 +604,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
       const contents = args.reduce<Reads>((all, argument) => {
         const read = converted(argument);
         return merge(all, { ...read, contents: read.contents || itemContainer(argument) });
-      }, none(key, ""));
+      }, NO_READS);
       if (node.fn === "concat" || node.fn === "join") {
         return { ...none(key, `textCall(${JSON.stringify(node.fn)}, ${values()})`), ...contents, fails: true };
       }
@@ -626,7 +626,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     }
     case "object": {
       const values = node.pairs.map((pair) => lower(pair.value, scope));
-      const reads = values.reduce<Reads>((all, value) => merge(all, value), none(key, ""));
+      const reads = values.reduce<Reads>((all, value) => merge(all, value), NO_READS);
       const source = reads.fails
         ? `recordValue(${JSON.stringify(node.pairs.map((pair) => pair.key))}, [${values.map((value) => value.source).join(", ")}])`
         : `{ ${node.pairs.map((pair, index) => `${JSON.stringify(pair.key)}: ${values[index]!.source}`).join(", ")} }`;
@@ -634,7 +634,7 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
     }
     case "array": {
       const items = node.items.map((item) => lower(item, scope));
-      const reads = items.reduce<Reads>((all, item) => merge(all, item), none(key, ""));
+      const reads = items.reduce<Reads>((all, item) => merge(all, item), NO_READS);
       const list = `[${items.map((item) => item.source).join(", ")}]`;
       return { ...none(key, reads.fails ? `listValue(${list})` : list), ...reads, deep: true };
     }
@@ -642,6 +642,9 @@ function lower(node: ExpressionNode, scope: Scope): Lowered {
 }
 
 type Reads = Pick<Lowered, "bits" | "nested" | "item" | "contents" | "fails" | "positional" | "overflow">;
+
+/** What reads nothing: the seed of reads merged over a literal's or call's parts, which may be none. */
+const NO_READS: Reads = { bits: 0, nested: false, item: false, contents: false, fails: false };
 
 function merge(left: Reads, right: Reads): Reads {
   return {
@@ -1316,7 +1319,7 @@ class Planner {
       }
       const value = expression === undefined ? undefined : this.checked(expression, scope);
       // The arms' tests run in order until one is truthy, so only those are read.
-      let reads: Reads = value ?? none("", "");
+      let reads: Reads = value ?? NO_READS;
       const lines = chosen.map((arm, index) => {
         if (arm.flow?.kind === "else") return `return ${index};`;
         const armTest = this.checked(plan((arm.flow as { testPlan?: CompiledExpression }).testPlan, (arm.flow as { test: string }).test), testBase);
@@ -1470,9 +1473,10 @@ interface Trie {
 
 /**
  * Emits `const` walks from `base` to every site with firstChild/nextSibling getters, naming only
- * the nodes later walks start from. Returns each site's expression.
+ * the nodes later walks start from. Returns each site's expression. A hydrating block (`spec`) reads
+ * each named node from the server nodes `adoptTree` matched to its prototype (`z`) when it adopts.
  */
-function walk(base: string, sites: readonly (readonly number[])[], lines: string[], prefix: string): string[] {
+function walk(base: string, sites: readonly (readonly number[])[], lines: string[], prefix: string, spec?: unknown): string[] {
   const root: Trie = { children: new Map() };
   sites.forEach((path, index) => {
     let node = root;
@@ -1485,7 +1489,7 @@ function walk(base: string, sites: readonly (readonly number[])[], lines: string
   });
   const expressions: string[] = [];
   let count = 0;
-  const visit = (expression: string, node: Trie): void => {
+  const visit = (expression: string, node: Trie, path: readonly number[] = []): void => {
     if (node.site !== undefined) expressions[node.site] = expression;
     const steps = [...node.children.keys()].sort((left, right) => left - right);
     let previous: string | undefined;
@@ -1499,15 +1503,42 @@ function walk(base: string, sites: readonly (readonly number[])[], lines: string
       let current = reached;
       if (named) {
         current = `${prefix}${count++}`;
-        lines.push(`const ${current} = ${reached};`);
+        lines.push(`const ${current} = ${spec === undefined ? reached : `z ? z[${preorder(spec, [...path, step])}] : ${reached}`};`);
       }
       previous = current;
       previousStep = step;
-      visit(current, child);
+      visit(current, child, [...path, step]);
     });
   };
   visit(base, root);
   return expressions;
+}
+
+/**
+ * A prototype node's index in `adoptTree`'s list: document order, with a region as its two marks.
+ * `path` steps through prototype nodes from the block's base, whose own element (not a fragment) is 0.
+ */
+function preorder(spec: unknown, path: readonly number[]): number {
+  const size = (child: unknown): number => typeof child === "string" || child === 0 ? 1 : typeof child === "number" ? 2
+    : 1 + (child as unknown[]).slice(2).reduce<number>((all, item) => all + size(item), 0);
+  if (path.length === 0) return 0;
+  let node = spec as unknown[];
+  let index = node[0] === "" ? 0 : 1;
+  for (const [depth, step] of path.entries()) {
+    let position = 0;
+    for (const child of node.slice(2)) {
+      const width = typeof child === "number" && child !== 0 ? 2 : 1;
+      if (position + width > step) {
+        if (depth === path.length - 1) return index + step - position;
+        node = child as unknown[];
+        index += 1;
+        break;
+      }
+      position += width;
+      index += size(child);
+    }
+  }
+  return unreachable("a site's path reaches a prototype node");
 }
 
 function guard(mask: number): string {
@@ -1591,6 +1622,8 @@ export function emitBlocks(
   rootLines: readonly string[],
   invocations?: ReadonlyMap<string, Invoked>,
   noContextReaders = false,
+  /** The factory also adopts a server-rendered root (see `adoptTree`). */
+  hydrate = false,
 ): string {
   const { contract } = definition;
   const blocks = plan.blocks;
@@ -1620,7 +1653,8 @@ export function emitBlocks(
     });
     if (tracks(block)) entries.push("w: 0");
     block.bindings.forEach((binding, index) => {
-      entries.push(`v${index}: ${binding.initial}`);
+      // An adopted block's first render writes every binding, as live hydration's effects run once each.
+      entries.push(`v${index}: ${hydrate && binding.initial !== "undefined" ? `z ? undefined : ${binding.initial}` : binding.initial}`);
       // A nonconforming segment keeps the text it last accepted.
       binding.parts?.forEach((part, segment) => {
         if (typeof part !== "string" && part.fails) entries.push(`m${index}_${segment}: ""`);
@@ -1634,8 +1668,10 @@ export function emitBlocks(
     });
     block.regions.forEach((region, index) => {
       const start = sites[region.site]!;
+      // An adopting block's region ends where the server's content does, and adopts it on its first render.
+      const end = hydrate ? `z ? z[${preorder(block.spec, block.sites[region.site]!) + 1}] : ${start}.nextSibling` : `${start}.nextSibling`;
       if (region.kind !== "each") {
-        entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`,
+        entries.push(`a${region.site}: ${start}`, `e${index}: ${end}`, `b${index}: ${hydrate ? "z && ADOPT" : "undefined"}`,
           ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
         if (region.names !== undefined) entries.push(`q${index}: undefined`);
       } else {
@@ -1643,7 +1679,8 @@ export function emitBlocks(
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
         const positional = region.positional === true || region.key?.positional === true;
         const type = `${region.block.ranged === true ? "Ranged" : ""}${region.key === undefined ? "IndexedList" : positional ? "PositionalList" : "KeyedList"}`;
-        entries.push(`L${index}: new ${type}(${start}, ${start}.nextSibling, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`);
+        entries.push(`L${index}: new ${type}(${start}, ${end}, m${child}, p${child}, ${key}, ${JSON.stringify(region.alias)})`,
+          ...hydrate ? [`b${index}: z && 1`] : []);
       }
     });
     return entries;
@@ -1655,7 +1692,9 @@ export function emitBlocks(
   const invoke = (block: Block): string[] => block.invocations.flatMap((invocation, index) => {
     const site = field(block, invocation.site);
     const projection = invocation.projection;
-    const make = projection === undefined ? undefined : `m${projection.id}(d${projection.needsParent === true ? ", undefined, r" : ""})`;
+    // A hydrating block adopts the server's root of the component, and the content it projected there.
+    const make = projection === undefined ? undefined
+      : hydrate ? `m${projection.id}(d, undefined, r, ay ? ${site} : undefined)` : `m${projection.id}(d${projection.needsParent === true ? ", undefined, r" : ""})`;
     const ref = invocation.ref;
     const refKey = ref === undefined ? "" : JSON.stringify(ref.name);
     // What the parent bound on the invocation moves with the component's root when a root switch replaces it.
@@ -1676,6 +1715,7 @@ export function emitBlocks(
     const waits = inProjection(block);
     return [
       waits ? `  if (r.h${index} === undefined) { if (placed(${site}, () => p${block.id}(r, 0, new Map()))) {` : `  if (r.h${index} === undefined) {`,
+      ...hydrate ? [`    const ay = ${site}.nodeType === 1 && ${site}.hasAttribute("data-component");`] : [],
       ...make === undefined ? [] : [`    const j = r.j${index} = ${make};`],
       `    const H = { ${invocation.html.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} };`,
       // A bound prop is first its attribute's text, which the component reads as HTML input, then its value.
@@ -1688,15 +1728,16 @@ export function emitBlocks(
         `    const k = document.createElement("div"), y = ${convertible(invocation.content.expression)};`,
         `    if (y !== NONCONFORMING) ${invocation.content.kind === "html" ? "writeHtml(k, toText(y))" : "k.textContent = toText(y)"};`,
       ],
-      `    r.h${index} = invoke(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
+      `    r.h${index} = ${hydrate ? `(ay${make === undefined ? "" : " && !j.n.firstChild"} ? adoptInvoke : invoke)` : "invoke"}(I, ${invocation.factory}, ${site}, { attributes: ${invocation.root ? "passThrough(" : ""}{ ${invocation.attributes.map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }${invocation.root ? ", attributes)" : ""}${
         make !== undefined ? ", ...projected(j.n)" : invocation.content !== undefined ? ", children: [...k.childNodes]" : ""} }, H, (root, previous) => { ${follow.join(" ")} }, r.z ??= []);`,
       `    ${site} = r.h${index}.e;`,
       // The shared root carries both markers, and this component's lifecycle rides its owner's.
       ...invocation.root ? [
         `    I.e = ${site};`,
         `    I.L = delegateLifecycle(r.h${index});`,
-        // Outer to inner, as live's lineage lists a delegated root's components.
-        `    I.e.setAttribute("data-component", \`${contract.tag} \${I.e.getAttribute("data-component")}\`);`,
+        // Outer to inner, as live's lineage lists a delegated root's components; an adopted root lists them already.
+        hydrate ? `    { const t = I.e.getAttribute("data-component"); if (!t.split(" ").includes(${JSON.stringify(contract.tag)})) I.e.setAttribute("data-component", \`${contract.tag} \${t}\`); }`
+          : `    I.e.setAttribute("data-component", \`${contract.tag} \${I.e.getAttribute("data-component")}\`);`,
       ] : [],
       ...invocation.props.map((prop, at) => `    ${prop.expression.fails ? `if (y${at} !== NONCONFORMING) ` : ""}bindProp(r.h${index}, ${JSON.stringify(prop.name)}, y${at});`),
       ...ref === undefined ? [] : [ref.iterated ? `    (I.r[${refKey}] ??= []).push(${site});` : `    I.r[${refKey}] = ${site};`],
@@ -1842,13 +1883,16 @@ export function emitBlocks(
         // Filled once, when its block first renders; then only its fallback updates.
         const body = `r.b${index}`;
         const name = typeof region.slot === "string" ? JSON.stringify(region.slot) : `toText(${region.slot!.source})`;
-        const make = `m${child}(d${region.block.needsParent === true ? ", undefined, r" : ""})`;
+        const make = hydrate ? `m${child}(d, undefined, r, ad ? at : undefined)` : `m${child}(d${region.block.needsParent === true ? ", undefined, r" : ""})`;
+        // An adopting block's slot keeps what the server rendered in it; its fallback adopts the range it rendered.
+        const fill = hydrate ? `const ad = ${body} === ADOPT; ${body} = undefined; const at = (ad ? adoptSlot : fillSlot)` : "const at = fillSlot";
+        const place = hydrate ? `if (${body}.n !== at) placeFallback(at, ${body}.n);` : `at.before(${body}.n);`;
         const props = region.props;
         if (props === undefined) {
           lines.push(
             // A consumer's <template slot> renders here afresh, and is let go when this outlet goes.
-            `  if (r.f${index} === undefined) { r.f${index} = 1; const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d);`,
-            `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); } }`,
+            `  if (r.f${index} === undefined) { r.f${index} = 1; ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, undefined, d);`,
+            `    if (Array.isArray(at)) (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); else if (at !== undefined) { ${body} = ${make}; ${place} } }`,
             `  else if (${body} !== undefined) p${child}(${body}, c, d);`,
           );
           return;
@@ -1861,9 +1905,9 @@ export function emitBlocks(
           `    r.f${index} = 1;`,
           // A prop that does not conform is not given, as live leaves it unset.
           `    const s = {}; ${props.map((prop, at) => `{ const y = ${convertible(prop)}; if (y !== NONCONFORMING) s[${JSON.stringify(region.propNames![at])}] = y; }`).join(" ")}`,
-          `    const at = fillSlot(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
+          `    ${fill}(r.a${region.site}, r.e${index}, ${name}, J, ${region.fallback === true}, s, d);`,
           `    if (Array.isArray(at)) { ${rendering} = at; (r.z ??= []).push(() => { at[0].l.delete(at[1]); dispose(at[1]); }); }`,
-          `    else if (at !== undefined) { ${body} = ${make}; at.before(${body}.n); }`,
+          `    else if (at !== undefined) { ${body} = ${make}; ${place} }`,
           `  } else if (${rendering} !== undefined) {`,
           `    if (${guard(props.reduce((mask, prop) => mask | maskOf(prop), 0) | NESTED)}) {`,
           `      const t = ${rendering}[1].s;`,
@@ -1901,11 +1945,30 @@ export function emitBlocks(
           // A rebuild that keeps the same decision (a slot name changed) replaces nothing a transition should show.
           ...marked ? [`      if (vt${index} !== ${shown}) transitionChanged();`] : [],
         ];
+        // An adopting block's first render binds the server's content, or creates the body where it does not match.
+        const adopt: string[] = [];
+        if (hydrate) {
+          // The first render of an adopting block binds the server's content, or creates the body where it does not match.
+          const base = (body: Block): string => (body.spec as unknown[])[0] === "" ? `r.a${region.site}` : `r.a${region.site}.nextSibling`;
+          const bases = [region.block, ...region.arms ?? []].map(base);
+          const from = region.kind !== "match" || new Set(bases).size === 1 ? bases[0]! : `[${bases.slice(1).join(", ")}][t${index}]`;
+          adopt.push(`if (${body} === ADOPT) {`, `  ${body} = undefined;`,
+            `  if (${region.kind === "if" ? `${test.fails ? `t${index}` : test.source}` : show}) { const h = ${from}; ${body} = ${region.kind === "if" ? `m${child}(d, undefined, r, h)`
+              : region.kind === "with" ? `m${child}(d, t${index}, r, h)` : `[${region.arms!.map((arm) => `m${arm.id}`).join(", ")}][t${index}](d, ${region.alias === undefined ? "undefined" : "mv"}, r, h)`};${
+              region.kind === "match" ? ` ${body}.s = t${index};` : ""} if (${body}.n !== h) { clearRegion(r.a${region.site}, r.e${index}); r.e${index}.before(${body}.n); } }`,
+            `  else clearRegion(r.a${region.site}, r.e${index});`, "}");
+          rebuild.unshift(...adopt.map((line) => `      ${line}`), "      else {");
+          rebuild.push("      }");
+        }
         const reselect = selectOf(block, region.site);
         if (reselect !== undefined) rebuild.push(`      queueMicrotask(r.c${reselect});`);
         // The body rebuilds when its decision flips, as live's region compares it; otherwise it is
         // patched, and a `$with` or `$match` body given another value updates against it in full.
-        const flip = region.kind === "if" ? `!t${index} !== !${body}` : region.kind === "with" ? `${body} === undefined` : `t${index} !== ${shown}`;
+        // An adopting body (`ADOPT`) has no decision yet: its first render takes the adopt branch, and a
+        // decision that does not conform leaves the server's content unbound.
+        const adopting = hydrate ? `${body} === ADOPT || ` : "";
+        const settle = hydrate ? `{ if (${body} === ADOPT) ${body} = undefined; else ${patchBody("c")} }` : patchBody("c");
+        const flip = `${adopting}${region.kind === "if" ? `!t${index} !== !${body}` : region.kind === "with" ? `${body} === undefined` : `t${index} !== ${shown}`}`;
         // Slot names: the shown body's, or the chosen arm's, compared by their text.
         const names = region.names?.map((list) => `[${list.map((name) => `toText(${name.source})`).join(", ")}]`);
         const named = names === undefined ? undefined : region.kind === "if" ? `t${index} ? ${names[0]} : []`
@@ -1915,8 +1978,9 @@ export function emitBlocks(
         if (region.kind === "if" && named === undefined && !test.fails) {
           // An `$if` flips by building its body or tearing it down.
           lines.push(
-            `  if (${guard(maskOf(test))} && !(${test.source}) !== !${body}) {`,
-            `    if (${body}) { ${disposable(region.block) ? `dispose(${body}); ` : ""}${body} = undefined; clearRegion(r.a${region.site}, r.e${index}); }`,
+            `  if (${guard(maskOf(test))} && ${hydrate ? `(${adopting}!(${test.source}) !== !${body})` : `!(${test.source}) !== !${body}`}) {`,
+            ...adopt.map((line) => `    ${line}`),
+            `    ${hydrate ? "else " : ""}if (${body}) { ${disposable(region.block) ? `dispose(${body}); ` : ""}${body} = undefined; clearRegion(r.a${region.site}, r.e${index}); }`,
             `    else { ${body} = ${make}; r.e${index}.before(${body}.n); }`,
             ...marked ? ["    transitionChanged();"] : [],
             ...reselect === undefined ? [] : [`    queueMicrotask(r.c${reselect});`],
@@ -1926,13 +1990,13 @@ export function emitBlocks(
         }
         if (region.kind === "if" || region.alias === undefined) {
           // Without an alias, a decision that holds, fails to conform or was not reached patches alike.
-          const decided = named === undefined ? flip : `(q${index} = ${named}, ${changed})`;
+          const decided = named === undefined ? hydrate ? `(${flip})` : flip : `(q${index} = ${named}, ${changed})`;
           lines.push(
             `  let t${index}${named === undefined ? "" : `, q${index}`};`,
             `  if (${guard(maskOf(test))} && ${test.fails ? `(t${index} = ${test.source}) !== NONCONFORMING && ${decided}` : `(t${index} = ${test.source}, ${decided})`}) {`,
             ...remember.map((line) => line.slice(4)),
             ...rebuild.map((line) => line.slice(2)),
-            `  } else if (${body} !== undefined) ${patchBody("c")}`,
+            `  } else if (${body} !== undefined) ${settle}`,
           );
           return;
         }
@@ -1944,7 +2008,7 @@ export function emitBlocks(
           ...(region.kind === "match" ? ["    let mv;"] : []),
           `    const t${index} = ${test.source};`,
           // A nonconforming decision leaves the region as it is, and its body keeps updating.
-          test.fails ? `    if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${patchBody("c")} } else {` : "    {",
+          test.fails ? `    if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${settle} } else {` : "    {",
           ...named === undefined ? [] : [...region.kind === "with" ? [`      const mv = t${index};`] : [], `      const q${index} = ${named};`],
           `      if (${changed}) {`,
           ...remember,
@@ -1960,15 +2024,18 @@ export function emitBlocks(
       // Keys that read roots, nested data or positions are re-read for every item when those change.
       const rekey = key === undefined ? 0 : key.bits | (key.nested ? NESTED : 0);
       const full = key?.positional === true ? "true" : rekey === 0 ? undefined : `(c & ${rekey}) !== 0`;
-      const apply = (value: string): string => full === undefined ? `r.L${index}.update(${value}, d, c)`
+      const update = (value: string): string => full === undefined ? `r.L${index}.update(${value}, d, c)`
         : `if (c === -1 || ${full}) r.L${index}.set(${value}, d, true); else r.L${index}.update(${value}, d, c)`;
+      // An adopting block's list adopts the server's rows on its first conforming value.
+      const apply = (value: string): string => !hydrate ? update(value)
+        : `if (r.b${index}) { r.b${index} = 0; adoptRows(r.L${index}, ${value}, ${region.block.ranged === true}); } else { ${update(value)}; }`;
       // A nonconforming list leaves the rows as they are; a list inside a select re-applies its selection.
       const reselect = selectOf(block, region.site);
       const queue = reselect === undefined ? "" : ` queueMicrotask(r.c${reselect});`;
       const rows = participating(region) ? [`const vt${index} = transitionRows(r.L${index}); `, ` transitionRowsChanged(r.L${index}, vt${index});`] : ["", ""];
       lines.push(list.fails || full !== undefined || reselect !== undefined
         ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { ${rows[0]}const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} }${rows[1]} }`
-        : rows[0] === "" ? `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`
+        : rows[0] === "" ? hydrate ? `  if (${guard(maskOf(list) | NESTED)}) { ${apply(list.source)} }` : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`
         : `  if (${guard(maskOf(list) | NESTED)}) { ${rows[0]}${apply(list.source)};${rows[1]} }`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
         (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | invocationOuter(region.block) | regionOuter(region.block);
@@ -1999,7 +2066,8 @@ export function emitBlocks(
       if (region.kind === "each" && region.key === undefined && region.positional === true) lines.push(`${indent}${record}.L${index}.q = true;`);
     });
     // A consumer's scoped-slot templates, which the component it projects into renders with its props.
-    block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: (d, s) => m${scope.block.id}(d, s, ${record}), p: p${scope.block.id}, l: new Set() });`));
+    block.scopes.forEach((scope, index) => lines.push(`${indent}${record}.k${index} = scopedTemplate(${siteOf(scope.site)}, { m: ${hydrate
+      ? `(d, s, h) => m${scope.block.id}(d, s, ${record}, h)` : `(d, s) => m${scope.block.id}(d, s, ${record})`}, p: p${scope.block.id}, l: new Set() });`));
     // A select's `applySelection` runs once its options exist and after its option regions change.
     for (const select of block.selects) lines.push(`${indent}${record}.c${select} = ${selection(block, select, (site) => block.sites[site]!.length === 0 ? `${record}.n` : `${record}.a${site}`)};`);
     const stops = block.events.map((event) => listener(event, siteOf(event.site)));
@@ -2023,17 +2091,38 @@ export function emitBlocks(
   };
   const armIds = new Set(plan.arms?.blocks.map((block) => block.id) ?? []);
   const scopedIds = new Set(blocks.flatMap((block) => block.scopes.map((scope) => scope.block.id)));
+  /**
+   * A hydrating block's server nodes, when it is given the node it adopts at (`h`): its element, the
+   * mark its fragment follows, or, for content projected into a component, that component's root.
+   */
+  const adoption = (block: Block): string[] => {
+    if (!hydrate) return [];
+    const at = block.invocations.map((invocation) => preorder(block.spec, block.sites[invocation.site]!));
+    const invoked = at.length === 0 ? "" : `, [${at.join(", ")}]`;
+    const into = blocks.flatMap((owner) => owner.invocations).find((invocation) => invocation.projection === block);
+    if (into === undefined) return [`    const z = h && adoptTree(${block.spec === 5 ? "5" : `T${block.id}`}, h${invoked});`];
+    const tag = [...invocations?.values() ?? []].find((candidate) => `create${candidate.definition.contract.name}` === into.factory)!.definition.contract.tag;
+    return [`    const z = h && adoptProjection(T${block.id}, h, ${JSON.stringify(tag)}${invoked});`];
+  };
+  /** The block's node: the one it adopted, or its prototype's clone. Projected content leaves its nodes where the server put them. */
+  const node = (block: Block): string => {
+    const clone = `(P${block.id} ??= ${prototype(block)}).cloneNode(true)`;
+    if (!hydrate) return `    const n = ${clone};`;
+    return blocks.some((owner) => owner.invocations.some((invocation) => invocation.projection === block))
+      ? `    const n = z ? document.createDocumentFragment() : ${clone};` : `    const n = z ? h : ${clone};`;
+  };
   for (const block of blocks.slice(1)) {
     if (armIds.has(block.id)) continue;
     const lines: string[] = [];
-    const sites = walk("n", block.sites, lines, "t");
+    const sites = walk("n", block.sites, lines, "t", hydrate ? block.spec : undefined);
     const entries = fields(block, sites);
     const reads = block.alias;
     if (scopedIds.has(block.id)) {
       // A rendering of a consumer's scoped-slot template holds the slot's prop values in `s`.
       body.push(
-        `  const m${block.id} = (d, s, u) => {`,
-        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
+        `  const m${block.id} = (d, s, u${hydrate ? ", h" : ""}) => {`,
+        ...adoption(block),
+        node(block),
         ...lines.map((line) => `    ${line}`),
         `    const r = { n, s, u${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
@@ -2044,11 +2133,15 @@ export function emitBlocks(
       );
     } else if (block.row) {
       body.push(
-        `  const m${block.id} = (o, j, l${block.needsParent === true ? ", u" : ""}) => {`,
-        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
+        `  const m${block.id} = (o, j, l${hydrate ? ", u, h" : block.needsParent === true ? ", u" : ""}) => {`,
+        ...adoption(block),
+        node(block),
         ...lines.map((line) => `    ${line}`),
         // A ranged row's nodes sit between item markers, which the list moves them by.
-        ...block.ranged === true ? ['    const s = document.createComment("html-next:item-start"), t = document.createComment("html-next:item-end");', "    n.prepend(s);", "    n.append(t);"] : [],
+        ...block.ranged !== true ? [] : hydrate ? [
+          '    const s = z ? h : document.createComment("html-next:item-start"), t = z ? regionEnd(h) : document.createComment("html-next:item-end");',
+          "    if (!z) { n.prepend(s); n.append(t); }",
+        ] : ['    const s = document.createComment("html-next:item-start"), t = document.createComment("html-next:item-end");', "    n.prepend(s);", "    n.append(t);"],
         `    const r = { k: undefined, i: o, n${block.ranged === true ? ": s, t" : ""}, x: 0, y: 0${block.positional === true ? ", j, l" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
         `    p${block.id}(r, -1, E);`,
@@ -2058,8 +2151,9 @@ export function emitBlocks(
       );
     } else {
       body.push(
-        `  const m${block.id} = (d${block.alias || block.needsParent === true ? ", o" : ""}${block.needsParent === true ? ", u" : ""}) => {`,
-        `    const n = (P${block.id} ??= ${prototype(block)}).cloneNode(true);`,
+        `  const m${block.id} = (d${hydrate ? ", o, u, h" : `${block.alias || block.needsParent === true ? ", o" : ""}${block.needsParent === true ? ", u" : ""}`}) => {`,
+        ...adoption(block),
+        node(block),
         ...lines.map((line) => `    ${line}`),
         `    const r = { n${block.alias ? ", i: o" : ""}${block.needsParent === true ? ", u" : ""}${entries.map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
@@ -2086,10 +2180,11 @@ export function emitBlocks(
     // Each arm's root block is made on an element: the factory's, or the one a switch creates.
     for (const block of plan.arms.blocks) {
       const lines: string[] = [];
-      const sites = walk("n", block.sites, lines, "t");
+      const sites = walk("n", block.sites, lines, "t", hydrate ? block.spec : undefined);
       body.push(
-        `  const m${block.id} = (n, d) => {`,
-        ...(block.spec as unknown[]).length > 2 ? [`    n.append((P${block.id} ??= ${prototype(block)}).cloneNode(true));`] : [],
+        // A hydrating factory's first arm adopts the server root's content (`z`).
+        `  const m${block.id} = (n, d${hydrate ? ", z" : ""}) => {`,
+        ...(block.spec as unknown[]).length > 2 ? [`    ${hydrate ? "if (!z) " : ""}n.append((P${block.id} ??= ${prototype(block)}).cloneNode(true));`] : [],
         ...lines.map((line) => `    ${line}`),
         `    const r = { n${fields(block, sites).map((entry) => `, ${entry}`).join("")} };`,
         ...ownership(block, sites, "r", "    "),
@@ -2111,7 +2206,7 @@ export function emitBlocks(
       "  const p = (c, d) => {",
       // A switch whose new arm failed leaves the old one inert, as live's (it does not try again).
       "    if (R === null) return;",
-      "    if (R === undefined) { R = M[a](element, d); return; }",
+      `    if (R === undefined) { R = M[a](element, d${hydrate ? ", z" : ""}); return; }`,
       `    if (${guard(maskOf(select))}) {`,
       `      const t = ${select.source};`,
       "      if (t !== a) {",
@@ -2134,7 +2229,7 @@ export function emitBlocks(
   const root = plan.root;
   const rootChildren = plan.arms === undefined && (root.spec as unknown[]).length > 2;
   const rootWalk: string[] = [];
-  const rootSites = walk("element", root.sites, rootWalk, "t");
+  const rootSites = walk("element", root.sites, rootWalk, "t", hydrate && plan.arms === undefined && !delegated ? root.spec : undefined);
   const rootEntries = fields(root, rootSites);
   if (delegated || root.bindings.some((binding) => root.sites[binding.site]!.length === 0)) rootEntries.unshift("n: element");
   if (plan.arms === undefined) body.push(
@@ -2161,13 +2256,15 @@ export function emitBlocks(
     index < 29 ? `c |= ${rootBit(index)};` : `c |= ${OVERFLOW}; d.set(${index}, 1);`} } }`);
   const update = plan.reads.length === 0 && aliased.length === 0 ? render
     : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
-  const instance = provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
+  const instance = hydrate || provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
     blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
     transitionMask !== 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
-    ...(slotted ? ["  const J = project(I, children, slots);"] : []),
+    // An adopted root connects once the outermost adoption has finished.
+    ...hydrate ? ["  if (h) I.L = adoptLifecycle;"] : [],
+    ...(slotted ? [hydrate ? "  const J = Y ? project(I, ...Y) : project(I, children, slots);" : "  const J = project(I, children, slots);"] : []),
     ...provides ? ["  I.R = new Set();"] : [],
     // host.data shows each declared read's state; reading one tracks it by name.
     ...plan.reads.length === 0 ? [] : [`  const DT = { ${plan.reads.map((read) => `${JSON.stringify(read.declaration.name)}: ${read.index}`).join(", ")} };`,
@@ -2214,6 +2311,8 @@ export function emitBlocks(
         .map((binding) => `    bindControl(I, ${siteOf(binding.site)}, ${binding.path});`),
       "  }",
     ] : [],
+    // Edits made before startup survive the first render; a root that could not be adopted replaces the server's.
+    ...hydrate ? ["  if (W) W();", ...delegated ? [] : ["  if (h && !z) h.replaceWith(element);"]] : [],
     delegated ? "  return I.e;" : "  return element;",
     "}",
   );
@@ -2242,26 +2341,46 @@ export function emitBlocks(
         : `  if (!element.hasAttribute(${name})) element.setAttribute(${name}, ${value});`];
     });
   }
+  /** The prop inputs: the factory's, or an adopted root's restored ones. */
+  const inputs = hydrate ? "Z ? recordInputs(Z, \"value\") : componentProps" : "componentProps";
+  const htmlInputs = hydrate ? "Z ? recordInputs(Z, \"html\") : html" : "html";
+  /** Where a block's invoked components' roots stand among its prototype's nodes. */
+  function invokedAt(block: Block): number[] {
+    return block.invocations.map((invocation) => preorder(block.spec, block.sites[invocation.site]!));
+  }
   const factory = [
     // `html` is an invocation's literal props, which a compiled parent passes as HTML input.
-    `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 ? ", html" : ""}) {`,
+    `export function create${contract.name}(options${Object.values(contract.props).some((prop) => prop.required) ? "" : " = {}"}${propNames.length > 0 || hydrate ? ", html" : ""}${hydrate ? ", h" : ""}) {`,
     propNames.length === 0 && !slotted && !delegated ? "  const { attributes = {} } = options;" : "  const { attributes = {}, children = [], slots = {}, ...componentProps } = options;",
+    // An adopted root's props, prop inputs and state are the server instance's, and its controls keep what a reader typed.
+    // Its projection is what the server rendered in its slot ranges and carried, read before its content is adopted.
+    ...hydrate ? [`  const Z = h && renderedInstanceRecord(h, ${JSON.stringify(contract.tag)}), W = h && holdControls(h)${
+      slotted ? `, Y = h && serverProjection(h, ${JSON.stringify(contract.tag)})` : ""};`] : [],
     ...delegated ? [
       // The root is the invoked component's, created when the root block first renders.
-      "  const element = document.createTextNode(\"\");",
+      hydrate ? "  const element = h ?? document.createTextNode(\"\");" : "  const element = document.createTextNode(\"\");",
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(undefined, D, S.n, v, componentProps, [], html);`]),
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(undefined, D, S.n, v, ${inputs}, [], ${htmlInputs});`]),
     ] : plan.arms === undefined ? [
-      ...element(definition.template.name, rootLines),
-      ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
+      ...hydrate ? [
+        `  const z = h && adoptTree(${rootChildren ? "T0" : '["", []]'}, h, [${invokedAt(root).join(", ")}], ${JSON.stringify(definition.template.name)});`,
+        ...element(definition.template.name, rootLines).map((line, index) => index === 0 ? line.replace("const element = ", "const element = z ? h : ") : line)
+          .flatMap((line, index) => index === 1 ? ["  if (!z) {", `  ${line}`] : index === 0 ? [line] : [`  ${line}`]),
+        ...(rootChildren ? [`    element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
+        "  }",
+      ] : [
+        ...element(definition.template.name, rootLines),
+        ...(rootChildren ? [`  element.append((P0 ??= ${prototype(plan.root)}).cloneNode(true));`] : []),
+      ],
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, ${JSON.stringify(boundProps(definition.template))}, html);`]),
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, ${inputs}, ${JSON.stringify(boundProps(definition.template))}, ${htmlInputs});`]),
     ] : [
       // The props choose the arm, as live's factory chooses it, before the root exists.
       `  const v = [${plan.roots.map((item) => item.initial).join(", ")}];`,
-      ...(propNames.length === 0 ? [] : ["  acceptProps(undefined, D, S.n, v, componentProps, [], html);"]),
+      ...(propNames.length === 0 ? [] : [`  acceptProps(undefined, D, S.n, v, ${inputs}, [], ${htmlInputs});`]),
     ],
     ...plan.initializers,
+    ...hydrate ? [`  if (Z) restoreInstance(Z, S, v${propNames.length > 0 ? ", D" : ""});`] : [],
     // A context's value is its own: the host reads it as it reads a computed.
     ...(contextStart >= 0 && plan.computeds.length === 0 ? ["  const X = { e: 0, g: (j) => v[j], w: new Set() };"] : []),
     ...(plan.computeds.length === 0 ? [] : [
@@ -2287,13 +2406,20 @@ export function emitBlocks(
     ...(selected.length === 0 ? [] : [`  let ${selected.map((root) => `s${root} = v[${root}]`).join(", ")};`]),
     ...plan.arms === undefined ? [] : [
       `  let a = ${plan.arms.select.source};`,
-      "  let element;",
+      // An adopted root is the arm its restored values choose, with that arm's content.
+      ...hydrate ? [
+        "  let element = h && h.localName === A[a][0] ? h : undefined;",
+        `  const z = element && (${plan.arms.blocks.map((block, index) =>
+          `${index === plan.arms!.blocks.length - 1 ? "" : `a === ${index} ? `}adoptTree(${(block.spec as unknown[]).length > 2 ? `T${block.id}` : '["", []]'}, element, [${invokedAt(block).join(", ")}])`).join(" : ")});`,
+        "  if (!z) {",
+      ] : ["  let element;"],
       ...plan.arms.nodes.flatMap((node, index) => [
         index === 0 ? "  if (a === 0) {" : index === plan.arms!.nodes.length - 1 ? "  } else {" : `  } else if (a === ${index}) {`,
         ...element(node.name, armLiterals(node), "  ", "").map((line) => `  ${line}`),
       ]),
       "  }",
-      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, componentProps, Q[a], html);`]),
+      ...hydrate ? ["  }"] : [],
+      ...(propNames.length === 0 ? [] : [`  const B = acceptProps(element, D, S.n, v, ${inputs}, Q[a], ${htmlInputs});`]),
     ],
     ...body,
   ];
@@ -2332,6 +2458,8 @@ export function emitBlocks(
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
+    "ADOPT", "adoptInvoke", "adoptLifecycle", "adoptProjection", "adoptRows", "adoptSlot", "adoptTree", "holdControls", "placeFallback", "recordInputs",
+    "regionEnd", "renderedInstanceRecord", "restoreInstance", "serverProjection",
     "transitionStyles"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // A root without children, and an arm without them, build no prototype.
