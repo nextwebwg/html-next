@@ -67,13 +67,15 @@ Until then, say the opposite: *built on HTML Next alpha releases; expect breakin
 
 ## Extensions {#extensions}
 
-An [extension](https://nextwebwg.org/declarative-components/#extensions) is an optional part of the language that sits outside every Level of the proposal. Each has a one-word name, such as `transitions`. *Planned with the first extension:*
+An [extension](https://nextwebwg.org/declarative-components/#extensions) is an optional part of the language that sits outside every Level of the proposal. Each has a one-word name, such as `transitions`.
 
-- The Vite plugin builds an extension only when your Vite configuration enables it. Otherwise, its syntax is an error that names the extension and how to enable it.
-- HTMLKit enables every extension.
-- The live browser runtime and Vue, React, and Svelte conversion do not support extensions, and report any extension syntax they meet.
-- An extension adds code only to pages whose components use it.
+- The Vite plugin builds an extension only when its `extensions` option lists it. Otherwise, the extension's syntax is an error (`HT024`) that names the option to add.
+- The live browser runtime and Vue, React, and Svelte conversion do not build extensions. They warn and build the component without the extension.
+- An extension adds code only to components that use it.
+- HTMLKit will enable every extension. *Planned:* it needs HTMLKit to ship compiled components first.
 
-No extension is implemented yet; `transitions` is at the Proposal stage.
+| Extension | Vite plugin | Live runtime | Vue, React, Svelte |
+| --- | --- | --- | --- |
+| [`transitions`](/html-next/transitions) | With `extensions: ["transitions"]` | Warns; renders without animation | Warns; converts without animation |
 
 Next: [Publish a library](/html-next/ship) covers the rest of a library's `package.json`.

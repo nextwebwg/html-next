@@ -207,6 +207,33 @@ compiled components and the React, Svelte and Vue targets' controller hosts all 
 stored on the document under the shared runtime key. Bound `<select>` elements in the Svelte and Vue
 targets share one more observer per document for their option lists, which no native event reports.
 
+## Transitions extension
+
+The optional `transitions` extension is built only into compiled components that use it. The live
+distributable carries none of it beyond one warning, and other compiled components pay nothing: the
+`measure:runtime` fixtures and the benchmark entry keep their sizes.
+
+| Need | Platform mechanism | Gap the extension fills |
+| --- | --- | --- |
+| Element enters | `@starting-style` with `transition`; the View Transitions API's new-only group | None in CSS; the extension uses the group so entering, leaving and moving share one model |
+| Element leaves the DOM | The View Transitions API's old-only group (`::view-transition-old(...):only-child`) | CSS cannot animate a removal; the update must run inside `document.startViewTransition()` |
+| Rows reorder | `view-transition-name: match-element` gives each row its own group | The same: the reorder must run inside a transition |
+| Shared element | Two elements with one `view-transition-name` in the old and new states | The same, plus a valid identifier from any `$transition-name` value (`CSS.escape`) |
+| Animation per value | `view-transition-class` and class-selected `::view-transition-*` rules; author `@keyframes` | Component styles are `@scope`d and cannot select these pseudo-elements, so each component registers document-level rules in one constructable stylesheet |
+| Rest of the page | `:root { view-transition-name: none }`, `::view-transition { pointer-events: none }` | Applied only during the extension's transitions, so an author's own transitions are unchanged |
+| Reduced motion | `prefers-reduced-motion` | Checked before holding an update |
+
+The precise gap is the update itself: compiled instances flush in their own microtasks, and a
+parent's flush reaches its children in later ones, while a document runs one view transition at a
+time. One coordinator per document holds each participating instance's flush, starts one
+transition, runs the held flushes in its update callback, waits one task for cascades, and skips the
+transition when no participating region or list changed structure. The hold shadows that instance's
+scheduler `flush`; the scheduler class and the shared controller are unchanged.
+
+Evidence: `tests/target-transitions.test.ts` in Chromium, Firefox and WebKit. Remaining gaps: a
+second document transition skips a running one (`Element.startViewTransition` would run them side by
+side; Chromium only), and a leaving picture is not clipped by an `overflow` ancestor.
+
 ## Review sequence
 
 The next decisions are intentionally separated so approval of one custom layer cannot be read as

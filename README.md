@@ -71,7 +71,8 @@ An application build may serve as a complete alternative to a framework applicat
 A library build keeps independently consumable component entries while allowing the consumer's
 bundler to combine their shared support. All three modes consume one normalized semantic model and
 must preserve appearance, interactions, state, events, validation, lifecycle, and successful
-hydration. Frameworks may use their own DOM and SSR representations; acceptance is based on how
+hydration. Optional language extensions are the exception: each lists the modes that build it in
+[Versions and stability](./docs/guide/versions.md#extensions). Frameworks may use their own DOM and SSR representations; acceptance is based on how
 the resulting component looks and acts, including controller connect/disconnect and cleanup.
 
 The detailed contracts and independent progress tracks are in the
