@@ -25,7 +25,9 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type Flow, type TemplateNode } from "../template.js";
+import { elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { fail } from "../diagnostics.js";
+import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
 import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
@@ -191,6 +193,8 @@ interface Block {
   projection?: boolean;
   /** A consumer's <template slot> content, which renders only when an outlet renders it. */
   template?: boolean;
+  /** An element here carries the `transitions` extension's directives. */
+  transitions?: boolean;
 }
 
 /**
@@ -253,6 +257,8 @@ export interface BlockPlan {
     readonly parameters: readonly { readonly name: string; readonly from: boolean; readonly value: Lowered; readonly recorded: Lowered | undefined; readonly record: string }[] }[];
   /** A root `$match`: one root block per arm, and the arm index its tests choose. */
   readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
+  /** The `transitions` extension's document-level rules for this component's values. */
+  readonly transitions?: string;
 }
 
 /** A state's initial value that is not a plain literal, which the factory then evaluates instead. */
@@ -812,9 +818,11 @@ class Planner {
   private projecting: { block: Block; readonly definition: ComponentDefinition } | undefined;
   /** The next block planned is a consumer's <template slot> content. */
   private templateContent = false;
+  /** The `transitions` extension's rules, by the class each value's elements carry. */
+  readonly transitionRules = new Map<string, string>();
 
   constructor(readonly roots: readonly Root[], readonly definition: ComponentDefinition,
-    readonly invocations: ReadonlyMap<string, Invoked> = new Map()) {
+    readonly invocations: ReadonlyMap<string, Invoked> = new Map(), readonly transitions = false) {
     const types: TypeScope = { get: () => undefined };
     declareTypes(types, definition);
     this.scope = { roots, aliases: [], level: 0, types, computed: (index) => this.computedLowered(index) };
@@ -1013,6 +1021,31 @@ class Planner {
     return block.sites.length - 1;
   }
 
+  /**
+   * The `transitions` extension: the element's name and class, as style bindings that also apply
+   * when it hydrates, and the rules that animate its class.
+   */
+  transition(block: Block, transition: ElementTransition, path: readonly number[], scope: Scope): void {
+    const source = this.definition.source.file;
+    const location = transition.line === undefined || transition.column === undefined ? undefined : { line: transition.line, column: transition.column };
+    if (!this.transitions) {
+      fail("HT024", `\`$transition\` and \`$transition-name\` use the \`${TRANSITIONS_EXTENSION}\` extension, which this build does not enable. Enable it with the html-next Vite plugin's \`extensions: ["${TRANSITIONS_EXTENSION}"]\` option.`, source, location);
+    }
+    const timing = parseTransitionValue(transition.value ?? "", source, location);
+    const cls = transitionClass(timing);
+    if (!this.transitionRules.has(cls)) this.transitionRules.set(cls, transitionCss(timing, cls));
+    const site = this.site(block, path);
+    block.bindings.push({ site, kind: "style", name: "view-transition-class", expression: none("transition-class", JSON.stringify(cls)), initial: "undefined" });
+    let name = none("transition-name", JSON.stringify("match-element"));
+    if (transition.namePlan !== undefined) {
+      const value = this.checked(transition.namePlan, scope);
+      // A nonconforming name falls back to the element's own identity rather than leaving the last one.
+      name = { ...value, source: `transitionName(${value.source})`, fails: false };
+    }
+    block.bindings.push({ site, kind: "style", name: "view-transition-name", expression: name, initial: "undefined" });
+    block.transitions = true;
+  }
+
   element(block: Block, node: ElementNode, path: readonly number[], scope: Scope, root: boolean, parentSvg: boolean): unknown[] | 5 {
     if (EXCLUDED.has(node.name)) unreachable("a <template> without a flow renders as its content");
     // A component the graph compiles renders through its factory; any other custom element is an
@@ -1026,6 +1059,7 @@ class Planner {
     for (const event of node.events ?? []) {
       block.events.push({ site: this.site(block, path), name: event.name, handler: this.handler(event.handler).name, modifiers: event.modifiers });
     }
+    if (node.transition !== undefined) this.transition(block, node.transition, path, scope);
     const literals = node.attributes.filter((attribute) => attribute.kind === "literal");
     const svg = parentSvg || node.name === "svg";
     const literal = (name: string): string | undefined =>
@@ -1397,7 +1431,7 @@ class Planner {
  * Plans a component for direct-extend emission, or returns undefined when it uses a feature the
  * subset does not cover yet (the caller keeps the general-runtime fallback).
  */
-export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>): BlockPlan {
+export function blockPlan(definition: ComponentDefinition, invocations?: ReadonlyMap<string, Invoked>, transitions = false): BlockPlan {
     const arms = rootArms(definition.template);
     // A real element's `$match` keeps the element and switches its content, as live's `elementMatchRoot`.
     const flow = arms === undefined ? definition.template.flow : undefined;
@@ -1406,7 +1440,7 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
     // A root `$with` names a value for the whole template; it is not the controller's state.
     const roots = [...compileRoots(definition), ...flow?.kind === "with"
       ? [{ name: flow.alias, type: "?" as const, initial: "null", alias: flow.expressionPlan ?? compileExpression(flow.expr) }] : []];
-    const planner = new Planner(roots, definition, invocations);
+    const planner = new Planner(roots, definition, invocations, transitions);
     // A root `$match` renders the arm its tests choose (read with `evalValue`, unchecked), each its own root.
     const nodes = (arms ?? [template]).map((arm) => { const { flow: _flow, ...body } = arm; return body; });
     const armBlocks = nodes.map((node) => planner.block(node, false, planner.scope, true, false));
@@ -1453,7 +1487,8 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
       computeds: roots.flatMap((item, index) => item.computed === undefined ? [] : [{ index, source: planner.computedLowered(index).source }]),
       states: roots.length - props - roots.filter((item) => item.computed !== undefined || item.context !== undefined).length, shown: roots.length - props, reads,
       aliased: roots.flatMap((item, index) => item.alias === undefined ? [] : [{ index, value: planner.checked(item.alias, planner.scope) }]),
-      ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } } };
+      ...select === undefined ? {} : { arms: { blocks: armBlocks, nodes, select } },
+      ...planner.transitionRules.size === 0 ? {} : { transitions: [...planner.transitionRules.values()].filter(Boolean).join("\n") } };
 }
 
 interface Trie {
@@ -1598,6 +1633,12 @@ export function emitBlocks(
     .flatMap((region) => region.kind === "each" ? selectors(region) : [])))];
   const field = (block: Block, site: number): string =>
     block.sites[site]!.length === 0 ? "r.n" : `r.a${site}`;
+  const participates = (block: Block): boolean => block.transitions === true ||
+    block.regions.some((region) => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates));
+  const participating = (region: Region): boolean => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates);
+  // What a scheduler's pending changes must touch to hold its flush for a transition.
+  const transitionMask = plan.transitions === undefined ? 0 : blocks.reduce((mask, block) => block.regions.reduce((inner, region) =>
+    !participating(region) ? inner : inner | (region.kind === "each" ? maskOf(region.list!) | NESTED : maskOf(region.test!)), mask), 0);
   /** Record fields for a block: sites the patch writes, last values, and region state. */
   const fields = (block: Block, sites: readonly string[]): string[] => {
     const written = new Set(block.bindings.map((binding) => binding.site));
@@ -1877,11 +1918,16 @@ export function emitBlocks(
           : region.kind === "with" ? `m${child}(d, t${index}${linked})`
           : `[${region.arms!.map((arm) => `m${arm.id}`).join(", ")}][t${index}](d, mv${linked})`;
         const show = region.kind === "if" ? `t${index}` : region.kind === "with" ? "true" : `t${index} >= 0`;
+        const shown = region.kind === "match" ? `(${body} === undefined ? -1 : ${body}.s)` : `(${body} !== undefined)`;
+        const marked = participating(region);
         const rebuild = [
+          ...marked && region.kind !== "with" ? [`      const vt${index} = ${shown};`] : [],
           ...([region.block, ...region.arms ?? []].some(disposable) ? [`      dispose(${body});`] : []),
           `      ${body} = undefined;`,
           `      clearRegion(r.a${region.site}, r.e${index});`,
           `      if (${show}) { ${body} = ${make};${region.kind === "match" ? ` ${body}.s = t${index};` : ""} r.e${index}.before(${body}.n); }`,
+          // A rebuild that keeps the same decision replaces nothing a transition should show.
+          ...!marked ? [] : region.kind === "with" ? ["      transitionChanged();"] : [`      if (vt${index} !== ${shown}) transitionChanged();`],
         ];
         const decide = region.recorded === undefined ? [] : [`    const ${region.recorded} = [];`];
         const changed = region.recorded === undefined ? test.overflow === undefined ? "true" : `c === -1${rootsWritten(test)}`
@@ -1914,9 +1960,11 @@ export function emitBlocks(
       // A nonconforming list leaves the rows as they are; a list inside a select re-applies its selection.
       const reselect = selectOf(block, region.site);
       const queue = reselect === undefined ? "" : ` queueMicrotask(r.c${reselect});`;
+      const rows = participating(region) ? [`const vt${index} = transitionRows(r.L${index}); `, ` transitionRowsChanged(r.L${index}, vt${index});`] : ["", ""];
       lines.push(list.fails || full !== undefined || reselect !== undefined
-        ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} } }`
-        : `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`);
+        ? `  if (${guard(maskOf(list) | NESTED | rekey)}) { ${rows[0]}const l = ${list.source}; ${list.fails ? "if (l !== NONCONFORMING) " : ""}{ ${apply("l")};${queue} }${rows[1]} }`
+        : rows[0] === "" ? `  if (${guard(maskOf(list) | NESTED)}) ${apply(list.source)};`
+        : `  if (${guard(maskOf(list) | NESTED)}) { ${rows[0]}${apply(list.source)};${rows[1]} }`);
       const outer = region.block.bindings.reduce((mask, binding) => mask |
         (selectorRoot(binding, region) < 0 ? outerOf(finalExpression(binding)) : 0), 0) | invocationOuter(region.block) | regionOuter(region.block);
       if (outer !== 0) lines.push(`  if (c !== -1 && c & ${outer}) r.L${index}.each(c, d);`);
@@ -2109,7 +2157,8 @@ export function emitBlocks(
   const update = plan.reads.length === 0 && aliased.length === 0 ? render
     : `((c, d) => { ${aliased.join(" ")}${plan.reads.length === 0 ? "" : " DU(c, d);"} ${render}(c, d); })`;
   const instance = provides || contextStart >= 0 || plan.reads.length > 0 || plan.arms !== undefined || propNames.length > 0 || slotted || plan.handlers.length > 0 ||
-    blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control"));
+    blocks.some((block) => block.refs.length > 0 || block.events.length > 0 || block.invocations.length > 0 || block.bindings.some((binding) => binding.kind === "control")) ||
+    transitionMask !== 0;
   const siteOf = (site: number): string => root.sites[site]!.length === 0 ? "element" : rootSites[site]!;
   body.push(
     ...(instance ? [`  const I = {${propNames.length > 0 ? " B " : ""}};`] : []),
@@ -2143,6 +2192,7 @@ export function emitBlocks(
     // A context provider tells its readers after each render.
     `  attachGeneratedController(element, S, v, ${provides ? `(c, d) => { ${update}(c, d); for (const f of I.R) f(c, d); }` : update}, ${definition.controller === undefined ? "undefined" : "C"}${
       channel || instance ? `, ${channel ? "X" : "undefined"}` : ""}${instance ? ", I" : ""});`,
+    ...transitionMask === 0 ? [] : [`  holdTransitions(I, ${transitionMask});`],
     ...plan.roots.flatMap((item, index) => item.context === undefined ? []
       : [`  readContext(I, X, ${index}, ${JSON.stringify(item.context.from)}, ${JSON.stringify(item.context.name)}, (d) => ${update}(${NESTED}, d));`]),
     ...plan.reads.map((read, at) => `  DR${at} = manageData(I, ${read.index}, DA[${at}], DF${at}, DS${at}, DT);`),
@@ -2249,6 +2299,8 @@ export function emitBlocks(
     return [`${JSON.stringify(declaration.name)}: [${type === undefined ? "0" : `detailCheck(${checkSource(type)})`}, ${declaration.bubbles}, ${declaration.composed}, ${declaration.cancelable}]`];
   });
   const shown = plan.roots.slice(0, plan.shown);
+  // The transitions extension's rules, registered once per document when the module loads.
+  const registration = plan.transitions === undefined || plan.transitions === "" ? "" : `transitionStyles(${JSON.stringify(plan.transitions)});`;
   const stateSpec = `const S = { n: ${JSON.stringify(shown.map((item) => item.name))}, t: [${shown.map((item) => compactSource(item.type)).join(",")}], f: import.meta.url, g: ${JSON.stringify(contract.tag)}${
     plan.states === plan.shown ? "" : `, k: ${plan.states}`}${events.length === 0 ? "" : `, d: { ${events.join(", ")} }, x: dispatchDeclared`}${
     blocks.some((block) => block.refs.some((ref) => ref.iterated)) ? ", z: iteratedRef" : ""}${plan.states === plan.shown ? "" : ", r: readonlyView"} };`;
@@ -2273,8 +2325,9 @@ export function emitBlocks(
     "RangedKeyedList", "RangedPositionalList", "RangedIndexedList", "scopedTemplate", "touches", "readContext", "manageData", "dataHandles", "ABSENT", "bindRootControl", "undeclared", "readonlyView", "placed",
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
-    "checkUnknown", "boundFailures"]
-    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}`));
+    "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
+    "transitionStyles"]
+    .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;
   const specs = blocks.flatMap((block) => built(block) && block.spec !== 5 ? [`const T${block.id} = ${JSON.stringify(block.spec)};`] : []);
@@ -2291,6 +2344,7 @@ export function emitBlocks(
     ...(definition.controller === undefined ? [] : [`import * as controller from ${JSON.stringify(definition.controller)};`]),
     `import "../styles/${contract.tag}.css";`,
     "",
+    ...registration === "" ? [] : [registration],
     ...specs,
     ...(prototypes.length === 0 ? [] : [`let ${prototypes.join(", ")};`]),
     // A fresh row's first patch has nothing written yet.

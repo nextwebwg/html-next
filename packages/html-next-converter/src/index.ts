@@ -39,6 +39,7 @@ import {
   type ComponentGraph,
   type TemplateNode,
   type GeneratedArtifact,
+  transitionElements,
 } from "@nextwebwg/html-next";
 
 export type FrameworkTarget = "vue" | "react" | "svelte";
@@ -377,6 +378,16 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     seenEntries.add(entry);
   }
   const graph = await loadNodeComponents(entries, { baseURL: pathToFileURL(`${projectRoot}${sep}`).href, collectDiagnostics });
+  // Only the native Vite build builds the `transitions` extension; conversion leaves its directives out.
+  const unsupported: HtmlDiagnostic[] = [...graph.nodes.values()].flatMap(({ definition }) => {
+    const [first] = transitionElements(definition);
+    if (first === undefined) return [];
+    return [{
+      code: "HT024", severity: "warning" as const, source: definition.source.file,
+      message: `\`$transition\` and \`$transition-name\` use the \`transitions\` extension, which ${options.target} conversion does not support; \`${definition.contract.tag}\` converts without animation.`,
+      ...first.line === undefined || first.column === undefined ? {} : { line: first.line, column: first.column },
+    }];
+  });
   const sourceFiles = new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)));
   const pathsByTag = new Map([...graph.nodes.values()].map((node) => [
     node.definition.contract.tag,
@@ -537,7 +548,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       }));
     } catch (error) { recover(error); }
   }
-  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...diagnostics]);
+  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...unsupported, ...diagnostics]);
 
   if (options.target === "vue" && neededHelpers.has("host")) {
     claim(vueHostArtifact(), "helper");
@@ -648,6 +659,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
     }),
     components: Object.freeze(manifestComponents),
   });
-  for (const warning of graph.warnings ?? []) options.onWarning?.(warning);
+  for (const warning of [...graph.warnings ?? [], ...unsupported]) options.onWarning?.(warning);
   return { manifest, artifacts: planned.map(({ artifact }) => artifact) };
 }

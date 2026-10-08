@@ -353,7 +353,27 @@ function installComponentStyles(
   return style;
 }
 
+/**
+ * The live runtime does not build the `transitions` extension, so its directives do nothing here.
+ * It says so once per definition, and only where a browser could have played the animation.
+ */
+const warnedTransitions = new WeakSet<ComponentDefinition>();
+
+function warnUnsupportedTransitions(definition: ComponentDefinition): void {
+  if (warnedTransitions.has(definition)) return;
+  warnedTransitions.add(definition);
+  if (typeof document === "undefined" || typeof document.startViewTransition !== "function") return;
+  const uses = (node: TemplateNode): boolean => node.kind === "element"
+    ? node.transition !== undefined || node.children.some(uses)
+    : node.kind === "slot" && (node.fallback ?? []).some(uses);
+  if (!uses(definition.template)) return;
+  console.warn(`${definition.source.file}: HT024: \`$transition\` and \`$transition-name\` use the \`transitions\` extension, ` +
+    `which the live runtime does not support; \`${definition.contract.tag}\` renders without animation. ` +
+    "Build it with the html-next Vite plugin's `extensions: [\"transitions\"]` option to animate it.");
+}
+
 function registerDefinition(registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
+  warnUnsupportedTransitions(definition.definition);
   registry.definitions.set(tag, definition);
   if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
 }
