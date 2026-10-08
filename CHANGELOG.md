@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.37
+
+- The `html-next` and `html-next-convert` commands run when started through their installed `node_modules/.bin` link, as `npx`, package scripts and direct calls do on macOS and Linux. Earlier releases exited there without output or files.
+
 ## 1.0.0-alpha.36
 
 - `bind:` writes through a `$each`, `$with`, or `$match` alias of a state path, as the proposal specifies. `<div $with="$draft.owner as owner"><input bind:value="owner.name">` writes `draft.owner.name`, and `<li $each="row of $rows"><input bind:value="row.label">` writes that row's `label`, in the live runtime, compiled output, and Vue, React and Svelte. An item of a `$where`, `$sort`, or `$limit` list, and an outer loop's item written from an inner loop when the outer loop names no index, are `HT005` with the reason; name the outer loop's index (`row, i of $rows`) to write through it. Replacing a whole loop item (`bind:value="tag"` over a list of strings) is also `HT005` for now; bind one of its fields. Compiled output writes a row's field through the row's item, so no row has to keep its position for it. A `$with` alias that shares a state's name no longer writes that state.

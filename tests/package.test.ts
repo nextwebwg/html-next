@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,13 @@ function pack(packageDirectory: string): string {
 
   expect(packed).toBeDefined();
   return isAbsolute(packed!) ? packed! : join(workspace, packed!);
+}
+
+// Runs an installed bin the way a consumer does: through npm's node_modules/.bin link (a command shim on Windows).
+function runBin(consumer: string, name: string, args: readonly string[] = []): string {
+  const bin = join(consumer, "node_modules/.bin", useCommandShell ? `${name}.cmd` : name);
+  if (!useCommandShell) expect(lstatSync(bin).isSymbolicLink()).toBe(true);
+  return execFileSync(bin, args, { cwd: consumer, encoding: "utf8", shell: useCommandShell });
 }
 
 function specifier(path: typeof publicExports[number]): string {
@@ -187,7 +194,12 @@ describe("workspace package contracts", () => {
         { cwd: consumer, encoding: "utf8" });
       expect(JSON.parse(output)).toEqual({ diagnostics: [] });
     }
+    expect(JSON.parse(runBin(consumer, "html-next-check", ["controls.html", "--json"]))).toEqual({ diagnostics: [] });
     expect(readdirSync(consumer, { recursive: true }).map(String).sort()).toEqual(filesBeforeCheck);
+    runBin(consumer, "html-next", ["build", "controls.html", "--out-dir", "bin-build"]);
+    expect(existsSync(join(consumer, "bin-build/vanilla/UiLabel.js"))).toBe(true);
+    runBin(consumer, "html-next-convert", ["vue", "controls.html", "--mode", "library", "--out-dir", "bin-vue"]);
+    expect(existsSync(join(consumer, "bin-vue/vue/UiLabel.vue"))).toBe(true);
     const invalid = join(consumer, "invalid.html");
     writeFileSync(invalid, '<template component="ui-invalid">\n  <ui-missing></ui-missing>\n</template>');
     const failedCheck = spawnSync(process.execPath, [checkCli, "invalid.html", "--json"], { cwd: consumer, encoding: "utf8" });
@@ -239,8 +251,7 @@ describe("workspace package contracts", () => {
     manifest.dependencies["@example/source-controls"] = "1.0.0";
     writeFileSync(join(consumer, "package.json"), JSON.stringify(manifest));
     writeFileSync(join(consumer, "vite.config.mjs"), `import htmlNext from "@nextwebwg/html-next-unplugin/vite"; import react from "@vitejs/plugin-react"; export default { plugins: [htmlNext({ target: "react" }), react()] };`);
-    const cli = join(consumer, "node_modules/@nextwebwg/html-next-unplugin/dist/cli.js");
-    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    runBin(consumer, "html-next-sync");
     expect(readFileSync(join(consumer, "src/html-next.d.ts"), "utf8")).toContain('declare module "@example/source-controls"');
     writeFileSync(join(consumer, "src/main.tsx"), 'import { UiLabel } from "@example/source-controls"; export const label = <UiLabel label="Ready" />;');
     writeFileSync(join(consumer, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true,
@@ -256,7 +267,7 @@ describe("workspace package contracts", () => {
     const libraryManifest = JSON.parse(readFileSync(join(library, "package.json"), "utf8")) as { exports: Record<string, unknown> };
     libraryManifest.exports["."] = { "html-next": "./components/" };
     writeFileSync(join(library, "package.json"), JSON.stringify(libraryManifest));
-    execFileSync(process.execPath, [cli], { cwd: consumer, encoding: "utf8" });
+    runBin(consumer, "html-next-sync");
     execFileSync(process.execPath, [tsc, "-p", "tsconfig.json"], { cwd: consumer, encoding: "utf8" });
     // The packed adapter also supports zero-config native consumption of the same folder.
     // Model strict dependency installation: the app has no direct core dependency.
@@ -305,7 +316,7 @@ describe("workspace package contracts", () => {
     writeFileSync(join(consumer, "app/pages/01-index.html"), '<meta name="htmlkit:page" content="packed-page"><template component="packed-label"><title>Helper default</title><strong>Packaged helper</strong></template><template component="packed-page"><title $value="$label"></title><defs><prop name="label" type="string" required>Label</prop></defs><section><h1 $value="$label"></h1><packed-label></packed-label></section></template>');
     writeFileSync(join(consumer, "app/pages/01-index.server.ts"), 'export const load = () => ({ props: { label: "Installed platform" } });');
     const installed = join(consumer, "node_modules/@nextwebwg/htmlkit");
-    const output = execFileSync(process.execPath, [join(installed, "dist/cli.js"), "build"], { cwd: consumer, encoding: "utf8" });
+    const output = runBin(consumer, "htmlkit", ["build"]);
     expect(output).toContain("Generated 1 pages");
     const html = readFileSync(join(consumer, "dist/index.html"), "utf8");
     expect(html).toContain("Installed platform");
