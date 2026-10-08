@@ -211,6 +211,30 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(mixed.map(({ code, severity, line }) => [code, severity, line]), [["HT022", "warning", 4], ["HT003", "error", 6]]);
   });
 
+  it("reports the transitions extension as each delivery mode supports it", async () => {
+    const root = await fixture();
+    const source = (value: string) => `<template component="x-app" status="early" summary="App.">
+  <defs><state name="open" type="boolean" value="false"></state></defs>
+  <main>
+    <aside $if="$open" $transition="${value}">Panel</aside>
+  </main>
+</template>`;
+    await writeFile(join(root, "app.html"), source("fly 200ms"));
+    const off = await checkHtmlNext({ root, entries: ["app.html"], mode: "application" });
+    assert.deepEqual(off.map(({ code, severity, line }) => [code, severity, line]), [["HT024", "error", 4]]);
+    assert.match(off[0]!.message, /extensions: \["transitions"\]/);
+    assert.deepEqual(await checkHtmlNext({ root, entries: ["app.html"], mode: "application", extensions: ["transitions"] }), []);
+    for (const target of ["vue", "react", "svelte"] as const) {
+      const converted = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
+      assert.deepEqual(converted.map(({ code, severity, line }) => [code, severity, line]), [["HT024", "warning", 4]], target);
+    }
+    const unknown = await checkHtmlNext({ root, entries: ["app.html"], extensions: ["sparkles"] });
+    assert.deepEqual(unknown.map(({ code }) => code), ["HN013"]);
+    await writeFile(join(root, "app.html"), source("fly 200"));
+    const malformed = await checkHtmlNext({ root, entries: ["app.html"], extensions: ["transitions"] });
+    assert.deepEqual(malformed.map(({ code, line }) => [code, line]), [["HT025", 4]]);
+  });
+
   it("rejects operational failures rather than reporting a clean check", async () => {
     const root = await fixture();
     const diagnostics = await checkHtmlNext({ entries: ["missing.html"], root });
