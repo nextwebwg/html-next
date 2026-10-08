@@ -5,7 +5,7 @@ import { extname, join, resolve } from "node:path";
 import { createServer, isRunnableDevEnvironment } from "vite";
 
 import { createApplication } from "./application.js";
-import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
+import { browserPlugin, browserSources, stylesheetSources } from "./browser.js";
 import { configure, HtmlKitError, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
@@ -117,7 +117,7 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
       if (page.status === 200 && !pathname.endsWith("/")) { redirect(response, pathname); return; }
       const graphId = createHash("sha256").update(page.components.map(component => component.definition.source.file).join("\0")).digest("hex").slice(0, 16);
       const id = `virtual:htmlkit/${graphId}`;
-      sources.set(id, browserSource(page.components, config.base));
+      for (const [module, source] of browserSources(page.components, config.base, id)) sources.set(module, source);
       const styles = stylesheetSources(page.components);
       for (const [id, css] of styles) sources.set(id, css);
       const assets = [...styles.keys()].map(id => `<link rel="stylesheet" href="${escapeHTML(config.base + "@fs/" + id)}">`).join("") +

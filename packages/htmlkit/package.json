@@ -25,7 +25,8 @@
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "build:docs-proof": "tsx examples/docs/build.ts"
+    "build:docs-proof": "tsx examples/docs/build.ts",
+    "measure:delivery": "tsx scripts/measure-delivery.ts"
   },
   "dependencies": {
     "@nextwebwg/html-next": "workspace:*",

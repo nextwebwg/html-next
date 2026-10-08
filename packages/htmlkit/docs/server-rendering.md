@@ -63,8 +63,8 @@ Titles, descriptions, and native metadata attributes are escaped by the document
 bindings reuse HTML Next's parser and renderer through inert binding carriers, since actual head
 elements are forbidden in component bodies. Only declared props enter that scope: browser reads,
 controller execution, and mutable browser state do not become server head dependencies.
-Browser entries import controllers
-and parsed definitions, never server loaders or their imports. Authentication/session values must
+Browser entries import the page's compiled
+components and their controllers, never server loaders or their imports. Authentication/session values must
 stay in private loader data unless deliberately reduced to public presentation values.
 
 Tests for the future adapter must prove two concurrent requests with distinct cookies and params
