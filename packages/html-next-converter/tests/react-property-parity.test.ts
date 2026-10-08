@@ -68,6 +68,9 @@ async function behaviorSnapshot(page: Page) {
 }
 
 async function snapshot(page: Page) {
+  // A click leaves the pointer over its button, and WebKit can keep or drop that hover after the
+  // update moves the button. The viewport origin is in the body's margin, outside the section.
+  await page.mouse.move(0, 0);
   return {
     behavior: await behaviorSnapshot(page),
     pixels: await page.locator("section").screenshot({ animations: "disabled" }),
