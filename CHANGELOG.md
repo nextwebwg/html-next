@@ -2,7 +2,10 @@
 
 ## 1.0.0-alpha.36
 
+### Changed
+
 - HTMLKit has a guide at [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/), authored in `packages/htmlkit/docs/guide`: routes and layouts, loaders and browser delivery, ordered routes and navigation, and configuration. The package README now links to it and states the supported Node range, `>=22.22.2 <23 || >=24.15 <25`.
+- A new guide page, Versions and stability, says that alpha releases follow the proposal's live draft and may break components, sets out what 1.0 will promise within a major version, and shows how a library declares the tools versions it supports (`peerDependencies` today; the planned `htmlNext.snapshot` and `htmlNext.extensions` fields) and how extensions will be enabled. The READMEs, the library publishing guide, and the release mechanics link to it.
 
 ## 1.0.0-alpha.35
 

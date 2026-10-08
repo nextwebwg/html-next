@@ -25,3 +25,14 @@ Confirm all four `latest` dist-tags after npm finishes processing the uploads.
 A new package name needs a manual first publish and npm trusted-publisher setup before it can
 join the workflow. An existing npm version cannot be replaced, so a correction uses a new shared
 version for all four packages.
+
+## Versions and snapshots
+
+Alpha releases follow the proposal's live draft, and any of them may break a component; list each
+break under **Breaking** in the changelog.
+
+From 1.0, a major version implements one dated snapshot of the proposal. Name that snapshot in the
+major's changelog heading and in [Versions and stability](../../../docs/guide/versions.md). Within a
+major, no release may break a component that builds on an earlier release of that major: a
+breaking change waits for the next major, and the previous major's last minor release warns about
+each construct it will change.
