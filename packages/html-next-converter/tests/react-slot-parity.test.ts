@@ -22,7 +22,7 @@ const panel = `<template component="x-panel" status="early" summary="Panel."><se
 const app = `<template component="x-app" status="early" summary="App."><defs>
   <state name="title" value="Title"></state>
   <handler name="change"><set name="title" value="Changed"></set></handler>
-</defs><article><x-panel><h2 slot="title" $value="title"></h2><p>Body</p></x-panel>
+</defs><article><x-panel><h2 slot="title" $value="$title"></h2><p>Body</p></x-panel>
   <x-panel></x-panel><button type="button" on:click="change">Change</button></article></template>`;
 
 async function snapshot(page: Page) {

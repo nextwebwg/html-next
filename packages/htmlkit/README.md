@@ -111,15 +111,15 @@ the existing HTML Next binding syntax:
 
 ```html
 <template component="page-item">
-  <title $value="label"></title>
-  <meta name="description" from:content="description">
-  <link rel="canonical" from:href="canonicalURL">
+  <title $value="$label"></title>
+  <meta name="description" from:content="$description">
+  <link rel="canonical" from:href="$canonicalURL">
   <defs>
     <prop name="label" type="string" required>Item label</prop>
     <prop name="description" type="string" required>Description</prop>
     <prop name="canonicalURL" type="string" required>Canonical URL</prop>
   </defs>
-  <article><h1 $value="label"></h1></article>
+  <article><h1 $value="$label"></h1></article>
 </template>
 ```
 
@@ -251,7 +251,7 @@ export async function load({ navigation }: LoadContext) {
     <prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop>
   </defs>
   <main>
-    <htmlkit-navigation from:items="navigation" label="Guide"></htmlkit-navigation>
+    <htmlkit-navigation from:items="$navigation" label="Guide"></htmlkit-navigation>
     <slot name="page"></slot>
   </main>
 </template>

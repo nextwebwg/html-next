@@ -12,14 +12,14 @@ import { sveltePlugin } from "./helpers/svelte.js";
 
 const receiver = `<template component="x-slot-host" controller="./slots.js"><defs>
   <state name="item" value="Ada"></state><handler name="rename"><set name="item" value="Grace"></set></handler>
-</defs><section><button on:click="rename">Rename</button><slot name="row" from:item="item"></slot><slot name="shown"></slot><slot></slot></section><style>:host { display: block; width: 240px; font: 16px/24px Arial, sans-serif; }</style></template>`;
+</defs><section><button on:click="rename">Rename</button><slot name="row" from:item="$item"></slot><slot name="shown"></slot><slot></slot></section><style>:host { display: block; width: 240px; font: 16px/24px Arial, sans-serif; }</style></template>`;
 const owner = `<link rel="component" href="./receiver.html"><template component="x-slot-owner"><defs>
   <state name="label" value="Ready"></state><handler name="change"><set name="label" value="Updated"></set></handler><handler name="clear-null"><set name="label" expr:value="null"></set></handler><handler name="clear-false"><set name="label" expr:value="false"></set></handler>
 </defs><main><button on:click="change">Change content</button><button data-clear-null on:click="clear-null">Clear to null</button><button data-clear-false on:click="clear-false">Clear to false</button>
-  <x-slot-host id="case" from:constructor="label" from:__proto__="label"><template slot="row"><p from:data-name="item" $value="item"></p></template>
-    <span slot="unused" data-original="unused" $value="label"></span><span data-original="default" $value="label"></span><button slot="" data-default-button $value="label"></button>
+  <x-slot-host id="case" from:constructor="$label" from:__proto__="$label"><template slot="row"><p from:data-name="$item" $value="$item"></p></template>
+    <span slot="unused" data-original="unused" $value="$label"></span><span data-original="default" $value="$label"></span><button slot="" data-default-button $value="$label"></button>
     <x-detached-projection slot="nested"></x-detached-projection>
-    <button slot="shown" $value="label"></button>
+    <button slot="shown" $value="$label"></button>
   </x-slot-host></main></template><template component="x-detached-projection"><aside>Nested projection</aside></template>`;
 const controller = `function connect(host) {
   window.slotHost = host;

@@ -68,7 +68,7 @@ describe("generateComponent", () => {
     const definition = parseComponent(`<template component="x-bounded"><defs>
       <prop name="amount" type="number" min="1" max="10">Amount.</prop>
       <prop name="label" type="string" minlength="2" maxlength="8">Label.</prop>
-    </defs><div from:data-amount="amount" from:data-label="label"></div></template>`);
+    </defs><div from:data-amount="$amount" from:data-label="$label"></div></template>`);
     const artifacts = generateComponent(definition);
     const vanilla = artifacts.find((artifact) => artifact.path === "vanilla/XBounded.js")!.content;
     assert.match(vanilla, /"min":1,"max":10/);
@@ -128,10 +128,10 @@ describe("generateComponent", () => {
       <defs>
         <state type="list(string)" name="parts" value="['a', 'b']"></state>
         <state type="string" name="separator" value=", "></state>
-        <computed name="label" from="join(parts, separator)"></computed>
+        <computed name="label" from="join($parts, $separator)"></computed>
         <handler name="increment"><set name="separator" value=" / "></set></handler>
       </defs>
-      <button type="button" on:click="increment"><output $value="label"></output></button>
+      <button type="button" on:click="increment"><output $value="$label"></output></button>
     </template>`;
     const vanilla = generateComponent(parseComponent(source))
       .find((artifact) => artifact.path === "vanilla/ComputedLabel.js")?.content;
@@ -147,7 +147,7 @@ describe("generateComponent", () => {
     const reader = parseComponent(`<template component="x-step"><defs>` +
       `<prop name="index" type="number" required>Step index.</prop>` +
       `<context name="current" from="x-steps" as="activeStep"></context></defs>` +
-      `<li from:aria-current="activeStep = index ? 'step' : null"><slot></slot></li></template>`);
+      `<li from:aria-current="$activeStep = $index ? 'step' : null"><slot></slot></li></template>`);
     const artifacts = (definition: typeof provider) => new Map(generateComponent(definition).map((item) => [item.path, item.content]));
     const providerOutput = artifacts(provider);
     const readerOutput = artifacts(reader);
@@ -171,7 +171,7 @@ describe("generateComponent", () => {
 
   it("projects typed property bindings, boolean defaults, and escaped literal markup", () => {
     const definition = parseComponent(componentSource(
-      `<button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; \\{literal}<slot></slot></button>`,
+      `<button title="A &amp; &quot;quote&quot;" .formAction="$destination" from:disabled="$disabled" from:data-selected="$selected">Text &amp; \\{literal}<slot></slot></button>`,
     ));
     const byPath = new Map(generateComponent(definition).map((artifact) => [artifact.path, artifact.content]));
 

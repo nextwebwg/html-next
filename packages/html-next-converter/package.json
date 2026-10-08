@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-converter",
-  "version": "1.0.0-alpha.33",
+  "version": "1.0.0-alpha.34",
   "description": "Vue, React, and Svelte conversion for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",

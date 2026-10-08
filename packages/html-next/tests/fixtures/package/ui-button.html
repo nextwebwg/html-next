@@ -2,6 +2,6 @@
   <defs>
     <prop name="disabled" type="boolean" default="false">Disabled state.</prop>
   </defs>
-  <button type="button" from:disabled="disabled"><slot></slot></button>
+  <button type="button" from:disabled="$disabled"><slot></slot></button>
   <style>button { font: inherit; }</style>
 </template>

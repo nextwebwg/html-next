@@ -30,9 +30,9 @@ describe("checkHtmlNext", () => {
     <prop name="label" type="not-a-type">Label.</prop>
   </defs>
   <main>
-    <output $value="missingOne"></output>
-    <output $value="missingTwo"></output>
-    <output $value="age"></output>
+    <output $value="$missingOne"></output>
+    <output $value="$missingTwo"></output>
+    <output $value="$age"></output>
   </main>
 </template>`);
     const before = await readdir(root);
@@ -48,7 +48,7 @@ describe("checkHtmlNext", () => {
     await writeFile(join(root, "app.html"), '<link rel="component" href="./shared.html"><link rel="component" href="./other.html"><template component="x-app"><main></main></template>');
     await writeFile(join(root, "shared.html"), `<template component="x-one"><defs><prop name="a" type="integer" default="no">A.</prop></defs><main></main></template>
 <template component="x-two"><defs><prop name="b" type="boolean" default="no">B.</prop></defs><main></main></template>`);
-    await writeFile(join(root, "other.html"), '<link rel="component" href="./shared.html"><template component="x-other"><output $value="unknown"></output></template>');
+    await writeFile(join(root, "other.html"), '<link rel="component" href="./shared.html"><template component="x-other"><output $value="$unknown"></output></template>');
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html", "other.html"] });
     assert.equal(diagnostics.length, 3);
     assert.equal(diagnostics.filter(({ code }) => code === "HC015").length, 2);
@@ -61,9 +61,9 @@ describe("checkHtmlNext", () => {
   <state name="age" type="integer" value="wrong"></state>
   <state name="enabled" type="boolean" value="wrong"></state>
   <state name="unknown" type="not-a-type"></state>
-  <computed name="first" from="missingOne"></computed>
-  <computed name="second" from="missingTwo"></computed>
-</defs><main><output $value="age"></output></main></template>`);
+  <computed name="first" from="$missingOne"></computed>
+  <computed name="second" from="$missingTwo"></computed>
+</defs><main><output $value="$age"></output></main></template>`);
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html"] });
     assert.deepEqual(diagnostics.map(({ code, line }) => [code, line]), [
       ["HC013", 2], ["HC013", 3], ["HC013", 4], ["HT003", 5], ["HT003", 6],
@@ -91,8 +91,8 @@ describe("checkHtmlNext", () => {
 
   it("checks dependencies even when their importing component has a parse error", async () => {
     const root = await fixture();
-    await writeFile(join(root, "app.html"), '<link rel="component" href="./child.html"><template component="x-app"><output $value="unknownParent"></output></template>');
-    await writeFile(join(root, "child.html"), '<template component="x-child"><output $value="unknownChild"></output></template>');
+    await writeFile(join(root, "app.html"), '<link rel="component" href="./child.html"><template component="x-app"><output $value="$unknownParent"></output></template>');
+    await writeFile(join(root, "child.html"), '<template component="x-child"><output $value="$unknownChild"></output></template>');
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html"] });
     assert.deepEqual(diagnostics.map(({ code, source }) => [code, source?.split("/").at(-1)]), [["HT003", "app.html"], ["HT003", "child.html"]]);
   });
@@ -100,7 +100,7 @@ describe("checkHtmlNext", () => {
   it("does not report a broken match arm as an additional malformed match", async () => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), `<template component="x-app"><template $match>
-  <main $when="missing">First</main>
+  <main $when="$missing">First</main>
   <main $else>Last</main>
 </template></template>`);
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html"] });
@@ -112,7 +112,7 @@ describe("checkHtmlNext", () => {
     await writeFile(join(root, "app.html"), `<template component="x-app"><props>
   <prop name="age" type="integer" default="wrong">Age.</prop>
   <prop name="enabled" type="boolean" default="wrong">Enabled.</prop>
-</props><main><output $value="age" from:data-age="age"></output><output $value="enabled" from:data-enabled="enabled"></output></main></template>`);
+</props><main><output $value="$age" from:data-age="$age"></output><output $value="$enabled" from:data-enabled="$enabled"></output></main></template>`);
     const diagnostics = await checkHtmlNext({ root, entries: ["app.html"] });
     assert.deepEqual(diagnostics.map(({ code }) => code), ["HC015", "HC015"]);
   });
@@ -127,7 +127,7 @@ describe("checkHtmlNext", () => {
 
   it.each(["native", "vue", "react", "svelte"] as const)("checks %s without output or controller execution", async (target) => {
     const root = await fixture();
-    await writeFile(join(root, "card.html"), `<template component="x-card"><defs><prop name="label" type="string" default="Ready">Label.</prop></defs><output $value="label"></output></template>`);
+    await writeFile(join(root, "card.html"), `<template component="x-card"><defs><prop name="label" type="string" default="Ready">Label.</prop></defs><output $value="$label"></output></template>`);
     await writeFile(join(root, "app.html"), `<link rel="component" href="./card.html"><template component="x-app"><main><x-card></x-card></main></template>`);
     const before = await readdir(root, { recursive: true });
     assert.deepEqual(await checkHtmlNext({ target, entries: ["app.html"], mode: "application", root }), []);
@@ -171,7 +171,7 @@ describe("checkHtmlNext", () => {
   it("reports authored constraint errors in linked sources", async () => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), '<link rel="component" href="./child.html"><template component="x-app"><main></main></template>');
-    await writeFile(join(root, "child.html"), '<template component="x-child">\n  <defs>\n    <prop name="age" type="integer" min="soon">Age.</prop>\n  </defs>\n  <output $value="age"></output>\n</template>');
+    await writeFile(join(root, "child.html"), '<template component="x-child">\n  <defs>\n    <prop name="age" type="integer" min="soon">Age.</prop>\n  </defs>\n  <output $value="$age"></output>\n</template>');
     const diagnostics = await checkHtmlNext({ entries: ["app.html"], root });
     assert.equal(diagnostics[0]?.code, "HC013");
     assert.equal(diagnostics[0]?.line, 3);
@@ -181,7 +181,7 @@ describe("checkHtmlNext", () => {
 
   it("locates malformed expressions and invalid resource elements without adding fields to the AST", async () => {
     const root = await fixture();
-    await writeFile(join(root, "app.html"), '<template component="x-app">\n  <main>\n    <output $value="undeclared"></output>\n  </main>\n</template>');
+    await writeFile(join(root, "app.html"), '<template component="x-app">\n  <main>\n    <output $value="$undeclared"></output>\n  </main>\n</template>');
     const expression = await checkHtmlNext({ entries: ["app.html"], root });
     assert.equal(expression[0]?.code, "HT003");
     assert.equal(expression[0]?.line, 3);
@@ -191,6 +191,24 @@ describe("checkHtmlNext", () => {
     assert.equal(resource[0]?.code, "HT009");
     assert.equal(resource[0]?.line, 3);
     assert.equal(resource[0]?.column, 3);
+  });
+
+  it.each(["native", "vue", "react", "svelte"] as const)("warns when a bare %s keyword spells a name in scope, beside errors", async (target) => {
+    const root = await fixture();
+    const source = (extra: string) => `<template component="x-app" status="early" summary="App.">
+  <defs><state name="count" type="number" value="1"></state></defs>
+  <main>
+    <output from:title="count" from:data-mode="compact" $value="$count"></output>
+    <input type="number" bind:value="count">${extra}
+  </main>
+</template>`;
+    await writeFile(join(root, "app.html"), source(""));
+    const warnings = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
+    assert.deepEqual(warnings.map(({ code, severity, line }) => [code, severity, line]), [["HT022", "warning", 4]]);
+    assert.match(warnings[0]!.message, /`count` is a keyword, not a reference; did you mean `\$count`\?/);
+    await writeFile(join(root, "app.html"), source('\n    <output $value="$missing"></output>'));
+    const mixed = await checkHtmlNext({ target, root, entries: ["app.html"], mode: "application" });
+    assert.deepEqual(mixed.map(({ code, severity, line }) => [code, severity, line]), [["HT022", "warning", 4], ["HT003", "error", 6]]);
   });
 
   it("rejects operational failures rather than reporting a clean check", async () => {

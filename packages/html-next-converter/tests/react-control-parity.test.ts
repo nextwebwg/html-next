@@ -19,7 +19,7 @@ const source = `<template component="x-controls" status="early" summary="Control
   <state type="object" name="form" value="{ name: 'Ada', checked: false, choice: 'a', count: 1, tags: ['a'], note: 'Ready' }"></state>
   <state type="object" name="readOnly" value="{ text: 'Hold', checked: false, choice: 'a', note: 'Keep' }"></state>
   <state type="number" name="tick" value="0"></state>
-  <handler name="bump"><set name="tick" expr:value="tick + 1"></set></handler>
+  <handler name="bump"><set name="tick" expr:value="$tick + 1"></set></handler>
   <handler name="changeReadOnly"><set name="readOnly" expr:value="{ text: 'Next', checked: true, choice: 'b', note: 'Later' }"></set></handler>
 </defs><form><label>Name <input class="text" name="name" value="Seed" bind:value="form.name"></label>
   <label>Ready <input class="check" type="checkbox" name="ready" checked bind:checked="form.checked"></label>
@@ -27,12 +27,12 @@ const source = `<template component="x-controls" status="early" summary="Control
   <input class="number" type="number" name="count" value="3" bind:value="form.count">
   <select class="tags" name="tags" multiple bind:value="form.tags"><option value="a">A</option><option value="b" selected>B</option></select>
   <textarea class="note" name="note" bind:value="form.note">Draft</textarea>
-  <div class="properties"><input class="read-only-text" value="Authored" .value="readOnly.text">
-    <input class="read-only-check" type="checkbox" checked .checked="readOnly.checked">
-    <select class="read-only-choice" .value="readOnly.choice"><option value="a">A</option><option value="b" selected>B</option></select>
-    <select class="read-only-multiple" multiple .value="readOnly.choice"><option value="a">A</option><option value="b" selected>B</option></select>
-    <textarea class="read-only-note" .value="readOnly.note">Authored note</textarea></div>
-  <output $value="[form.name, form.checked, form.choice, form.count, form.tags, form.note, tick]"></output>
+  <div class="properties"><input class="read-only-text" value="Authored" .value="$readOnly.text">
+    <input class="read-only-check" type="checkbox" checked .checked="$readOnly.checked">
+    <select class="read-only-choice" .value="$readOnly.choice"><option value="a">A</option><option value="b" selected>B</option></select>
+    <select class="read-only-multiple" multiple .value="$readOnly.choice"><option value="a">A</option><option value="b" selected>B</option></select>
+    <textarea class="read-only-note" .value="$readOnly.note">Authored note</textarea></div>
+  <output $value="[$form.name, $form.checked, $form.choice, $form.count, $form.tags, $form.note, $tick]"></output>
   <button class="bump" type="button" on:click="bump">Bump</button>
   <button class="change-read-only" type="button" on:click="changeReadOnly">Change</button>
 </form><style>:host { display: block; padding: 8px; background: rgb(240, 245, 250); }

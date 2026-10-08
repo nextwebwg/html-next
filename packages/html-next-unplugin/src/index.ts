@@ -306,7 +306,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     dynamicBoundaries.set(boundary.tag, Object.freeze({ ...boundary }));
   }
   const invocations = collectInvocationEdges(graph.nodes, graph.tags, dynamicBoundaries, report);
-  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
+  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError([...graph.warnings ?? [], ...diagnostics]);
   const contextProviders = new Set(
     [...graph.nodes.values()].flatMap((node) =>
       (node.definition.declarations ?? [])
@@ -358,6 +358,8 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
       }));
     } catch (error) { recoverDiagnostic(error, report); }
   }
+  // Warnings exist only in check mode, after every phase has had its chance to report.
+  diagnostics.unshift(...graph.warnings ?? []);
   if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
 
   const publicEntries = graph.roots.map((url) => {
@@ -432,7 +434,7 @@ export type HtmlNextCheckOptions =
   | CheckConversionOptions;
 
 export interface HtmlNextCheckDiagnostic extends HtmlDiagnostic {
-  readonly severity: "error";
+  readonly severity: "error" | "warning";
 }
 
 /**
@@ -442,9 +444,11 @@ export interface HtmlNextCheckDiagnostic extends HtmlDiagnostic {
  */
 export async function checkHtmlNext(options: HtmlNextCheckOptions = {}): Promise<readonly HtmlNextCheckDiagnostic[]> {
   try {
-    if (options.target === "vue" || options.target === "react" || options.target === "svelte") await checkConversion(options);
-    else await compileGraph(options, true);
-    return Object.freeze([]);
+    const warnings: HtmlDiagnostic[] = [];
+    if (options.target === "vue" || options.target === "react" || options.target === "svelte") {
+      await checkConversion({ ...options, onWarning: (warning) => { warnings.push(warning); } });
+    } else await compileGraph(options, true);
+    return checkDiagnostics(warnings);
   } catch (error) {
     let diagnostic: HtmlDiagnostic;
     if (error instanceof HtmlDiagnosticAggregateError) return checkDiagnostics(error.diagnostics);
@@ -467,7 +471,7 @@ function checkDiagnostics(diagnostics: readonly HtmlDiagnostic[]): readonly Html
   return Object.freeze([...unique.values()].sort((left, right) =>
     (left.source ?? "").localeCompare(right.source ?? "") ||
     (left.line ?? 0) - (right.line ?? 0) || (left.column ?? 0) - (right.column ?? 0) || left.code.localeCompare(right.code)
-  ).map((diagnostic) => Object.freeze({ ...diagnostic, severity: "error" as const })));
+  ).map((diagnostic) => Object.freeze({ ...diagnostic, severity: diagnostic.severity ?? "error" })));
 }
 
 export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((options = {}, meta) => {

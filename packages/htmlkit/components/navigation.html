@@ -3,7 +3,7 @@
     <prop name="items" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Ordered concrete route links.</prop>
     <prop name="label" type="string" default="Navigation">Accessible navigation name.</prop>
   </defs>
-  <nav from:aria-label="label">
-    <ul><li $each="item of items" from:data-depth="item.depth"><a from:href="item.href" from:aria-current="item.current" $value="item.label"></a></li></ul>
+  <nav from:aria-label="$label">
+    <ul><li $each="item of $items" from:data-depth="$item.depth"><a from:href="$item.href" from:aria-current="$item.current" $value="$item.label"></a></li></ul>
   </nav>
 </template>

@@ -312,7 +312,7 @@ describe("generated lifecycle coordinator", () => {
     const definition = parseComponent(`<template component="x-action" status="early" summary="Button or link.">
   <defs><prop name="as" type="keyword" values="button, a" default="button">Native root.</prop></defs>
   <template $match>
-    <a $when="as = 'a'" href="/next"><slot></slot></a>
+    <a $when="$as = 'a'" href="/next"><slot></slot></a>
     <button $else type="button"><slot></slot></button>
   </template>
 </template>`, "https://example.test/x-action.html");

@@ -19,15 +19,15 @@ const panelBody = `<button type="button" class="expand" on:click="expand">Expand
   <button type="button" class="switch" on:click="switchRoot">Switch</button>
   <header><slot name="title"><h2>Untitled</h2></slot></header>
   <main><slot><p>Empty</p></slot></main>
-  <ul><li $each="row of rows" $key="row"><slot from:name="concat('row-', row)"><span class="missing">Missing</span></slot></li></ul>
-  <div class="extra" $if="open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
+  <ul><li $each="row of $rows" $key="$row"><slot from:name="concat('row-', $row)"><span class="missing">Missing</span></slot></li></ul>
+  <div class="extra" $if="$open"><slot name="extra"><em>Extra fallback</em></slot></div>`;
 const source = `<template component="x-slot-panel" status="early" summary="Slot parity."><defs>
   <state name="branch" type="keyword" value="section"></state>
   <state type="list(unknown)" name="rows" value="['a']"></state>
   <state type="boolean" name="open" value="false"></state>
   <handler name="expand"><set name="rows" expr:value="['a', 'b']"></set><set name="open" value="true"></set></handler>
   <handler name="switchRoot"><set name="branch" expr:value="'article'"></set></handler>
-</defs><template $match><article $when="branch = 'article'">${panelBody}</article><section $else>${panelBody}</section></template></template>`;
+</defs><template $match><article $when="$branch = 'article'">${panelBody}</article><section $else>${panelBody}</section></template></template>`;
 const invocation = `<x-slot-panel id="case"><h2 id="title-node" slot="title">Title</h2>
   <p id="body-node">Body</p><strong id="row-a" slot="row-a">A</strong>
   <b id="row-b" slot="row-b">B</b></x-slot-panel>`;

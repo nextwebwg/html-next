@@ -33,6 +33,8 @@ export interface ComponentGraph {
   readonly nodes: ReadonlyMap<string, ComponentGraphNode>;
   /** Component tags mapped to definition IDs. */
   readonly tags: ReadonlyMap<string, string>;
+  /** Check mode only: non-fatal diagnostics from a graph that otherwise loaded. */
+  readonly warnings?: readonly HtmlDiagnostic[];
 }
 
 export interface BuildGraphOptions {
@@ -177,7 +179,7 @@ export async function buildComponentGraph(
       }
     } catch (error) { recoverDiagnostic(error, report); }
   }
-  if (diagnostics.length > 0) throw new HtmlDiagnosticAggregateError(diagnostics);
+  if (diagnostics.some((diagnostic) => diagnostic.severity !== "warning")) throw new HtmlDiagnosticAggregateError(diagnostics);
 
   const nodeEntries: Array<readonly [string, ComponentGraphNode]> = [];
   for (const [id, draft] of Array.from(drafts).sort(byKey)) {
@@ -196,5 +198,6 @@ export async function buildComponentGraph(
     roots: Object.freeze(roots),
     nodes: new Map(nodeEntries),
     tags: new Map(Array.from(tags).sort(byKey)),
+    ...(diagnostics.length === 0 ? {} : { warnings: Object.freeze(diagnostics) }),
   });
 }

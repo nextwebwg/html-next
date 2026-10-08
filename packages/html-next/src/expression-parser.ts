@@ -232,7 +232,9 @@ export function parseExpression(source: string): ExpressionNode {
         }
         return { kind: "call", fn: name, args };
       }
-      return { kind: "id", name: name === "$$event" ? name : name.startsWith("$") ? name.slice(1) : name };
+      if (name === "$$event") return { kind: "id", name };
+      // `$name` reads a declaration; a bare name is a keyword literal, never a reference.
+      return name.startsWith("$") ? { kind: "id", name: name.slice(1) } : { kind: "literal", value: name, keyword: true };
     }
     throw new SyntaxError("Unexpected end of expression.");
   }

@@ -17,12 +17,12 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const provider = `<template component="x-steps" status="early" summary="Context provider."><defs>
   <state type="number" name="current" value="1"></state>
-  <handler name="next"><set name="current" expr:value="current + 1"></set></handler>
+  <handler name="next"><set name="current" expr:value="$current + 1"></set></handler>
 </defs><section><button type="button" on:click="next">Next</button><slot></slot></section></template>`;
 const reader = `<template component="x-step" status="early" summary="Context reader."><defs>
   <prop name="index" type="number" required>Step index.</prop>
   <context name="current" from="x-steps" as="activeStep"></context>
-</defs><p from:data-active="activeStep = index ? 'yes' : 'no'"><slot></slot></p></template>`;
+</defs><p from:data-active="$activeStep = $index ? 'yes' : 'no'"><slot></slot></p></template>`;
 const invocation = `<x-steps id="case"><x-step id="outer-one" index="1">Outer one</x-step>
   <x-step id="outer-two" index="2">Outer two</x-step>
   <x-steps id="inner"><x-step id="inner-one" index="1">Inner one</x-step>

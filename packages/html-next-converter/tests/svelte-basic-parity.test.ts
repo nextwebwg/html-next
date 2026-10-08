@@ -18,9 +18,9 @@ const fixtures = [
     name: "counter",
     source: `<template component="x-counter" status="early" summary="Counter."><defs>
       <state name="count" type="integer" value="0"></state>
-      <computed name="double" from="count * 2"></computed>
-      <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-    </defs><button type="button" on:click="increment" from:data-double="double" $value="count"></button>
+      <computed name="double" from="$count * 2"></computed>
+      <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+    </defs><button type="button" on:click="increment" from:data-double="$double" $value="$count"></button>
     <style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }</style></template>`,
     tag: "x-counter",
     root: "button",
@@ -38,7 +38,7 @@ const fixtures = [
       <state name="rows" type="list(integer)" value="[3, 1, 2]"></state>
       <handler name="change"><set name="rows" expr:value="[2, 4, 1]"></set></handler>
     </defs><div><button type="button" on:click="change">Change</button><ul>
-      <li $each="row, i of rows" $key="row" $sort="row" from:data-i="i" from:data-count="loop.count" $value="row"></li>
+      <li $each="row, i of $rows" $key="$row" $sort="row" from:data-i="$i" from:data-count="$loop.count" $value="$row"></li>
     </ul></div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }</style></template>`,
     tag: "x-list",
     root: "div",
@@ -55,9 +55,9 @@ const fixtures = [
     name: "style",
     source: `<template component="x-style" status="early" summary="Reactive style."><defs>
       <state name="open" type="boolean" value="false"></state>
-      <handler name="toggle"><set name="open" expr:value="open = false"></set></handler>
-    </defs><div class="base" class:open="open" style:--tone="open ? 'green' : 'red'">
-      <button type="button" on:click="toggle">Toggle</button><output $value="open ? 'Open' : 'Closed'"></output>
+      <handler name="toggle"><set name="open" expr:value="$open = false"></set></handler>
+    </defs><div class="base" class:open="$open" style:--tone="$open ? 'green' : 'red'">
+      <button type="button" on:click="toggle">Toggle</button><output $value="$open ? 'Open' : 'Closed'"></output>
     </div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; background: var(--tone); }
       :host-state([open]) { border-color: red; }</style></template>`,
     tag: "x-style",

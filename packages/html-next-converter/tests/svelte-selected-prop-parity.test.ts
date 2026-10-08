@@ -15,7 +15,7 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-selected" status="early" summary="Selected value."><defs>
   <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
   <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-</defs><output from:data-kind="kind" from:data-value="value" $value="value"></output></template>`;
+</defs><output from:data-kind="$kind" from:data-value="$value" $value="$value"></output></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, unknown>; readonly pixels: Buffer }> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));

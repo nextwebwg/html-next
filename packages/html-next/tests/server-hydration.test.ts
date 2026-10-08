@@ -22,26 +22,26 @@ const definitions = [
     <prop name="label" type="string" default="Visits">Label.</prop>
     <state name="count" type="number" value="0"></state>
     <state name="open" type="boolean" value="false"></state>
-    <handler name="increment"><set name="count" expr:value="count + 1"></set><set name="open" expr:value="true"></set></handler>
-    </defs><section from:data-label="label"><button type="button" on:click="increment"><span $value="count"></span></button>
+    <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="open" expr:value="true"></set></handler>
+    </defs><section from:data-label="$label"><button type="button" on:click="increment"><span $value="$count"></span></button>
     <header><slot name="title">Untitled</slot></header><p>Hello <slot></slot>!</p>
-    <aside $if="open"><slot name="extra">Fallback</slot></aside></section></template>`,
+    <aside $if="$open"><slot name="extra">Fallback</slot></aside></section></template>`,
   `<template component="ssr-list"><defs>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
     </defs><section><button type="button" on:click="change">Change</button>
-    <ul><li $each="row of rows" $key="row"><b $value="row"></b></li></ul></section></template>`,
+    <ul><li $each="row of $rows" $key="$row"><b $value="$row"></b></li></ul></section></template>`,
   `<template component="ssr-reader"><defs><context name="current" from="ssr-provider"></context></defs>
-    <output $value="current"></output></template>`,
+    <output $value="$current"></output></template>`,
   `<template component="ssr-bound-button"><defs><prop name="count" type="number" default="0">Count</prop></defs>
-    <template $match><button $when="count < 6" type="button"><slot></slot><span $value="count"></span></button>
-    <a $else href="#kept"><slot></slot><span $value="count"></span></a></template></template>`,
+    <template $match><button $when="$count < 6" type="button"><slot></slot><span $value="$count"></span></button>
+    <a $else href="#kept"><slot></slot><span $value="$count"></span></a></template></template>`,
   `<template component="ssr-bound-parent"><defs><state name="count" type="number" value="0"></state>
-    <handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-    <section><ssr-bound-button $ref="action" from:count="count" from:aria-expanded="count > 4"
-    class:active="count > 4" style:opacity="count > 4 ? '0.5' : '1'" on:click="increment"><strong>Next</strong></ssr-bound-button></section></template>`,
+    <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+    <section><ssr-bound-button $ref="action" from:count="$count" from:aria-expanded="$count > 4"
+    class:active="$count > 4" style:opacity="$count > 4 ? '0.5' : '1'" on:click="increment"><strong>Next</strong></ssr-bound-button></section></template>`,
   `<template component="ssr-provider"><defs><state name="current" type="number" value="1"></state>
-    <handler name="increment"><set name="current" expr:value="current + 1"></set></handler></defs>
+    <handler name="increment"><set name="current" expr:value="$current + 1"></set></handler></defs>
     <section><button type="button" on:click="increment">Next</button><ssr-reader></ssr-reader><slot></slot></section></template>`,
   `<template component="ssr-control"><defs><state name="text" type="string" value="'initial'"></state></defs>
     <input bind:value="text" value="authored"></template>`,
@@ -50,30 +50,30 @@ const definitions = [
     <prop name="items" type="list(string)" default="[]">Items.</prop>
     <prop name="amount" type="number" default="2">Amount.</prop>
     <prop name="enabled" type="boolean" default="false">Enabled.</prop>
-    </defs><output from:data-items="items" $value="amount"></output></template>`,
+    </defs><output from:data-items="$items" $value="$amount"></output></template>`,
   `<template component="ssr-alias"><defs>
     <state name="first" type="unknown" value="{ count: 1 }"></state>
     <state name="second" type="unknown" value="first"></state>
-    <handler name="increment"><set name="first.count" expr:value="first.count + 1"></set></handler>
-    </defs><section><button type="button" on:click="increment">Next</button><output $value="second.count"></output></section></template>`,
+    <handler name="increment"><set name="first.count" expr:value="$first.count + 1"></set></handler>
+    </defs><section><button type="button" on:click="increment">Next</button><output $value="$second.count"></output></section></template>`,
   `<template component="ssr-match"><defs><state name="open" type="boolean" value="false"></state>
-    <handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
-    <template $match><article $when="open"><button type="button" on:click="toggle">Close</button><slot></slot></article>
+    <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+    <template $match><article $when="$open"><button type="button" on:click="toggle">Close</button><slot></slot></article>
     <div $else><button type="button" on:click="toggle">Open</button><slot></slot></div></template></template>`,
   `<template component="ssr-table"><table><tbody><tr><td>Cell <slot></slot> end</td></tr></tbody></table></template>`,
   `<template component="ssr-classed"><defs><state name="count" type="number" value="0"></state></defs>
-    <section class="card own" style="color: red" title="own"><output $value="count"></output></section></template>`,
+    <section class="card own" style="color: red" title="own"><output $value="$count"></output></section></template>`,
   `<template component="ssr-scoped"><defs>
     <state name="rows" type="list(string)" value="['Ada']"></state>
     <handler name="change"><set name="rows" expr:value="['Bea', 'Ada', 'Cy']"></set></handler>
     </defs><section><button type="button" on:click="change">Change</button><ul>
-    <slot $each="row of rows" $key="row" name="row" from:item="row"><li $value="row"></li></slot>
+    <slot $each="row of $rows" $key="$row" name="row" from:item="$row"><li $value="$row"></li></slot>
     </ul></section></template>`,
   `<template component="ssr-lazy-toggle"><defs><state name="open" type="boolean" value="false"></state>
-    <handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
-    <section><button type="button" on:click="toggle">More</button><div $if="open"><slot name="details"></slot></div></section></template>`,
+    <handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+    <section><button type="button" on:click="toggle">More</button><div $if="$open"><slot name="details"></slot></div></section></template>`,
   `<template component="ssr-lazy-page"><defs><state name="label" type="string" value="first"></state></defs>
-    <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="label"></b></template></ssr-lazy-toggle></article></template>`,
+    <article><ssr-lazy-toggle><template slot="details"><img alt="" src="https://assets.example/lazy.png"><b $value="$label"></b></template></ssr-lazy-toggle></article></template>`,
 ].map((source) => parseComponent(source));
 
 const cases = [
@@ -91,7 +91,7 @@ const cases = [
   { name: "state-selected native roots", html: '<ssr-match id="subject">Content</ssr-match>', state: { open: true } },
   { name: "slot ranges inside tables", html: '<ssr-table id="subject">Projected</ssr-table>', state: {} },
   { name: "a root's consumer class, style and attribute overrides", html: '<ssr-classed id="subject" class="mine" style="margin: 1px" title="theirs"></ssr-classed>', state: { count: 3 } },
-  { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
+  { name: "scoped slots and keyed projection", html: '<ssr-scoped id="subject"><template slot="row"><li><b $value="$item"></b></li></template></ssr-scoped>', state: { rows: ["Ada", "Bea"] } },
   { name: "a closed slot's lazy consumer template", html: '<ssr-lazy-page id="subject"></ssr-lazy-page>', state: { label: "server" } },
 ] as const;
 

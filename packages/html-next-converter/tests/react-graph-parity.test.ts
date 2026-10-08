@@ -19,19 +19,19 @@ const child = `<template component="x-graph-item" status="early" summary="Graph 
   <prop name="label" type="string" default="Initial">Item label.</prop>
   <event name="saved" type="number"></event>
   <handler name="save"><dispatch event="saved" expr:value="1"></dispatch></handler>
-</defs><li on:click="save"><slot></slot><output $value="label"></output></li>
+</defs><li on:click="save"><slot></slot><output $value="$label"></output></li>
 <style>:host { color: rgb(20 40 80); } :slotted(strong) { color: rgb(90 30 60); }</style></template>`;
 const parent = `<template component="x-graph-list" status="early" summary="Graph parent."><defs>
   <state type="number" name="count" value="0"></state>
   <state type="boolean" name="active" value="true"></state>
   <state type="number" name="saved" value="0"></state>
   <state type="number" name="ancestorSaved" value="0"></state>
-  <handler name="increment"><set name="count" expr:value="count + 1"></set><set name="active" expr:value="not active"></set></handler>
-  <handler name="recordSaved"><set name="saved" expr:value="saved + 1"></set></handler>
-  <handler name="recordAncestorSaved"><set name="ancestorSaved" expr:value="ancestorSaved + 1"></set></handler>
+  <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="active" expr:value="not $active"></set></handler>
+  <handler name="recordSaved"><set name="saved" expr:value="$saved + 1"></set></handler>
+  <handler name="recordAncestorSaved"><set name="ancestorSaved" expr:value="$ancestorSaved + 1"></set></handler>
 </defs><section on:saved="recordAncestorSaved"><button type="button" on:click="increment">Increment</button>
-  <ul><x-graph-item from:label="count = 0 ? 'Item0' : 'Item1'" on:saved.stop="recordSaved"><strong>Child: </strong></x-graph-item></ul>
-  <output class="saved" $value="saved"></output><output class="ancestor-saved" $value="ancestorSaved"></output>
+  <ul><x-graph-item from:label="$count = 0 ? 'Item0' : 'Item1'" on:saved.stop="recordSaved"><strong>Child: </strong></x-graph-item></ul>
+  <output class="saved" $value="$saved"></output><output class="ancestor-saved" $value="$ancestorSaved"></output>
 </section><style>:host { display: block; padding: 8px; background: rgb(225 235 245); }
   :host-state([active]) { background: rgb(200 220 240); }</style></template>`;
 

@@ -22,15 +22,15 @@ const component = `<template component="x-controlled" status="early" summary="Co
   <handler name="sendOne"><dispatch target="button" event="saved" value="7"></dispatch></handler>
   <handler name="sendAll"><dispatch target="receivers" event="saved" value="7"></dispatch></handler>
   <state type="number" name="count" value="0"></state>
-  <computed name="double" from="count * 2"></computed>
+  <computed name="double" from="$count * 2"></computed>
   <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <event name="helper-loaded" type="number"></event>
 </defs><template $match>
-  <article $when="arm = 'article'" $ref="articleRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="count"></output><x-dispatch-receiver $each="receiver of receivers" $key="receiver" $ref="receivers" from:receiver="receiver"></x-dispatch-receiver></article>
-  <section $else $ref="sectionRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="count"></output><x-dispatch-receiver $each="receiver of receivers" $key="receiver" $ref="receivers" from:receiver="receiver"></x-dispatch-receiver></section>
+  <article $when="$arm = 'article'" $ref="articleRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></article>
+  <section $else $ref="sectionRoot" on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></section>
 </template></template>
-<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="receiver" from:data-hits="hits"></span></template>`;
+<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="$hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="$receiver" from:data-hits="$hits"></span></template>`;
 const controller = `function connect(host) {
   window.trace.connects++;
   window.controllerHost = host;

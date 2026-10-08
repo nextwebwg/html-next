@@ -32,7 +32,7 @@ export const formattingSource = `<template component="x-formatting"><defs>
   <p data-format="displayName">{format('CA', 'displayName', { type: 'region' }, $locale)}</p>
   <p data-format="range">{formatRange(1, $amount, 'number', {}, $locale)}</p>
   <p data-format="parts"><span $each="part of formatParts($amount, 'currency', { currency: $currency }, $locale)">{$part.value}</span></p>
-<p data-format="shadow"><span $each="formatValue of names">{format(12, 'number', {}, $locale)}</span></p>
+<p data-format="shadow"><span $each="formatValue of $names">{format(12, 'number', {}, $locale)}</span></p>
 <p data-format="withShadow" $with="$amount as formatValue">{format($formatValue, 'number', {}, $locale)}</p>
 <p data-format="matchShadow"><template $match="$amount as formatValue"><span $when="$formatValue &gt; 0">{format($formatValue, 'number', {}, $locale)}</span></template></p>
 <p data-format="scoped" $with="12 as price">Total: {format($price, 'currency', { currency: $currency }, $locale)} for {format($names, 'list', {}, $locale)}.</p>

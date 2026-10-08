@@ -8,6 +8,8 @@ export interface HtmlDiagnostic extends Partial<DiagnosticLocation> {
   readonly code: string;
   readonly message: string;
   readonly source?: string;
+  /** Omitted means error. A warning never withholds a definition or fails a check. */
+  readonly severity?: "error" | "warning";
 }
 
 // Keep build-time provenance out of the normalized AST and generated runtime data.

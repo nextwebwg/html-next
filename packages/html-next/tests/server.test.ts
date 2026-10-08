@@ -7,8 +7,8 @@ import { renderComponents } from "../src/server.js";
 const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
-  <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-</defs><section><h2 $value="label"></h2><button type="button" on:click="increment"><span $value="count"></span></button>
+  <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+</defs><section><h2 $value="$label"></h2><button type="button" on:click="increment"><span $value="$count"></span></button>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
@@ -47,8 +47,8 @@ describe("Node component rendering", () => {
   it("renders the browser's declarative baseline before declared reads connect", async () => {
     const definition = parseComponent(`<template component="x-server-read"><defs>
       <data name="result" src="data:application/json,%22resolved%22" type="string"></data>
-      </defs><section><output $if="result.pending">Loading</output>
-      <b $if="result.ok" $value="result.value"></b></section></template>`);
+      </defs><section><output $if="$result.pending">Loading</output>
+      <b $if="$result.ok" $value="$result.value"></b></section></template>`);
     const rendered = await renderComponents("<x-server-read></x-server-read>", { definitions: [definition] });
     assert.match(rendered.html, /<output>Loading<\/output>/);
   });

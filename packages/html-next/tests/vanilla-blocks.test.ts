@@ -51,9 +51,9 @@ const benchmarkShape = component(`
   <state name="ready" type="boolean" value="false"></state>
   <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
   <state name="selected" type="number" nullable></state>`, `
-  <div id="main"><div class="container" $if="ready"><table><tbody>
-    <tr $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected">
-      <td $value="row.id"></td><td><a data-action="select" $value="row.label"></a></td>
+  <div id="main"><div class="container" $if="$ready"><table><tbody>
+    <tr $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:danger="$row.id = $selected">
+      <td $value="$row.id"></td><td><a data-action="select" $value="$row.label"></a></td>
     </tr>
   </tbody></table></div></div>`);
 
@@ -97,10 +97,10 @@ describe("direct-extend Vanilla generation", () => {
 
   it("compiles every component without the general runtime", () => {
     // What the parser accepts compiles; anything it rejects never reaches the generator.
-    for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="x"></p>')]) {
+    for (const text of [benchmarkShape, component('<state name="x" type="number" value="1"></state>', '<p $value="$x"></p>')]) {
       assert.doesNotMatch(vanilla(text), /@nextwebwg\/html-next\/runtime/);
     }
-    assert.throws(() => vanilla(component('<state name="x" type="number" value="abc"></state>', '<p $value="x"></p>')), /HC013/);
+    assert.throws(() => vanilla(component('<state name="x" type="number" value="abc"></state>', '<p $value="$x"></p>')), /HC013/);
   });
 });
 
@@ -348,9 +348,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>`, `
-      <section><p>rows</p><ul $if="ready">
-        <li $each="row of rows" $key="row.id" from:data-id="row.id" class:on="row.id = selected"
-          class:off="selected != row.id"><b $value="row.label"></b></li>
+      <section><p>rows</p><ul $if="$ready">
+        <li $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:on="$row.id = $selected"
+          class:off="$selected != $row.id"><b $value="$row.label"></b></li>
       </ul></section>`);
     const reads = new Set<number>();
     await same(text, [
@@ -371,8 +371,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("keeps explicit loop-index comparisons reactive when retained rows move", async () => {
     const text = component(`
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p>rows</p><ul><li $each="row, i of rows" $key="row.id"
-        from:data-id="row.id" class:on="row.id = i"><b $value="i"></b></li></ul></section>`);
+      <section><p>rows</p><ul><li $each="row, i of $rows" $key="$row.id"
+        from:data-id="$row.id" class:on="$row.id = $i"><b $value="$i"></b></li></ul></section>`);
     const result = await same(text, [
       (host) => { host.state.rows = [{ id: 0, label: "zero" }, { id: 1, label: "one" }]; },
       (host) => { host.state.rows = host.state.rows.toReversed(); },
@@ -388,11 +388,11 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
       <state name="other" type="number" nullable></state>`, `
-      <section><p>rows</p><div $if="ready">
-        <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"
-          class:on="row.id = selected" class:other="row.id = other"><b $value="row.label"></b></li></ul>
-        <ol><li $each="row of rows" $key="row.id" class:off="selected != row.id"
-          from:title="selected" class:label="row.label = selected"><b $value="row.label"></b></li></ol>
+      <section><p>rows</p><div $if="$ready">
+        <ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"
+          class:on="$row.id = $selected" class:other="$row.id = $other"><b $value="$row.label"></b></li></ul>
+        <ol><li $each="row of $rows" $key="$row.id" class:off="$selected != $row.id"
+          from:title="$selected" class:label="$row.label = $selected"><b $value="$row.label"></b></li></ol>
       </div></section>`);
     await same(text, [
       (host) => { host.state.rows = [{ id: -0, label: "zero" }, { id: 1, label: "one" }, { id: null, label: "null" }]; },
@@ -410,9 +410,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string) }))" value="[]"></state>
       <state name="current" type="list(string)" value="[]"></state>`, `
-      <section><p $value="current"></p><ul $if="ready">
-        <li $each="row of rows" $key="row.id" from:data-id="row.id" from:title="row.tags">
-          <i $value="row.tags"></i><b $value="row.tags ? 'y' : 'n'"></b><em $value="row.label"></em><s class:full="row.tags"></s>
+      <section><p $value="$current"></p><ul $if="$ready">
+        <li $each="row of $rows" $key="$row.id" from:data-id="$row.id" from:title="$row.tags">
+          <i $value="$row.tags"></i><b $value="$row.tags ? 'y' : 'n'"></b><em $value="$row.label"></em><s class:full="$row.tags"></s>
         </li>
       </ul></section>`);
     await same(text, [
@@ -434,11 +434,11 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="rows" type="list(object({ id: number, label: string, tags: list(string), user: object({ name: string }) }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
       <state name="user" type="object({ name: string, age: number })" value="{ name: 'Ada', age: 36 }"></state>`, `
-      <section from:data-next="selected + 1" from:title="concat(user.name, '/', user.age)">
-        <p $value="default(selected, 'none')"></p>
-        <output $value="user.age * 2"></output><span $value="rows[0].label"></span><s $value="user.name"></s>
-        <ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id" class:even="row.id % 2 = 0">
-          <b $value="row.user.name"></b><i $value="abs(row.id - 3)"></i><em $value="join(row.tags, '+')"></em>
+      <section from:data-next="$selected + 1" from:title="concat($user.name, '/', $user.age)">
+        <p $value="default($selected, 'none')"></p>
+        <output $value="$user.age * 2"></output><span $value="$rows[0].label"></span><s $value="$user.name"></s>
+        <ul $if="$ready"><li $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:even="$row.id % 2 = 0">
+          <b $value="$row.user.name"></b><i $value="abs($row.id - 3)"></i><em $value="join($row.tags, '+')"></em>
         </li></ul></section>`);
     let kept = { name: "Raw", age: 1 };
     await same(text, [
@@ -459,13 +459,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="selected" type="number" nullable></state>
       <state name="title" type="string" value="Rows"></state>
       <state name="link" type="string" value="https://a.example/"></state>`, `
-      <section style:--count="rows.length" from:data-n="rows.length">
-        <p>Rows: {rows.length} of {title}!</p>
-        <a from:href="link">Link</a><img from:src="link" alt=""><input .value="title">
-        <div from:class="title" class:on="ready" class:pick="selected = 2"></div>
-        <svg viewBox="0 0 10 10"><circle from:r="rows.length" from:viewbox="title"></circle>
-          <foreignObject><b $value="title"></b></foreignObject></svg>
-        <ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id"><i>{row.label}: {row.id}</i></li></ul>
+      <section style:--count="$rows.length" from:data-n="$rows.length">
+        <p>Rows: {$rows.length} of {$title}!</p>
+        <a from:href="$link">Link</a><img from:src="$link" alt=""><input .value="$title">
+        <div from:class="$title" class:on="$ready" class:pick="$selected = 2"></div>
+        <svg viewBox="0 0 10 10"><circle from:r="$rows.length" from:viewbox="$title"></circle>
+          <foreignObject><b $value="$title"></b></foreignObject></svg>
+        <ul $if="$ready"><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><i>{$row.label}: {$row.id}</i></li></ul>
       </section>`);
     const note = (host: any): void => {
       const input = host.root.querySelector("input") as HTMLInputElement;
@@ -490,15 +490,15 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="count" type="number" value="0"></state>
       <state name="items" type="list(number)" value="[]"></state>
       <state name="label" type="string" value="start"></state>
-      <state name="seed" type="number" expr:value="count + 10"></state>
-      <computed name="double" from="count * 2"></computed>
-      <computed name="total" type="number" from="seed + double"></computed>
+      <state name="seed" type="number" expr:value="$count + 10"></state>
+      <computed name="double" from="$count * 2"></computed>
+      <computed name="total" type="number" from="$seed + $double"></computed>
       <event name="changed" type="number" bubbles="false"></event>
-      <handler name="increment"><set name="count" expr:value="count + 1" $if="count < 3"></set><set name="items" expr:value="[count, double]"></set>
-        <dispatch event="changed" expr:value="count"></dispatch><focus target="out"></focus></handler>
+      <handler name="increment"><set name="count" expr:value="$count + 1" $if="$count < 3"></set><set name="items" expr:value="[$count, $double]"></set>
+        <dispatch event="changed" expr:value="$count"></dispatch><focus target="out"></focus></handler>
       <handler name="bad"><set name="count" expr:value="'x'"></set><set name="label" expr:value="$$event.type"></set></handler>`, `
       <section><button id="go" on:click.prevent="increment">Next</button><button id="bad" on:click.once="bad">Bad</button>
-        <output $ref="out" tabindex="-1" $value="double"></output><p>{total} {label} {seed} {items}</p></section>`, false);
+        <output $ref="out" tabindex="-1" $value="$double"></output><p>{$total} {$label} {$seed} {$items}</p></section>`, false);
     const log = (root: Element, note: string): void => {
       (globalThis as any).directExtendLog.events.push(`${note} focus=${(root.ownerDocument.activeElement as Element | null)?.localName}`);
     };
@@ -528,14 +528,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="limit" type="number" value="3"></state>
       <state name="prefix" type="string" value="k"></state>
       <handler name="pick"><set name="title" expr:value="concat($$event.type, ':', $$event.target.textContent)"></set></handler>`, `
-      <section><p>{title}</p>
-        <b $if="rows.length">some</b><i $if="rows">truthy</i><s $if="rows[0].tags">tagged</s>
-        <span $with="rows[0] as first"><em $value="first.label"></em> <u $value="first.tags.length"></u></span>
-        <template $match="selected as chosen"><b $when="chosen = 1">one</b><i $when="chosen > 1">many {chosen}</i><u $else>none</u></template>
-        <ol><li $each="row, i of rows" from:data-id="row.id" class:first="loop.first" class:last="loop.last">{i}/{loop.count} {row.label}
-          <button $ref="picks" on:click.stop="pick">{row.label}</button><em $if="row.tags.length > 0 and ready">{row.tags}</em>
-          <ul><li $each="tag of row.tags" $key="tag">{tag}</li></ul></li></ol>
-        <menu><li $each="row of rows" $key="concat(prefix, row.id)" $where="row.label" $sort="-label,id" $limit="limit" from:data-key="row.id">{row.label}</li></menu>
+      <section><p>{$title}</p>
+        <b $if="$rows.length">some</b><i $if="$rows">truthy</i><s $if="$rows[0].tags">tagged</s>
+        <span $with="$rows[0] as first"><em $value="$first.label"></em> <u $value="$first.tags.length"></u></span>
+        <template $match="$selected as chosen"><b $when="$chosen = 1">one</b><i $when="$chosen > 1">many {$chosen}</i><u $else>none</u></template>
+        <ol><li $each="row, i of $rows" from:data-id="$row.id" class:first="$loop.first" class:last="$loop.last">{$i}/{$loop.count} {$row.label}
+          <button $ref="picks" on:click.stop="pick">{$row.label}</button><em $if="$row.tags.length > 0 and $ready">{$row.tags}</em>
+          <ul><li $each="tag of $row.tags" $key="$tag">{$tag}</li></ul></li></ol>
+        <menu><li $each="row of $rows" $key="concat($prefix, $row.id)" $where="$row.label" $sort="-label,id" $limit="$limit" from:data-key="$row.id">{$row.label}</li></menu>
       </section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} refs=${(host.refs.picks ?? []).map((button: Element) => button.textContent).join("|")}`);
@@ -563,13 +563,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="size" type="string" value="m"></state>
       <state name="colors" type="list(string)" value="['red']"></state>
       <state name="markup" type="string" value="&lt;b&gt;bold&lt;/b&gt;"></state>`, `
-      <section><p>{name} {age} {agree} {size} {colors}</p>
+      <section><p>{$name} {$age} {$agree} {$size} {$colors}</p>
         <input id="name" bind:value="name"><input id="age" type="text" bind:value="age"><input id="agree" type="checkbox" bind:checked="agree">
-        <input id="small" type="radio" name="size" value="s" from:checked="size = 's'"><textarea id="bio" bind:value="name"></textarea>
-        <select id="size" bind:value="size"><option $each="row of rows" $key="row.id" from:value="row.label">{row.label}</option><option value="m">M</option></select>
+        <input id="small" type="radio" name="size" value="s" from:checked="$size = 's'"><textarea id="bio" bind:value="name"></textarea>
+        <select id="size" bind:value="size"><option $each="row of $rows" $key="$row.id" from:value="$row.label">{$row.label}</option><option value="m">M</option></select>
         <select id="colors" multiple bind:value="colors"><option value="red">Red</option><option value="blue">Blue</option></select>
-        <div id="html" $html="markup"></div><template $html="markup"></template><template $value="name"></template><template><i>inline</i> {age}</template>
-        <input id="first" type="checkbox" bind:checked="rows[0].done"><ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><b>{row.done}</b></li></ul>
+        <div id="html" $html="$markup"></div><template $html="$markup"></template><template $value="$name"></template><template><i>inline</i> {$age}</template>
+        <input id="first" type="checkbox" bind:checked="rows[0].done"><ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><b>{$row.done}</b></li></ul>
       </section>`);
     const control = (root: Element, id: string): any => root.querySelector(`#${id}`);
     const note = (host: any, label: string): void => {
@@ -603,27 +603,27 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   };
   const log = (text: string): void => { (globalThis as any).directExtendLog.events.push(text); };
   const olderShapes: Record<string, [string, readonly Step[]]> = {
-    counter: [older(`<state name="count" type="number" value="0"></state><computed name="label" from="concat('n', count)"></computed>
-      <handler name="up"><set name="count" expr:value="count + 1" $if="count < 2"></set></handler>`,
-      `<section><button on:click.prevent="up" from:aria-label="label">{count}</button><output $value="label"></output></section>`),
+    counter: [older(`<state name="count" type="number" value="0"></state><computed name="label" from="concat('n', $count)"></computed>
+      <handler name="up"><set name="count" expr:value="$count + 1" $if="$count < 2"></set></handler>`,
+      `<section><button on:click.prevent="up" from:aria-label="$label">{$count}</button><output $value="$label"></output></section>`),
       [({ root }) => log(String(fire(root.querySelector("button"), "click"))), ({ root }) => { fire(root.querySelector("button"), "click"); fire(root.querySelector("button"), "click"); }]],
-    "number guard": [older(`<state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler>`,
-      `<section><button on:click="divide"><output $value="count"></output></button></section>`), [({ root }) => fire(root.querySelector("button"), "click")]],
-    checkbox: [older(`<state name="done" type="boolean" value="false"></state>`, `<section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>`),
+    "number guard": [older(`<state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="$count / 0"></set></handler>`,
+      `<section><button on:click="divide"><output $value="$count"></output></button></section>`), [({ root }) => fire(root.querySelector("button"), "click")]],
+    checkbox: [older(`<state name="done" type="boolean" value="false"></state>`, `<section><input type="checkbox" bind:checked="done"><output $value="$done"></output></section>`),
       [({ root }) => { root.querySelector("input").click(); log(String(root.querySelector("input").checked)); }]],
-    range: [older(`<state name="position" type="number" value="0"></state>`, `<section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>`),
+    range: [older(`<state name="position" type="number" value="0"></state>`, `<section><input type="range" min="0" max="100" bind:value="position"><output $value="$position"></output></section>`),
       [({ root }) => { root.querySelector("input").value = "42"; fire(root.querySelector("input"), "input"); log(root.querySelector("input").value); }]],
     choice: [older(`<state name="choice" type="string" value="one"></state>`,
-      `<section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>`),
+      `<section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="$choice"></output></section>`),
       [({ root }) => { root.querySelector("select").value = "two"; fire(root.querySelector("select"), "change"); log(root.querySelector("textarea").value); },
         ({ root }) => { root.querySelector("textarea").value = "three"; fire(root.querySelector("textarea"), "input"); log(root.querySelector("select").value); }]],
-    modifiers: [older(`<state name="count" type="number" value="0"></state><handler name="up"><set name="count" expr:value="count + 1"></set></handler>`,
-      `<section><input on:keydown.enter.stop="up"><button on:click.self.once="up"><b>inner</b></button><output $value="count"></output></section>`),
+    modifiers: [older(`<state name="count" type="number" value="0"></state><handler name="up"><set name="count" expr:value="$count + 1"></set></handler>`,
+      `<section><input on:keydown.enter.stop="up"><button on:click.self.once="up"><b>inner</b></button><output $value="$count"></output></section>`),
       [({ root }) => { log(String(fire(root.querySelector("input"), "keydown", { key: "Enter" }))); fire(root.querySelector("input"), "keydown", { key: "a" }); },
         ({ root }) => { fire(root.querySelector("b"), "click"); fire(root.querySelector("button"), "click"); fire(root.querySelector("button"), "click"); }]],
     "mixed text and styles": [older(`<state name="count" type="number" value="2"></state><state name="tone" type="string" value="red"></state>
-      <handler name="up"><set name="count" expr:value="count + 1"></set><set name="tone" value="blue"></set></handler>`,
-      `<section style:color="tone" from:data-count="count"><p>Count: {count} of {tone}!</p><button on:click="up" class:big="count > 2">Up</button></section>`),
+      <handler name="up"><set name="count" expr:value="$count + 1"></set><set name="tone" value="blue"></set></handler>`,
+      `<section style:color="$tone" from:data-count="$count"><p>Count: {$count} of {$tone}!</p><button on:click="up" class:big="$count > 2">Up</button></section>`),
       [({ root }) => fire(root.querySelector("button"), "click")]],
   };
   for (const [name, [text, steps]] of Object.entries(olderShapes)) {
@@ -655,152 +655,152 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <defs>
         <state type="number" name="count" value="0"></state>
         <handler name="increment">
-          <set name="count" expr:value="count + 1"></set>
-          <set name="count" expr:value="count + 1"></set>
+          <set name="count" expr:value="$count + 1"></set>
+          <set name="count" expr:value="$count + 1"></set>
         </handler>
       </defs>
-      <button type="button" on:click="increment"><output $value="count"></output></button>
+      <button type="button" on:click="increment"><output $value="$count"></output></button>
     </template>`,
     "prunes directly compiled numeric updates by their static dependencies": `<template component="demo-split" status="experimental" summary="Split state.">
       <defs>
         <state type="number" name="left" value="1"></state>
         <state type="number" name="right" value="10"></state>
-        <computed name="left1" from="left + 1"></computed>
-        <computed name="left2" from="left1 + 1"></computed>
-        <computed name="left3" from="left2 + 1"></computed>
-        <computed name="total" from="left3 + right"></computed>
-        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+        <computed name="left1" from="$left + 1"></computed>
+        <computed name="left2" from="$left1 + 1"></computed>
+        <computed name="left3" from="$left2 + 1"></computed>
+        <computed name="total" from="$left3 + $right"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="$left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="$right + 1"></set></handler>
       </defs>
-      <section><button on:click="increaseLeft"><output $value="left3"></output></button><button on:click="increaseRight"><output $value="total"></output></button></section>
+      <section><button on:click="increaseLeft"><output $value="$left3"></output></button><button on:click="increaseRight"><output $value="$total"></output></button></section>
     </template>`,
     "removes unused direct numeric branches from generated output": `<template component="demo-live" status="experimental" summary="Live direct branch.">
       <defs>
         <state type="number" name="left" value="1"></state>
         <state type="number" name="right" value="10"></state>
-        <computed name="visible" from="right + 1"></computed>
-        <computed name="unused1" from="left + 1"></computed>
-        <computed name="unused2" from="unused1 + 1"></computed>
-        <computed name="unused3" from="unused2 + 1"></computed>
-        <handler name="increaseLeft"><set name="left" expr:value="left + 1"></set></handler>
-        <handler name="increaseRight"><set name="right" expr:value="right + 1"></set></handler>
+        <computed name="visible" from="$right + 1"></computed>
+        <computed name="unused1" from="$left + 1"></computed>
+        <computed name="unused2" from="$unused1 + 1"></computed>
+        <computed name="unused3" from="$unused2 + 1"></computed>
+        <handler name="increaseLeft"><set name="left" expr:value="$left + 1"></set></handler>
+        <handler name="increaseRight"><set name="right" expr:value="$right + 1"></set></handler>
       </defs>
-      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="visible"></output></button></section>
+      <section><button on:click="increaseLeft"></button><button on:click="increaseRight"><output $value="$visible"></output></button></section>
     </template>`,
     "suppresses repeated direct rounded DOM output": `<template component="demo-round" status="experimental" summary="Rounded direct value.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="bucket"></output></button>
+      <button on:click="advance"><output $value="$bucket"></output></button>
     </template>`,
     "gates only stabilizing direct bindings in a mixed output": `<template component="demo-mixed" status="experimental" summary="Mixed direct value.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="position"></output><output $value="bucket"></output></button>
+      <button on:click="advance"><output $value="$position"></output><output $value="$bucket"></output></button>
     </template>`,
     "compiles numeric data attributes with the direct native emitter": `<template component="demo-data" status="experimental" summary="Direct data binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" from:data-bucket="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:data-bucket="$bucket"><output $value="$position"></output></button>
     </template>`,
     "compiles numeric ARIA attributes with the direct native emitter": `<template component="demo-aria" status="experimental" summary="Direct ARIA binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" role="progressbar" from:aria-valuenow="position" from:aria-valuetext="bucket"><output $value="position"></output></button>
+      <button on:click="advance" role="progressbar" from:aria-valuenow="$position" from:aria-valuetext="$bucket"><output $value="$position"></output></button>
     </template>`,
     "compiles numeric ordinary HTML attributes with the direct native emitter": `<template component="demo-title" status="experimental" summary="Direct HTML attribute binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance" from:title="bucket"><output $value="position"></output></button>
+      <button on:click="advance" from:title="$bucket"><output $value="$position"></output></button>
     </template>`,
     "compiles numeric native HTML properties with the direct emitter": `<template component="demo-value" status="experimental" summary="Direct HTML property binding.">
       <defs>
         <state type="number" name="position" value="0"></state>
-        <computed name="bucket" from="round(position)"></computed>
-        <handler name="advance"><set name="position" expr:value="position + 0.1"></set></handler>
+        <computed name="bucket" from="round($position)"></computed>
+        <handler name="advance"><set name="position" expr:value="$position + 0.1"></set></handler>
       </defs>
-      <button on:click="advance"><input type="number" .value="bucket"><output $value="position"></output></button>
+      <button on:click="advance"><input type="number" .value="$bucket"><output $value="$position"></output></button>
     </template>`,
     "compiles primitive boolean state, attributes, and properties with the direct emitter": `<template component="demo-toggle" status="experimental" summary="Direct primitive toggle.">
       <defs>
         <state type="boolean" name="open" value="false"></state>
-        <computed name="closed" from="not open"></computed>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <computed name="closed" from="not $open"></computed>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" from:aria-expanded="open" from:hidden="closed"><input type="checkbox" .checked="open"><output $value="closed"></output></button>
+      <button on:click="toggle" from:aria-expanded="$open" from:hidden="$closed"><input type="checkbox" .checked="$open"><output $value="$closed"></output></button>
     </template>`,
     "compiles primitive class tokens with the direct emitter": `<template component="demo-class-toggle" status="experimental" summary="Direct primitive class toggle.">
       <defs>
         <state type="boolean" name="open" value="false"></state>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" class:open="open"><output $value="open"></output></button>
+      <button on:click="toggle" class:open="$open"><output $value="$open"></output></button>
     </template>`,
     "compiles primitive HTML style values with the direct emitter": `<template component="demo-style-counter" status="experimental" summary="Direct primitive style counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment" style:--count="count"><output $value="count"></output></button>
+      <button on:click="increment" style:--count="$count"><output $value="$count"></output></button>
     </template>`,
     "compiles primitive SVG style values with the direct emitter": `<template component="demo-svg-style-counter" status="experimental" summary="Direct primitive SVG style counter.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><svg style:--count="count"><text>Chart</text></svg><output $value="count"></output></button>
+      <button on:click="increment"><svg style:--count="$count"><text>Chart</text></svg><output $value="$count"></output></button>
     </template>`,
     "compiles direct text input bindings with the native dirty-value guard": `<template component="demo-bound-text" status="experimental" summary="Direct native text binding.">
       <defs><state type="string" name="draft" value="Ready"></state></defs>
-      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="draft"></output></section>
+      <section><label>Draft <input type="text" bind:value="draft"></label><output $value="$draft"></output></section>
     </template>`,
     "compiles direct checkbox bindings with native checked synchronization": `<template component="demo-bound-check" status="experimental" summary="Direct native checkbox binding.">
       <defs><state type="boolean" name="done" value="false"></state></defs>
-      <section><input type="checkbox" bind:checked="done"><output $value="done"></output></section>
+      <section><input type="checkbox" bind:checked="done"><output $value="$done"></output></section>
     </template>`,
     "compiles direct textarea and single-select bindings": `<template component="demo-bound-choice" status="experimental" summary="Direct native choice bindings.">
       <defs><state type="string" name="choice" value="one"></state></defs>
-      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+      <section><textarea bind:value="choice"></textarea><select bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="$choice"></output></section>
     </template>`,
     "compiles direct range bindings with native numeric synchronization": `<template component="demo-bound-range" status="experimental" summary="Direct native range binding.">
       <defs><state type="number" name="position" value="0"></state></defs>
-      <section><input type="range" min="0" max="100" bind:value="position"><output $value="position"></output></section>
+      <section><input type="range" min="0" max="100" bind:value="position"><output $value="$position"></output></section>
     </template>`,
     "compiles static self handlers with a native target identity guard": `<template component="demo-event-self" status="experimental" summary="Direct native self modifier.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.self="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.self="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`,
     "compiles static filtered handlers with native event guards": `<template component="demo-event-filter" status="experimental" summary="Direct native event filter.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:keydown.enter.ctrl.exact.self.prevent.stop="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`,
     "compiles static capture and passive listeners with native options": `<template component="demo-event-options" status="experimental" summary="Direct native event options.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.capture.passive.stop="increment"><span>Inner</span><output $value="$count"></output></button></section>
     </template>`,
     "compiles static once listeners through the generated lifecycle coordinator": `<template component="demo-event-once" status="experimental" summary="Native once fallback.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <button on:keydown.enter.once="increment"><output $value="count"></output></button>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <button on:keydown.enter.once="increment"><output $value="$count"></output></button>
     </template>`,
     "compiles static state-derived primitive event dispatch through generated runtime validation": `<template component="demo-event-dispatch" status="experimental" summary="Direct declared event dispatch.">
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
         <state type="number" name="count" value="0"></state>
-        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="count"></dispatch></handler>
+        <handler name="save"><set name="count" expr:value="$count + 1"></set><dispatch event="saved" expr:value="$count"></dispatch></handler>
       </defs>
       <button on:click="save">Save</button>
     </template>`,
@@ -809,86 +809,86 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <event name="saved" type="number"></event>
         <state type="boolean" name="enabled" value="true"></state>
         <state type="number" name="count" value="0"></state>
-        <handler name="advance"><set name="count" expr:value="count + 1" $if="enabled"></set><dispatch event="saved" expr:value="count" $if="enabled"></dispatch><set name="enabled" expr:value="not enabled"></set></handler>
+        <handler name="advance"><set name="count" expr:value="$count + 1" $if="$enabled"></set><dispatch event="saved" expr:value="$count" $if="$enabled"></dispatch><set name="enabled" expr:value="not $enabled"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="count"></output></button>
+      <button on:click="advance"><output $value="$count"></output></button>
     </template>`,
     "pulls static primitive computed handler guards before each guarded step": `<template component="demo-computed-guard" status="experimental" summary="Computed guard direct path.">
       <defs>
         <state type="number" name="count" value="0"></state>
         <state type="number" name="hits" value="0"></state>
-        <computed name="even" from="count % 2 = 0"></computed>
-        <handler name="advance"><set name="count" expr:value="count + 1"></set><set name="hits" expr:value="hits + 1" $if="even"></set></handler>
+        <computed name="even" from="$count % 2 = 0"></computed>
+        <handler name="advance"><set name="count" expr:value="$count + 1"></set><set name="hits" expr:value="$hits + 1" $if="$even"></set></handler>
       </defs>
-      <button on:click="advance"><output $value="count"></output><output $value="hits"></output></button>
+      <button on:click="advance"><output $value="$count"></output><output $value="$hits"></output></button>
     </template>`,
     "compiles static refs with native validation and focus handler steps": `<template component="demo-ref-action" status="experimental" summary="Direct static ref action.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="count"></output></section>
+      <section><form $ref="form"><input required $ref="field"></form><button on:click="submit">Submit</button><output $value="$count"></output></section>
     </template>`,
     "compiles dependency-free primitive `$value` beside dynamic direct output": `<template component="demo-literal-text" status="experimental" summary="Direct literal text.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><output class="status" $value="'Ready'"></output><button on:click="increment"><output $value="$count"></output></button></section>
     </template>`,
     "compiles dependency-free primitive native bindings beside dynamic direct output": `<template component="demo-literal-native" status="experimental" summary="Direct literal native bindings.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section from:data-status="'ready'" from:aria-hidden="false" from:hidden="true" class:fixed="true" style:--gap="4"><input .value="'Fixed'"><button on:click="increment"><output $value="$count"></output></button></section>
     </template>`,
     "initializes transitively constant direct computeds during construction": `<template component="demo-static-computed" status="experimental" summary="Static computed direct construction.">
       <defs>
         <event name="saved" type="string"></event>
         <state type="number" name="count" value="0"></state>
         <computed name="prefix" from="'Ready'"></computed>
-        <computed name="label" from="concat(prefix, '!')"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-        <handler name="save"><dispatch event="saved" expr:value="label"></dispatch></handler>
+        <computed name="label" from="concat($prefix, '!')"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+        <handler name="save"><dispatch event="saved" expr:value="$label"></dispatch></handler>
       </defs>
-      <section from:data-status="label" class:ready="label = 'Ready!'" style:--label="prefix"><input .value="label"><output class="status" $value="label"></output><button on:click="increment"><output $value="count"></output></button><button on:click="save">Save</button></section>
+      <section from:data-status="$label" class:ready="$label = 'Ready!'" style:--label="$prefix"><input .value="$label"><output class="status" $value="$label"></output><button on:click="increment"><output $value="$count"></output></button><button on:click="save">Save</button></section>
     </template>`,
     "pulls static primitive computed event detail through the generated dispatch boundary": `<template component="demo-computed-event-dispatch" status="experimental" summary="Direct computed declared event dispatch.">
       <defs>
         <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
         <state type="number" name="count" value="0"></state>
-        <computed name="savedValue" from="count * 2"></computed>
-        <handler name="save"><set name="count" expr:value="count + 1"></set><dispatch event="saved" expr:value="savedValue"></dispatch></handler>
+        <computed name="savedValue" from="$count * 2"></computed>
+        <handler name="save"><set name="count" expr:value="$count + 1"></set><dispatch event="saved" expr:value="$savedValue"></dispatch></handler>
       </defs>
-      <button on:click="save">Save <output $value="savedValue"></output></button>
+      <button on:click="save">Save <output $value="$savedValue"></output></button>
     </template>`,
     "compiles a static primitive `$value` expression without the live runtime": `<template component="demo-inline-expression" status="experimental" summary="Direct inline text expression.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="count + 1"></output></button>
+      <button on:click="increment"><output $value="$count + 1"></output></button>
     </template>`,
     "compiles static primitive attribute, property, class, and style expressions directly": `<template component="demo-inline-attributes" status="experimental" summary="Direct inline native expressions.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <section from:data-count="count + 1" class:zero="count = 0" style:--count="count + 1"><button on:click="increment">Advance</button><input type="number" .value="count + 1"></section>
+      <section from:data-count="$count + 1" class:zero="$count = 0" style:--count="$count + 1"><button on:click="increment">Advance</button><input type="number" .value="$count + 1"></section>
     </template>`,
     "compiles dependency-free primitive `$value` expressions as direct text": `<template component="demo-static-directive" status="experimental" summary="Static directive text.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
       <button on:click="increment"><output $value="'fixed'"></output></button>
     </template>`,
     "guards direct mutable numeric state against non-finite writes": `<template component="demo-typed-number" status="experimental" summary="Typed numeric state.">
-      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="count / 0"></set></handler></defs>
-      <button on:click="divide"><output $value="count"></output></button>
+      <defs><state name="count" type="number" value="1"></state><handler name="divide"><set name="count" expr:value="$count / 0"></set></handler></defs>
+      <button on:click="divide"><output $value="$count"></output></button>
     </template>`,
     "includes set value dependencies even when they are not rendered": `<template component="demo-set-input" status="experimental" summary="Set input dependency.">
-      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="count + 1"></set></handler></defs>
-      <button on:click="save"><output $value="snapshot"></output></button>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><handler name="save"><set name="snapshot" expr:value="$count + 1"></set></handler></defs>
+      <button on:click="save"><output $value="$snapshot"></output></button>
     </template>`,
     "refreshes a computed before a later set reads it": `<template component="demo-sequential-sets" status="experimental" summary="Sequential sets.">
-      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="count * 2"></computed><handler name="advance"><set name="count" expr:value="count + 1"></set><set name="snapshot" expr:value="double"></set></handler></defs>
-      <button on:click="advance"><output $value="snapshot"></output></button>
+      <defs><state type="number" name="count" value="0"></state><state type="number" name="snapshot" value="0"></state><computed name="double" from="$count * 2"></computed><handler name="advance"><set name="count" expr:value="$count + 1"></set><set name="snapshot" expr:value="$double"></set></handler></defs>
+      <button on:click="advance"><output $value="$snapshot"></output></button>
     </template>`,
     "compiles static string modes to direct native text, attributes, and properties": `<template component="demo-tabs" status="experimental" summary="Direct string tabs.">
       <defs>
@@ -896,41 +896,41 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <handler name="showOne"><set name="tab" expr:value="'one'"></set></handler>
         <handler name="showTwo"><set name="tab" expr:value="'two'"></set></handler>
       </defs>
-      <section from:data-tab="tab" from:title="tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="tab"><output $value="tab"></output></section>
+      <section from:data-tab="$tab" from:title="$tab"><button on:click="showOne">One</button><button on:click="showTwo">Two</button><input .value="$tab"><output $value="$tab"></output></section>
     </template>`,
     "compiles literal primitive concat expressions to direct string concatenation": `<template component="demo-label" status="experimental" summary="Direct formatted label.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="concat('Step ', count)"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="label" from="concat('Step ', $count)"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment" from:aria-label="label"><input .value="label"><output $value="label"></output></button>
+      <button on:click="increment" from:aria-label="$label"><input .value="$label"><output $value="$label"></output></button>
     </template>`,
     "preserves literal percent characters in direct concatenation": `<template component="demo-missing-format" status="experimental" summary="Direct missing format placeholder.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="label" from="concat(count, '/%s')"></computed>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="label" from="concat($count, '/%s')"></computed>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="label"></output></button>
+      <button on:click="increment"><output $value="$label"></output></button>
     </template>`,
     "keeps numeric SVG data attributes on the direct native emitter": `<template component="demo-svg-data" status="experimental" summary="Direct SVG data binding.">
       <defs>
         <state type="number" name="size" value="24"></state>
-        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
+        <handler name="grow"><set name="size" expr:value="$size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg from:data-size="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:data-size="$size"><path d="M0 0"></path></svg></button>
     </template>`,
-    "compiles scalar prop reflection without the live interpreter": `<template component="demo-label" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Ready">Label.</prop></props><output from:data-label="label"><span $value="label"></span></output></template>`,
-    "compiles a scalar native property prop with the compact generated boundary": `<template component="demo-prop-value" status="experimental" summary="A target compiler fixture."><props><prop name="value" type="number" default="1">Value.</prop></props><input type="number" .value="value"></template>`,
-    "creates vanilla SVG subtrees in the SVG namespace": `<template component="demo-icon" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Close">Label.</prop></props><button from:aria-label="label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path><foreignObject><span>html</span></foreignObject></svg></button></template>`,
+    "compiles scalar prop reflection without the live interpreter": `<template component="demo-label" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Ready">Label.</prop></props><output from:data-label="$label"><span $value="$label"></span></output></template>`,
+    "compiles a scalar native property prop with the compact generated boundary": `<template component="demo-prop-value" status="experimental" summary="A target compiler fixture."><props><prop name="value" type="number" default="1">Value.</prop></props><input type="number" .value="$value"></template>`,
+    "creates vanilla SVG subtrees in the SVG namespace": `<template component="demo-icon" status="experimental" summary="A target compiler fixture."><props><prop name="label" type="string" default="Close">Label.</prop></props><button from:aria-label="$label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"></path><foreignObject><span>html</span></foreignObject></svg></button></template>`,
     "compiles a read-only primitive reactive leaf without the full runtime": `<template component="demo-derived" status="experimental" summary="Derived output.">
       <defs><state type="number" name="count" value="0"></state></defs>
-      <output $value="count + 1"></output>
+      <output $value="$count + 1"></output>
     </template>`,
     "compiles static prevent and stop handlers with native event calls": `<template component="demo-event-modifier" status="experimental" summary="Direct native event modifiers.">
-      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="count + 1"></set></handler></defs>
-      <section><button on:click.prevent.stop="increment"><output $value="count"></output></button></section>
+      <defs><state type="number" name="count" value="0"></state><handler name="increment"><set name="count" expr:value="$count + 1"></set></handler></defs>
+      <section><button on:click.prevent.stop="increment"><output $value="$count"></output></button></section>
     </template>`,
   };
   for (const [name, text] of Object.entries(formerCompactShapes)) {
@@ -949,7 +949,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="when" type="date" nullable></state>
       <state name="tone" type="keyword" values="solid, outline" value="solid"></state>
       <state name="links" type="list(url)" value="[]"></state>`, `
-      <section><p>{site} {tint} {when} {tone}</p><a from:href="site">x</a><b $value="links[0]"></b><i $value="links.length"></i></section>`);
+      <section><p>{$site} {$tint} {$when} {$tone}</p><a from:href="$site">x</a><b $value="$links[0]"></b><i $value="$links.length"></i></section>`);
     await same(text, [
       (host) => { host.state.site = "not a url"; host.state.tint = "#abc"; host.state.when = "2024-02-29"; host.state.tone = "outline"; },
       (host) => { host.state.tint = "nope"; host.state.when = "2023-02-29"; host.state.tone = "dashed"; host.state.when = null; },
@@ -963,9 +963,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
-      <computed name="first" from="rows[0]"></computed>
-      <computed name="labels" from="[default(first.label, 'none')]"></computed>`, `
-      <section><p>{default(first.label, 'none')}</p><b $value="labels[0]"></b><i $value="rows.length"></i></section>`);
+      <computed name="first" from="$rows[0]"></computed>
+      <computed name="labels" from="[default($first.label, 'none')]"></computed>`, `
+      <section><p>{default($first.label, 'none')}</p><b $value="$labels[0]"></b><i $value="$rows.length"></i></section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} ${JSON.stringify(host.state.rows)} ${JSON.stringify(host.state.first)} ${JSON.stringify(host.state.labels)}`);
     };
@@ -983,7 +983,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>${many}`, `
-      <section><p>{s0} {s30} {s33}</p><input .value="s31"><b $if="s32 > 40">big</b><i class:hot="s33 > 40"></i></section>`);
+      <section><p>{$s0} {$s30} {$s33}</p><input .value="$s31"><b $if="$s32 > 40">big</b><i class:hot="$s33 > 40"></i></section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} ${host.root.querySelector("input").value}`);
     };
@@ -1001,7 +1001,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
       <state name="selected" type="number" nullable></state>
       <state name="tone" type="string" value=""></state>`, `
-      <section><p>{tone}</p></section><style>:host-state([ready]) { color: red; } :host-state([tone="loud"]) { color: blue; }
+      <section><p>{$tone}</p></section><style>:host-state([ready]) { color: red; } :host-state([tone="loud"]) { color: blue; }
       :host-state([selected]) { outline: 1px solid; }</style>`);
     await same(text, [
       (host) => { host.state.tone = "loud"; host.state.selected = 2; },
@@ -1020,11 +1020,11 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <prop name="ratio" type="number">Ratio.</prop>
     <prop name="open" type="boolean" default="false">Open.</prop>
     <state name="note" type="string" value="n"></state>
-    <computed name="doubled" from="count * 2"></computed>
-    <computed name="summary" from="concat(variant, ':', default(label, note))"></computed>`;
+    <computed name="doubled" from="$count * 2"></computed>
+    <computed name="summary" from="concat($variant, ':', default($label, $note))"></computed>`;
   const scalarBody = `
-    <section class:open="open" from:data-tone="variant"><p>{label} {count} {ratio}</p><b $value="summary"></b>
-      <i $if="open">{doubled}</i><ul><li $each="n of [1, 2, 3]" $key="n" from:data-id="n"><b $if="n <= count">{n}</b></li></ul></section>`;
+    <section class:open="$open" from:data-tone="$variant"><p>{$label} {$count} {$ratio}</p><b $value="$summary"></b>
+      <i $if="$open">{$doubled}</i><ul><li $each="n of [1, 2, 3]" $key="$n" from:data-id="$n"><b $if="$n <= $count">{$n}</b></li></ul></section>`;
 
   it("accepts, renders and reflects props like the general runtime", async () => {
     await same(propsShape(scalarProps, scalarBody), [
@@ -1049,7 +1049,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await same(propsShape(`
       <prop name="variant" type="keyword" values="solid, subtle" default="subtle">Emphasis.</prop>
       <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>`, `
-      <section from:data-variant="variant"><p>{size}</p></section>`), [
+      <section from:data-variant="$variant"><p>{$size}</p></section>`), [
       (_host, update) => { update({ variant: "solid", size: "sm" }); },
       (_host, update) => { update({ variant: "bad", size: "bad" }); },
       (_host, update) => { update({ variant: undefined, size: undefined }); },
@@ -1060,7 +1060,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     await same(propsShape(`
       <prop name="items" type="list(object({ id: integer, label: string }))" default="[]">Items.</prop>
       <prop name="config" type="object({ title: string, limit?: integer })">Config.</prop>`, `
-      <section><h2>{config.title}</h2><ol><li $each="item of items" $key="item.id" from:data-id="item.id"><b $if="item.id <= default(config.limit, 9)">{item.label}</b></li></ol></section>`), [
+      <section><h2>{$config.title}</h2><ol><li $each="item of $items" $key="$item.id" from:data-id="$item.id"><b $if="$item.id <= default($config.limit, 9)">{$item.label}</b></li></ol></section>`), [
       (_host, update) => { update({ items: [{ id: 1, label: "a" }, { id: 2, label: "b" }], config: { title: "T", limit: 1 } }); },
       (_host, update) => { update({ items: [{ id: 2, label: "B" }, { id: 3, label: "c" }], config: { title: "U" } }); },
       (_host, update) => { update({ items: [{ id: "x" }], config: { title: 1 } }); },
@@ -1073,7 +1073,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <prop name="label" type="string" minlength="2" maxlength="8" pattern="[a-z]+">Label.</prop>
       <prop name="open" type="boolean" default="false">Open.</prop>
       <prop name="gone" type="boolean" default="false">Gone.</prop>`, `
-      <section from:aria-expanded="open" from:hidden="gone"><input type="number" .value="amount" from:data-label="label"></section>`), [
+      <section from:aria-expanded="$open" from:hidden="$gone"><input type="number" .value="$amount" from:data-label="$label"></section>`), [
       (_host, update) => { update({ amount: 11, label: "a" }); },
       (_host, update) => { update({ amount: 0, label: "toolongvalue", open: true, gone: true }); },
       (_host, update) => { update({ amount: 5, label: "UPPER" }); },
@@ -1087,7 +1087,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <prop name="destination" type="string">Destination.</prop>
       <prop name="disabled" type="boolean" default="false">Disabled.</prop>
       <prop name="selected" type="boolean" default="false">Selected.</prop>`, `
-      <section><a from:href="target">Link</a><button title="A &amp; &quot;quote&quot;" .formAction="destination" from:disabled="disabled" from:data-selected="selected">Text &amp; \\{literal}</button></section>`), [
+      <section><a from:href="$target">Link</a><button title="A &amp; &quot;quote&quot;" .formAction="$destination" from:disabled="$disabled" from:data-selected="$selected">Text &amp; \\{literal}</button></section>`), [
       (_host, update) => { update({ target: "javascript:alert(1)", destination: "/go", disabled: true }); },
       (_host, update) => { update({ target: " JAVASCRIPT:x", selected: true }); },
       (_host, update) => { update({ target: "/relative", disabled: false, destination: undefined }); },
@@ -1099,7 +1099,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       ${from}
       <type name="input-value" from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type>
       <prop name="value" type="input-value">Value.</prop>`, `
-      <section from:data-value="value"><p>{value}</p><b $if="value = 3">three</b></section>`);
+      <section from:data-value="$value"><p>{$value}</p><b $if="$value = 3">three</b></section>`);
     // A required selector can be cleared, which chooses nothing: then the value must be null.
     await same(select('<prop name="mode" type="keyword" values="text, number" required>Mode.</prop>'), [
       (_host, update) => { update({ mode: "number" }); },
@@ -1124,8 +1124,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("projects children and named slots, and renders fallbacks, like the general runtime", async () => {
     const text = slotsShape("", `
-      <section><header><slot name="head"><em>{label}</em></slot></header><main><slot></slot></main>
-        <footer><slot name="tail">Tail {label}<b $if="open">open</b></slot></footer><aside><slot name="missing"></slot></aside></section>`);
+      <section><header><slot name="head"><em>{$label}</em></slot></header><main><slot></slot></main>
+        <footer><slot name="tail">Tail {$label}<b $if="$open">open</b></slot></footer><aside><slot name="missing"></slot></aside></section>`);
     const steps: Step[] = [(host) => { host.state.label = "M"; }, (host) => { host.state.open = false; }];
     await same(text, steps, projection);
     await same(text, steps);
@@ -1133,7 +1133,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("moves projected nodes with the region that renders their slot", async () => {
     await same(slotsShape(`<state name="shown" type="boolean" value="true"></state>`, `
-      <section><div $if="shown"><slot></slot></div><p $if="not shown"><slot name="head">none</slot></p><slot name="tail"></slot></section>`), [
+      <section><div $if="$shown"><slot></slot></div><p $if="not $shown"><slot name="head">none</slot></p><slot name="tail"></slot></section>`), [
       (host) => { host.state.shown = false; },
       (host) => { host.state.shown = true; },
       (host) => { host.state.label = "x"; },
@@ -1143,10 +1143,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("gives projected nodes to the outlet live's assembly appends last when two share a name", async () => {
     // Static names are unique, so outlets share one only in rows or through a dynamic name.
     for (const body of [
-      '<section><ul><li $each="n of rows" $key="n" from:data-id="n"><slot name="head">row</slot></li></ul></section>',
-      '<section><slot from:name="which"></slot><div><slot name="head"></slot></div></section>',
-      '<section><div><slot name="head"></slot></div><slot from:name="which"></slot></section>',
-      '<section><div><slot from:name="which"></slot></div><p><slot name="head"></slot></p><b $if="open"><slot from:name="other"></slot></b></section>',
+      '<section><ul><li $each="n of $rows" $key="$n" from:data-id="$n"><slot name="head">row</slot></li></ul></section>',
+      '<section><slot from:name="$which"></slot><div><slot name="head"></slot></div></section>',
+      '<section><div><slot name="head"></slot></div><slot from:name="$which"></slot></section>',
+      '<section><div><slot from:name="$which"></slot></div><p><slot name="head"></slot></p><b $if="$open"><slot from:name="$other"></slot></b></section>',
     ]) {
       await same(slotsShape(`<state name="which" type="string" value="head"></state><state name="other" type="string" value="head"></state>
         <state name="rows" type="list(integer)" value="[1, 2]"></state>`, body), [
@@ -1159,13 +1159,13 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("names a slot by its expression when it renders", async () => {
     await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
-      <section><div $if="open"><slot from:name="which">fallback {which}</slot></div></section>`), [
+      <section><div $if="$open"><slot from:name="$which">fallback {$which}</slot></div></section>`), [
       (host) => { host.state.which = "default"; },
       (host) => { host.state.open = false; },
       (host) => { host.state.which = ""; host.state.open = true; },
     ], projection);
     await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
-      <section><slot from:name="which">fallback {which}</slot><p $with="label as l"><slot from:name="which">{l}</slot></p></section>`), [
+      <section><slot from:name="$which">fallback {$which}</slot><p $with="$label as l"><slot from:name="$which">{$l}</slot></p></section>`), [
       (host) => { host.state.which = "default"; },
       (host) => { host.state.which = ""; },
     ], projection);
@@ -1176,9 +1176,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
     <state name="count" type="integer" value="1"></state>`, `
     <template $match>
-      <section $when="as = 'section'" class="card own" style="color: red" from:data-tone="tone" class:hot="count > 1"><h2>{tone}</h2><slot></slot></section>
-      <article $when="as = 'article' and count < 3" role="article" title="own"><button>{count}</button><slot></slot></article>
-      <div $else tabindex="-1"><slot></slot><b>{count}</b></div>
+      <section $when="$as = 'section'" class="card own" style="color: red" from:data-tone="$tone" class:hot="$count > 1"><h2>{$tone}</h2><slot></slot></section>
+      <article $when="$as = 'article' and $count < 3" role="article" title="own"><button>{$count}</button><slot></slot></article>
+      <div $else tabindex="-1"><slot></slot><b>{$count}</b></div>
     </template>`);
 
   it("switches a root $match arm like the general runtime", async () => {
@@ -1212,8 +1212,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       <prop name="tags" type="keyword#">Comma-separated tags.</prop>
       <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>`, `
       <template $match>
-        <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
-        <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
+        <a $when="$as = 'a'" class="action" from:href="{ true: null, false: $href }[concat($disabled)]" from:data-tags="$tags" from:data-space-tags="$spaceTags" $ref="control"><slot></slot></a>
+        <button $else class="action" type="button" from:disabled="$disabled" $ref="control"><slot></slot></button>
       </template>`), [
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ as: "a", href: "/next", tags: ["red", "blue"], spaceTags: ["one", "two"] }); },
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.control.localName}`); update({ disabled: true }); },
@@ -1226,17 +1226,17 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
       <prop name="count" type="integer" default="0">Count.</prop><prop name="label" type="string">Label.</prop>
       <prop name="open" type="boolean" default="false">Open.</prop></defs>
-    <span class="badge" from:data-tone="tone"><b>{count}</b><i $if="open">{label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
+    <span class="badge" from:data-tone="$tone"><b>{$count}</b><i $if="$open">{$label}</i><slot name="icon">*</slot><slot></slot></span></template>`;
   const parent = (body: string, defs = ""): string => propsShape(`
     <prop name="flag" type="boolean" default="false">Flag.</prop>
     <state name="label" type="string" value="L"></state><state name="count" type="integer" value="1"></state>
     <state name="rows" type="list(integer)" value="[1, 2]"></state>
-    <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>${defs}`, body);
+    <handler name="bump"><set name="count" expr:value="$count + 1"></set></handler>${defs}`, body);
 
   it("invokes a compiled component like live lowering", async () => {
     await same([parent(`
-      <section><x-badge tone="warn" count="3" open class="extra" title="t" from:label="label" class:hot="count > 1" style:color="flag ? 'red' : 'blue'"
-        from:data-n="count" on:click="bump" $ref="badge">Text {label}<em slot="icon">{count}</em></x-badge></section>`), badge], [
+      <section><x-badge tone="warn" count="3" open class="extra" title="t" from:label="$label" class:hot="$count > 1" style:color="$flag ? 'red' : 'blue'"
+        from:data-n="$count" on:click="bump" $ref="badge">Text {$label}<em slot="icon">{$count}</em></x-badge></section>`), badge], [
       (host) => { host.state.label = "M"; },
       (host) => { host.root.querySelector("span").click(); },
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.badge.className}`); update({ flag: true }); host.state.count = 5; },
@@ -1245,7 +1245,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("binds invocation props by their values, after their attribute text", async () => {
     await same([parent(`
-      <section><x-badge from:count="label" from:tone="flag ? 'warn' : 'nope'" from:open="flag"></x-badge></section>`), badge], [
+      <section><x-badge from:count="$label" from:tone="$flag ? 'warn' : 'nope'" from:open="$flag"></x-badge></section>`), badge], [
       (_host, update) => { update({ flag: true }); },
       (host) => { host.state.label = "7"; },
       (host, update) => { host.state.label = "x"; update({ flag: false }); },
@@ -1254,9 +1254,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("invokes components in regions and keyed rows like live lowering", async () => {
     await same([parent(`
-      <section><x-badge $if="flag" from:count="count">if</x-badge>
-        <ul><li $each="n of rows" $key="n" from:data-id="n"><x-badge from:count="n" from:label="label" on:click="bump" $ref="rows">{n}</x-badge></li></ul>
-        <x-badge $each="n of rows" $key="n" from:count="n * 10"></x-badge></section>`), badge], [
+      <section><x-badge $if="$flag" from:count="$count">if</x-badge>
+        <ul><li $each="n of $rows" $key="$n" from:data-id="$n"><x-badge from:count="$n" from:label="$label" on:click="bump" $ref="rows">{$n}</x-badge></li></ul>
+        <x-badge $each="n of $rows" $key="$n" from:count="$n * 10"></x-badge></section>`), badge], [
       (_host, update) => { update({ flag: true }); },
       (host) => { host.state.rows = [2, 3, 1]; host.state.label = "z"; },
       (host) => { host.root.querySelectorAll("li span")[1].click(); (globalThis as any).directExtendLog.events.push(`refs ${host.refs.rows.length}`); },
@@ -1267,9 +1267,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("follows an invoked component's root switch with the parent's bindings", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
-      <template $match><a $when="as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+      <template $match><a $when="$as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
     await same([parent(`
-      <section><x-action from:as="flag ? 'a' : 'button'" class:hot="count > 1" from:title="label" on:click="bump" $ref="action">Go {count}</x-action></section>`), action], [
+      <section><x-action from:as="$flag ? 'a' : 'button'" class:hot="$count > 1" from:title="$label" on:click="bump" $ref="action">Go {$count}</x-action></section>`), action], [
       (host) => { host.root.querySelector("button").click(); },
       (_host, update) => { update({ flag: true }); },
       (host) => { host.root.querySelector("a").click(); (globalThis as any).directExtendLog.events.push(`ref ${host.refs.action.localName}`); },
@@ -1280,7 +1280,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("renders a custom element no component claims as an element, like live", async () => {
     await same(parent(`
-      <section><x-other class="o" from:title="label" class:hot="count > 1" from:data-n="count" on:click="bump" $ref="other"><b>{label}</b><x-deeper $if="flag">{count}</x-deeper></x-other></section>`), [
+      <section><x-other class="o" from:title="$label" class:hot="$count > 1" from:data-n="$count" on:click="bump" $ref="other"><b>{$label}</b><x-deeper $if="$flag">{$count}</x-deeper></x-other></section>`), [
       (host) => { host.root.querySelector("x-other").click(); (globalThis as any).directExtendLog.events.push(`ref ${host.refs.other.localName}`); },
       (host, update) => { host.state.label = "Q"; update({ flag: true }); },
     ]);
@@ -1288,7 +1288,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("retains nothing from rows it removed: their listeners and invoked components", async () => {
     const compiled = graph([parent(`
-      <section><ul><li $each="n of rows" $key="n" from:data-id="n" on:click="bump"><x-badge from:count="n" on:click="bump">{n}</x-badge></li></ul></section>`), badge]);
+      <section><ul><li $each="n of $rows" $key="$n" from:data-id="$n" on:click="bump"><x-badge from:count="$n" on:click="bump">{$n}</x-badge></li></ul></section>`), badge]);
     const { text: code } = await bundle(compiled.entry, false, compiled.modules);
     const { window } = new JSDOM("<!doctype html><body></body>");
     for (const key of Object.getOwnPropertyNames(window)) {
@@ -1317,7 +1317,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("fails a <context> no ancestor provides with live's HR009", async () => {
     const step = `<template component="x-step" status="early" summary="Step.">
-      <defs><context name="count" from="x-shape" as="active"></context></defs><li>{active}</li></template>`;
+      <defs><context name="count" from="x-shape" as="active"></context></defs><li>{$active}</li></template>`;
     const messages: string[] = [];
     for (const compiled of [false, true]) {
       const { text: code } = await bundle(compiled ? graph([step]).entry : reference(step));
@@ -1345,9 +1345,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("observes each document once however many compiled roots it holds", async () => {
     const action = `<template component="x-action" status="early" summary="Action.">
       <defs><prop name="as" type="keyword" values="button, a" default="button">As.</prop></defs>
-      <template $match><a $when="as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
+      <template $match><a $when="$as = 'a'" href="#"><slot></slot></a><button $else type="button"><slot></slot></button></template></template>`;
     const compiled = graph([parent(`
-      <section><x-badge $each="n of rows" $key="n" from:count="n"><x-action from:as="flag ? 'a' : 'button'">{n}</x-action></x-badge></section>`), badge, action]);
+      <section><x-badge $each="n of $rows" $key="$n" from:count="$n"><x-action from:as="$flag ? 'a' : 'button'">{$n}</x-action></x-badge></section>`), badge, action]);
     const { text: code } = await bundle(`${compiled.entry}\nexport { updateGeneratedProps as update } from "@nextwebwg/html-next/generated-runtime";`, false, compiled.modules);
     const { window } = new JSDOM("<!doctype html><body></body>");
     let observers = 0;
@@ -1383,14 +1383,14 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const card = `<template component="x-card" status="early" summary="Card.">
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
         <prop name="as" type="keyword" values="section, article" default="section">As.</prop></defs>
-      <template $match><article $when="as = 'article'" class="card"><slot name="head"></slot><slot></slot></article>
-        <section $else class="card" from:data-tone="tone"><slot name="head"></slot><slot></slot></section></template></template>`;
+      <template $match><article $when="$as = 'article'" class="card"><slot name="head"></slot><slot></slot></article>
+        <section $else class="card" from:data-tone="$tone"><slot name="head"></slot><slot></slot></section></template></template>`;
     const panel = propsShape(`
       <prop name="title" type="string" required>Title.</prop>
       <prop name="kind" type="keyword" values="section, article" default="section">Kind.</prop>
       <state name="count" type="integer" value="1"></state>
-      <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>`, `
-      <x-card tone="warn" class="panel" from:as="kind" on:click="bump"><h2 slot="head">{title}</h2><p>{count} <slot></slot></p></x-card>`);
+      <handler name="bump"><set name="count" expr:value="$count + 1"></set></handler>`, `
+      <x-card tone="warn" class="panel" from:as="$kind" on:click="bump"><h2 slot="head">{$title}</h2><p>{$count} <slot></slot></p></x-card>`);
     await same([panel, card], [
       (host) => { host.root.click(); (globalThis as any).directExtendLog.events.push(`hosts ${(globalThis as any).directExtendLog.hosts.length}`); },
       (_host, update) => { update({ title: "Next", kind: "article" }); },
@@ -1413,9 +1413,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows = [{ id: 5, label: "five" }]; },
     ];
     for (const body of [
-      `<section><p></p><dl><template $each="row of rows" $key="row.id"><dt from:data-id="row.id">{row.label}</dt><dd $if="row.id = selected">sel</dd>text</template></dl></section>`,
-      `<section><p></p><dl><template $each="row of rows"><dt from:data-id="row.id">{row.label}</dt><dd>{loop.index}</dd></template></dl></section>`,
-      `<section><p></p><dl><template $each="row, i of rows" $key="row.id"><dt from:data-id="row.id">{i}</dt><dd>{loop.count}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row of $rows" $key="$row.id"><dt from:data-id="$row.id">{$row.label}</dt><dd $if="$row.id = $selected">sel</dd>text</template></dl></section>`,
+      `<section><p></p><dl><template $each="row of $rows"><dt from:data-id="$row.id">{$row.label}</dt><dd>{$loop.index}</dd></template></dl></section>`,
+      `<section><p></p><dl><template $each="row, i of $rows" $key="$row.id"><dt from:data-id="$row.id">{$i}</dt><dd>{$loop.count}</dd></template></dl></section>`,
     ]) {
       await same(component(rows, body), steps);
     }
@@ -1425,12 +1425,12 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const list = `<template component="x-row-list" status="early" summary="Rows.">
       <defs><prop name="items" type="list(object({ id: integer, name: string }))" default="[]">Items.</prop>
         <state name="title" type="string" value="Rows"></state></defs>
-      <section><h3><slot name="title" from:text="title">{title}</slot></h3>
-        <ul><slot $each="item, i of items" $key="item.id" name="row" from:item="item" from:index="i"><li>{item.name}</li></slot></ul></section></template>`;
+      <section><h3><slot name="title" from:text="$title">{$title}</slot></h3>
+        <ul><slot $each="item, i of $items" $key="$item.id" name="row" from:item="$item" from:index="$i"><li>{$item.name}</li></slot></ul></section></template>`;
     const consumer = parent(`
-      <section><x-row-list from:items="people">
-        <template slot="row"><li from:data-id="item.id"><b>{item.name}</b> {index} <i $if="flag">{label}</i></li></template>
-      </x-row-list><x-row-list from:items="people"></x-row-list></section>`,
+      <section><x-row-list from:items="$people">
+        <template slot="row"><li from:data-id="$item.id"><b>{$item.name}</b> {$index} <i $if="$flag">{$label}</i></li></template>
+      </x-row-list><x-row-list from:items="$people"></x-row-list></section>`,
       `<state name="people" type="list(object({ id: integer, name: string }))" value="[]"></state>`);
     await same([consumer, list], [
       (host) => { host.state.people = [{ id: 1, name: "Ada" }, { id: 2, name: "Bea" }]; },
@@ -1445,10 +1445,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const step = `<template component="x-step" status="early" summary="Step.">
       <defs><prop name="index" type="integer" default="0">Index.</prop>
         <context name="count" from="x-shape" as="active"></context><context name="people" from="x-shape"></context></defs>
-      <li from:aria-current="active = index ? 'step' : null"><b>{active}</b> <i>{people.length}</i>
-        <em $each="person of people" $key="person.id">{person.name}</em></li></template>`;
+      <li from:aria-current="$active = $index ? 'step' : null"><b>{$active}</b> <i>{$people.length}</i>
+        <em $each="person of $people" $key="$person.id">{$person.name}</em></li></template>`;
     const provider = parent(`
-      <ol><x-step index="1"></x-step><x-step from:index="count + 1"></x-step><li $each="n of rows" $key="n" from:data-id="n"><x-step from:index="n"></x-step></li></ol>`,
+      <ol><x-step index="1"></x-step><x-step from:index="$count + 1"></x-step><li $each="n of $rows" $key="$n" from:data-id="$n"><x-step from:index="$n"></x-step></li></ol>`,
       `<state name="people" type="list(object({ id: integer, name: string }))" value="[]"></state>`);
     await same([provider, step], [
       (host) => { host.state.count = 2; },
@@ -1467,11 +1467,11 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     };
     try {
       await same(parent(`
-        <section><p $if="users.pending">loading</p><b $if="users.ok">ok</b><i>{default(users.error, 'none')}</i>
-          <ul><li $each="user of default(users.value, [])">{user.name}</li></ul></section>`, `
+        <section><p $if="$users.pending">loading</p><b $if="$users.ok">ok</b><i>{default($users.error, 'none')}</i>
+          <ul><li $each="user of default($users.value, [])">{$user.name}</li></ul></section>`, `
         <state name="q" type="string" value="a"></state><state name="page" type="integer" value="1"></state>
         <data name="users" src="https://example.test/api/users/{q}" type="list(object({ name: string }))">
-          <param name="q" from:value="q"></param><param name="page" expr:value="page"></param></data>`), [
+          <param name="q" from:value="$q"></param><param name="page" expr:value="$page"></param></data>`), [
         (host) => { host.state.q = "b"; },
         // An `expr` parameter is sampled when a request goes out; changing it requests nothing.
         (host) => { host.state.page = 2; },
@@ -1488,10 +1488,10 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("writes is=, content directives and two-way bindings on invocations like live", async () => {
     const field = `<template component="x-field" status="early" summary="Field.">
-      <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="value"></template>`;
+      <defs><prop name="value" type="string" default="">Value.</prop></defs><input .value="$value"></template>`;
     await same([parent(`
-      <section><button is="x-fancy" from:title="label">is</button>
-        <x-badge $value="label" from:count="count"></x-badge><x-badge $html="'<b>' + label + '</b>'"></x-badge>
+      <section><button is="x-fancy" from:title="$label">is</button>
+        <x-badge $value="$label" from:count="$count"></x-badge><x-badge $html="'<b>' + $label + '</b>'"></x-badge>
         <x-field bind:value="label"></x-field><x-field bind:title="label"></x-field></section>`), badge, field], [
       (host) => { host.state.label = "M"; },
       (host) => {
@@ -1504,7 +1504,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   });
 
   it("compiles a component with only props like the general runtime", async () => {
-    for (const body of ['<button from:data-tone="tone" type="button">{label}</button>', '<input from:value="label" from:data-tone="tone">']) {
+    for (const body of ['<button from:data-tone="$tone" type="button">{$label}</button>', '<input from:value="$label" from:data-tone="$tone">']) {
       await same(`<template component="x-shape" status="early" summary="Shape.">
         <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>${body}</template>`, [
         (_host, update) => { update({ tone: "warn", label: "L" }); },
@@ -1516,12 +1516,12 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("creates a component projected into a closed slot only when a slot renders it, like live", async () => {
     const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
-      <p class="leaf" data-id="leaf" $value="text"></p></template>`;
+      <p class="leaf" data-id="leaf" $value="$text"></p></template>`;
     const host = (controller: boolean): string => `<template component="x-host" ${controller ? 'controller="./slots-controller.js" ' : ""}status="early" summary="Host.">
-      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
-      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="open"><slot name="head"></slot></section></div></template>`;
+      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="$open"><slot name="head"></slot></section></div></template>`;
     const page = `<template component="x-page" status="early" summary="Page."><defs><state type="string" name="label" value="from the page"></state></defs>
-      <div><x-host><x-leaf slot="head" from:text="label"></x-leaf><b slot="tail">tail</b></x-host></div></template>`;
+      <div><x-host><x-leaf slot="head" from:text="$label"></x-leaf><b slot="tail">tail</b></x-host></div></template>`;
     const toggle = ({ root }: any): void => root.querySelector("button.toggle").click();
     // Closed at first render: nothing is created until the slot opens; then closing and reopening
     // inserts the same component root again.
@@ -1532,15 +1532,15 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
 
   it("renders a consumer's <template slot> only while a slot without props renders, like live", async () => {
     const leaf = `<template component="x-leaf" status="early" summary="Leaf."><defs><prop name="text" type="string" default="none">Text.</prop></defs>
-      <p class="leaf" $value="text"></p></template>`;
+      <p class="leaf" $value="$text"></p></template>`;
     const toggle = `<template component="x-toggle" controller="./host-reader.js" status="early" summary="Toggle.">
-      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not open"></set></handler></defs>
-      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="open"><slot name="details"></slot><slot name="note"></slot></section></div></template>`;
+      <defs><state type="boolean" name="open" value="false"></state><handler name="toggle"><set name="open" expr:value="not $open"></set></handler></defs>
+      <div><button type="button" class="toggle" on:click="toggle">More</button><section $if="$open"><slot name="details"></slot><slot name="note"></slot></section></div></template>`;
     const page = `<template component="x-page" status="early" summary="Page."><defs><state type="string" name="label" value="first"></state>
       <handler name="rename"><set name="label" expr:value="'second'"></set></handler></defs>
       <div><button type="button" class="rename" on:click="rename">Rename</button><x-toggle>
         <p slot="note" class="note" data-id="note">Note</p>
-        <template slot="details"><i data-id="detail" $value="label"></i><x-leaf from:text="label"></x-leaf></template>
+        <template slot="details"><i data-id="detail" $value="$label"></i><x-leaf from:text="$label"></x-leaf></template>
       </x-toggle></div></template>`;
     const tag = (element: Element): string => element.localName + (element.className === "" ? "" : `.${element.className}`);
     const read = (host: any): void => log(`details ${host.slots.details.map(tag)} note ${host.slots.note.map(tag)} rendered ${
@@ -1552,9 +1552,9 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
   it("invokes a scalar prop component like live lowering", async () => {
     const tag = `<template component="x-tag" status="early" summary="Tag.">
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop><prop name="label" type="string" required>Label.</prop></defs>
-      <button from:data-tone="tone" type="button">{label}</button></template>`;
+      <button from:data-tone="$tone" type="button">{$label}</button></template>`;
     await same([parent(`
-      <section><x-tag tone="warn" label="Hi"></x-tag><x-tag tone="bad"></x-tag><x-tag from:label="label" from:tone="flag ? 'warn' : 'nope'"></x-tag></section>`), tag], [
+      <section><x-tag tone="warn" label="Hi"></x-tag><x-tag tone="bad"></x-tag><x-tag from:label="$label" from:tone="$flag ? 'warn' : 'nope'"></x-tag></section>`), tag], [
       (_host, update) => { update({ flag: true }); },
       (host) => { host.state.label = "7"; },
       (host, update) => { host.state.label = "8"; update({ flag: false }); },
@@ -1571,25 +1571,25 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.rows[0].label = "z"; host.state.selected = 2; },
       (host) => { host.state.rows = []; },
     ];
-    await same(component(rows, `<section $with="rows[0] as first" from:data-n="rows.length"><p>{default(first.label, 'none')}</p><b $if="first">has</b></section>`), steps);
-    await same(component(rows, `<section $match class="m"><p $when="rows.length = 0">empty</p><p $when="selected">{selected}</p><ul $else><li $each="row of rows" $key="row.id" from:data-id="row.id">{row.label}</li></ul></section>`), steps);
+    await same(component(rows, `<section $with="$rows[0] as first" from:data-n="$rows.length"><p>{default($first.label, 'none')}</p><b $if="$first">has</b></section>`), steps);
+    await same(component(rows, `<section $match class="m"><p $when="$rows.length = 0">empty</p><p $when="$selected">{$selected}</p><ul $else><li $each="row of $rows" $key="$row.id" from:data-id="$row.id">{$row.label}</li></ul></section>`), steps);
   });
 
   it("gives a scoped slot's props by name, and leaves other names to the consumer, like live", async () => {
     const alternate = `<template component="x-alternate" status="early" summary="Alternate.">
       <defs><prop name="alternate" type="boolean" default="false">Alternate.</prop>
         <state name="first" type="string" value="First"></state><state name="second" type="string" value="Second"></state></defs>
-      <template $match><section $when="alternate"><slot name="item" from:first="first"></slot></section>
-        <article $else><slot name="item" from:second="second"></slot></article></template></template>`;
+      <template $match><section $when="$alternate"><slot name="item" from:first="$first"></slot></section>
+        <article $else><slot name="item" from:second="$second"></slot></article></template></template>`;
     await same([parent(`
-      <section><x-alternate from:alternate="flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i></template></x-alternate></section>`,
+      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default($first, 'no first')}</b> <i>{default($second, 'no second')}</i></template></x-alternate></section>`,
       `<state name="first" type="string" value="mine"></state><state name="second" type="string" value="own"></state>`), alternate], [
       (_host, update) => { update({ flag: true }); },
       (host) => { if (host.state === undefined) (globalThis as any).directExtendLog.events.push("no host"); else { host.state.first = "changed"; host.state.second = "own2"; } },
       (_host, update) => { update({ flag: false }); },
     ]);
     await same([parent(`
-      <section><x-alternate from:alternate="flag"><template slot="item"><b>{default(first, 'no first')}</b> <i>{default(second, 'no second')}</i> <u>{label}</u></template></x-alternate></section>`,
+      <section><x-alternate from:alternate="$flag"><template slot="item"><b>{default($first, 'no first')}</b> <i>{default($second, 'no second')}</i> <u>{$label}</u></template></x-alternate></section>`,
       `<state name="first" type="string" value="mine"></state>`), alternate], [
       // The section arm gives no \`second\`, which the consumer does not declare: HB001 leaves the old arm, inert.
       (_host, update) => { update({ flag: true }); },
@@ -1601,7 +1601,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p>rows</p><ul $if="ready"><li $each="row of rows" $key="row.id" from:data-id="row.id"><b $value="row.label"></b></li></ul></section>`);
+      <section><p>rows</p><ul $if="$ready"><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><b $value="$row.label"></b></li></ul></section>`);
     const compiled = await same(text, [
       (host) => { host.state.rows = [{ id: 1, label: "a" }, { id: 2, label: "b" }]; },
       (host) => { host.state.rows[0].label = "X"; host.state.rows[1].id = 1; },
@@ -1613,8 +1613,8 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
       <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
-      <section><p from:title="ready" from:data-x="rows.length" from:lang="ready" class:a="ready" class:b="rows.length" class:c="ready">rows</p>
-        <ul $if="ready"><li $each="row of rows" $key="row.id" class:x="ready" from:data-id="row.id" class:y="row.label" from:title="ready"></li></ul></section>`);
+      <section><p from:title="$ready" from:data-x="$rows.length" from:lang="$ready" class:a="$ready" class:b="$rows.length" class:c="$ready">rows</p>
+        <ul $if="$ready"><li $each="row of $rows" $key="$row.id" class:x="$ready" from:data-id="$row.id" class:y="$row.label" from:title="$ready"></li></ul></section>`);
     await same(text, [
       (host) => { host.state.rows = [{ id: 1, label: "a" }]; },
       (host) => { host.state.ready = false; },

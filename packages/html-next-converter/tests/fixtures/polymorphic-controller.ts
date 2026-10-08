@@ -1,7 +1,7 @@
 export const polymorphicControllerSource = `<template component="x-switch" status="early" summary="Polymorphic root." controller="./switch.js"><defs>
   <state type="boolean" name="linked" value="false"></state>
-  <handler name="switch"><set name="linked" expr:value="linked = false"></set></handler>
-</defs><template $match><a $when="linked" $ref="link" href="#next" on:click.prevent="switch">Link</a>
+  <handler name="switch"><set name="linked" expr:value="$linked = false"></set></handler>
+</defs><template $match><a $when="$linked" $ref="link" href="#next" on:click.prevent="switch">Link</a>
   <button $else $ref="button" type="button" on:click="switch">Button</button></template>
 <style>:host { display: inline-block; padding: 4px; color: rgb(20 70 130); font: 16px/24px Arial, sans-serif; }</style></template>`;
 export const polymorphicControllerModule = `function connect(host) {

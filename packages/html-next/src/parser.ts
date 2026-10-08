@@ -2,7 +2,7 @@ import type { DefaultTreeAdapterTypes } from "parse5";
 
 import { matchesPropBounds, matchesPropValues, parseTypeAttribute, parseValueBounds, parseValuesConstraint } from "./contract.js";
 import { fail, HtmlDiagnosticError, recoverDiagnostic, withDiagnosticLocation, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
-import { checkExpressionSemantics, compileExpression, getWritablePath, type CompiledExpression } from "./expression.js";
+import { checkExpressionSemantics, compileExpression, compilePath, getWritablePath, type CompiledExpression, type ExpressionNode } from "./expression.js";
 import { parseDuration } from "./duration.js";
 import { deepFreeze } from "./freeze.js";
 import {
@@ -57,6 +57,7 @@ export function parseProjectedSlotContent(
     roots: new Set(names),
     writableRoots: new Set(),
     handlers: new Set(),
+    report: platform.onDiagnostic,
   };
   const slotState = { defaults: 0, names: new Set<string>(), contracts: [] as SlotContract[], refs: new Set<string>() };
   const nodes: TemplateNode[] = [];
@@ -187,6 +188,9 @@ interface ParseScope {
   readonly writableRoots: ReadonlySet<string>;
   readonly handlers: ReadonlySet<string>;
   readonly allowUndeclared?: boolean;
+  /** Check-mode sink for non-fatal diagnostics, and the authored element they point at. */
+  readonly report?: ((diagnostic: HtmlDiagnostic) => void) | undefined;
+  readonly at?: DiagnosticLocation | undefined;
 }
 
 function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseScope {
@@ -194,22 +198,40 @@ function withRoots(scope: ParseScope, ...roots: (string | undefined)[]): ParseSc
   for (const root of roots) {
     if (root !== undefined) expanded.add(root);
   }
-  return {
-    roots: expanded,
-    writableRoots: scope.writableRoots,
-    handlers: scope.handlers,
-    ...(scope.allowUndeclared === undefined ? {} : { allowUndeclared: scope.allowUndeclared }),
-  };
+  return { ...scope, roots: expanded };
 }
 
 function compileScopedExpression(
   value: string,
   scope: ParseScope,
   source: string,
+  path = false,
 ): CompiledExpression {
-  const expression = compileDeclarationExpression(value, source);
+  const expression = compileDeclarationExpression(value, source, path);
   validateCompiledExpression(expression, scope, source);
+  if (scope.report !== undefined) warnBareNames(expression.ast, scope, source);
   return expression;
+}
+
+/** A bare word is a keyword literal. Spelling a name in scope is almost always a missing `$`. */
+function warnBareNames(node: unknown, scope: ParseScope, source: string): void {
+  if (Array.isArray(node)) {
+    for (const child of node) warnBareNames(child, scope, source);
+  } else if (node !== null && typeof node === "object") {
+    const literal = node as ExpressionNode;
+    if (literal.kind !== "literal") {
+      for (const child of Object.values(node)) warnBareNames(child, scope, source);
+    } else if (literal.keyword && scope.roots.has(literal.value as string)) {
+      const name = literal.value as string;
+      scope.report!({
+        code: "HT022",
+        message: `\`${name}\` is a keyword, not a reference; did you mean \`$${name}\`?`,
+        source,
+        ...scope.at,
+        severity: "warning",
+      });
+    }
+  }
 }
 
 // Scan browser-parsed text, not source HTML. Mixed segments share one native Text node.
@@ -288,17 +310,16 @@ function collectTargetsAtSource(
   };
   const visit = (element: Element): void => {
     for (const attribute of sourceAttributes(element)) {
+      // A target is a direct `$prop` reference.
+      const name = attribute.value.slice(1);
+      if (!attribute.value.startsWith("$") || !isIdentifier(name)) continue;
       if (attribute.name.startsWith("from:")) {
-        if (isIdentifier(attribute.value)) {
-          record(attribute.value, { attribute: attribute.name.slice("from:".length).toLowerCase() });
-        }
+        record(name, { attribute: attribute.name.slice("from:".length).toLowerCase() });
       } else if (attribute.name.startsWith(".")) {
         const key = attribute.name.slice(1).toLowerCase();
-        if (isIdentifier(attribute.value)) {
-          const property = platform.resolveDomProperty(sourceTag(element), key) ??
-            (attribute.value.toLowerCase() === key ? attribute.value : key);
-          record(attribute.value, { property });
-        }
+        const property = platform.resolveDomProperty(sourceTag(element), key) ??
+          (name.toLowerCase() === key ? name : key);
+        record(name, { property });
       }
     }
     for (const child of sourceChildren(element)) {
@@ -593,9 +614,9 @@ function readContractAtSource(
   };
 }
 
-function compileDeclarationExpression(value: string, source: string) {
+function compileDeclarationExpression(value: string, source: string, path = false) {
   try {
-    const expression = compileExpression(value);
+    const expression = path ? compilePath(value) : compileExpression(value);
     checkExpressionSemantics(expression.ast);
     return expression;
   } catch {
@@ -630,7 +651,7 @@ function readHandlerStepsAtSource(
       if (path === "" || (literal === undefined) === (expressionSource === undefined)) {
         fail("HC023", "A <set> requires `name` and exactly one of `value` or `expr:value`.", source);
       }
-      compileScopedExpression(path, scope, source);
+      compileScopedExpression(path, scope, source, true);
       const writablePath = getWritablePath(path, scope.writableRoots);
       if (writablePath === undefined) {
         fail("HT005", `Handler write \`${path}\` is not rooted in declared state.`, source);
@@ -732,7 +753,7 @@ function readDeclarations(
   const roots = new Set(Object.keys(contract.props));
   const writableRoots = new Set<string>();
   const handlers = new Set<string>();
-  if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers } };
+  if (group === undefined) return { declarations, scope: { roots, writableRoots, handlers, report: onDiagnostic } };
   if (onDiagnostic !== undefined) {
     for (const prop of directElements(group, "prop")) {
       const name = attr(prop, "name");
@@ -795,9 +816,10 @@ function readDeclarations(
     }
   }
 
-  const scope = { roots, writableRoots, handlers };
+  const declarationScope = { roots, writableRoots, handlers, report: onDiagnostic };
   for (const element of elements) {
     if (invalid?.has(element)) continue;
+    const scope = { ...declarationScope, at: sourceLocation(element) };
     try {
       const fail: DiagnosticFail = locatedFail(element);
       const kind = sourceTag(element);
@@ -954,7 +976,7 @@ function readDeclarations(
       }
     }
   }
-  return { declarations, scope };
+  return { declarations, scope: declarationScope };
 }
 
 function parseAttributes(
@@ -972,7 +994,7 @@ function parseAttributes(
       if (name === "" || RAW_SINK_RE.test(name)) {
         fail("HT007", `Two-way binding cannot target \`${name || attribute.name}\`.`, source);
       }
-      const expressionPlan = compileScopedExpression(attribute.value, scope, source);
+      const expressionPlan = compileScopedExpression(attribute.value, scope, source, true);
       const writablePath = getWritablePath(attribute.value, scope.writableRoots);
       if (writablePath === undefined) {
         fail("HT005", `\`${attribute.value}\` is not a writable state-rooted path.`, source);
@@ -980,7 +1002,8 @@ function parseAttributes(
       parsed.push({
         kind: "attribute",
         name,
-        expression: attribute.value,
+        // The path's read side, spelled as the expression `$path` for every consumer.
+        expression: expressionPlan.source,
         expressionPlan,
         twoWay: true,
         writablePath,
@@ -1233,6 +1256,7 @@ function parseElementAtSource(
   platform: ComponentParserPlatform,
   rootMatch = false,
 ): ElementNode {
+  if (scope.report !== undefined) scope = { ...scope, at: sourceLocation(element) ?? scope.at };
   const tagName = sourceTag(element);
   if (isReservedElement(tagName)) {
     fail("HT009", `<${tagName}> is reserved but not supported by this profile.`, source);

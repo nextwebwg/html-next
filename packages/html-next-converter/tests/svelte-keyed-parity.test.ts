@@ -21,7 +21,7 @@ const source = `<template component="x-keyed-list" status="early" summary="Keyed
 </defs><section><button type="button" class="reorder" on:click="reorder">Reorder</button>
   <button type="button" class="duplicate" on:click="duplicate">Duplicate</button>
   <button type="button" class="recover" on:click="recover">Recover</button>
-  <ul><li $each="row of rows" $key="row.id" from:data-id="row.id"><span $value="row.label"></span><input value="Authored" size="6"></li></ul>
+  <ul><li $each="row of $rows" $key="$row.id" from:data-id="$row.id"><span $value="$row.label"></span><input value="Authored" size="6"></li></ul>
 </section><style>:host { display: block; width: 180px; font: 16px/24px Arial, sans-serif; } li { border-bottom: 1px solid black; }</style></template>`;
 
 async function snapshot(page: Page) {
