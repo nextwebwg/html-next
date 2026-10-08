@@ -123,7 +123,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           await tick();
           out.unrelated = [w.transitions.length - before, document.querySelector("output")!.textContent];
 
-          first.state.items = [...first.state.items].reverse();
+          first.state.items = first.state.items.toReversed();
           out.moving = await w.played(await next());
           await settle();
 
@@ -138,7 +138,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           await settle();
 
           out.sheetsAfter = document.adoptedStyleSheets.length;
-          out.names = [...document.querySelectorAll("li")].slice(0, 2).map((li) => [li.style.getPropertyValue("view-transition-name"), /^hn-t/.test(li.style.getPropertyValue("view-transition-class"))]);
+          out.names = [...document.querySelectorAll("li")].slice(0, 2).map((li) => [li.style.getPropertyValue("view-transition-name"), li.style.getPropertyValue("view-transition-class").startsWith("hn-t")]);
           return out;
         });
         assert.equal(result.heldBeforeCapture, 0);
@@ -163,12 +163,12 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
       try {
         const groups = await page.evaluate(async () => {
           const w = window as unknown as { hosts: { state: { items: unknown[] } }[]; transitions: ViewTransition[] };
-          w.hosts[0]!.state.items = [...w.hosts[0]!.state.items].reverse();
+          w.hosts[0]!.state.items = w.hosts[0]!.state.items.toReversed();
           await Promise.resolve();
           const transition = w.transitions.at(-1)!;
           await transition.ready;
           const durations = document.documentElement.getAnimations({ subtree: true })
-            .filter((animation) => animation.effect?.pseudoElement?.startsWith("::view-transition-group("))
+            .filter((animation) => (animation.effect as KeyframeEffect | null)?.pseudoElement?.startsWith("::view-transition-group("))
             .map((animation) => Math.round(animation.effect!.getComputedTiming().duration as number));
           await transition.finished;
           return durations;
