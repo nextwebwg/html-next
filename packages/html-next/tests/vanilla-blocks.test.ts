@@ -593,6 +593,37 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("writes through $each, $with, and $match aliases of state like the general runtime", async () => {
+    const text = component(`
+      <state name="rows" type="list(object({ id: number, label: string, done: boolean }))" value="[]"></state>
+      <state name="draft" type="object({ owner: object({ name: string }), plan: string })" value="{ owner: { name: 'Ada' }, plan: 'free' }"></state>`, `
+      <section><p>{$draft.owner.name} {$draft.plan}</p>
+        <div $with="$draft.owner as owner"><input id="owner" bind:value="owner.name"></div>
+        <template $match="$draft as d"><select id="plan" $when="$d.plan" bind:value="d.plan"><option value="free">Free</option><option value="pro">Pro</option></select><i $else></i></template>
+        <ul><li $each="row of $rows" $key="$row.id"><input class="label" bind:value="row.label"><input class="done" type="checkbox" bind:checked="row.done"></li></ul>
+        <ol><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]"><input class="nested" bind:value="row.label"></b></li></ol>
+      </section>`);
+    const all = (host: any, selector: string): any[] => Array.from((host.root as Element).querySelectorAll(selector));
+    const type = (element: any, value: string, event = "input"): void => {
+      element.value = value;
+      element.dispatchEvent(new Event(event, { bubbles: true }));
+    };
+    const note = (host: any, label: string): void => {
+      (globalThis as any).directExtendLog.events.push(`${label} ${JSON.stringify([host.state.draft, host.state.rows])}`);
+    };
+    const result = await same(text, [
+      (host) => { host.state.rows = [1, 2].map((id) => ({ id, label: `l${id}`, done: false })); note(host, "rows"); },
+      (host) => { type(all(host, "#owner")[0], "Bea"); type(all(host, "#plan")[0], "pro", "change"); note(host, "with/match"); },
+      (host) => { type(all(host, ".label")[1], "second"); all(host, ".done")[0].click(); note(host, "each"); },
+      (host) => { type(all(host, ".nested")[0], "nested"); note(host, "nested"); },
+    ]);
+    assert.deepEqual(result.events.filter((event: string) => /^(with\/match|each|nested) /.test(event)), [
+      `with/match ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "l1", done: false }, { id: 2, label: "l2", done: false }]])}`,
+      `each ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "l1", done: true }, { id: 2, label: "second", done: false }]])}`,
+      `nested ${JSON.stringify([{ owner: { name: "Bea" }, plan: "pro" }, [{ id: 1, label: "nested", done: true }, { id: 2, label: "second", done: false }]])}`,
+    ]);
+  });
+
   // The older direct paths compile these primitive, controller-free shapes; they must match live too.
   const older = (defs: string, body: string): string => component(defs, body, false);
   const fire = (target: any, type: string, init: EventInit & { key?: string; ctrlKey?: boolean } = {}): boolean => {

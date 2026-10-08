@@ -551,6 +551,12 @@ export function compilePath(source: string): CompiledExpression {
   return compileExpression(path.startsWith("$") ? path : `$${path}`);
 }
 
+/** An access chain's segments from its root name, or undefined when the node is not one. */
+export function writablePathOf(node: ExpressionNode): WritablePath | undefined {
+  const result: WritablePathSegment[] = [];
+  return appendWritable(node, result) ? result : undefined;
+}
+
 /** Return a writable path only when it is rooted in declared writable state. */
 export function getWritablePath(
   source: string,

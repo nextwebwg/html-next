@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.36
 
+- `bind:` writes through a `$each`, `$with`, or `$match` alias of a state path, as the proposal specifies. `<div $with="$draft.owner as owner"><input bind:value="owner.name">` writes `draft.owner.name`, and `<li $each="row of $rows"><input bind:value="row.label">` writes that row's `label`, in the live runtime, compiled output, and Vue, React and Svelte. An item of a `$where`, `$sort`, or `$limit` list, and an outer loop's item written from an inner loop when the outer loop names no index, are `HT005` with the reason; name the outer loop's index (`row, i of $rows`) to write through it. A `$with` alias that shares a state's name no longer writes that state.
+- Components parsed in the browser log `HT022` to the console when a bare keyword spells a name in scope, so a missing `$` shows up without running `html-next-check`. The message quotes the expression.
 - Rebuild brand symbols and lettering with clean vector geometry, removing jagged raster-trace edges while preserving the approved N spacing.
 
 - HTML Next has approved vector and PNG brand assets, separate symbol-only avatars and full name lockups, and a branded repository introduction.
