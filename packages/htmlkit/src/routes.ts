@@ -115,7 +115,8 @@ export async function discover(root: string, options: DiscoveryOptions) {
         asset(file) {
           const absolute = resolve(file);
           let real: string;
-          try { real = realpathSync(absolute); } catch { throw new HtmlKitError(`Missing asset ${file}.`, component); }
+          // The native resolver, as for the root: on Windows the JS one keeps 8.3 short names (RUNNER~1).
+          try { real = realpathSync.native(absolute); } catch { throw new HtmlKitError(`Missing asset ${file}.`, component); }
           if (!within(realRoot, real) || !statSync(real).isFile()) throw new HtmlKitError(`Asset ${file} must be a file inside the application root.`, component);
           const name = `_htmlkit/files/${createHash("sha256").update(relative(realRoot, real)).digest("hex").slice(0, 16)}-${basename(real)}`;
           files.set(name, real);
