@@ -97,7 +97,8 @@ describe("compiled transitions", () => {
     assert.match(module, /^transitionStyles\(".*@keyframes hn-fly .*"\);$/m);
     assert.match(module, /style\.setProperty\("view-transition-class"/);
     assert.match(module, /transitionName\(readMember\(o, "id"\)\)/);
-    assert.match(module, /if \(vt0 !== \(r\.b0 !== undefined\)\) transitionChanged\(\);/);
+    // Only a flip builds or tears down the body, so only a flip marks the transition.
+    assert.match(module, /if \(c & 1 && !\(v\[0\]\) !== !r\.b0\) \{\n(?:.*\n){2} *transitionChanged\(\);\n *\} else if \(r\.b0 !== undefined\) p1\(r\.b0, c, d\);/);
     assert.match(module, /transitionRows\(r\.L1\)/);
     assert.match(module, /^  holdTransitions\(I, \d+\);$/m);
   });
