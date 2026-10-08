@@ -3,6 +3,7 @@
 ## 1.0.0-alpha.37
 
 - HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
+- Compiled components update rows inside a nested `$each` when an outer row moves, or when its item or an outer state value changes, as the live runtime does. Before, `<li $each="row, i of $rows"><b $each="n of $row.tags">{$i}</b></li>` kept each row's old `$i` after a reorder (and showed `undefined` at first), an inner row's `{$row.label}` missed writes to that row's `label`, and rows two loops deep missed state changes. Rows keep their position only when something in or below them reads it. A reorder re-runs only the moved rows' position bindings, and a count change only rows that read `loop.count` or `loop.last`.
 
 ## 1.0.0-alpha.36
 
