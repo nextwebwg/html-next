@@ -67,7 +67,8 @@ export interface CompiledExpression {
 export type WritablePathSegment =
   | string
   | number
-  | { readonly kind: "index"; readonly expression: ExpressionNode };
+  /** `item` names the loop item at this position, so a target may write through the item itself. */
+  | { readonly kind: "index"; readonly expression: ExpressionNode; readonly item?: string };
 export type WritablePath = readonly WritablePathSegment[];
 
 
@@ -549,6 +550,12 @@ export function compileExpression(source: string): CompiledExpression {
 export function compilePath(source: string): CompiledExpression {
   const path = source.trimStart();
   return compileExpression(path.startsWith("$") ? path : `$${path}`);
+}
+
+/** An access chain's segments from its root name, or undefined when the node is not one. */
+export function writablePathOf(node: ExpressionNode): WritablePath | undefined {
+  const result: WritablePathSegment[] = [];
+  return appendWritable(node, result) ? result : undefined;
 }
 
 /** Return a writable path only when it is rooted in declared writable state. */

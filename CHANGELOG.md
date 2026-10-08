@@ -1,19 +1,24 @@
 # Changelog
 
-## 1.0.0-alpha.38
+## 1.0.0-alpha.39
 
 - HTMLKit plugins add page formats. A plugin's `pages` compiler claims file extensions such as `.md` and turns each file into an HTML Next page resource; HTMLKit then routes, orders, watches, renders, and builds those pages like `.html` pages. While compiling, a page can resolve another page's URL with `page.href` and serve a referenced file with `page.asset`. A plugin's `config()` contributes options, including a layout whose loader is a module object and a `headScript` inlined before `app/head.js`.
 - `pages` lists the page directories and the URL prefix each serves, defaulting to `app/pages` at `/`. One directory may serve several prefixes.
 - Pages can set their navigation label (`htmlkit:label`), stay out of navigation (`htmlkit:navigation` with `content="hidden"`), and add alias routes (`htmlkit:alias`). An alias never appears in navigation and marks its page's own entry current.
 
-## 1.0.0-alpha.37
+## 1.0.0-alpha.38
 
 - HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
 - The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
 
-## 1.0.0-alpha.36
+## 1.0.0-alpha.37
 
 - HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
+
+## 1.0.0-alpha.36
+
+- `bind:` writes through a `$each`, `$with`, or `$match` alias of a state path, as the proposal specifies. `<div $with="$draft.owner as owner"><input bind:value="owner.name">` writes `draft.owner.name`, and `<li $each="row of $rows"><input bind:value="row.label">` writes that row's `label`, in the live runtime, compiled output, and Vue, React and Svelte. An item of a `$where`, `$sort`, or `$limit` list, and an outer loop's item written from an inner loop when the outer loop names no index, are `HT005` with the reason; name the outer loop's index (`row, i of $rows`) to write through it. Replacing a whole loop item (`bind:value="tag"` over a list of strings) is also `HT005` for now; bind one of its fields. Compiled output writes a row's field through the row's item, so no row has to keep its position for it. A `$with` alias that shares a state's name no longer writes that state.
+- Components parsed in the browser log `HT022` to the console when a bare keyword spells a name in scope, so a missing `$` shows up without running `html-next-check`. The message quotes the expression.
 - Rebuild brand symbols and lettering with clean vector geometry, removing jagged raster-trace edges while preserving the approved N spacing.
 
 - HTML Next has approved vector and PNG brand assets, separate symbol-only avatars and full name lockups, and a branded repository introduction.
