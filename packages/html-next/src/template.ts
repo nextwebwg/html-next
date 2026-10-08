@@ -136,6 +136,22 @@ export interface ElementNode {
   readonly flow?: Flow;
   readonly events?: readonly EventBinding[];
   readonly ref?: string;
+  /** The `transitions` extension's directives on this element. */
+  readonly transition?: ElementTransition;
+}
+
+/**
+ * `$transition` and `$transition-name`, as authored. The value stays unparsed: only a build that
+ * enables the `transitions` extension reads its grammar, so the live runtime carries none of it.
+ */
+export interface ElementTransition {
+  /** The `$transition` literal, trimmed: a keyframes name and optional duration, easing, and delay. */
+  readonly value?: string;
+  /** The `$transition-name` expression. */
+  readonly name?: string;
+  readonly namePlan?: CompiledExpression;
+  readonly line?: number;
+  readonly column?: number;
 }
 
 export interface EventBinding {
