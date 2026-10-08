@@ -962,7 +962,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...data.map((declaration) => {
       const parameters = declaration.parameters.map((parameter) =>
         `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
-      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: () => ({ ${parameters} }) });`;
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
+        .map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
+      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...contexts.flatMap((context, index) => {
       const variable = `__context${index}`;

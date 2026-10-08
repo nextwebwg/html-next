@@ -115,7 +115,7 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
 
   for (const [engine, browserType] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const satisfies ReadonlyArray<readonly [string, BrowserType]>) {
     for (const mode of ["application", "library"] as const) {
-      it(`${engine} ${mode} seeds accepted parameters before initial recovery and restarts equal URLs`, async () => {
+      it(`${engine} ${mode} seeds accepted parameters before initial recovery and keeps a read whose parameters are unchanged`, async () => {
         const browser = await launchParityBrowser(browserType);
         const pages: Page[] = [];
         const output = initial.get(mode)!;
@@ -156,11 +156,11 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
           await waitFor();
           assert.deepEqual(requests.live, [label], "native samples retain values accepted before the first valid request");
           assert.deepEqual(requests.svelte, requests.live);
-          const restarted = pages.map(page => page.waitForRequest(request => request.url().endsWith(label), { timeout: 5000 }));
+          // A new box whose `from` parameters resolve as before requests nothing.
           await act("partial");
-          await Promise.all(restarted);
+          await new Promise(resolve => setTimeout(resolve, 150));
           await waitFor();
-          assert.deepEqual(requests.live, [label, label], "native valid updates restart even with the same URL");
+          assert.deepEqual(requests.live, [label], "native valid updates with unchanged parameters request nothing");
           assert.deepEqual(requests.svelte, requests.live);
           assert.deepEqual(errors, []);
         } finally {

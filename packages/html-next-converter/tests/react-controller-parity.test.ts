@@ -80,7 +80,9 @@ const hydrating = container.hasChildNodes();
 const root = hydrating ? hydrateRoot(container, element) : createRoot(container);
 if (!hydrating) root.render(element);
 (window as any).reactRoot = root;
-(window as any).reactSetAmount = (amount: unknown) => root.render(<XControlled id="case" amount={amount as number} />);`);
+const props: { amount?: number; tone?: string } = {};
+(window as any).reactSetAmount = (amount: unknown) => { props.amount = amount as number; root.render(<XControlled id="case" {...props} />); };
+(window as any).reactSetTone = (tone: unknown) => { props.tone = tone as string; root.render(<XControlled id="case" {...props} />); };`);
       const bundle = join(outDirectory, "mount.js");
       await build({ entryPoints: [mountEntry], outfile: bundle, bundle: true, format: "iife", platform: "browser",
         target: ["es2022"], jsx: "automatic", loader: { ".css": "empty" },
@@ -149,6 +151,15 @@ if (!hydrating) root.render(element);
                 document.querySelector("#case")?.getAttribute("data-amount-input") === String(value), amount)));
               await compare();
             }
+            // Another prop changing does not rerun an effect that read only `amount`.
+            const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
+            await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
+              updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+            await react.evaluate(() => (window as unknown as { reactSetTone(value: unknown): void }).reactSetTone("loud"));
+            await Promise.all([live, react].map((page) => page.waitForTimeout(50)));
+            assert.equal((await snapshot(live)).behavior.trace.amountEffects, amountRuns, "another prop must not rerun the amount effect");
+            await compare();
             const undeclared = await Promise.all([live, react].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               let observed: { detail: unknown; bubbles: boolean; composed: boolean; cancelable: boolean } | null = null;
@@ -220,6 +231,8 @@ if (!hydrating) root.render(element);
             await Promise.all([live, react].map((page) => page.locator("#case button").first().click()));
             await Promise.all([live, react].map((page) => page.waitForFunction(() =>
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
+            const unchanged = (await snapshot(live)).behavior.trace;
+            assert.deepEqual([unchanged.flatEffects, unchanged.nestedEffects], [1, 1], "an equal computed or written-back value must not rerun effects");
             await compare();
             const results = await Promise.all([live, react].map((page) => page.evaluate(() =>
               new Promise<number>((resolve) => {
@@ -313,7 +326,7 @@ if (!hydrating) root.render(element);
             const traces = await Promise.all(pages.map((page) => page.evaluate(() =>
               ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
             assert.deepEqual(traces[1], traces[0]);
-            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, effectCleanups: 1, disconnects: 1 });
+            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, flatEffects: 1, amountEffects: 1, effectCleanups: 1, disconnects: 1 });
           } finally {
             await Promise.all(pages.map((page) => page.close()));
             await browser.close();
