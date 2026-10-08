@@ -13,13 +13,20 @@ HTMLKit (`@nextwebwg/htmlkit`) turns a folder of HTML Next components into a web
 
 ## Install and run
 
-Use Node `>=22.22.2 <23 || >=24.15 <25` and pnpm through Corepack. Install `@nextwebwg/htmlkit`, then run:
+Use Node `>=22.22.2 <23 || >=24.15 <25`. Install `@nextwebwg/htmlkit` and add its commands to your
+`package.json` scripts:
 
-```sh
-corepack pnpm exec htmlkit dev
-corepack pnpm exec htmlkit build
-corepack pnpm exec htmlkit preview
+```json
+{
+  "scripts": {
+    "dev": "htmlkit dev",
+    "build": "htmlkit build",
+    "preview": "htmlkit preview"
+  }
+}
 ```
+
+Then run `pnpm dev`, `pnpm build`, or `pnpm preview` (`npm run dev` and the others work too).
 
 Commands accept an optional application root and `--base /docs/`, `--origin https://example.com`,
 `--out-dir dist`, `--port 3000`, and `--host 127.0.0.1`. Development and preview default to loopback.

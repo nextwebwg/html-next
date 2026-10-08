@@ -98,7 +98,7 @@ the existing HTML Next binding syntax:
 
 ```html
 <template component="page-item">
-  <title $value="$label"></title>
+  <title>{$label}</title>
   <meta name="description" from:content="$description">
   <link rel="canonical" from:href="$canonicalURL">
   <defs>
@@ -106,7 +106,7 @@ the existing HTML Next binding syntax:
     <prop name="description" type="string" required>Description</prop>
     <prop name="canonicalURL" type="string" required>Canonical URL</prop>
   </defs>
-  <article><h1 $value="$label"></h1></article>
+  <article><h1>{$label}</h1></article>
 </template>
 ```
 

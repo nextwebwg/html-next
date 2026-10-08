@@ -45,7 +45,7 @@ describe("application platform", () => {
     const root = await app();
     await rm(join(root, "app/layouts/default.server.ts"));
     await write(root, "app/layouts/default.html", '<template component="head-shell"><title>Site title</title><meta name="description" content="Site description"><meta property="og:title" content="Site"><link rel="canonical" href="https://example.test/"><link rel="stylesheet" href="/shared.css"><link rel="alternate" hreflang="en" href="https://example.test/en/"><main><slot name="page"></slot></main></template>');
-    await write(root, "extra/head.html", '<meta name="htmlkit:page" content="page-head"><template component="head-helper"><title $value="$missing"></title><meta name="htmlkit:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title $value="$title"></title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p $value="$title"></p><head-helper></head-helper></section></template>');
+    await write(root, "extra/head.html", '<meta name="htmlkit:page" content="page-head"><template component="head-helper"><title>{$missing}</title><meta name="htmlkit:layout" content="absent"><meta name="description" content="Helper description"><meta property="og:image" content="https://example.test/helper.png"><strong>Helper content</strong></template><template component="page-head"><title>{$title}</title><meta name="description" from:content="$description"><meta property="og:title" from:content="$title"><meta property="og:image" content="https://example.test/a.png"><meta property="og:image" content="https://example.test/b.png"><link rel="canonical" from:href="$canonical"><link rel="stylesheet" href="/page.css"><link rel="alternate" hreflang="fr" href="https://example.test/fr/"><defs><prop name="title" type="string" required>Title</prop><prop name="description" type="string" required>Description</prop><prop name="canonical" type="string" required>Canonical</prop></defs><section><p>{$title}</p><head-helper></head-helper></section></template>');
     await write(root, "extra/head.server.ts", 'export const load = () => ({ props: { title: "Page & title", description: "a < b", canonical: "https://example.test/page/" } });');
     const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/head.html", server: "extra/head.server.ts" }] });
     try {
@@ -58,7 +58,7 @@ describe("application platform", () => {
       expect(head).not.toContain("Site description");
       expect(head.match(/rel="canonical"/g)).toHaveLength(1);
       for (const value of ["/shared.css", "/page.css", 'hreflang="en"', 'hreflang="fr"', "a.png", "b.png"]) expect(head).toContain(value);
-      expect(head).not.toMatch(/htmlkit:|from:|\$value/);
+      expect(head).not.toMatch(/htmlkit:|from:|\{\$/);
       expect(head).not.toContain("Helper description");
       expect(head).not.toContain("helper.png");
       expect(html.split("</head>")[1]).toContain("Helper content");
@@ -206,7 +206,7 @@ describe("application platform", () => {
 
   it("serializes false boolean values and camelCase props independently of native DOM targets", async () => {
     const root = await app();
-    await write(root, "extra/values.html", '<template component="value-page"><defs><prop name="active" type="boolean" default="true">Active</prop><prop name="itemURL" type="string" required>Link</prop></defs><section><button from:disabled="$active" $value="$active"></button><a from:href="$itemURL">Item</a></section></template>');
+    await write(root, "extra/values.html", '<template component="value-page"><defs><prop name="active" type="boolean" default="true">Active</prop><prop name="itemURL" type="string" required>Link</prop></defs><section><button from:disabled="$active">{$active}</button><a from:href="$itemURL">Item</a></section></template>');
     await write(root, "extra/values.server.ts", 'export const load = () => ({ props: { active: false, itemURL: "/target/" } });');
     const application = await createApplication({ root, fileRoutes: false, routes: [{ pattern: "/", component: "extra/values.html", server: "extra/values.server.ts" }] });
     try {

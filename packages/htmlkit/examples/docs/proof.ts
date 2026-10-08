@@ -10,7 +10,7 @@ import { escapeHTML } from "../../src/document.js";
 const counter = `<template component="proof-counter" controller="./counter.ts"><defs>
 <prop name="step" type="number" default="1">Increment amount.</prop>
 <state name="count" type="number" value="0"></state></defs>
-<section><button type="button" $ref="increment">Increment</button> <output $value="$count"></output></section>
+<section><button type="button" $ref="increment">Increment</button> <output>{$count}</output></section>
 <style>:host { padding: 1rem; border: 1px solid #ccd8e1; border-radius: .5rem; } button { font: inherit; } output { margin-left: 1rem; }</style></template>`;
 
 // Markdown text is content, not HTML Next expressions. Escape its text nodes with the
@@ -38,7 +38,7 @@ export async function buildDocsProof(root: string, contentRoot: string, base = "
     <state name="dark" type="boolean" value="false"></state></defs>
     <main><header><strong>HTMLKit</strong><button type="button" $ref="theme">Toggle theme</button></header>
     <div class="columns"><nav aria-label="Documentation"><label>Find a page <input type="search" $ref="search"></label>
-      <ul><li $each="link of $links"><a from:href="$link.href" $value="$link.label"></a></li></ul></nav>
+      <ul><li $each="link of $links"><a from:href="$link.href">{$link.label}</a></li></ul></nav>
       <div class="content"><slot name="page"></slot></div></div></main>
     <style>:host { color: #183047; background: #fff; min-height: 100vh; padding: 2rem; font: 1rem/1.65 system-ui; }
       :host-state([dark]) { color: #e1ebf4; background: #142638; } header { display: flex; justify-content: space-between; border-bottom: 1px solid #9aaebf; padding-bottom: 1rem; }
