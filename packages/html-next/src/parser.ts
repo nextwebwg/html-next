@@ -1195,7 +1195,8 @@ function extractFlow(
       result.where = where;
       result.wherePlan = compileScopedExpression(where, localScope, source);
     }
-    if (values.$sort !== undefined) result.sort = values.$sort;
+    // A path list, like `bind:`: a key may carry the `$` marker, which every target reads without.
+    if (values.$sort !== undefined) result.sort = values.$sort.replace(/(^|,)(\s*-?\s*)\$/g, "$1$2");
     const limit = values.$limit;
     if (limit !== undefined) {
       result.limit = limit;
