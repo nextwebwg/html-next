@@ -82,7 +82,7 @@
         <p $if="$loading" class="notice">Loading pantry…</p>
         <p $if="$failed" class="notice notice--error">The pantry list could not be loaded.</p>
         <ul class="items" $if="not $loading">
-          <pantry-item $each="row of $rows" $key="$row.id" $where="$row.matches" $sort="label"
+          <pantry-item $each="row of $rows" $key="$row.id" $where="$row.matches" $sort="row.label"
  from:item-id="$row.id" from:label="$row.label" from:quantity="$row.quantity" from:unit="$row.unit"
  from:threshold="$row.threshold"></pantry-item>
         </ul>

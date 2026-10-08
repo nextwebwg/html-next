@@ -333,7 +333,7 @@ function renderEach(node: ElementNode | SlotNode, scope: Scope, lowering: Loweri
   const list = lowering.list(listNode, scope, filterItem, {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
     itemScope: scopeWith(filterItem, "index", "loop"),
-    sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
+    sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   }, listSource);
   const callbackScope = scopeWith("item", "index", "loop");

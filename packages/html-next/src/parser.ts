@@ -22,6 +22,7 @@ import type {
   Flow,
   HandlerStep,
   SlotContract,
+  SortKey,
   TemplateAttribute,
   TemplateNode,
   TextNode,
@@ -1179,6 +1180,7 @@ function extractFlow(
       where?: string;
       wherePlan?: CompiledExpression;
       sort?: string;
+      sortKeys?: SortKey[];
       limit?: string;
       limitPlan?: CompiledExpression;
       key?: string;
@@ -1195,8 +1197,23 @@ function extractFlow(
       result.where = where;
       result.wherePlan = compileScopedExpression(where, localScope, source);
     }
-    // A path list, like `bind:`: a key may carry the `$` marker, which every target reads without.
-    if (values.$sort !== undefined) result.sort = values.$sort.replace(/(^|,)(\s*-?\s*)\$/g, "$1$2");
+    // A path list rooted at the loop item, so `p.price` cannot be confused with a field named `p`:
+    // `-p.name` sorts descending, `p` alone sorts by the item itself, and a leading `$` is accepted.
+    if (values.$sort !== undefined) {
+      result.sort = values.$sort;
+      result.sortKeys = values.$sort.split(",").map((raw) => {
+        const descending = raw.trim().startsWith("-");
+        const key = raw.trim().slice(descending ? 1 : 0).trim();
+        const steps = key.replace(/^\$/, "").split(".");
+        const valid = steps.every((step, index) => isIdentifier(step) || index > 0 && /^\d+$/.test(step));
+        const [root, ...path] = steps;
+        if (root !== item || !valid) {
+          const hint = valid ? `; did you mean \`${descending ? "-" : ""}${item}.${steps.join(".")}\`?` : ".";
+          fail("HT023", `\`$sort\` key \`${raw.trim()}\` must be a path from the loop item \`${item}\`${hint}`, source);
+        }
+        return { path, descending };
+      });
+    }
     const limit = values.$limit;
     if (limit !== undefined) {
       result.limit = limit;

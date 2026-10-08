@@ -1366,7 +1366,7 @@ class Planner {
 
   /** `$where`, `$sort` and `$limit` around a list, through the shared `shapeItems`. */
   shape(flow: Extract<Flow, { kind: "each" }>, scope: Scope, list: Lowered, itemType: TypeNode | undefined): { list: Lowered; positional: boolean } {
-    if (flow.where === undefined && flow.sort === undefined && flow.limit === undefined) return { list, positional: false };
+    if (flow.where === undefined && flow.sortKeys === undefined && flow.limit === undefined) return { list, positional: false };
     let reads: Reads = list;
     let where = "0";
     if (flow.where !== undefined) {
@@ -1377,13 +1377,8 @@ class Planner {
       reads = merge(reads, { ...converted(lowered), item: false, nested: true });
       where = `(o) => ${lowered.source}`;
     }
-    const sorts = (flow.sort ?? "").split(",").map((key: string) => key.trim()).filter((key: string) => key !== "").map((key: string) => {
-      const descending = key.startsWith("-");
-      const field = descending ? key.slice(1).trim() : key;
-      let source = "o";
-      for (const step of field.split(".")) source = `readMember(${source}, ${JSON.stringify(step)})`;
-      return `[(o) => ${source}, ${descending}]`;
-    });
+    const sorts = (flow.sortKeys ?? []).map(({ path, descending }) =>
+      `[(o) => ${path.reduce((source, step) => `readMember(${source}, ${JSON.stringify(step)})`, "o")}, ${descending}]`);
     if (sorts.length > 0) reads = merge(reads, { bits: 0, nested: true, item: false, contents: false, fails: false });
     let limit = "undefined";
     if (flow.limit !== undefined) {

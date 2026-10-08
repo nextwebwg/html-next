@@ -144,6 +144,11 @@ export interface EventBinding {
   readonly modifiers: readonly string[];
 }
 
+export interface SortKey {
+  readonly path: readonly string[];
+  readonly descending: boolean;
+}
+
 export type Flow =
   | { readonly kind: "if"; readonly test: string; readonly testPlan?: CompiledExpression }
   | {
@@ -155,6 +160,8 @@ export type Flow =
       readonly where?: string;
       readonly wherePlan?: CompiledExpression;
       readonly sort?: string;
+      /** `$sort` parsed: each key's path below the loop item (empty for the item itself) and direction. */
+      readonly sortKeys?: readonly SortKey[];
       readonly limit?: string;
       readonly limitPlan?: CompiledExpression;
       readonly key?: string;

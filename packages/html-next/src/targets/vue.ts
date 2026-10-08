@@ -348,7 +348,7 @@ function renderEachNode(node: ElementNode | SlotNode, flow: Extract<NonNullable<
   const options = {
     ...(flow.wherePlan === undefined ? {} : { where: flow.wherePlan.ast }),
     itemScope: local.template,
-    sort: (flow.sort ?? "").split(",").map((key) => key.trim()).filter(Boolean),
+    sort: (flow.sortKeys ?? []).map(({ path, descending }) => `${descending ? "-" : ""}${path.join(".")}`),
     ...(flow.limitPlan === undefined ? {} : { limit: flow.limitPlan.ast }),
   };
   const list = (flow.listPlan === undefined || !mayProduceInvalidResult(listNode, names.script) ? undefined : guardedBinding(flow.listPlan, names, context, (scope) =>

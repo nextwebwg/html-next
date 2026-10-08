@@ -642,8 +642,8 @@ describe("parseComponent", () => {
     );
   });
 
-  it("reads path fields without the $ marker and accepts it for convenience", () => {
-    const parse = (sort: string, path: string) => parseComponent(
+  it("reads path fields without the $ marker and accepts it even though it is not required", () => {
+    const parse = (sort: string, path = "draft.title") => parseComponent(
       `<template component="demo-paths" status="early" summary="Paths.">` +
         `<defs><state type="object({ title: string })" name="draft" value="{ title: '' }"></state>` +
         `<state type="list(object({ price: number, name: string }))" name="rows" value="[]"></state>` +
@@ -653,14 +653,22 @@ describe("parseComponent", () => {
     const shape = (definition: ReturnType<typeof parse>) => {
       const [input, list] = definition.template.children as ElementNode[];
       const handler = definition.declarations?.find((declaration) => declaration.kind === "handler");
+      const flow = (list!.children[0] as ElementNode).flow;
       return {
         bind: input!.attributes[0]?.kind === "attribute" ? input!.attributes[0].writablePath : undefined,
         set: handler?.kind === "handler" && handler.steps[0]?.kind === "set" ? handler.steps[0].writablePath : undefined,
-        sort: (list!.children[0] as ElementNode).flow?.kind === "each" ? ((list!.children[0] as ElementNode).flow as { sort?: string }).sort : undefined,
+        sort: flow?.kind === "each" ? flow.sortKeys : undefined,
       };
     };
-    assert.deepEqual(shape(parse("price, -name", "draft.title")), { bind: ["draft", "title"], set: ["draft", "title"], sort: "price, -name" });
-    assert.deepEqual(shape(parse("$price, -$name", "$draft.title")), shape(parse("price, -name", "draft.title")));
+    assert.deepEqual(shape(parse("row.price, -row.name, row")), {
+      bind: ["draft", "title"], set: ["draft", "title"],
+      sort: [{ path: ["price"], descending: false }, { path: ["name"], descending: true }, { path: [], descending: false }],
+    });
+    assert.deepEqual(shape(parse("$row.price, -$row.name, $row", "$draft.title")), shape(parse("row.price, -row.name, row")));
+    // A $sort key starts at the loop item, so a bare field is not read as one.
+    assert.throws(() => parse("price, -name"), /`\$sort` key `price` must be a path from the loop item `row`; did you mean `row\.price`\?/);
+    assert.throws(() => parse("-name"), /did you mean `-row\.name`\?/);
+    assert.throws(() => parse("item.price"), /HT023/);
     expectDiagnostic("HT005", `<template component="demo-paths" status="early" summary="Paths."><defs><state type="number" name="count" value="0"></state></defs><input bind:value="$count + 1"></template>`);
   });
 
@@ -723,7 +731,7 @@ describe("parseComponent", () => {
         `</handler></defs>` +
         `<section from:data-ready="$hasQuery" class:active="$hasQuery" style:opacity="$hasQuery" $ref="root">` +
         `<input .value="$query" bind:data-index="form.selected" $ref="search" on:input.capture.once="select">` +
-        `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-score,name" $limit="3" $key="$row.id">` +
+        `<ol><li $each="row, i of $results.value" $where="$row.visible" $sort="-row.score,row.name" $limit="3" $key="$row.id">` +
         `<slot from:name="$row.id"><span $value="$i"></span></slot></li></ol>` +
         `<div $with="$form as current"><output $value="$current.selected"></output></div>` +
         `<div $match="$form as current"><span $when="$current.selected > 0">Selected</span><span $else>None</span></div>` +

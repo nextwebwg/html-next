@@ -535,7 +535,7 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
         <ol><li $each="row, i of $rows" from:data-id="$row.id" class:first="$loop.first" class:last="$loop.last">{$i}/{$loop.count} {$row.label}
           <button $ref="picks" on:click.stop="pick">{$row.label}</button><em $if="$row.tags.length > 0 and $ready">{$row.tags}</em>
           <ul><li $each="tag of $row.tags" $key="$tag">{$tag}</li></ul></li></ol>
-        <menu><li $each="row of $rows" $key="concat($prefix, $row.id)" $where="$row.label" $sort="-label,id" $limit="$limit" from:data-key="$row.id">{$row.label}</li></menu>
+        <menu><li $each="row of $rows" $key="concat($prefix, $row.id)" $where="$row.label" $sort="-row.label,row.id" $limit="$limit" from:data-key="$row.id">{$row.label}</li></menu>
       </section>`);
     const note = (host: any, label: string): void => {
       (globalThis as any).directExtendLog.events.push(`${label} refs=${(host.refs.picks ?? []).map((button: Element) => button.textContent).join("|")}`);

@@ -376,7 +376,7 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
   return Number.isFinite(value) ? String(value) + unit : invalid;
 }`,
   sortBy: `function sortBy(items: any[], keys: readonly string[]): any[] {
-  const field = (item: any, path: string): unknown => item !== null && typeof item === "object" && !Array.isArray(item)
+  const field = (item: any, path: string): unknown => path !== "" && item !== null && typeof item === "object" && !Array.isArray(item)
     ? path.split(".").reduce((value, key) => value?.[key], item)
     : item;
   return items.slice().sort((a, b) => {
