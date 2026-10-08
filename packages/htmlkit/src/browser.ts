@@ -66,8 +66,9 @@ document.dispatchEvent(new Event('htmlkit:ready'));
 export function browserPlugin(sources: ReadonlyMap<string, string>, inputs?: Set<string>): Plugin {
   return {
     name: "htmlkit-browser",
-    resolveId(id) { if (sources.has(id)) return id.endsWith(".css") ? id : `\0${id}`; },
-    load(id) { return sources.get(id.startsWith("\0") ? id.slice(1) : id); },
+    // Vite adds ?direct when a document <link> requests a stylesheet; keep the query for its CSS plugin.
+    resolveId(id) { const path = id.split("?")[0]!; if (sources.has(path)) return path.endsWith(".css") ? id : `\0${id}`; },
+    load(id) { return sources.get((id.startsWith("\0") ? id.slice(1) : id).split("?")[0]!); },
     generateBundle() {
       if (inputs !== undefined) for (const id of this.getModuleIds()) if (!id.startsWith("\0")) inputs.add(id);
     },

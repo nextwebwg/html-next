@@ -96,6 +96,11 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
     const server = await devApplication({ root, base: "/development/", port: 0 });
     const browser = await chromium.launch({ headless: true });
     try {
+      // Component stylesheets are document links, so they apply at first paint, before any module runs.
+      const unscripted = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
+      await unscripted.goto(server.url);
+      expect(await unscripted.locator("main").evaluate(element => getComputedStyle(element).color)).toBe("rgb(20, 30, 40)");
+      expect(await unscripted.locator('[data-component="home-label"]').evaluate(element => getComputedStyle(element).color)).toBe("rgb(90, 80, 70)");
       const page = await browser.newPage();
       const errors: string[] = [];
       page.on("pageerror", error => errors.push(error.message));
