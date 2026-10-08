@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { chromium, firefox, webkit } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApplication, devApplication, previewApplication, type ApplicationServer } from "../src/index.js";
@@ -7,15 +7,21 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixture } from "./fixture.js";
+import { build } from "vite";
+import { fixture, write } from "./fixture.js";
 
 describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application adoption", () => {
   let root: string;
   let server: ApplicationServer;
+  let runtime: string;
   beforeAll(async () => {
     root = await fixture();
     await buildApplication({ root, base: "/kit/" });
     server = await previewApplication({ root, port: 0 });
+    // The live runtime's API, as page code would import it, to read the compiled roots it did not create.
+    const live = await build({ configFile: false, logLevel: "silent", build: { write: false, minify: false,
+      lib: { entry: fileURLToPath(new URL("../../html-next/src/live.ts", import.meta.url)), formats: ["iife"], name: "HtmlRuntime" } } });
+    runtime = (Array.isArray(live) ? live[0]! : live as { output: { code?: string }[] }).output[0]!.code!;
   });
   afterAll(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
   for (const [name, type] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
@@ -69,6 +75,12 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("built application ad
         })).toBe(true);
         await page.locator("button").click();
         await expect.poll(() => page.locator("output").textContent()).toBe("5");
+        await page.addScriptTag({ content: runtime });
+        expect(await page.evaluate(() => {
+          const { getComponentHost } = (window as unknown as { HtmlRuntime: { getComponentHost(element: Element): { state: { count: number }; root: Element } | undefined } }).HtmlRuntime;
+          const root = document.querySelector('[data-component="home-page"]')!;
+          return { count: getComponentHost(root)?.state.count, root: getComponentHost(root)?.root === root };
+        })).toEqual({ count: 5, root: true });
         await expect.poll(() => page.locator("button").getAttribute("aria-expanded")).toBe("true");
         expect(await page.locator("button span").textContent()).toBe("5");
         expect(await page.locator("button").evaluate(element => element.classList.contains("active"))).toBe(true);
@@ -104,6 +116,15 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
       await page.getByText("Loaded data", { exact: true }).waitFor();
       expect(await subject.getAttribute("data-production")).toBe("false");
       expect(await page.locator("img").evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+      await page.locator("button").click();
+      await expect.poll(() => page.locator("output").textContent()).toBe("5");
+      // An edited component reloads the page, whose regenerated modules adopt the new server DOM.
+      await page.evaluate(() => { (window as unknown as { previous: boolean }).previous = true; });
+      const source = await readFile(join(root, "app/pages/index.html"), "utf8");
+      await write(root, "app/pages/index.html", source.replace("<h1>Home</h1>", "<h1>Edited home</h1>"));
+      await page.waitForFunction(() => !(window as unknown as { previous?: boolean }).previous && document.querySelector("h1")?.textContent === "Edited home",
+        undefined, { timeout: 10_000 });
+      await expect.poll(() => subject.getAttribute("data-connections")).toBe("1");
       await page.locator("button").click();
       await expect.poll(() => page.locator("output").textContent()).toBe("5");
       expect(errors).toEqual([]);

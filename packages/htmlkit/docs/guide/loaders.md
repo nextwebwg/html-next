@@ -21,10 +21,12 @@ into a public prop or state. Never place secrets in props or state. Inner head f
 ones. Each render runs loaders again; application module globals are not isolated between renders.
 
 Node uses HTML Next's renderer for the baseline. It executes neither browser controllers nor
-declared browser reads. Per-page browser modules register parsed definitions and let HTML Next
-adopt existing DOM, resume reads, and connect controllers. The platform adds no parser, scheduler,
-hydration record, or lifecycle registry. Document navigation uses native links. The browser emits
-`htmlkit:ready` on `document` after initial observation is installed.
+declared browser reads. Each page's browser module imports the page's components compiled to direct
+DOM code, which adopt the server's DOM in place: what a reader typed before startup stays, reads
+start, and controllers connect once the page is adopted. A page ships only the HTML Next helpers its
+components use, and pages share the modules of the components they have in common. The platform
+adds no scheduler, hydration record, or lifecycle registry. Document navigation uses native links.
+The browser emits `htmlkit:ready` on `document` once the page's components are adopted.
 
 Relative declared read sources are bundled as assets beside the browser delivery. Root-relative
 read URLs are prefixed with the application base; absolute HTTP(S) sources retain their origin.
