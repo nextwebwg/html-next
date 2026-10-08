@@ -499,7 +499,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
           : node.name === "select" ? `${value} as React.SelectHTMLAttributes<HTMLSelectElement>["defaultValue"]` : `String(${value} ?? "")`;
         const authored = name === "checked" ? `(${defaults}).checked`
           : node.name === "select" ? "undefined" : `(${defaults}).value`;
-        bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
+        bindings.push(memoControl
+          ? `htmlNextDefault=${quote(name === "checked" ? "defaultChecked" : "defaultValue")} htmlNextAuthored={${authored}} htmlNextInitial={${initial}}`
+          : `${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else {
         genericWrites.push({ state: attribute.writablePath[0], path: pathSource, dynamic });
         bindings.push(`{...{ ${quote(attribute.name)}: ${lowering.attribute(attribute.expressionPlan.ast, scope, attribute.name)} }}`);
@@ -571,7 +573,9 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
             : `${alias} == null ? undefined : String(${alias})`;
         const authored = name === "checked" ? `(${defaults}).checked`
           : node.name === "select" ? "undefined" : `(${defaults}).value`;
-        bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
+        bindings.push(memoControl
+          ? `htmlNextDefault=${quote(name === "checked" ? "defaultChecked" : "defaultValue")} htmlNextAuthored={${authored}} htmlNextInitial={${initial}}`
+          : `${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else if (attribute.name === "textContent") {
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
         if (guard !== undefined) {
@@ -919,12 +923,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     `  const { children: _children, slots: _slots, ${target.props.map((prop) => `${propKey(prop.name)}: _${prop.name.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     ...(target.props.length > 0 || usesNativeControls ? [
       "  const hasMounted = React.useRef(false);",
-      // Bound controls switch to their authored defaults once mounted. Render that switch as part of
-      // mounting, so it never reaches the DOM with an unrelated later update.
-      ...usesNativeControls ? [
-        "  const [, settleMounted] = React.useReducer((revision: number) => revision + 1, 0);",
-        "  React.useLayoutEffect(() => { hasMounted.current = true; settleMounted(); }, []);",
-      ] : ["  React.useLayoutEffect(() => { hasMounted.current = true; }, []);"],
+      "  React.useLayoutEffect(() => { hasMounted.current = true; }, []);",
     ] : []),
     ...(target.props.length === 0 ? [] : [
       `  const acceptedProps = React.useRef<Record<string, unknown>>({ ${target.props.map((prop) =>
@@ -1272,20 +1271,31 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...(renderState.usesControlMemo ? [
       "",
-      "/** Equal props, with style compared entry by entry: a control with them commits nothing. */",
+      "/** Equal props, with style compared entry by entry: a control with them commits nothing. Its initial default only seeds it. */",
       "function sameControlProps(previousProps: object, nextProps: object): boolean {",
       "  const [previous, next] = [previousProps as Readonly<Record<string, unknown>>, nextProps as Readonly<Record<string, unknown>>];",
       "  const keys = Object.keys(next);",
       "  if (keys.length !== Object.keys(previous).length) return false;",
       "  return keys.every((key) => {",
+      "    if (key === 'htmlNextInitial') return true;",
       "    const [before, after] = [previous[key], next[key]];",
       "    if (key !== 'style' || before === null || after === null || typeof before !== 'object' || typeof after !== 'object') return Object.is(before, after);",
       "    const entries = Object.entries(after);",
       "    return entries.length === Object.keys(before).length && entries.every(([name, value]) => Object.is((before as Record<string, unknown>)[name], value));",
       "  });",
       "}",
-      "const HtmlNextInput = React.memo((props: React.ComponentProps<'input'>) => <input {...props} />, sameControlProps);",
-      "const HtmlNextTextarea = React.memo((props: React.ComponentProps<'textarea'>) => <textarea {...props} />, sameControlProps);",
+      "interface ControlDefaults { readonly htmlNextDefault?: 'defaultValue' | 'defaultChecked'; readonly htmlNextAuthored?: unknown; readonly htmlNextInitial?: unknown }",
+      "/** A bound control renders its initial default, then switches to its authored one as it mounts, rendering only itself. */",
+      "function useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial }: ControlDefaults): Record<string, unknown> {",
+      "  const mounted = React.useRef(false);",
+      "  const [, settle] = React.useReducer((revision: number) => revision + 1, 0);",
+      "  React.useLayoutEffect(() => { if (htmlNextDefault !== undefined) { mounted.current = true; settle(); } }, []);",
+      "  return htmlNextDefault === undefined ? {} : { [htmlNextDefault]: mounted.current ? htmlNextAuthored : htmlNextInitial };",
+      "}",
+      "const HtmlNextInput = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<'input'> & ControlDefaults) =>",
+      "  <input {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);",
+      "const HtmlNextTextarea = React.memo(({ htmlNextDefault, htmlNextAuthored, htmlNextInitial, ...props }: React.ComponentProps<'textarea'> & ControlDefaults) =>",
+      "  <textarea {...props} {...useControlDefaults({ htmlNextDefault, htmlNextAuthored, htmlNextInitial })} />, sameControlProps);",
     ] : []),
     ...(renderState.usesOutputValue ? [
       "",
