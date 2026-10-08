@@ -11,7 +11,7 @@
         <prop name="size" type="keyword" values="sm, md, lg" default="md">Control size.</prop>
         <prop name="disabled" type="boolean" default="false">Whether the button is disabled.</prop>
       </defs>
-      <button data-x-button type="button" from:data-variant="variant" from:data-size="size" from:disabled="disabled">
+      <button data-x-button type="button" from:data-variant="$variant" from:data-size="$size" from:disabled="$disabled">
         <slot></slot>
       </button>
       <style>button[data-x-button] { box-sizing: border-box; }</style>
@@ -21,7 +21,7 @@
       <defs>
         <prop name="message" type="string" default="Waiting">Status text.</prop>
       </defs>
-      <output $value="message"></output>
+      <output $value="$message"></output>
     </template>
 
     <main>

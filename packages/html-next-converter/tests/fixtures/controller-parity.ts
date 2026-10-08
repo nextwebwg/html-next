@@ -11,9 +11,9 @@ export const controllerParitySource = `<template component="x-controlled" status
   <event name="quantity" type="number"></event>
   <event name="incremented" type="number"></event>
   <event name="labels" type="keyword+"></event>
-</defs><section on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><output $value="count"></output><x-dispatch-receiver $each="receiver of receivers" $key="receiver" $ref="receivers" from:receiver="receiver"></x-dispatch-receiver></section>
+</defs><section on:request-one="sendOne" on:request-all="sendAll"><button type="button" $ref="button">Increment</button><button class="same-nested" type="button" on:click="sameNested">Same</button><output $value="$count"></output><x-dispatch-receiver $each="receiver of $receivers" $key="$receiver" $ref="receivers" from:receiver="$receiver"></x-dispatch-receiver></section>
 <style>:host { display: block; width: 180px; padding: 4px; background: rgb(240 245 250); font: 16px/24px Arial, sans-serif; }</style></template>
-<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="receiver" from:data-hits="hits"></span></template>`;
+<template component="x-dispatch-receiver" status="early" summary="Receives targeted events."><defs><prop name="receiver" type="number" default="0">Receiver number.</prop><state name="hits" type="number" value="0"></state><handler name="receive"><set name="hits" expr:value="$hits + 1"></set></handler></defs><span hidden on:saved="receive" from:data-receiver="$receiver" from:data-hits="$hits"></span></template>`;
 export const controllerParityModule = `function connect(host) {
   window.trace.connects++;
   window.controllerHost = host;

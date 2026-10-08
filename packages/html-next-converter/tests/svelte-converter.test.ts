@@ -44,7 +44,7 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
   temporary.push(root);
   await writeFile(join(root, "card.html"), `<template component="x-card" status="early" summary="Card.">
     <props><prop name="label" type="string" default="Ready">Label.</prop></props>
-    <article class="card" from:aria-label="label"><slot></slot></article>
+    <article class="card" from:aria-label="$label"><slot></slot></article>
     <style>:host { display: block; }</style>
   </template>`);
 
@@ -91,7 +91,7 @@ it("shares computed-only Intl formatters across SSR instances without authored h
     <state name="formatValue" type="number" value="12.5"></state>
     <state name="createFormatValue" type="number" value="2"></state>
     <computed name="label" from="format($formatValue + $createFormatValue, 'number', {}, 'en-US')"></computed>
-    </defs><output $value="label"></output></template>`);
+    </defs><output $value="$label"></output></template>`);
   for (const mode of ["application", "library"] as const) {
     const outDirectory = join(root, mode);
     const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["formatting.html"] });
@@ -154,10 +154,10 @@ it("lowers state, computed text, and declarative handlers to Svelte runes", asyn
   await writeFile(join(root, "counter.html"), `<template component="x-counter" status="early" summary="Counter.">
     <defs>
       <state name="count" type="integer" value="0"></state>
-      <computed name="double" from="count * 2"></computed>
-      <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+      <computed name="double" from="$count * 2"></computed>
+      <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
     </defs>
-    <button on:click="increment" from:aria-label="double" $value="count"></button>
+    <button on:click="increment" from:aria-label="$double" $value="$count"></button>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["counter.html"] });
@@ -174,7 +174,7 @@ it("lowers conditional and aliased child regions without wrapper elements", asyn
   temporary.push(root);
   await writeFile(join(root, "panel.html"), `<template component="x-panel" status="early" summary="Panel.">
     <defs><state name="open" type="boolean" value="true"></state></defs>
-    <div><span $if="open">Shown</span><template $with="{ name: 'Ada' } as user"><b $value="user.name"></b></template></div>
+    <div><span $if="$open">Shown</span><template $with="{ name: 'Ada' } as user"><b $value="$user.name"></b></template></div>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["panel.html"] });
@@ -190,7 +190,7 @@ it("lowers a match inside table markup to one selected native row", async () => 
   temporary.push(root);
   await writeFile(join(root, "table.html"), `<template component="x-table" status="early" summary="Table.">
     <props><prop name="status" type="keyword" values="ok, bad" default="ok">Status.</prop></props>
-    <table from:data-status="status"><tbody><template $match="status as s"><tr $when="s = 'ok'"><td>OK</td></tr><tr $else><td>No</td></tr></template></tbody></table>
+    <table from:data-status="$status"><tbody><template $match="$status as s"><tr $when="$s = 'ok'"><td>OK</td></tr><tr $else><td>No</td></tr></template></tbody></table>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["table.html"] });
@@ -206,8 +206,8 @@ it("renders sorted, filtered, limited rows with loop metadata and no wrapper", a
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-each-"));
   temporary.push(root);
   await writeFile(join(root, "list.html"), `<template component="x-list" status="early" summary="List.">
-    <ul><li $each="n, i of [3, 1, 2, 5]" $where="n < 5" $sort="n" $limit="3"
-      from:data-i="i" from:data-last="loop.last" from:data-count="loop.count" $value="n"></li></ul>
+    <ul><li $each="n, i of [3, 1, 2, 5]" $where="$n < 5" $sort="n" $limit="3"
+      from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>
   </template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["list.html"] });
@@ -228,11 +228,11 @@ it("treats an absent list as empty and reports duplicate keyed rows", async () =
   temporary.push(root);
   await writeFile(join(root, "empty.html"), `<template component="x-empty" status="early" summary="Empty list.">
     <defs><state name="rows" type="list(string)"></state></defs>
-    <ul><li $each="row of rows" $value="row"></li></ul>
+    <ul><li $each="row of $rows" $value="$row"></li></ul>
   </template>`);
   await writeFile(join(root, "duplicate.html"), `<template component="x-duplicate" status="early" summary="Duplicate list.">
     <defs><state name="rows" type="list(string)" value="['a', 'a']"></state></defs>
-    <ul><li $each="row of rows" $key="row" $value="row"></li></ul>
+    <ul><li $each="row of $rows" $key="$row" $value="$row"></li></ul>
   </template>`);
   for (const [name, expected] of [["empty", "no rows"], ["duplicate", "HR004"]] as const) {
     const outDirectory = join(root, `out-${name}`);
@@ -253,7 +253,7 @@ it("converts nested-folder component graphs and parses child HTML literals by th
   </template>`);
   await writeFile(join(root, "components", "nested", "child.html"), `<template component="x-child" status="early" summary="Child."><defs>
     <prop name="amount" type="number" required>Amount.</prop><prop name="label" type="string">Label.</prop>
-  </defs><output from:data-label="label" $value="amount + 1"></output></template>`);
+  </defs><output from:data-label="$label" $value="$amount + 1"></output></template>`);
   for (const mode of ["application", "library"] as const) {
     const outDirectory = join(root, mode);
     const manifest = await convertComponents({ mode, target: "svelte", root, outDirectory, entries: ["components/**"] });
@@ -290,7 +290,7 @@ it("checks a prop against the type selected by another prop", async () => {
   await writeFile(join(root, "selected.html"), `<template component="x-selected" status="early" summary="Selected value."><defs>
     <prop name="kind" type="keyword" values="text, number" default="text">Kind.</prop>
     <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-  </defs><output from:data-kind="kind" $value="value"></output></template>`);
+  </defs><output from:data-kind="$kind" $value="$value"></output></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -305,7 +305,7 @@ it("initializes a state-selected prop after seeding the selector state", async (
   await writeFile(join(root, "selected.html"), `<template component="x-selected" status="early" summary="Selected value."><defs>
     <state name="kind" type="keyword" values="text, number" value="text"></state>
     <prop name="value">Value.<type from="kind"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-  </defs><output $value="value"></output></template>`);
+  </defs><output $value="$value"></output></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["selected.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -319,7 +319,7 @@ it("sanitizes dynamic HTML on the server with the shared safe-default policy", a
   temporary.push(root);
   await writeFile(join(root, "body.html"), `<template component="x-body" status="early" summary="Safe body."><defs>
     <prop name="body" type="string">Body.</prop>
-  </defs><div $html="body"></div></template>`);
+  </defs><div $html="$body"></div></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["body.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -343,7 +343,7 @@ it("keeps each row's sanitized HTML boundary local to that row", async () => {
   temporary.push(root);
   await writeFile(join(root, "rows.html"), `<template component="x-rows" status="early" summary="HTML rows."><defs>
     <state name="rows" type="list(string)" value="['&lt;b&gt;A&lt;/b&gt;', '&lt;i&gt;B&lt;/i&gt;']"></state>
-  </defs><ul><li $each="row of rows" $html="row"></li></ul></template>`);
+  </defs><ul><li $each="row of $rows" $html="$row"></li></ul></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["rows.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
@@ -356,22 +356,22 @@ it("keeps each row's sanitized HTML boundary local to that row", async () => {
 it.each([
   { name: "generic bind", defs: '<state name="value" value="Ready"></state>',
     root: '<div><output bind:value="value"></output></div>', expected: /<output[^>]*value="Ready"/ },
-  { name: "pending data", defs: '<data name="feed"></data><computed name="pending" from="feed.pending"></computed>',
-    root: '<div $value="pending"></div>', expected: />true</ },
+  { name: "pending data", defs: '<data name="feed"></data><computed name="pending" from="$feed.pending"></computed>',
+    root: '<div $value="$pending"></div>', expected: />true</ },
   { name: "keyword-named data", defs: '<data name="default"></data><state name="htmlNextData0" value="kept"></state>',
-    root: '<div><i $value="default.pending"></i><b $value="htmlNextData0"></b></div>', expected: /<i>true<\/i><b>kept<\/b>/ },
+    root: '<div><i $value="$default.pending"></i><b $value="$htmlNextData0"></b></div>', expected: /<i>true<\/i><b>kept<\/b>/ },
   { name: "bindings with generated-name collisions", defs: '<state name="boundAttribute" value="kept"></state><state name="boundValue" value="Ready"></state>',
-    root: '<div><output bind:value="boundValue"></output><b $value="boundAttribute"></b></div>', expected: /<output[^>]*value="Ready"[^>]*><\/output><b>kept<\/b>/ },
+    root: '<div><output bind:value="boundValue"></output><b $value="$boundAttribute"></b></div>', expected: /<output[^>]*value="Ready"[^>]*><\/output><b>kept<\/b>/ },
   { name: "nullable reflected properties", defs: '<state name="record" type="object" value="{}"></state>',
-    root: '<button .title="null" .name="record.missing"></button>', expected: /title="null"[^>]*name="undefined"/ },
+    root: '<button .title="null" .name="$record.missing"></button>', expected: /title="null"[^>]*name="undefined"/ },
   { name: "initially invalid reflected string property", defs: '<state name="count" type="number" value="0"></state>',
-    root: '<button title="Authored" .title="40px / count"></button>', expected: /<button[^>]*title="Authored"/ },
+    root: '<button title="Authored" .title="40px / $count"></button>', expected: /<button[^>]*title="Authored"/ },
   { name: "initially invalid reflected boolean property", defs: '<state name="count" type="number" value="0"></state>',
-    root: '<button disabled .disabled="40px / count"></button>', expected: /<button[^>]* disabled/ },
+    root: '<button disabled .disabled="40px / $count"></button>', expected: /<button[^>]* disabled/ },
   { name: "initially invalid property with incoming attribute", defs: '<state name="count" type="number" value="0"></state>',
-    root: '<button title="Authored" .title="40px / count"></button>', props: { title: "Incoming" }, expected: /<button[^>]*title="Incoming"/ },
+    root: '<button title="Authored" .title="40px / $count"></button>', props: { title: "Incoming" }, expected: /<button[^>]*title="Incoming"/ },
   { name: "initially invalid control property", defs: '<state name="count" type="number" value="0"></state>',
-    root: '<input value="Authored" .value="40px / count">', expected: /<input[^>]*value="Authored"/ },
+    root: '<input value="Authored" .value="40px / $count">', expected: /<input[^>]*value="Authored"/ },
   { name: "native scroll property", defs: '', root: '<div .scrollTop="10"></div>', expected: /<div/ },
   { name: "native property", defs: '', root: '<button .disabled="true"></button>', expected: /<button[^>]* disabled/ },
 ])("renders $name in Svelte server output", async (testCase) => {
@@ -392,7 +392,7 @@ it("emits a resource helper only for sourced data and keeps SSR pending without 
   temporary.push(root);
   await writeFile(join(root, "case.html"), `<template component="x-case" status="early" summary="Resource output."><defs>
     <data name="feed" src="/api/feed" type="object({ label: string })"></data>
-    </defs><output $value="feed.pending"></output></template>`);
+    </defs><output $value="$feed.pending"></output></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
   assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "svelte/data.svelte.ts"));
@@ -406,10 +406,10 @@ it("keeps keyword declarations, handler event names, and reserved local aliases 
   temporary.push(root);
   await writeFile(join(root, "case.html"), `<template component="x-names" status="early" summary="Authored names."><defs>
     <state name="class" type="number" value="1"></state><state name="event" type="number" value="2"></state>
-    <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="class + event + rootElement"></computed>
-    <handler name="switch"><set name="class" expr:value="class + 1"></set><set name="event" expr:value="event + 1"></set></handler>
-    </defs><button on:click="switch"><template $with="{ total: checkedProps } as default"><span $value="default.total"></span></template>
-      <template $match="class as class"><b $when="class = 1">First</b><b $else>Next</b></template></button></template>`);
+    <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="$class + $event + $rootElement"></computed>
+    <handler name="switch"><set name="class" expr:value="$class + 1"></set><set name="event" expr:value="$event + 1"></set></handler>
+    </defs><button on:click="switch"><template $with="{ total: $checkedProps } as default"><span $value="$default.total"></span></template>
+      <template $match="$class as class"><b $when="$class = 1">First</b><b $else>Next</b></template></button></template>`);
   const outDirectory = join(root, "out");
   const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["case.html"] });
   const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");

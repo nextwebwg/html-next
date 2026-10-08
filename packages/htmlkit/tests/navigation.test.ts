@@ -45,7 +45,7 @@ it("queries ordered concrete navigation with base URLs, aliases, depth, and curr
   await write(root, "app/components/navigation.html", await readFile(new URL("../components/navigation.html", import.meta.url), "utf8"));
   await write(root, "app/layouts/default.html", `<link rel="component" href="../components/navigation.html">
     <template component="navigation-shell"><defs><prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs>
-    <main><htmlkit-navigation from:items="navigation"></htmlkit-navigation><slot name="page"></slot></main></template>`);
+    <main><htmlkit-navigation from:items="$navigation"></htmlkit-navigation><slot name="page"></slot></main></template>`);
   await write(root, "app/layouts/default.server.ts", 'export const load = async ({ navigation }) => ({ props: { navigation: await navigation({ from: "/guide/" }) } });');
   const application = await createApplication({ root, routeOrdering: true, base: "/kit/", routes: [{ pattern: "/alias/", component: "app/pages/02-api.html" }] });
   try {

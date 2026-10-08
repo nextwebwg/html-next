@@ -27,7 +27,7 @@ The app declares two reads. The first runs once on connection; the second is a r
 <!-- Sent as query parameters, re-requested whenever catalogQuery changes. -->
 <data name="catalog" src="/api/catalog" debounce="150ms"
   type="list(object({ id: string, label: string, unit: string }))">
-  <param name="q" from:value="catalogQuery"></param>
+  <param name="q" from:value="$catalogQuery"></param>
   <param name="limit" from:value="5"></param>
 </data>
 ```
@@ -53,10 +53,10 @@ The last resolved value also stays bound while the next read runs, so typing doe
 list. The template then renders straight from the result:
 
 ```html
-<p class="notice" $if="catalog.pending">Searching the catalog…</p>
+<p class="notice" $if="$catalog.pending">Searching the catalog…</p>
 <ul class="suggestions">
-  <pantry-suggestion $each="hit of catalog.value" $key="hit.id"
- from:item-id="hit.id" from:label="hit.label" from:unit="hit.unit"></pantry-suggestion>
+  <pantry-suggestion $each="hit of $catalog.value" $key="$hit.id"
+ from:item-id="$hit.id" from:label="$hit.label" from:unit="$hit.unit"></pantry-suggestion>
 </ul>
 ```
 

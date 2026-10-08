@@ -18,14 +18,14 @@ const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-dynamic-control" status="early" summary="Dynamic control path."><defs>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></state>
   <state type="number" name="selected" value="1"></state>
-  <handler name="choose"><set name="selected" expr:value="selected = 1 ? 0 : 1"></set></handler>
-  <handler name="reorder"><set name="rows" expr:value="[rows.1, rows.0]"></set></handler>
-</defs><section><input class="edit" bind:value="rows[selected].name">
+  <handler name="choose"><set name="selected" expr:value="$selected = 1 ? 0 : 1"></set></handler>
+  <handler name="reorder"><set name="rows" expr:value="[$rows.1, $rows.0]"></set></handler>
+</defs><section><input class="edit" bind:value="rows[$selected].name">
   <button type="button" on:click="choose">Switch</button>
   <button type="button" class="reorder" on:click="reorder">Reorder</button>
-  <div class="row" $each="row of rows" $key="row.id"><input class="row-edit" bind:value="rows[loop.index].name"></div>
-  <output class="first" $value="rows.0.name"></output>
-  <output class="second" $value="rows.1.name"></output>
+  <div class="row" $each="row of $rows" $key="$row.id"><input class="row-edit" bind:value="rows[$loop.index].name"></div>
+  <output class="first" $value="$rows.0.name"></output>
+  <output class="second" $value="$rows.1.name"></output>
 </section><style>:host { display: block; padding: 6px; background: rgb(240 245 250); }</style></template>`;
 
 async function snapshot(page: Page) {

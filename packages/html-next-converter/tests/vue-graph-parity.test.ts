@@ -19,7 +19,7 @@ const child = `<template component="x-graph-item" status="early" summary="Graph 
   <defs><prop name="label" type="string" default="Initial">Item label.</prop>
     <event name="saved" type="number"></event>
     <handler name="save"><dispatch event="saved" expr:value="1"></dispatch></handler></defs>
-  <li on:click="save"><slot></slot><output $value="label"></output></li>
+  <li on:click="save"><slot></slot><output $value="$label"></output></li>
   <style>:host { color: rgb(20 40 80); } :slotted(strong) { color: rgb(90 30 60); }</style>
 </template>`;
 const parent = `<link rel="component" href="./item.html">
@@ -27,17 +27,17 @@ const parent = `<link rel="component" href="./item.html">
   <defs><state type="number" name="count" value="0"></state><state type="boolean" name="active" value="true"></state><state type="number" name="rootHits" value="0"></state>
     <state type="number" name="saved" value="0"></state><state type="number" name="ancestorSaved" value="0"></state>
     <state type="number" name="rightHits" value="0"></state>
-    <handler name="increment"><set name="count" expr:value="count + 1"></set><set name="active" expr:value="not active"></set></handler>
-    <handler name="rootClick"><set name="rootHits" expr:value="rootHits + 1"></set></handler>
-    <handler name="recordSaved"><set name="saved" expr:value="saved + 1"></set></handler>
-    <handler name="recordAncestorSaved"><set name="ancestorSaved" expr:value="ancestorSaved + 1"></set></handler>
-    <handler name="recordRight"><set name="rightHits" expr:value="rightHits + 1"></set></handler>
+    <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="active" expr:value="not $active"></set></handler>
+    <handler name="rootClick"><set name="rootHits" expr:value="$rootHits + 1"></set></handler>
+    <handler name="recordSaved"><set name="saved" expr:value="$saved + 1"></set></handler>
+    <handler name="recordAncestorSaved"><set name="ancestorSaved" expr:value="$ancestorSaved + 1"></set></handler>
+    <handler name="recordRight"><set name="rightHits" expr:value="$rightHits + 1"></set></handler>
   </defs>
   <section on:click.stop.self="rootClick" on:saved="recordAncestorSaved"><button type="button" on:click="increment">Increment</button>
-    <ul><x-graph-item from:label="concat('Item ', count)" on:saved.stop="recordSaved" on:click.right="recordRight"><strong>Child: </strong></x-graph-item></ul>
-    <output class="root-hits" $value="rootHits"></output>
-    <output class="saved-hits" $value="concat(saved, ':', ancestorSaved)"></output>
-    <output class="right-hits" $value="rightHits"></output>
+    <ul><x-graph-item from:label="concat('Item ', $count)" on:saved.stop="recordSaved" on:click.right="recordRight"><strong>Child: </strong></x-graph-item></ul>
+    <output class="root-hits" $value="$rootHits"></output>
+    <output class="saved-hits" $value="concat($saved, ':', $ancestorSaved)"></output>
+    <output class="right-hits" $value="$rightHits"></output>
   </section>
   <style>:host { display: block; padding: 8px; background: rgb(225 235 245); } :host-state([active]) { background: rgb(200 220 240); }</style>
 </template>`;

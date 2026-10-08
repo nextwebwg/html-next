@@ -19,9 +19,9 @@ const source = `<template component="x-safe-html" status="early" summary="Safe d
   <handler name="restore"><set name="width" value="2px"></set></handler>
 </defs><div><button class="invalidate" type="button" on:click="invalidate">Invalidate</button>
   <button class="restore" type="button" on:click="restore">Restore</button>
-  <p class="unsafe" $html="body"></p>
-  <p class="element" $html="concat('&lt;b&gt;', min(width, 5px), '&lt;/b&gt;')"></p>
-  <span class="inline"><template $html="concat('&lt;i&gt;', min(width, 5px), '&lt;/i&gt;')"></template></span>
+  <p class="unsafe" $html="$body"></p>
+  <p class="element" $html="concat('&lt;b&gt;', min($width, 5px), '&lt;/b&gt;')"></p>
+  <span class="inline"><template $html="concat('&lt;i&gt;', min($width, 5px), '&lt;/i&gt;')"></template></span>
 </div><style>:host { display: block; width: 240px; padding: 8px; border: 1px solid #444; }</style></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: Record<string, unknown>; readonly pixels: Buffer }> {

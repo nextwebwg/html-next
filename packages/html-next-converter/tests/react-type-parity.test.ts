@@ -93,7 +93,7 @@ describe.skipIf(!enabled)("public React converter type parity", () => {
       await writeFile(join(dependentDirectory, "component.html"), `<template component="x-dependent" status="early" summary="Selected prop types."><defs>
         <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
         <prop name="value">Value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-      </defs><input from:type="type" from:value="value"></template>`);
+      </defs><input from:type="$type" from:value="$value"></template>`);
       await convertComponents({ mode: "library", target: "react", entries: ["component.html"], root: dependentDirectory,
         outDirectory: join(dependentDirectory, "out") });
       await writeFile(join(dependentDirectory, "consumer.tsx"), `import XDependent, { type XDependentProps } from "./out/react/XDependent";

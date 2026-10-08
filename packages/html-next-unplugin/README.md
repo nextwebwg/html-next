@@ -76,7 +76,7 @@ for every HTML binding expression. Runtime behavior and bundler failures still n
 ### Diagnostics for tooling
 
 `html-next-check --json ...` writes `{ "diagnostics": [...] }` to stdout. Success has an empty
-array. Each diagnostic has `code`, `message`, `severity: "error"`, and an optional `source`
+array. Each diagnostic has `code`, `message`, `severity` (`"error"` or `"warning"`), and an optional `source`
 (a file URL or a converter-relative path). Source-located diagnostics also include one-based
 `line` and `column` coordinates. Human-readable failures go to stderr as compact Jess-style rows,
 without code excerpts:
@@ -89,8 +89,8 @@ The `file:line:column` label is an OSC 8 hyperlink to `vscode://file/…:line:co
 that support these links can open the authored location in VS Code. Use `--no-color` or set
 `NO_COLOR` to disable links for plain logs. JSON never includes terminal escape sequences.
 Exit status is
-`0` for success, `1` for a compiler diagnostic, and `2` for invalid arguments or an operational
-failure without a compiler diagnostic. Such operational failures go to stderr even with `--json`.
+`0` for success or warnings only, `1` for a compiler error, and `2` for invalid arguments or an
+operational failure without a compiler diagnostic. Such operational failures go to stderr even with `--json`.
 
 Checks collect independent failures across declarations, markup elements, component carriers,
 and linked resources. Shared invalid resources are checked once, and diagnostics are deduplicated
@@ -101,6 +101,9 @@ lowering for that graph, while a valid graph can report failures across several 
 Builds and conversions continue to stop at the first error and never emit output from recovered
 check data. The checker can therefore report several errors in one run without promising every
 possible error after a broken prerequisite.
+
+Warnings never stop a check or a build. `HT022` warns when a bare word in an expression spells a
+name in scope: `from:title="count"` is the keyword `count`, and `$count` reads the declaration.
 
 Parser diagnostics point
 to the relevant declaration or element; backend failures can point to the enclosing component.

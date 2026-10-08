@@ -17,8 +17,8 @@ const sources = {
       <input type="checkbox" checked bind:checked="checked"><select bind:value="value"><option selected>First</option><option>Second</option></select></form></template>`,
   siblings: `<template component="x-field" status="early" summary="Sibling controls."><defs>
     <prop name="value" type="string" default="Second">Value.</prop><prop name="checked" type="boolean" default="false">Checked.</prop>
-    </defs><article><input value="Draft" .value="value"><textarea .value="value">Draft</textarea>
-      <input type="checkbox" checked .checked="checked"><select .value="value"><option selected>First</option><option>Second</option></select></article></template>
+    </defs><article><input value="Draft" .value="$value"><textarea .value="$value">Draft</textarea>
+      <input type="checkbox" checked .checked="$checked"><select .value="$value"><option selected>First</option><option>Second</option></select></article></template>
     <template component="x-picker" status="early" summary="Sibling control owner."><form><x-field></x-field><x-field></x-field><x-field></x-field></form></template>`,
   rich: `<template component="x-picker" status="early" summary="Explicit rich option values."><defs>
     <state name="value" type="string" value="Same"></state></defs><form><select bind:value="value">

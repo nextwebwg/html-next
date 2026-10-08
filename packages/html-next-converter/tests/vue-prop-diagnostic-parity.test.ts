@@ -17,7 +17,7 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const livePath = new URL("../../html-next/src/live.ts", import.meta.url).pathname;
 const source = `<template component="x-required-number" status="early" summary="Required numeric prop."><defs>
   <prop name="n" type="number" required>Number.</prop>
-</defs><div><output $value="n + 1"></output></div></template>`;
+</defs><div><output $value="$n + 1"></output></div></template>`;
 
 interface Case {
   readonly name: string;

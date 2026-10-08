@@ -86,7 +86,7 @@ const regressions: readonly ConverterCase[] = [
       <state name="value" type="string" value="One"></state><state name="checked" type="boolean" value="false"></state>
       <handler name="next"><set name="value" expr:value="'Two'"></set><set name="checked" expr:value="true"></set></handler>
       <handler name="previous"><set name="value" expr:value="'One'"></set><set name="checked" expr:value="false"></set></handler>
-      </defs><form><input value="Draft" from:value="value"><input type="checkbox" checked from:checked="checked"><button type="button" on:click="next">Next</button><button type="button" on:click="previous">Previous</button></form></template><x-oneway-defaults></x-oneway-defaults>`,
+      </defs><form><input value="Draft" from:value="$value"><input type="checkbox" checked from:checked="$checked"><button type="button" on:click="next">Next</button><button type="button" on:click="previous">Previous</button></form></template><x-oneway-defaults></x-oneway-defaults>`,
     expect: { probe: `return [q('input').value, q('input').defaultValue, q('input[type=checkbox]').checked, q('input[type=checkbox]').defaultChecked, q('input').getAttribute('value'), q('input[type=checkbox]').getAttribute('checked')];`,
       result: ["One", "One", false, false, "One", null], after: [
         { action: `document.querySelector('button').click();`, result: ["Two", "Two", true, true, "Two", ""] },
@@ -105,7 +105,7 @@ const regressions: readonly ConverterCase[] = [
     name: "sanitized HTML option bodies select by native descendant text during SSR",
     source: `<template component="x-html-option" status="early" summary="HTML option text."><defs>
       <state name="choice" type="string" value="A B &amp; C"></state><prop name="label" type="string" default="  &lt;b&gt;A   B&lt;/b&gt; &amp;amp; C  ">Label.</prop>
-      </defs><section><select bind:value="choice"><option>First</option><option $html="label"></option></select><select .value="choice"><option>First</option><option value="A B &amp; C" $html="label"></option></select></section></template><x-html-option></x-html-option>`,
+      </defs><section><select bind:value="choice"><option>First</option><option $html="$label"></option></select><select .value="$choice"><option>First</option><option value="A B &amp; C" $html="$label"></option></select></section></template><x-html-option></x-html-option>`,
     expect: { probe: `return [q('select').value, q('select').selectedIndex, qa('option').map(e => [e.value, e.textContent, e.getAttribute('value')]), qa('option b').length];`, result: ["A B & C", 1, [["First", "First", null], ["A B & C", "  A   B & C  ", null], ["First", "First", null], ["A B & C", "  A   B & C  ", "A B & C"]], 2] },
   },
   {
@@ -113,15 +113,15 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-html-option-rows" status="early" summary="Repeated HTML option text."><defs>
       <state name="choices" type="list(string)" value="['A B', 'D E']"></state>
       <prop name="labels" type="list(string)" default="['  &lt;b&gt;A   B&lt;/b&gt;  ', '&lt;i&gt;D  E&lt;/i&gt;']">Labels.</prop>
-      </defs><section><select multiple bind:value="choices"><option $each="label of labels" $html="label"></option></select></section></template><x-html-option-rows></x-html-option-rows>`,
+      </defs><section><select multiple bind:value="choices"><option $each="label of $labels" $html="$label"></option></select></section></template><x-html-option-rows></x-html-option-rows>`,
     expect: { probe: `return [qa('option').map(e => [e.value, e.textContent, e.selected, e.getAttribute('value')]), qa('option b, option i').map(e => e.tagName)];`, result: [[["A B", "  A   B  ", true, null], ["D E", "D  E", true, null]], ["B", "I"]] },
   },
   {
     name: "dynamic implicit option values normalize ASCII whitespace and preserve ordinary letters",
     source: `<template component="x-dynamic-option" status="early" summary="Dynamic option text."><defs>
       <state name="choice" type="string" value="First next word"></state><prop name="label" type="string" default="  First&nbsp;next\tword\n  ">Label.</prop>
-      </defs><section><select bind:value="choice"><option>Other</option><option $value="label"></option></select>
-      <select .value="choice"><option>Other</option><option .textContent="label"></option></select></section></template><x-dynamic-option></x-dynamic-option>`,
+      </defs><section><select bind:value="choice"><option>Other</option><option $value="$label"></option></select>
+      <select .value="$choice"><option>Other</option><option .textContent="$label"></option></select></section></template><x-dynamic-option></x-dynamic-option>`,
     expect: { probe: `return qa('select').map(e => [e.value, e.selectedIndex, Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
       ["First next word", 1, [["Other", "Other", null], ["First next word", "  First next\tword\n  ", null]]],
       ["First next word", 1, [["Other", "Other", null], ["First next word", "  First next\tword\n  ", null]]],
@@ -140,7 +140,7 @@ const regressions: readonly ConverterCase[] = [
       <state name="choice" type="string" value="A B"></state><state name="choices" type="list(string)" value="['A B', 'A B']"></state>
       </defs><section><x-text-select bind:value="choice"></x-text-select>
       <select multiple bind:value="choices"><option>First</option><option> \tA\n  B </option><option> A&nbsp;B </option></select>
-      <select .value="choice"><option>First</option><option>  A   B  </option></select></section></template><x-option-modes></x-option-modes>`,
+      <select .value="$choice"><option>First</option><option>  A   B  </option></select></section></template><x-option-modes></x-option-modes>`,
     expect: { probe: `return qa('select').map(e => [e.value, Array.from(e.selectedOptions, o => o.value), Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
       ["A B", ["A B"], [["First", "First", null], ["A B", "  A   B  ", null]]],
       ["A B", ["A B", "A B"], [["First", "First", null], ["A B", " \tA\n  B ", null], ["A B", " A B ", null]]],
@@ -153,9 +153,9 @@ const regressions: readonly ConverterCase[] = [
       <state name="choice" type="string" value="A B"></state><state name="label" type="string" value="  A   B  "></state>
       <handler name="change"><set name="choice" value="First"></set></handler>
       </defs><section><select class="static" bind:value="choice"><option>First</option><option>  A   B  </option><option> C   D </option></select>
-      <select class="dynamic" bind:value="choice"><option>First</option><option $value="label"></option></select>
+      <select class="dynamic" bind:value="choice"><option>First</option><option $value="$label"></option></select>
       <select class="entity" bind:value="choice"><option>First</option><option> A&#32;B </option><option> C&#32;D </option></select>
-      <select class="omitted" bind:value="choice"><option>First</option><option from:value="null" $value="label"></option></select>
+      <select class="omitted" bind:value="choice"><option>First</option><option from:value="null" $value="$label"></option></select>
       <button on:click="change">Change</button></section></template><x-option-text></x-option-text>`,
     expect: { probe: `return qa('select').map(e => [e.value, e.selectedIndex, Array.from(e.options, o => [o.value, o.textContent, o.getAttribute('value')])]);`, result: [
       ["A B", 1, [["First", "First", null], ["A B", "  A   B  ", null], ["C D", " C   D ", null]]],
@@ -172,10 +172,10 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "truncated arrays invalidate deleted indexed reads and computed values",
     source: `<template component="x-truncated-rows" status="early" summary="Array truncation."><defs>
-      <state name="rows" type="list(string)" value="['a', 'b', 'c']"></state><computed name="tail" from="rows[2]"></computed>
+      <state name="rows" type="list(string)" value="['a', 'b', 'c']"></state><computed name="tail" from="$rows[2]"></computed>
       <handler name="truncate"><set name="rows.length" expr:value="1"></set></handler>
       <handler name="recover"><set name="rows[2]" expr:value="'next'"></set></handler>
-      </defs><section><output class="direct" $value="rows[2]"></output><output class="computed" $value="tail"></output>
+      </defs><section><output class="direct" $value="$rows[2]"></output><output class="computed" $value="$tail"></output>
       <button class="truncate" on:click="truncate">Truncate</button><button class="recover" on:click="recover">Recover</button></section></template><x-truncated-rows></x-truncated-rows>`,
     expect: { probe: `return qa('output').map(e => e.textContent);`, result: ["c", "c"], after: [
       { action: `document.querySelector('button.truncate').click();`, result: ["", ""] },
@@ -190,7 +190,7 @@ const regressions: readonly ConverterCase[] = [
       <handler name="array"><set name="free" expr:value="['One', 'Two']"></set></handler>
       <handler name="object"><set name="free" expr:value="{ label: 'Object' }"></set></handler>
       <handler name="zero"><set name="free" expr:value="0"></set></handler>
-      </defs><section><output $value="free"></output><span from:data-value="free"></span><p $if="free">Visible</p>
+      </defs><section><output $value="$free"></output><span from:data-value="$free"></span><p $if="$free">Visible</p>
       <button class="array" on:click="array">Array</button><button class="object" on:click="object">Object</button><button class="zero" on:click="zero">Zero</button></section></template><x-changing-shape></x-changing-shape>`,
     expect: { probe: `return [q('output').textContent, q('span').getAttribute('data-value'), q('p')?.textContent ?? null];`, result: ["Seed", "Seed", "Visible"], after: [
       { action: `document.querySelector('button.array').click();`, result: ["One Two", "One Two", "Visible"] },
@@ -205,7 +205,7 @@ const regressions: readonly ConverterCase[] = [
       <state name="words" type="keyword+" value="one two"></state>
       <handler name="invalid"><set name="box" expr:value="{ space: [], comma: ['two words'] }"></set><set name="words" expr:value="[]"></set></handler>
       <handler name="recover"><set name="box" expr:value="{ space: 'next good', comma: 'third, fourth' }"></set><set name="words" expr:value="'new words'"></set></handler>
-      </defs><section><output $value="box.space"></output><output $value="box.comma"></output><output $value="words"></output>
+      </defs><section><output $value="$box.space"></output><output $value="$box.comma"></output><output $value="$words"></output>
       <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button></section></template><x-separated-lists></x-separated-lists>`,
     expect: { probe: `return qa('output').map(e => e.textContent);`, result: ["one two", "one two", "one two"], after: [
       { action: `document.querySelector('button.invalid').click();`, result: ["one two", "one two", "one two"] },
@@ -216,7 +216,7 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "authored text preserves literal braces decoded entities and exact whitespace",
     source: `<template component="x-literal-text" status="early" summary="Literal text."><defs><state name="count" type="number" value="1"></state><handler name="next"><set name="count" value="2"></set></handler></defs><section><p class="literal" title="{count}" data-entity="&amp;amp;">  \\{count} &amp; \\&#123;count&#125; \\{#if count} &lt;b&gt;  </p><pre> first
-  second </pre><span class="dynamic" $value="count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
+  second </pre><span class="dynamic" $value="$count"></span><button on:click="next">Next</button></section></template><x-literal-text></x-literal-text>`,
     expect: { probe: `return [q('p.literal').textContent, q('pre').textContent, q('p.literal').getAttribute('title'), q('p.literal').getAttribute('data-entity'), q('span.dynamic').textContent];`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "1"], after: [
       { action: `document.querySelector('button').click();`, result: ["  {count} & {count} {#if count} <b>  ", " first\n  second ", "{count}", "&amp;", "2"] },
     ] },
@@ -225,12 +225,12 @@ const regressions: readonly ConverterCase[] = [
     name: "bound selects preserve authored value attributes and native option text selection",
     source: `<template component="x-select-ssr" status="early" summary="Select defaults."><defs>
       <state name="choice" type="number" value="2"></state><state name="choices" type="list(number)" value="[2]"></state><state name="items" type="list(number)" value="[1, 2]"></state><state name="many" type="boolean" value="true"></state>
-      <handler name="toggle"><set name="many" expr:value="many = false"></set></handler><handler name="both"><set name="choices" expr:value="[1, 2]"></set></handler>
+      <handler name="toggle"><set name="many" expr:value="$many = false"></set></handler><handler name="both"><set name="choices" expr:value="[1, 2]"></set></handler>
       </defs><section><select class="authored" value="Authored" bind:value="choice"><option value="1" selected>One</option><option value="2">Two</option></select>
-      <select class="dynamic" from:multiple="many" bind:value="choices"><option $each="item of items" from:value="item" $value="item"></option></select>
+      <select class="dynamic" from:multiple="$many" bind:value="choices"><option $each="item of $items" from:value="$item" $value="$item"></option></select>
       <select class="implicit" bind:value="choice"><option> One </option><option> 2 </option></select>
       <select class="implicit-many" multiple bind:value="choices"><option> 1 </option><option> 2 </option></select>
-      <select class="nullable-options" bind:value="choice"><option $each="item of items" from:value="item = 2 ? null : item" $value="item"></option></select>
+      <select class="nullable-options" bind:value="choice"><option $each="item of $items" from:value="$item = 2 ? null : $item" $value="$item"></option></select>
       <button class="toggle" on:click="toggle">Toggle</button><button class="both" on:click="both">Both</button></section></template><x-select-ssr></x-select-ssr>`,
     expect: { probe: `return qa('select').map(e => [e.getAttribute('value'), e.multiple, e.value, Array.from(e.selectedOptions, o => o.value)]);`,
       result: [["Authored", false, "2", ["2"]], [null, true, "2", ["2"]], [null, false, "2", ["2"]], [null, true, "2", ["2"]], [null, false, "2", ["2"]]], after: [
@@ -246,7 +246,7 @@ const regressions: readonly ConverterCase[] = [
       <handler name="invalid"><set name="box" expr:value="${formatObject(2)}"></set></handler>
       <handler name="write">${formatCases.map((entry, index) => `<set name="box.f${index}" expr:value="'${entry[2]}'"></set>`).join("")}</handler>
       <handler name="recover"><set name="box" expr:value="${formatObject(3)}"></set></handler>
-      </defs><section>${formatCases.map((_entry, index) => `<output $value="box.f${index}"></output>`).join("")}<button class="invalid" on:click="invalid">Invalid</button><button class="write" on:click="write">Write</button><button class="recover" on:click="recover">Recover</button></section></template><x-format-fields></x-format-fields>`,
+      </defs><section>${formatCases.map((_entry, index) => `<output $value="$box.f${index}"></output>`).join("")}<button class="invalid" on:click="invalid">Invalid</button><button class="write" on:click="write">Write</button><button class="recover" on:click="recover">Recover</button></section></template><x-format-fields></x-format-fields>`,
     expect: { probe: `return qa('output').map(e => e.textContent);`, result: formatCases.map(entry => entry[1]), after: [
       { action: `document.querySelector('button.write').click();`, result: formatCases.map(entry => entry[1]) },
       { action: `document.querySelector('button.invalid').click();`, result: formatCases.map(entry => entry[1]) },
@@ -258,12 +258,12 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-strict-reads" status="early" summary="Strict reads."><defs>
       <state name="box" type="object({ size: length, day: date, paint: color, link: url })" value="{ size: '8px', day: '2024-02-29', paint: 'red', link: 'https://example.com/' }"></state>
       <state name="size" type="length" value="8px"></state><state name="day" type="date" value="2024-02-29"></state><state name="paint" type="color" value="red"></state><state name="link" type="url" value="https://example.com/"></state>
-      <state name="written" value="Seed"></state><computed name="copied" from="concat(box.size, '/', box.day, '/', box.paint, '/', box.link)"></computed>
+      <state name="written" value="Seed"></state><computed name="copied" from="concat($box.size, '/', $box.day, '/', $box.paint, '/', $box.link)"></computed>
       <handler name="invalid"><set name="box" expr:value="{ size: 'bad', day: '2024-02-30', paint: 'not-a-color', link: 'bad url' }"></set><set name="size" expr:value="'bad'"></set><set name="day" expr:value="'2024-02-30'"></set><set name="paint" expr:value="'not-a-color'"></set><set name="link" expr:value="'bad url'"></set></handler>
-      <handler name="read"><set name="written" expr:value="box.day"></set></handler>
+      <handler name="read"><set name="written" expr:value="$box.day"></set></handler>
       <handler name="recover"><set name="box" expr:value="{ size: '12px', day: '2025-01-01', paint: 'blue', link: 'https://example.org/' }"></set></handler>
-      </defs><section><output class="fields" $value="concat(box.size, '/', box.day, '/', box.paint, '/', box.link)"></output><output class="destinations" $value="concat(size, '/', day, '/', paint, '/', link)"></output><output class="copied" $value="copied"></output><output class="written" $value="written"></output>
-      <span from:data-day="box.day" style:margin-left="box.size">Style</span><b $with="box.day as day" $value="day"></b>
+      </defs><section><output class="fields" $value="concat($box.size, '/', $box.day, '/', $box.paint, '/', $box.link)"></output><output class="destinations" $value="concat($size, '/', $day, '/', $paint, '/', $link)"></output><output class="copied" $value="$copied"></output><output class="written" $value="$written"></output>
+      <span from:data-day="$box.day" style:margin-left="$box.size">Style</span><b $with="$box.day as day" $value="$day"></b>
       <button class="invalid" on:click="invalid">Invalid</button><button class="read" on:click="read">Read</button><button class="recover" on:click="recover">Recover</button>
       </section></template><x-strict-reads></x-strict-reads>`,
     expect: { probe: `return [qa('output').map(e => e.textContent), q('span').getAttribute('data-day'), q('span').style.marginLeft, q('b').textContent];`,
@@ -281,7 +281,7 @@ const regressions: readonly ConverterCase[] = [
       <handler name="write"><set name="count" expr:value="null"></set><set name="optional" expr:value="null"></set><set name="free" expr:value="42"></set></handler>
       <handler name="recover"><set name="count" expr:value="4"></set><set name="optional" expr:value="4"></set><set name="free" value="Next"></set></handler>
       </defs><section><input class="count" type="number" bind:value="count"><input class="optional" type="number" bind:value="optional">
-        <output class="values" $value="concat(count, '/', optional = null, '/', free)"></output>
+        <output class="values" $value="concat($count, '/', $optional = null, '/', $free)"></output>
         <button class="write" on:click="write">Write</button><button class="recover" on:click="recover">Recover</button>
       </section></template><x-declared-destinations></x-declared-destinations>`,
     expect: { probe: `return [q('input.count').value, q('input.optional').value, q('output').textContent];`, result: ["3", "3", "3/false/Seed"], after: [
@@ -297,11 +297,11 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-declared-actions" status="early" summary="Conforming actions."><defs>
       <state name="box" type="object({ input: string, enabled: boolean })" value="{ input: 'Ready', enabled: true }"></state>
       <state name="written" value="Seed"></state><state name="ticks" type="number" value="0"></state>
-      <computed name="copied" from="box.input"></computed><event name="changed" type="string"></event>
+      <computed name="copied" from="$box.input"></computed><event name="changed" type="string"></event>
       <handler name="invalid"><set name="box" expr:value="{ input: 42, enabled: 1 }"></set></handler>
       <handler name="recover"><set name="box" expr:value="{ input: 'Next', enabled: true }"></set></handler>
-      <handler name="read"><set name="written" expr:value="concat(box.input, '!')"></set><set name="ticks" expr:value="ticks + 1" $if="box.enabled"></set><dispatch event="changed" expr:value="box.input"></dispatch></handler>
-      </defs><section><output class="copied" $value="copied"></output><output class="written" $value="written"></output><output class="ticks" $value="ticks"></output>
+      <handler name="read"><set name="written" expr:value="concat($box.input, '!')"></set><set name="ticks" expr:value="$ticks + 1" $if="$box.enabled"></set><dispatch event="changed" expr:value="$box.input"></dispatch></handler>
+      </defs><section><output class="copied" $value="$copied"></output><output class="written" $value="$written"></output><output class="ticks" $value="$ticks"></output>
         <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button><button class="read" on:click="read">Read</button>
       </section></template><x-declared-actions></x-declared-actions>`,
     expect: { probe: `return [q('output.copied').textContent, q('output.written').textContent, q('output.ticks').textContent, window.actionEvents ?? []];`,
@@ -315,9 +315,9 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "initially invalid computed reads expose native null until recovery",
     source: `<template component="x-invalid-computed" status="early" summary="Absent computed."><defs>
-      <state name="count" type="number" value="0"></state><computed name="size" from="40px / count"></computed><computed name="sizes" from="[40px / count]"></computed>
+      <state name="count" type="number" value="0"></state><computed name="size" from="40px / $count"></computed><computed name="sizes" from="[40px / $count]"></computed>
       <handler name="recover"><set name="count" expr:value="2"></set></handler>
-      </defs><section><button on:click="recover" from:data-null="size = null"><output $value="size"></output></button><ul><li $each="item of sizes" $value="item"></li></ul></section></template><x-invalid-computed></x-invalid-computed>`,
+      </defs><section><button on:click="recover" from:data-null="$size = null"><output $value="$size"></output></button><ul><li $each="item of $sizes" $value="$item"></li></ul></section></template><x-invalid-computed></x-invalid-computed>`,
     expect: { probe: `return [q('button').getAttribute('data-null'), q('output').textContent, qa('li').map(e => e.textContent)];`, result: ["", "", []], after: [
       { action: `document.querySelector('button').click();`, result: [null, "20px", ["20px"]] },
     ] },
@@ -330,7 +330,7 @@ const regressions: readonly ConverterCase[] = [
       <handler name="invalidSecond"><set name="box" expr:value="{ first: false, second: 0, label: 'Next' }"></set></handler>
       <handler name="recover"><set name="box" expr:value="{ first: false, second: true, label: 'Next' }"></set></handler>
       <handler name="skip"><set name="box" expr:value="{ first: true, second: 0, label: 'Ready' }"></set></handler>
-      </defs><section><template $match="box.label as label"><b $when="box.first" $value="concat('First/', label)"></b><b $when="box.second" $value="concat('Second/', label)"></b><b $else $value="concat('Else/', label)"></b></template>
+      </defs><section><template $match="$box.label as label"><b $when="$box.first" $value="concat('First/', $label)"></b><b $when="$box.second" $value="concat('Second/', $label)"></b><b $else $value="concat('Else/', $label)"></b></template>
         <button class="first" on:click="invalidFirst">First</button><button class="second" on:click="invalidSecond">Second</button>
         <button class="recover" on:click="recover">Recover</button><button class="skip" on:click="skip">Skip</button>
       </section></template><x-declared-match></x-declared-match>`,
@@ -350,9 +350,9 @@ const regressions: readonly ConverterCase[] = [
       <handler name="recover"><set name="box" expr:value="{ flag: false, label: 'Next', rows: ['C'] }"></set></handler>
       <handler name="absent"><set name="box" expr:value="{ flag: null, label: null, rows: null }"></set></handler>
       <handler name="empty"><set name="box" expr:value="{}"></set></handler>
-      </defs><section><strong $if="box">Box</strong><u $if="box.rows">Rows</u><b $if="box.flag">Flag</b><i $with="box.label as label" $value="label"></i>
-        <template $match="box.label as label"><em $when="label = 'Ready'" $value="label"></em><em $else $value="label"></em></template>
-        <ul><li $each="row of box.rows" $value="row"></li></ul>
+      </defs><section><strong $if="$box">Box</strong><u $if="$box.rows">Rows</u><b $if="$box.flag">Flag</b><i $with="$box.label as label" $value="$label"></i>
+        <template $match="$box.label as label"><em $when="$label = 'Ready'" $value="$label"></em><em $else $value="$label"></em></template>
+        <ul><li $each="row of $box.rows" $value="$row"></li></ul>
         <button class="invalid" on:click="invalid">Invalid</button><button class="recover" on:click="recover">Recover</button><button class="absent" on:click="absent">Absent</button><button class="empty" on:click="empty">Empty</button>
       </section></template><x-declared-regions></x-declared-regions>`,
     expect: { probe: `return [q('strong')?.textContent ?? null, q('u')?.textContent ?? null, q('b')?.textContent ?? null, q('i').textContent, q('em').textContent, qa('li').map(e => e.textContent)];`,
@@ -370,15 +370,15 @@ const regressions: readonly ConverterCase[] = [
     dependencies: {
       "named-leaf.html": `<template component="x-named-leaf" status="early" summary="Reserved public names."><defs>
         <prop name="children" type="string" default="Missing">Public children.</prop><prop name="slots" type="string" default="Missing">Public slots.</prop>
-        </defs><section><h1 $value="concat(children, '/', slots)"></h1><header><slot name="title"><i>Fallback title</i></slot></header>
+        </defs><section><h1 $value="concat($children, '/', $slots)"></h1><header><slot name="title"><i>Fallback title</i></slot></header>
           <main><slot><i>Fallback body</i></slot></main></section></template>`,
       "changing-button.html": `<template component="x-changing-button" status="early" summary="Action."><button type="button">Change</button></template>`,
     },
     source: `<template component="x-name-app" status="early" summary="Safe names."><defs>
       <state name="XNamedLeaf" value="First"></state><state name="Map" value="99"></state><state name="String" value="String"></state>
       <state name="Symbol" value="Symbol"></state><state name="Object" value="Object"></state><handler name="XChangingButton"><set name="XNamedLeaf" value="Next"></set></handler>
-      </defs><article><x-named-leaf from:children="XNamedLeaf" slots="Public"><b slot="title">Title</b><span $value="XNamedLeaf"></span></x-named-leaf>
-        <x-changing-button $ref="action" on:click="XChangingButton"></x-changing-button><output $value="concat(String, '/', Map, '/', Symbol, '/', Object)"></output></article></template><x-name-app></x-name-app>`,
+      </defs><article><x-named-leaf from:children="$XNamedLeaf" slots="Public"><b slot="title">Title</b><span $value="$XNamedLeaf"></span></x-named-leaf>
+        <x-changing-button $ref="action" on:click="XChangingButton"></x-changing-button><output $value="concat($String, '/', $Map, '/', $Symbol, '/', $Object)"></output></article></template><x-name-app></x-name-app>`,
     expect: { probe: `return [q('h1').textContent, q('header').textContent, q('section main').textContent, q('output').textContent];`,
       result: ["First/Public", "Title", "First", "String/99/Symbol/Object"], after: [
         { action: `document.querySelector('button').click();`, result: ["Next/Public", "Title", "Next", "String/99/Symbol/Object"] },
@@ -388,7 +388,7 @@ const regressions: readonly ConverterCase[] = [
     name: "uninitialized typed states are null and accept their first native write",
     source: `<template component="x-uninitialized" status="early" summary="Absent state."><defs>
       <state name="count" type="number"></state><handler name="initialize"><set name="count" expr:value="1"></set></handler>
-      </defs><button type="button" on:click="initialize" .title="count" from:data-null="count = null"><output $value="count"></output></button>
+      </defs><button type="button" on:click="initialize" .title="$count" from:data-null="$count = null"><output $value="$count"></output></button>
       </template><x-uninitialized></x-uninitialized>`,
     expect: { probe: `return [q('button').title, q('button').getAttribute('data-null'), q('output').textContent];`,
       result: ["null", "", ""], after: [
@@ -400,10 +400,10 @@ const regressions: readonly ConverterCase[] = [
     name: "keyword and generated-name declarations stay reactive inside scoped aliases",
     source: `<template component="x-keyword-names" status="early" summary="Authored names."><defs>
       <state name="class" type="number" value="1"></state><state name="event" type="number" value="2"></state>
-      <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="class + event + rootElement"></computed>
-      <handler name="switch"><set name="class" expr:value="class + 1"></set><set name="event" expr:value="event + 1"></set></handler>
-      </defs><button on:click="switch"><template $with="{ total: checkedProps } as default"><span $value="default.total"></span></template>
-        <template $match="class as class"><b $when="class = 1">First</b><b $else>Next</b></template></button></template><x-keyword-names></x-keyword-names>`,
+      <state name="rootElement" type="number" value="3"></state><computed name="checkedProps" from="$class + $event + $rootElement"></computed>
+      <handler name="switch"><set name="class" expr:value="$class + 1"></set><set name="event" expr:value="$event + 1"></set></handler>
+      </defs><button on:click="switch"><template $with="{ total: $checkedProps } as default"><span $value="$default.total"></span></template>
+        <template $match="$class as class"><b $when="$class = 1">First</b><b $else>Next</b></template></button></template><x-keyword-names></x-keyword-names>`,
     expect: { probe: `return [q('span').textContent, q('b').textContent];`, result: ["6", "First"], after: [
       { action: `document.querySelector('button').click();`, result: ["8", "Next"] },
       { action: `document.querySelector('button').click();`, result: ["10", "Next"] },
@@ -412,8 +412,8 @@ const regressions: readonly ConverterCase[] = [
   {
     name: "element match retains its native wrapper across selected arms",
     source: `<template component="x-wrapper-match" status="early" summary="Stable match wrapper."><defs>
-      <state name="status" value="ready"></state><handler name="toggle"><set name="status" expr:value="status = 'ready' ? 'waiting' : 'ready'"></set></handler>
-      </defs><section class="wrapper" $match="status as s"><button $when="s = 'ready'" on:click="toggle">Ready</button><button $else on:click="toggle">Waiting</button></section>
+      <state name="status" value="ready"></state><handler name="toggle"><set name="status" expr:value="$status = 'ready' ? 'waiting' : 'ready'"></set></handler>
+      </defs><section class="wrapper" $match="$status as s"><button $when="$s = 'ready'" on:click="toggle">Ready</button><button $else on:click="toggle">Waiting</button></section>
       <style>:host { display: block; padding: 4px; background: rgb(238 244 250); }</style></template><x-wrapper-match id="case"></x-wrapper-match>`,
     liveSetup: `window.wrapper = document.querySelector('#case');`,
     expect: { probe: `return [q('#case').tagName, q('#case').className, q('#case').textContent.trim(), window.wrapper ? q('#case') === window.wrapper : true];`,
@@ -427,19 +427,19 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-edited-form" status="early" summary="Edited controls."><defs>
       <state name="form" type="object({ text: string, number: number, checked: boolean, choice: string, choices: list(string) })" value="{ text: 'Ready', number: 4, checked: false, choice: 'b', choices: ['b'] }"></state>
       <state name="ticks" type="number" value="0"></state>
-      <handler name="unrelated"><set name="ticks" expr:value="ticks + 1"></set></handler>
+      <handler name="unrelated"><set name="ticks" expr:value="$ticks + 1"></set></handler>
       <handler name="change"><set name="form.text" value="New"></set><set name="form.checked" expr:value="true"></set>
         <set name="form.choice" value="a"></set><set name="form.choices" expr:value="['a']"></set></handler>
     </defs><form><input class="text" name="text" value="authored" bind:value="form.text">
       <textarea name="area" bind:value="form.text">default area</textarea>
       <input class="number" type="number" bind:value="form.number">
       <input class="checked" type="checkbox" name="check" checked bind:checked="form.checked">
-      <input class="readonly" value="original" .value="form.text">
+      <input class="readonly" value="original" .value="$form.text">
       <select name="single" bind:value="form.choice"><option value="a" selected>A</option><option value="b">B</option></select>
       <select name="multiple" multiple bind:value="form.choices"><option value="a" selected>A</option><option value="b">B</option></select>
       <button type="button" class="unrelated" on:click="unrelated">Unrelated</button>
       <button type="button" class="change" on:click="change">Change</button>
-      <output $value="concat(form.text, '/', form.checked, '/', form.choice, '/', join(form.choices, ','), '/', ticks)"></output>
+      <output $value="concat($form.text, '/', $form.checked, '/', $form.choice, '/', join($form.choices, ','), '/', $ticks)"></output>
     </form></template><x-edited-form></x-edited-form>`,
     hydrationOnlyProbe: true,
     beforeHydration: `const e = document.querySelector('input.text'); e.value = 'Edited'; e.focus(); e.setSelectionRange(1, 3); document.querySelector('textarea').value = 'Edited area'; document.querySelector('input.checked').checked = true;`,
@@ -465,10 +465,10 @@ const regressions: readonly ConverterCase[] = [
       <input class="radio" type="radio" bind:checked="form.checked">
       <input class="text" bind:value="form.text">
       <output class="generic" bind:value="form.text"></output>
-      <select class="choice" bind:value="form.choice"><option $each="item of items" from:value="item" $value="item"></option></select>
+      <select class="choice" bind:value="form.choice"><option $each="item of $items" from:value="$item" $value="$item"></option></select>
       <select class="multiple" multiple bind:value="form.choices"><option value="a">A</option><option value="b">B</option></select>
       <button class="remove" on:click="remove">Remove</button><button class="restore" on:click="restore">Restore</button>
-      <p $value="concat(form.text, '/', form.number, '/', form.checked, '/', form.choice, '/', join(form.choices, ','))"></p>
+      <p $value="concat($form.text, '/', $form.number, '/', $form.checked, '/', $form.choice, '/', join($form.choices, ','))"></p>
     </section></template><x-binding-types></x-binding-types>`,
     expect: { probe: `return [q('input.number').value, q('input.range').value, q('input.check').checked, q('input.radio').checked, q('input.text').value, q('output').getAttribute('value'), q('select.choice').value, Array.from(q('select.multiple').selectedOptions, e => e.value), q('p').textContent];`,
       result: ["4", "4", false, false, "Ready", "Ready", "b", ["b"], "Ready/4/false/b/b"], after: [
@@ -489,10 +489,10 @@ const regressions: readonly ConverterCase[] = [
       <state name="label" type="string" value="Ready"></state>
       <handler name="invalid"><set name="count" expr:value="0"></set><set name="disabled" expr:value="true"></set></handler>
       <handler name="valid"><set name="count" expr:value="2"></set><set name="disabled" expr:value="false"></set></handler>
-    </defs><section><p class="content" .textContent="40px / count"></p>
-      <button class="bound" .disabled="disabled" .title="40px / count">Bound</button>
-      <div class="scroll" style="height: 20px; overflow: auto" .scrollTop="20 / count"><div style="height: 200px"></div></div>
-      <input class="generic" value="Authored" bind:title="label"><output $value="label"></output>
+    </defs><section><p class="content" .textContent="40px / $count"></p>
+      <button class="bound" .disabled="$disabled" .title="40px / $count">Bound</button>
+      <div class="scroll" style="height: 20px; overflow: auto" .scrollTop="20 / $count"><div style="height: 200px"></div></div>
+      <input class="generic" value="Authored" bind:title="label"><output $value="$label"></output>
       <button class="invalid" on:click="invalid">Invalid</button><button class="valid" on:click="valid">Valid</button>
     </section></template><x-native-properties></x-native-properties>`,
     hydrationOnlyProbe: true,
@@ -508,13 +508,13 @@ const regressions: readonly ConverterCase[] = [
     name: "named and dynamic slot snippets preserve projection and fallbacks",
     dependencies: { "panel.html": `<template component="x-panel" status="early" summary="Panel."><defs>
       <state name="slotName" value="title"></state><handler name="rotate"><set name="slotName" value="secondary"></set></handler>
-      </defs><section><header><slot from:name="slotName"><b>Untitled</b></slot></header><main><slot><i>Empty</i></slot></main>
+      </defs><section><header><slot from:name="$slotName"><b>Untitled</b></slot></header><main><slot><i>Empty</i></slot></main>
         <button class="rotate" on:click="rotate">Rotate</button></section>
       <style>:host { display: block; background: rgb(238 244 250); padding: 4px; } header { color: rgb(32 48 64); }
         h2 { font-style: italic; } :slotted(h2) { color: rgb(200 20 30); }</style></template>` },
     source: `<template component="x-slot-app" status="early" summary="Slot app."><defs>
       <state name="heading" value="Title"></state><handler name="rename"><set name="heading" value="Changed"></set></handler>
-      </defs><article><x-panel><h2 slot="title" $value="heading"></h2><h3 slot="secondary">Second</h3><p>Body</p></x-panel>
+      </defs><article><x-panel><h2 slot="title" $value="$heading"></h2><h3 slot="secondary">Second</h3><p>Body</p></x-panel>
         <x-panel></x-panel><button class="rename" on:click="rename">Rename</button></article></template><x-slot-app></x-slot-app>`,
     expect: { probe: `return [qa('section header').map(e => e.textContent.trim()), qa('section main').map(e => e.textContent.trim()), q('h2') ? getComputedStyle(q('h2')).color : null, q('h2') ? getComputedStyle(q('h2')).fontStyle : null, qa('x-panel, slot').length];`,
       result: [["Title", "Untitled"], ["Body", "Empty"], "rgb(200, 20, 30)", "normal", 0], after: [
@@ -528,14 +528,14 @@ const regressions: readonly ConverterCase[] = [
       <state name="rows" type="list(unknown)" value="[{ id: 'a', name: 'Ada' }]"></state>
       <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
       </defs><div><button class="add" on:click="add">Add</button><ul>
-        <slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot>
+        <slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot>
       </ul></div><style>:host { display: block; background: rgb(238 244 250); padding: 4px; } li { font-weight: bold; }
         :slotted(li) { color: rgb(32 48 64); }</style></template>` },
     source: `<template component="x-scoped-app" status="early" summary="Scoped app."><defs>
       <state name="item" type="object" value="{ name: 'Parent' }"></state><state name="heading" value="Team"></state>
       <handler name="rename"><set name="heading" value="Group"></set></handler></defs>
-      <article><button class="rename" on:click="rename">Rename</button><output $value="item.name"></output>
-        <x-rows><template slot="row"><li .title="item.name"><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small><input .value="item.name"></li></template></x-rows>
+      <article><button class="rename" on:click="rename">Rename</button><output $value="$item.name"></output>
+        <x-rows><template slot="row"><li .title="$item.name"><b $value="$item.name"></b><em $value="$heading"></em><small $value="$index"></small><input .value="$item.name"></li></template></x-rows>
         <x-rows></x-rows></article></template><x-scoped-app></x-scoped-app>`,
     expect: { probe: `return [q('output').textContent, qa('ul').map(e => Array.from(e.querySelectorAll('li'), e => e.textContent)), qa('ul')[0] ? Array.from(qa('ul')[0].querySelectorAll('li'), e => [e.title, e.querySelector('input').value, getComputedStyle(e).color, getComputedStyle(e).fontWeight]) : []];`,
       result: ["Parent", [["AdaTeam0"], ["Missing"]], [["Ada", "Ada", "rgb(32, 48, 64)", "400"]]], after: [
@@ -551,9 +551,9 @@ const regressions: readonly ConverterCase[] = [
       <handler name="invalidate"><set name="rows.0.width" value="1rem"></set></handler>
       <handler name="restore"><set name="rows.0.width" value="2px"></set><set name="rows.1.width" value="6px"></set></handler>
       </defs><section><button class="invalidate" on:click="invalidate">Invalidate</button><button class="restore" on:click="restore">Restore</button>
-        <slot name="measure" $each="row of rows" $key="row.id" from:item="min(row.width, 5px)" from:index="loop.index"></slot></section></template>` },
+        <slot name="measure" $each="row of $rows" $key="$row.id" from:item="min($row.width, 5px)" from:index="$loop.index"></slot></section></template>` },
     source: `<template component="x-measure-app" status="early" summary="Measure app."><div><x-measures>
-      <template slot="measure"><span .title="item" $value="concat(item, '/', index)"></span><input .value="item"></template>
+      <template slot="measure"><span .title="$item" $value="concat($item, '/', $index)"></span><input .value="$item"></template>
       </x-measures></div></template><x-measure-app></x-measure-app>`,
     expect: { probe: `return [qa('span').map(e => [e.textContent, e.title]), qa('input').map(e => e.value)];`,
       result: [[["5px/0", "5px"], ["4px/1", "4px"]], ["5px", "4px"]], after: [
@@ -570,8 +570,8 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-primary" status="early" summary="Primary button."><defs>
       <prop name="label" type="string" required>Label.</prop><state name="active" type="boolean" value="false"></state>
       <event name="change" type="boolean" composed="false" cancelable="true">Change.</event>
-      <handler name="toggle"><set name="active" expr:value="active = false"></set><dispatch event="change" expr:value="active"></dispatch><focus ref="root"></focus></handler>
-      </defs><x-base-button $ref="root" class="primary" style="padding: 6px" class:active="active" from:data-active="active" on:click="toggle"><slot></slot></x-base-button>
+      <handler name="toggle"><set name="active" expr:value="$active = false"></set><dispatch event="change" expr:value="$active"></dispatch><focus ref="root"></focus></handler>
+      </defs><x-base-button $ref="root" class="primary" style="padding: 6px" class:active="$active" from:data-active="$active" on:click="toggle"><slot></slot></x-base-button>
       <style>:host { color: rgb(170 20 20); } :host(.active) { background: rgb(230 240 250); }</style></template>
       <x-primary id="case" class="outside active" label="Ready">Go</x-primary>`,
     hydrationOnlyProbe: true,
@@ -587,13 +587,13 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-handler-path" status="early" summary="Nested handlers."><defs>
       <state name="form" type="object({ rows: list(object({ name: string })), index: number })" value="{ rows: [{ name: 'Ada' }, { name: 'Bea' }], index: 1 }"></state>
       <state name="count" type="number" value="0"></state>
-      <computed name="next" from="count + 1"></computed>
-      <handler name="rename"><set name="form.rows[form.index].name" value="Ann"></set><set name="form.index" expr:value="0"></set>
-        <set name="form.rows[form.index].name" value="Zoe" $if="form.index = 0"></set>
-        <set name="count" expr:value="next"></set><set name="count" expr:value="next"></set></handler>
-      <handler name="wrong"><set name="count" expr:value="concat(count)"></set><set name="form.rows[0].name" expr:value="7"></set>
+      <computed name="next" from="$count + 1"></computed>
+      <handler name="rename"><set name="form.rows[$form.index].name" value="Ann"></set><set name="form.index" expr:value="0"></set>
+        <set name="form.rows[$form.index].name" value="Zoe" $if="$form.index = 0"></set>
+        <set name="count" expr:value="$next"></set><set name="count" expr:value="$next"></set></handler>
+      <handler name="wrong"><set name="count" expr:value="concat($count)"></set><set name="form.rows[0].name" expr:value="7"></set>
         <set name="form.rows[9].name" value="Missing"></set><set name="count" expr:value="99" $if="false"></set></handler>
-    </defs><section><output $value="concat(form.rows[0].name, '/', form.rows[1].name, '/', count)"></output>
+    </defs><section><output $value="concat($form.rows[0].name, '/', $form.rows[1].name, '/', $count)"></output>
       <button class="rename" on:click="rename">Rename</button><button class="wrong" on:click="wrong">Invalid</button>
     </section></template><x-handler-path></x-handler-path>`,
     expect: { probe: `return q('output').textContent;`, result: "Ada/Bea/0", after: [
@@ -606,9 +606,9 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-native-actions" status="early" summary="Native events."><defs>
       <state name="count" type="number" value="0"></state>
       <event name="change" type="number" bubbles="true" cancelable="true">Count.</event>
-      <handler name="send"><set name="count" expr:value="count + 1"></set><dispatch event="change" expr:value="count"></dispatch>
+      <handler name="send"><set name="count" expr:value="$count + 1"></set><dispatch event="change" expr:value="$count"></dispatch>
         <focus ref="field"></focus><validate ref="field"></validate></handler>
-    </defs><section><input $ref="field" required><output $value="count"></output>
+    </defs><section><input $ref="field" required><output $value="$count"></output>
       <button class="send" on:click.self.prevent="send">Send<span>Nested</span></button>
       <button class="key" on:keydown.enter.once="send">Key</button></section></template><x-native-actions></x-native-actions>`,
     expect: { probe: `const e = q('section'); return [q('output').textContent, e.getAttribute('data-detail'), e.getAttribute('data-invalid'), document.activeElement === q('input')];`,
@@ -623,10 +623,10 @@ const regressions: readonly ConverterCase[] = [
     name: "generic bindings reflect attributes and update before declared input handlers",
     source: `<template component="x-output" status="early" summary="Bound output."><defs>
       <state name="value" value="x"></state><state name="last" value="-"></state>
-      <handler name="record"><set name="last" expr:value="value"></set></handler>
+      <handler name="record"><set name="last" expr:value="$value"></set></handler>
       <handler name="change"><set name="value" value="y"></set></handler>
       <handler name="clear"><set name="value" expr:value="null"></set></handler>
-    </defs><div><output bind:value="value" on:input="record"></output><span $value="last"></span>
+    </defs><div><output bind:value="value" on:input="record"></output><span $value="$last"></span>
       <button class="change" on:click="change">Change</button><button class="clear" on:click="clear">Clear</button>
     </div></template><x-output></x-output>`,
     expect: {
@@ -643,7 +643,7 @@ const regressions: readonly ConverterCase[] = [
     name: "generic bindings read the value attribute when the element has no value property",
     source: `<template component="x-generic" status="early" summary="Generic input."><defs>
       <state name="value" value="x"></state>
-    </defs><div><i bind:value="value"></i><span $value="value"></span></div></template><x-generic></x-generic>`,
+    </defs><div><i bind:value="value"></i><span $value="$value"></span></div></template><x-generic></x-generic>`,
     expect: {
       probe: `return [q('i').getAttribute('value'), q('span').textContent];`, result: ["x", "x"],
       after: [{ action: `const e = document.querySelector('i'); e.setAttribute('value', 'updated'); e.dispatchEvent(new Event('input', { bubbles: true }));`, result: ["updated", "updated"] }],
@@ -673,7 +673,7 @@ const regressions: readonly ConverterCase[] = [
     source: `<template component="x-disabled" status="early" summary="Disabled property."><defs>
       <state name="disabled" type="boolean" value="true"></state>
       <handler name="enable"><set name="disabled" expr:value="false"></set></handler>
-    </defs><div><button class="target" disabled .disabled="disabled">Target</button>
+    </defs><div><button class="target" disabled .disabled="$disabled">Target</button>
       <button class="enable" on:click="enable">Enable</button></div></template><x-disabled></x-disabled>`,
     expect: {
       probe: `const e = q('button.target'); return [e.disabled, e.hasAttribute('disabled'), e.hasAttribute('.disabled')];`,

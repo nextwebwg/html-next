@@ -20,8 +20,8 @@ const base = `<template component="x-base-button" status="early" summary="Base b
 </template>`;
 const primary = `<template component="x-primary" status="early" summary="Primary button."><defs>
   <state type="boolean" name="active" value="false"></state>
-  <handler name="toggle"><set name="active" expr:value="active = false"></set></handler>
-</defs><x-base-button class="primary" style="padding: 6px" class:active="active" from:data-active="active" on:click="toggle"><slot></slot></x-base-button>
+  <handler name="toggle"><set name="active" expr:value="$active = false"></set></handler>
+</defs><x-base-button class="primary" style="padding: 6px" class:active="$active" from:data-active="$active" on:click="toggle"><slot></slot></x-base-button>
 <style>:host { color: rgb(170 20 20); } :host(.active) { background: rgb(230 240 250); }</style></template>`;
 
 async function snapshot(page: Page) {

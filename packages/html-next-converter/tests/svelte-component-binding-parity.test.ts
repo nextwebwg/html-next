@@ -12,32 +12,32 @@ import { sveltePlugin } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { componentBindingsSource as sharedSource, componentBindingsModule as controller, selectedBindingModule, componentOptionsModule, componentOwnedModule } from "./fixtures/component-bindings.js";
 
-const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-from" value="14" from:value="selected.value"></x-literal-number>
+const source = sharedSource.replace("</form>", `  <x-literal-number id="mixed-from" value="14" from:value="$selected.value"></x-literal-number>
   <x-literal-number id="mixed-bind" value="14" bind:value="selected.value"></x-literal-number>
-  <x-literal-number id="mixed-invalid-from" value="14" from:value="literalInput.value"></x-literal-number>
+  <x-literal-number id="mixed-invalid-from" value="14" from:value="$literalInput.value"></x-literal-number>
   <x-literal-number id="mixed-invalid-bind" value="14" bind:value="literalInput.value"></x-literal-number>
-  <x-literal-number $each="row, index of [1, 2]" from:id="concat('mixed-row-', index)" value="14" from:value="literalInput.value"></x-literal-number>
-  <x-state-field id="mixed-selected-from" value="14" from:value="literalInput.value"></x-state-field>
+  <x-literal-number $each="row, index of [1, 2]" from:id="concat('mixed-row-', $index)" value="14" from:value="$literalInput.value"></x-literal-number>
+  <x-state-field id="mixed-selected-from" value="14" from:value="$literalInput.value"></x-state-field>
   <x-state-field id="mixed-selected-bind" value="14" bind:value="literalInput.value"></x-state-field>
-  <x-prop-field id="mixed-selected-prop-from" value="14" from:mode="mode" from:value="literalInput.value"></x-prop-field>
-  <x-prop-field id="mixed-selected-prop-bind" value="14" from:mode="mode" bind:value="literalInput.value"></x-prop-field>
-  <x-state-field id="mixed-selected-string-from" value="99" from:value="stringInput.value"></x-state-field>
+  <x-prop-field id="mixed-selected-prop-from" value="14" from:mode="$mode" from:value="$literalInput.value"></x-prop-field>
+  <x-prop-field id="mixed-selected-prop-bind" value="14" from:mode="$mode" bind:value="literalInput.value"></x-prop-field>
+  <x-state-field id="mixed-selected-string-from" value="99" from:value="$stringInput.value"></x-state-field>
   <x-state-field id="mixed-selected-string-bind" value="99" bind:value="stringInput.value"></x-state-field>
-  <x-structured-list id="mixed-structured-list-from" from:value="structuredInput.list"></x-structured-list>
+  <x-structured-list id="mixed-structured-list-from" from:value="$structuredInput.list"></x-structured-list>
   <x-structured-list id="mixed-structured-list-bind" bind:value="structuredInput.list"></x-structured-list>
-  <x-structured-list id="mixed-structured-list-bootstrap-from" from:value="structuredInput.badlist"></x-structured-list>
+  <x-structured-list id="mixed-structured-list-bootstrap-from" from:value="$structuredInput.badlist"></x-structured-list>
   <x-structured-list id="mixed-structured-list-bootstrap-bind" bind:value="structuredInput.badlist"></x-structured-list>
-  <x-structured-object id="mixed-structured-object-from" from:value="structuredInput.object"></x-structured-object>
+  <x-structured-object id="mixed-structured-object-from" from:value="$structuredInput.object"></x-structured-object>
   <x-structured-object id="mixed-structured-object-bind" bind:value="structuredInput.object"></x-structured-object>
   <x-literal-number id="literal-number" value="14"></x-literal-number>
   <x-literal-boolean id="literal-boolean" value></x-literal-boolean>
   <x-literal-list id="literal-list" value="One Two"></x-literal-list>
-  <x-prop-field id="literal-selected" value="14" from:mode="mode"></x-prop-field>
-</form>`).replace('<state name="selected"', '<state name="structuredInput" type="object({ list: unknown, object: unknown, badlist: unknown })" value="{ badlist: [\'[-1,2]\'], list: \'[-1, (2),]\', object: &quot;{ label: \'Ready\', count: 2 }&quot; }"></state><state name="stringInput" type="object({ value: unknown })" value="{ value: \'14\' }"></state><state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="value"></output></template>
-<template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="value"></output></template>
-<template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="value"></output></template>
-<template component="x-structured-list" status="early" summary="Selected structured list." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="list(number)"></option><option value="text" type="string"></option></type></prop></defs><output $value="value"></output></template>
-<template component="x-structured-object" status="early" summary="Selected structured object." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="object({ label: string, count: number })"></option><option value="text" type="string"></option></type></prop></defs><output $value="value"></output></template>
+  <x-prop-field id="literal-selected" value="14" from:mode="$mode"></x-prop-field>
+</form>`).replace('<state name="selected"', '<state name="structuredInput" type="object({ list: unknown, object: unknown, badlist: unknown })" value="{ badlist: [\'[-1,2]\'], list: \'[-1, (2),]\', object: &quot;{ label: \'Ready\', count: 2 }&quot; }"></state><state name="stringInput" type="object({ value: unknown })" value="{ value: \'14\' }"></state><state name="literalInput" type="object({ value: unknown })" value="{ value: \'invalid\' }"></state><state name="selected"') + `<template component="x-literal-number" status="early" summary="Literal number handle." controller="./selected.js"><defs><prop name="value" type="number" default="5">Value.</prop></defs><output .value="$value"></output></template>
+<template component="x-literal-boolean" status="early" summary="Literal boolean handle." controller="./selected.js"><defs><prop name="value" type="boolean" default="false">Value.</prop></defs><output .value="$value"></output></template>
+<template component="x-literal-list" status="early" summary="Literal list handle." controller="./selected.js"><defs><prop name="value" type="keyword+">Value.</prop></defs><output .value="$value"></output></template>
+<template component="x-structured-list" status="early" summary="Selected structured list." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="list(number)"></option><option value="text" type="string"></option></type></prop></defs><output $value="$value"></output></template>
+<template component="x-structured-object" status="early" summary="Selected structured object." controller="./selected.js"><defs><state name="mode" type="keyword" values="structured, text" value="structured"></state><prop name="value">Value.<type from="mode"><option value="structured" type="object({ label: string, count: number })"></option><option value="text" type="string"></option></type></prop></defs><output $value="$value"></output></template>
 `;
 
 async function snapshot(page: Page) {

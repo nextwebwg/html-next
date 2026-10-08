@@ -33,18 +33,18 @@ export const cases: readonly ModifierCase[] = [
   { id: "passive", event: "click", modifiers: "passive", steps: [click(0, 1)] },
   { id: "capture", event: "click", modifiers: "capture", steps: [click(0, 1, { child: true })] },
   { id: "capture_order", event: "click", modifiers: "capture", steps: [click(0, 11)],
-    definition: '<state type="number" name="count_capture_order" value="0"></state><handler name="capture_capture_order"><set name="count_capture_order" expr:value="count_capture_order + 1"></set></handler><handler name="bubble_capture_order"><set name="count_capture_order" expr:value="count_capture_order * 10 + 1"></set></handler>',
-    markup: '<div data-case="capture_order" on:click.capture="capture_capture_order"><button type="button" on:click="bubble_capture_order">capture_order</button><output $value="count_capture_order"></output></div>',
+    definition: '<state type="number" name="count_capture_order" value="0"></state><handler name="capture_capture_order"><set name="count_capture_order" expr:value="$count_capture_order + 1"></set></handler><handler name="bubble_capture_order"><set name="count_capture_order" expr:value="$count_capture_order * 10 + 1"></set></handler>',
+    markup: '<div data-case="capture_order" on:click.capture="capture_capture_order"><button type="button" on:click="bubble_capture_order">capture_order</button><output $value="$count_capture_order"></output></div>',
   },
   { id: "capture_computed", event: "click", modifiers: "capture", steps: [click(0, 3)],
-    definition: '<state type="number" name="count_capture_computed" value="0"></state><computed name="doubled_capture_computed" from="count_capture_computed * 2"></computed><handler name="capture_capture_computed"><set name="count_capture_computed" expr:value="count_capture_computed + 1"></set></handler><handler name="bubble_capture_computed"><set name="count_capture_computed" expr:value="doubled_capture_computed + 1"></set></handler>',
-    markup: '<div data-case="capture_computed" on:click.capture="capture_capture_computed"><button type="button" on:click="bubble_capture_computed">capture_computed</button><output $value="count_capture_computed"></output></div>',
+    definition: '<state type="number" name="count_capture_computed" value="0"></state><computed name="doubled_capture_computed" from="$count_capture_computed * 2"></computed><handler name="capture_capture_computed"><set name="count_capture_computed" expr:value="$count_capture_computed + 1"></set></handler><handler name="bubble_capture_computed"><set name="count_capture_computed" expr:value="$doubled_capture_computed + 1"></set></handler>',
+    markup: '<div data-case="capture_computed" on:click.capture="capture_capture_computed"><button type="button" on:click="bubble_capture_computed">capture_computed</button><output $value="$count_capture_computed"></output></div>',
   },
   { id: "computed_steps", event: "click", modifiers: "stop", steps: [click(0, 3, { bubbled: false })],
-    definition: '<state type="number" name="count_computed_steps" value="0"></state><computed name="doubled_computed_steps" from="count_computed_steps * 2"></computed><handler name="hit_computed_steps"><set name="count_computed_steps" expr:value="doubled_computed_steps + 1"></set><set name="count_computed_steps" expr:value="doubled_computed_steps + 1"></set></handler>',
+    definition: '<state type="number" name="count_computed_steps" value="0"></state><computed name="doubled_computed_steps" from="$count_computed_steps * 2"></computed><handler name="hit_computed_steps"><set name="count_computed_steps" expr:value="$doubled_computed_steps + 1"></set><set name="count_computed_steps" expr:value="$doubled_computed_steps + 1"></set></handler>',
   },
   { id: "computed_chain", event: "click", modifiers: "stop", steps: [click(0, 3, { bubbled: false })],
-    definition: '<state type="number" name="count_computed_chain" value="0"></state><computed name="doubled_computed_chain" from="count_computed_chain * 2"></computed><computed name="next_computed_chain" from="doubled_computed_chain + 1"></computed><handler name="hit_computed_chain"><set name="count_computed_chain" expr:value="next_computed_chain"></set><set name="count_computed_chain" expr:value="next_computed_chain"></set></handler>',
+    definition: '<state type="number" name="count_computed_chain" value="0"></state><computed name="doubled_computed_chain" from="$count_computed_chain * 2"></computed><computed name="next_computed_chain" from="$doubled_computed_chain + 1"></computed><handler name="hit_computed_chain"><set name="count_computed_chain" expr:value="$next_computed_chain"></set><set name="count_computed_chain" expr:value="$next_computed_chain"></set></handler>',
   },
   { id: "left_mouse", event: "click", modifiers: "left", steps: [click(2, 0), click(0, 1)] },
   { id: "middle_mouse", event: "click", modifiers: "middle", steps: [click(0, 0), click(1, 1)] },
@@ -67,9 +67,9 @@ export const cases: readonly ModifierCase[] = [
 ];
 
 export const source = `<template component="x-event-matrix" status="early" summary="Event modifier parity."><defs>
-${cases.map(({ id, definition }) => definition ?? `<state type="number" name="count_${id}" value="0"></state><handler name="hit_${id}"><set name="count_${id}" expr:value="count_${id} + 1"></set></handler>`).join("\n")}
+${cases.map(({ id, definition }) => definition ?? `<state type="number" name="count_${id}" value="0"></state><handler name="hit_${id}"><set name="count_${id}" expr:value="$count_${id} + 1"></set></handler>`).join("\n")}
 </defs><section>
-${cases.map(({ id, event, modifiers, markup }) => markup ?? `<div data-case="${id}"><button type="button" on:${event}.${modifiers}="hit_${id}">${id}<span>child</span></button><output $value="count_${id}"></output></div>`).join("\n")}
+${cases.map(({ id, event, modifiers, markup }) => markup ?? `<div data-case="${id}"><button type="button" on:${event}.${modifiers}="hit_${id}">${id}<span>child</span></button><output $value="$count_${id}"></output></div>`).join("\n")}
 </section></template>`;
 
 export type DispatchResult = { readonly bubbled: boolean; readonly prevented: boolean; readonly returned: boolean };

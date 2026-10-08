@@ -20,8 +20,8 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const definition = parseComponent(`<template component="list-memory"><defs>
   <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>
   <state name="selected" type="number" nullable></state>
-  </defs><table><tbody><tr $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected">
-  <td $value="row.id"></td><td><a $value="row.label"></a></td></tr></tbody></table></template>`);
+  </defs><table><tbody><tr $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:danger="$row.id = $selected">
+  <td $value="$row.id"></td><td><a $value="$row.label"></a></td></tr></tbody></table></template>`);
 
 const pageSetup = `(serialized) => {
   const runtime = window.BareRuntime;

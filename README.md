@@ -121,7 +121,7 @@ component dependency graph, not a registration script.
   status="early" summary="A native counter button.">
   <defs>
     <state name="count" type="number" value="0"></state>
-    <computed name="label" from="concat('Count: ', count)"></computed>
+    <computed name="label" from="concat('Count: ', $count)"></computed>
   </defs>
 
   <button $ref="button" type="button">

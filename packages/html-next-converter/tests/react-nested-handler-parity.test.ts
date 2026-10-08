@@ -20,26 +20,26 @@ const source = `<template component="x-nested-set" status="early" summary="Neste
   <state type="number" name="missingIndex" value="9"></state>
   <state type="number" name="count" value="2"></state>
   <state type="object({ '9007199254740992': object({ name: string }), '9007199254740993': object({ name: string }), '01': object({ name: string }) })" name="byId" value="{ '9007199254740992': { name: 'Wrong' }, '9007199254740993': { name: 'Right' }, '01': { name: 'Leading' } }"></state>
-  <handler name="rename"><set name="form.rows[form.selected].name" value="Ann"></set>
-    <set name="form.selected" expr:value="form.selected - 1"></set>
-    <set name="form.rows[form.selected].name" value="Zoe"></set></handler>
-  <handler name="missing"><set name="form.rows[missingIndex].name" value="Ignored"></set></handler>
-  <handler name="wrongNumber"><set name="count" expr:value="concat(count)"></set></handler>
-  <handler name="wrongField"><set name="form.rows[form.selected].name" expr:value="7"></set></handler>
-  <handler name="bump"><set name="count" expr:value="count + 1"></set></handler>
+  <handler name="rename"><set name="form.rows[$form.selected].name" value="Ann"></set>
+    <set name="form.selected" expr:value="$form.selected - 1"></set>
+    <set name="form.rows[$form.selected].name" value="Zoe"></set></handler>
+  <handler name="missing"><set name="form.rows[$missingIndex].name" value="Ignored"></set></handler>
+  <handler name="wrongNumber"><set name="count" expr:value="concat($count)"></set></handler>
+  <handler name="wrongField"><set name="form.rows[$form.selected].name" expr:value="7"></set></handler>
+  <handler name="bump"><set name="count" expr:value="$count + 1"></set></handler>
 </defs><section><button class="rename" type="button" on:click="rename">Rename</button>
   <button class="missing" type="button" on:click="missing">Missing</button>
   <button class="wrong-number" type="button" on:click="wrongNumber">Wrong number</button>
   <button class="wrong-field" type="button" on:click="wrongField">Wrong field</button>
   <button class="bump" type="button" on:click="bump">Bump</button>
-  <output class="first" $value="form.rows.0.name"></output>
-  <output class="second" $value="form.rows.1.name"></output>
-  <output class="bracket-first" $value="form.rows[0].name"></output>
-  <output class="bracket-selected" $value="form.rows[form.selected].name"></output>
-  <output class="large-key" $value="byId[9007199254740993].name"></output>
-  <output class="leading-key" $value="byId[01].name"></output>
-  <output class="selected" $value="form.selected"></output>
-  <output class="count" $value="count"></output></section>
+  <output class="first" $value="$form.rows.0.name"></output>
+  <output class="second" $value="$form.rows.1.name"></output>
+  <output class="bracket-first" $value="$form.rows[0].name"></output>
+  <output class="bracket-selected" $value="$form.rows[$form.selected].name"></output>
+  <output class="large-key" $value="$byId[9007199254740993].name"></output>
+  <output class="leading-key" $value="$byId[01].name"></output>
+  <output class="selected" $value="$form.selected"></output>
+  <output class="count" $value="$count"></output></section>
 <style>:host { display: block; padding: 4px; font: 16px/24px Arial, sans-serif; }
   output { display: inline-block; min-width: 32px; }</style></template>`;
 

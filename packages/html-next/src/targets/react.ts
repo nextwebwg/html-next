@@ -1,7 +1,7 @@
 /** React output is compiled from the same checked component definition as the browser runtime. */
 import { isScriptIdentifier } from "./shared.js";
 import { fail } from "../diagnostics.js";
-import { compileExpression, type ExpressionNode } from "../expression.js";
+import { compilePath, type ExpressionNode } from "../expression.js";
 import { parseDuration } from "../duration.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
@@ -1040,7 +1040,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         includeDependencies(step.guard?.dependencies ?? []);
         if (step.kind === "set") {
           includeDependencies(step.value.dependencies);
-          includeDependencies(compileExpression(step.path).dependencies);
+          includeDependencies(compilePath(step.path).dependencies);
         } else if (step.kind === "dispatch") includeDependencies(step.value?.dependencies ?? []);
       }
       const handlerComputed = computed.filter((value) => referencedComputed.has(value.name)).map((value) => {

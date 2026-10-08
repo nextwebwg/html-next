@@ -22,8 +22,8 @@ const child = `<template component="x-child" status="early" summary="Child."><de
 </defs><div><button type="button" on:click="fire">Fire</button><button type="button" on:click="fireInvalid">Invalid</button><button type="button" on:click="fireNumericString">Invalid number</button><button type="button" on:click="fireNumericLiteral">Valid number</button></div></template>`;
 const parent = `<template component="x-parent" status="early" summary="Parent."><defs>
   <state type="number" name="hits" value="0"></state>
-  <handler name="record"><set name="hits" expr:value="hits + 1"></set></handler>
-</defs><section><x-child on:saved.stop="record"></x-child><output $value="hits"></output></section></template>`;
+  <handler name="record"><set name="hits" expr:value="$hits + 1"></set></handler>
+</defs><section><x-child on:saved.stop="record"></x-child><output $value="$hits"></output></section></template>`;
 
 async function snapshot(page: Page, expected: string): Promise<{ readonly hits: string; readonly documentHits: number; readonly pixels: Buffer }> {
   await page.waitForFunction((value) => document.querySelector("output")?.textContent === value, expected);

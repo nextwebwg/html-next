@@ -28,8 +28,8 @@ import { renderComponents } from "@nextwebwg/html-next/server";
 
 const counter = parseComponent(`<template component="x-counter"><defs>
   <state name="count" type="number" value="0"></state>
-  <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
-</defs><button type="button" on:click="increment"><span $value="count"></span></button></template>`);
+  <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
+</defs><button type="button" on:click="increment"><span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],

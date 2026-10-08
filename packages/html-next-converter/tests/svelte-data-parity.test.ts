@@ -17,29 +17,29 @@ import { dataLifecycleSource as source } from "./fixtures/data-lifecycle.js";
 
 const sampledSource = `<template component="x-data-cycle" status="early" summary="Sampled resource."><defs>
   <state name="page" type="number" value="1"></state><state name="kind" value="Before"></state>
-  <computed name="requestPage" from="page + 1"></computed>
+  <computed name="requestPage" from="$page + 1"></computed>
   <data name="feed" src="./api/{kind}" type="string" debounce="80ms" poll="500ms">
-    <param name="page" from:value="requestPage"></param><param name="kind" expr:value="kind"></param>
+    <param name="page" from:value="$requestPage"></param><param name="kind" expr:value="$kind"></param>
     <param name="tag" expr:value="['a', 'b']"></param></data>
-  <handler name="sample"><set name="kind" expr:value="kind = 'Before' ? 'After' : 'Before'"></set></handler>
-  <handler name="next"><set name="page" expr:value="page + 1"></set></handler>
+  <handler name="sample"><set name="kind" expr:value="$kind = 'Before' ? 'After' : 'Before'"></set></handler>
+  <handler name="next"><set name="page" expr:value="$page + 1"></set></handler>
   </defs><section><button class="sample" on:click="sample">Sample</button><button class="next" on:click="next">Next</button>
-    <output class="label" $value="feed.value"></output><output class="pending" $value="feed.pending"></output></section></template>`;
+    <output class="label" $value="$feed.value"></output><output class="pending" $value="$feed.pending"></output></section></template>`;
 
 const conformingSource = `<template component="x-data-cycle" status="early" summary="Conforming parameters."><defs>
   <state name="box" type="object({ query: number, sample: date })" value="{ query: 1, sample: '2024-02-29' }"></state>
   <data name="feed" src="./api/read" type="string" debounce="80ms" poll="600ms">
-    <param name="query" from:value="box.query"></param><param name="sample" expr:value="box.sample"></param></data>
+    <param name="query" from:value="$box.query"></param><param name="sample" expr:value="$box.sample"></param></data>
   <handler name="invalid"><set name="box" expr:value="{ query: 'bad', sample: 42 }"></set></handler>
   <handler name="partial"><set name="box" expr:value="{ query: 2, sample: 42 }"></set></handler>
   <handler name="sample"><set name="box" expr:value="{ query: 'bad', sample: '2025-01-01' }"></set></handler>
   <handler name="recover"><set name="box" expr:value="{ query: 3, sample: '2026-01-01' }"></set></handler>
   </defs><section><button class="invalid" on:click="invalid">Invalid</button><button class="partial" on:click="partial">Partial</button><button class="sample" on:click="sample">Sample</button><button class="recover" on:click="recover">Recover</button>
-    <output class="label" $value="feed.value"></output><output class="pending" $value="feed.pending"></output></section></template>`;
+    <output class="label" $value="$feed.value"></output><output class="pending" $value="$feed.pending"></output></section></template>`;
 
 const initiallyInvalidSource = conformingSource
   .replace('<state name="box"', '<state name="count" type="number" value="0"></state><state name="box"')
-  .replace('<param name="query" from:value="box.query"></param>', '<param name="query" from:value="8px / count"></param><param name="other" from:value="box.query"></param>')
+  .replace('<param name="query" from:value="$box.query"></param>', '<param name="query" from:value="8px / $count"></param><param name="other" from:value="$box.query"></param>')
   .replace(' poll="600ms"', '')
   .replace('</defs>', '<handler name="start"><set name="count" expr:value="2"></set></handler></defs>')
   .replace('<section>', '<section><button class="start" on:click="start">Start</button>');

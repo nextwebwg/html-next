@@ -65,15 +65,15 @@ describe.skipIf(!enabled)("browser graph loader", () => {
           requests.push(path);
           const body = path === "/page.html" ?
             '<meta name="htmlkit:layout" content="admin"><head>' +
-            '<title $value="missing">Imported title</title>' +
-            '<meta name="description" content="Imported description" from:content="missing">' +
+            '<title $value="$missing">Imported title</title>' +
+            '<meta name="description" content="Imported description" from:content="$missing">' +
             '<meta property="og:title" content="Imported social title">' +
             '<link rel="stylesheet" href="./ignored.css">' +
             '<link rel="canonical" href="https://other.example/">' +
             '<link rel="preload" as="script" href="./ignored.js">' +
             '<link rel="component" href="./child.html"></head>' +
-            '<template component="products-page"><title $value="missing">Carrier title</title>' +
-            '<meta name="htmlkit:layout" content="admin"><meta name="description" from:content="missing">' +
+            '<template component="products-page"><title $value="$missing">Carrier title</title>' +
+            '<meta name="htmlkit:layout" content="admin"><meta name="description" from:content="$missing">' +
             '<link rel="stylesheet" href="./carrier.css"><link rel="preload" as="script" href="./carrier.js">' +
             '<section>Products <product-detail></product-detail></section></template>' :
             path === "/child.html" ?
@@ -251,7 +251,7 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             `<template component="x-app" status="early" summary="App." controller="./app.js">` +
             `<defs><state type="number" name="count" value="1"></state>` +
             `</defs>` +
-            `<main><button $ref="button">add</button><output $value="count"></output></main></template>`,
+            `<main><button $ref="button">add</button><output $value="$count"></output></main></template>`,
         });
       } else if (url.endsWith("/ui/app.js")) {
         await route.fulfill({

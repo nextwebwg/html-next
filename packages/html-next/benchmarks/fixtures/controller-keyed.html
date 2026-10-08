@@ -5,12 +5,12 @@
     <state name="selected" type="number" nullable></state>
   </defs>
   <div>
-    <div class="list" $if="ready">
+    <div class="list" $if="$ready">
       <table>
         <tbody>
-          <tr $each="row of rows" $key="row.id" from:data-id="row.id" class:danger="row.id = selected">
-            <td $value="row.id"></td>
-            <td><a data-action="select" $value="row.label"></a></td>
+          <tr $each="row of $rows" $key="$row.id" from:data-id="$row.id" class:danger="$row.id = $selected">
+            <td $value="$row.id"></td>
+            <td><a data-action="select" $value="$row.label"></a></td>
             <td><a data-action="remove">Remove</a></td>
           </tr>
         </tbody>

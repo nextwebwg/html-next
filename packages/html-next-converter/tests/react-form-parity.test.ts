@@ -19,7 +19,7 @@ const nodeModulesPath = fileURLToPath(new URL("../node_modules", import.meta.url
 const livePath = fileURLToPath(new URL("../../html-next/src/live.ts", import.meta.url));
 const source = `<template component="x-email" status="early" summary="A form-associated email control."><defs>
   <state name="email" value=""></state>
-</defs><input type="email" name="email" required bind:value="email" from:data-current="email"></template>`;
+</defs><input type="email" name="email" required bind:value="email" from:data-current="$email"></template>`;
 const invocation = `<form id="owner"><button type="submit">Send</button></form><x-email id="case" form="owner" placeholder="Email"></x-email>`;
 
 type FormBehavior = {

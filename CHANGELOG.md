@@ -2,6 +2,13 @@
 
 ## 1.0.0-alpha.34
 
+### Breaking
+
+- Expressions read a declared value only as `$name`, as the proposal specifies. A bare word inside an expression is now a keyword literal: `from:title="count"` sets the text `count`, and `{ label: name }` holds the keyword `name`. Add `$` to every reference in `from:`, `class:`, `style:`, `.prop`, `expr:value`, `<computed from>`, `$if`, `$when`, `$where`, `$limit`, `$key`, `$value`, `$html`, the `$each` list, the `$with`/`$match` subject, and `{…}` text. Loop items, `as` aliases, declaration and handler names stay bare.
+- `bind:` and `<set name>` are path fields, not expression fields, and are written without `$` (`bind:value="search.query"`). A bracketed segment inside a path is an expression: `rows[$selected].name`. `$sort` keys are unchanged.
+
+### Changed
+
 - Every HTML Next package now requires Node `>=22.22.2 <23 || >=24.15 <25` (previously `>=22.13 <23 || >=24 <25`), the Node 22 and 24 releases that jsdom 30 supports. 1.0.0-alpha.33 already uses jsdom 30 for server rendering.
 - A component slotted into a slot that is closed at first render lowers when the slot opens, and a slot that closes and renders again re-inserts the lowered component rather than its raw invocation. Hidden slotted content creates no instance or bindings until a slot renders it.
 - A consumer's `<template slot>` renders lazily for every slot, including one that exposes no props. Previously such a slot inserted the inert `<template>` and its content never rendered. The children render in the consumer's scope only while the slot renders, afresh each time, and nothing inside is created, fetched or bound while the slot is hidden. `host.slots` lists the elements the template renders while its slot renders, and none otherwise; for a slot with props it previously listed the `<template>` itself. Plain projection stays eager.
@@ -12,6 +19,11 @@
 - Compiled components follow the live runtime's slot rules. A consumer's `<template slot>` renders only while its outlet renders, `host.slots` lists what it renders, and a component projected into a slot is created only once a slot places it.
 - A compiled component bundles only the type checks its declared props and events use, not the type-expression parser, literal parser, unused formats or color keywords. Live type checks are built from the same combinators and are about 10% faster.
 - A document has one MutationObserver for connection tracking, shared by the live runtime, compiled components and the React, Svelte and Vue targets. Bound `<select>` elements in the Svelte and Vue targets share one observer per document for their option lists.
+
+### Added
+
+- A structured attribute value accepts bare keywords as keyword literals, checked against the declared type: `<state value="{ mode: compact, tags: [red, blue] }">`.
+- `html-next-check` reports warnings as well as errors. `HT022` warns when a bare keyword spells a name in scope (did you mean `$count`?). Warnings carry `severity: "warning"` and leave the exit status at `0`. `checkConversion` passes them to an optional `onWarning` callback.
 
 ## 1.0.0-alpha.33
 

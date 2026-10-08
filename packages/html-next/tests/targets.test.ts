@@ -75,22 +75,22 @@ const featureSource = `<template component="x-feature" status="experimental" sum
     <prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>
     <state type="boolean" name="open" value="false"></state>
     <state type="string" name="query" value=""></state>
-    <computed name="count" from="items.length"></computed>
+    <computed name="count" from="$items.length"></computed>
     <event name="toggle" type="object({ open: boolean })"></event>
-    <handler name="flip"><set name="open" expr:value="not open"></set><dispatch event="toggle" expr:value="{ open: open }"></dispatch></handler>
+    <handler name="flip"><set name="open" expr:value="not $open"></set><dispatch event="toggle" expr:value="{ open: $open }"></dispatch></handler>
   </defs>
-  <section class="panel" class:compact="size = 'sm'" style:--gap="size">
-    <h2 $value="label"></h2>
+  <section class="panel" class:compact="$size = 'sm'" style:--gap="$size">
+    <h2 $value="$label"></h2>
     <input $ref="search" bind:value="query">
-    <button type="button" on:click="flip"><template $value="open"></template></button>
-    <ul $if="open">
-      <li $each="item, index of items" $key="item.id" $where="item.done" $sort="name"><span $value="item.name"></span></li>
+    <button type="button" on:click="flip"><template $value="$open"></template></button>
+    <ul $if="$open">
+      <li $each="item, index of $items" $key="$item.id" $where="$item.done" $sort="name"><span $value="$item.name"></span></li>
     </ul>
     <template $match>
-      <small $when="size = 'sm'">small</small>
+      <small $when="$size = 'sm'">small</small>
       <span $else>regular</span>
     </template>
-    <x-badge from:tone="size"><slot name="badge">none</slot></x-badge>
+    <x-badge from:tone="$size"><slot name="badge">none</slot></x-badge>
     <slot></slot>
   </section>
   <style>
@@ -109,7 +109,7 @@ describe("official target compilers", () => {
       const inline = text !== undefined;
       const definition = parseComponent(`<template component="x-row-text"><defs>
         <state name="rows" type="list(object({ id: number, label: string, note: unknown, missing?: string }))" value="[{ id: 1, label: 'Ada', note: null }, { id: 2, label: 'Bea', note: '?' }]"></state>
-        </defs><ul><li $each="row of rows"><span${inline ? "" : ' $value="row.label"'}>${text ?? ""}</span></li></ul></template>`);
+        </defs><ul><li $each="row of $rows"><span${inline ? "" : ' $value="$row.label"'}>${text ?? ""}</span></li></ul></template>`);
       const source = generateVueComponent(definition);
       if (text === "{$row.label}") assert.equal(source, valueSource, "inline paths and $value must emit identical Vue code");
       else if (!inline) valueSource = source;
@@ -228,7 +228,7 @@ describe("official target compilers", () => {
       const outputs = generated(`<template component="x-dependent"><defs>
         <prop name="type" type="keyword" values="text, number" default="text">Mode.</prop>
         ${declaration}
-      </defs><input from:type="type" from:value="value"></template>`);
+      </defs><input from:type="$type" from:value="$value"></template>`);
       const vue = outputs.get("vue/XDependent.vue")!;
       const vanilla = outputs.get("vanilla/XDependent.d.ts")!;
       compileVue(vue, "XDependent.vue");
@@ -269,8 +269,8 @@ describe("official target compilers", () => {
     const outputs = generated(`<template component="x-state-dependent"><defs>
       <state name="mode" type="keyword" values="text, number" value="text"></state>
       <prop name="value">Value.<type from="mode"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
-      <handler name="toggle"><set name="mode" expr:value="mode = 'text' ? 'number' : 'text'"></set></handler>
-    </defs><button from:data-value="value" on:click="toggle">Toggle</button></template>`);
+      <handler name="toggle"><set name="mode" expr:value="$mode = 'text' ? 'number' : 'text'"></set></handler>
+    </defs><button from:data-value="$value" on:click="toggle">Toggle</button></template>`);
     const vue = outputs.get("vue/XStateDependent.vue")!;
     const vanilla = outputs.get("vanilla/XStateDependent.d.ts")!;
     compileVue(vue, "XStateDependent.vue");
@@ -284,7 +284,7 @@ describe("official target compilers", () => {
       <state name="count" type="number" value="2"></state>
       <state name="items" type="list(object({ name: string }))" value="[{ name: 'Ada' }]"></state>
       <state name="index" type="integer" value="0"></state>
-      <handler name="badNumber"><set name="count" expr:value="concat(count)"></set></handler>
+      <handler name="badNumber"><set name="count" expr:value="concat($count)"></set></handler>
       <handler name="badField"><set name="items[$index].name" expr:value="7"></set></handler>
     </defs><main><button on:click="badNumber">Number</button><button on:click="badField">Field</button></main></template>`)
       .get("vue/XTypedHandlers.vue")!;
@@ -308,7 +308,7 @@ describe("official target compilers", () => {
       "x-optional",
       `<prop name="label" type="string">Label.</prop><prop name="size" type="keyword" values="sm, md" default="md">Size.</prop>` +
         '<prop name="count" type="number" required>Count.</prop>',
-      '<p from:data-label="label" from:data-size="size" from:data-count="count"></p>',
+      '<p from:data-label="$label" from:data-size="$size" from:data-count="$count"></p>',
     )).get("vue/XOptional.vue")!;
     // Vue applies defaults before exposing resolved props, including the implicit null default.
     assert.match(vue, /label: \{ type: null as unknown as PropType<string \| null>, default: null \}/);
@@ -345,7 +345,7 @@ describe("official target compilers", () => {
   it("types scalar concat output as text while preserving invalid-call results", async () => {
     const vue = generated(`<template component="x-concat-types">
       <defs><prop name="label" type="string">Label.</prop></defs>
-      <div from:aria-label="concat(label, 1)">{$label}</div>
+      <div from:aria-label="concat($label, 1)">{$label}</div>
     </template>`).get("vue/XConcatTypes.vue")!;
     const checked = vue.replace("</script>", `
 const scalar: string | undefined = concat('Label ', 1, true, null, undefined);
@@ -377,7 +377,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const outputs = generated(componentSource(
       "x-field",
       '<prop name="value" type="string">Value.</prop>',
-      '<input from:value="value">',
+      '<input from:value="$value">',
     ));
     const vue = outputs.get("vue/XField.vue")!;
     compileVue(vue, "XField.vue");
@@ -388,7 +388,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     assert.match(vue, /@input="model = readBoundControl\(/);
     assert.match(vue, /const model = computed\(\{\n  get: \(\) => checkedProps\.value\.modelValue \?\? checkedProps\.value\.value \?\? undefined,/);
     // The select uses the same native-control bridge; Vue's v-model would reassert stale state.
-    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="value"><slot></slot></select>')).get("vue/XChoice.vue")!;
+    const select = generated(componentSource("x-choice", '<prop name="value" type="string">Value.</prop>', '<select from:value="$value"><slot></slot></select>')).get("vue/XChoice.vue")!;
     assert.match(select, /<select\s+data-component="x-choice"/);
     assert.match(select, /v-bind-control="\{ tag: 'select', name: 'value', value: model, optionalValue: true, defaultValue: '' \}"/);
     assert.match(select, /@change="model = readBoundControl\(/);
@@ -400,7 +400,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "x-native-control-primitives",
       '<prop name="value" type="string">Value.</prop><prop name="selected" type="boolean">Selected.</prop>',
-      '<div><input class="property" .value="value" value="authored"><input class="attribute" from:value="value"><input type="checkbox" from:checked="selected"></div>',
+      '<div><input class="property" .value="$value" value="authored"><input class="attribute" from:value="$value"><input type="checkbox" from:checked="$selected"></div>',
     )).get("vue/XNativeControlPrimitives.vue")!;
     compileVue(vue, "XNativeControlPrimitives.vue");
     assert.match(vue, /<input\s+class="property"\s+v-bind-control="\{[\s\S]*?value: checkedProps\.value,[\s\S]*?nativeProperty: true,[\s\S]*?defaultValue: 'authored',[\s\S]*?\}"/);
@@ -413,7 +413,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("passes repeated scoped-slot values through Vue's native slot outlet", () => {
     const vue = generated(`<template component="x-row-list"><defs>` +
       '<prop name="rows" type="list(object({ id: string, name: string }))">Rows.</prop></defs>' +
-      '<ul><slot $each="row of rows" $key="row.id" name="row" from:item="row" from:index="loop.index"><li $value="row.name"></li></slot></ul></template>')
+      '<ul><slot $each="row of $rows" $key="$row.id" name="row" from:item="$row" from:index="$loop.index"><li $value="$row.name"></li></slot></ul></template>')
       .get("vue/XRowList.vue")!;
     compileVue(vue, "XRowList.vue");
     assert.match(vue, /v-for="[^"]*checkedProps\.rows/);
@@ -423,7 +423,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
   it("converts a consumer's scoped-slot template with its lexical state", () => {
     const vue = generated(`<template component="x-consumer"><defs><state name="heading" type="string" value="People"></state></defs>` +
-      `<section><x-row-list><template slot="row"><b $value="item.name"></b><i $value="heading"></i></template></x-row-list></section></template>`)
+      `<section><x-row-list><template slot="row"><b $value="$item.name"></b><i $value="$heading"></i></template></x-row-list></section></template>`)
       .get("vue/XConsumer.vue")!;
     compileVue(vue, "XConsumer.vue");
     assert.match(vue, /<template #row="\{ item \}">/);
@@ -435,7 +435,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "x-both",
       '<prop name="a" type="boolean" default="false">A.</prop><prop name="b" type="boolean" default="false">B.</prop>',
-      '<button from:hidden="a and b" from:title="a" from:data-b="b"></button>',
+      '<button from:hidden="$a and $b" from:title="$a" from:data-b="$b"></button>',
     )).get("vue/XBoth.vue")!;
     compileVue(vue, "XBoth.vue");
     assert.match(vue, /:hidden="checkedProps\.a && checkedProps\.b"/);
@@ -446,7 +446,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const outputs = generated(componentSource(
       "x-aria",
       '<prop name="open" type="boolean" default="false">Open.</prop><prop name="gone" type="boolean" default="false">Gone.</prop>',
-      '<button from:aria-expanded="open" from:hidden="gone"></button>',
+      '<button from:aria-expanded="$open" from:hidden="$gone"></button>',
     ));
     const vue = outputs.get("vue/XAria.vue")!;
     compileVue(vue, "XAria.vue");
@@ -504,7 +504,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("reads a typed state list's items plainly while checking its keys", () => {
     const vue = generated(`<template component="x-tabs" status="experimental" summary="Typed state.">` +
       `<defs><state name="tabs" type="list(object({ id: string, label: string, active: boolean }))" value="[]"></state></defs>` +
-      `<div><button $each="tab of tabs" $key="tab.id" from:id="tab.id" from:aria-selected="tab.active" class:active="tab.active"><template $value="tab.label"></template></button></div></template>`,
+      `<div><button $each="tab of $tabs" $key="$tab.id" from:id="$tab.id" from:aria-selected="$tab.active" class:active="$tab.active"><template $value="$tab.label"></template></button></div></template>`,
     ).get("vue/XTabs.vue")!;
     compileVue(vue, "XTabs.vue");
     assert.match(vue, /const tabs = ref<\{ id: string; label: string; active: boolean \}\[\]>\(\[\]\)\n/);
@@ -517,7 +517,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(`<template component="x-hover" status="experimental" summary="Typed records.">` +
       `<defs><state name="hovered" type="object({ row: integer, label?: string, ... })" ></state>` +
       `<state name="issues" type="list(object({ message: string }))" value="[]"></state></defs>` +
-      `<div><span $if="hovered" from:title="hovered.label"></span><p $if="not issues.length">Valid</p></div></template>`,
+      `<div><span $if="$hovered" from:title="$hovered.label"></span><p $if="not $issues.length">Valid</p></div></template>`,
     ).get("vue/XHover.vue")!;
     compileVue(vue, "XHover.vue");
     assert.match(vue, /const hovered = ref<\{ row: number; label\?: string; \[name: string\]: any \} \| null>\(null\)\n/);
@@ -549,7 +549,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       const vue = generated(
         `<template component="x-row" status="experimental" summary="A target compiler fixture."${controller}>` +
         `<defs><prop name="label" type="string" default="">Row label.</prop></defs>` +
-        `<div><h2 $value="label"></h2><span><slot name="label"><template $value="label"></template></slot></span></div></template>`,
+        `<div><h2 $value="$label"></h2><span><slot name="label"><template $value="$label"></template></slot></span></div></template>`,
       ).get("vue/XRow.vue")!;
       compileVue(vue, "XRow.vue");
       assert.match(vue, /<h2>\{\{ checkedProps\.label \}\}<\/h2>/, `${controller}: element text`);
@@ -561,7 +561,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(
       `<template component="x-choice" status="experimental" summary="A target compiler fixture.">` +
       `<defs><prop name="disabled" type="boolean" default="false">Disabled.</prop></defs>` +
-      `<select from:disabled="disabled"><option value="">None</option><slot></slot></select></template>`,
+      `<select from:disabled="$disabled"><option value="">None</option><slot></slot></select></template>`,
     ).get("vue/XChoice.vue")!;
     compileVue(vue, "XChoice.vue");
     assert.match(vue, /<select[^>]*>\n\s+<option value="">None<\/option>\n\s+<slot \/>\n\s+<\/select>/);
@@ -571,7 +571,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const vue = generated(componentSource(
       "demo-anchor",
       `<prop name="anchor" type="keyword" values="start, end">Anchor edge.</prop>`,
-      `<div from:data-edge="anchor"></div>`,
+      `<div from:data-edge="$anchor"></div>`,
     )).get("vue/DemoAnchor.vue")!;
     assert.match(vue, /anchor: \{ type: null as unknown as PropType<'start' \| 'end' \| null>, default: null \}/);
     assert.doesNotMatch(vue, /null \| null/);
@@ -587,8 +587,8 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     <prop name="spaceTags" type="keyword+">Space-separated tags.</prop>
   </defs>
   <template $match>
-    <a $when="as = 'a'" class="action" from:href="{ true: null, false: href }[concat(disabled)]" from:data-tags="tags" from:data-space-tags="spaceTags" $ref="control"><slot></slot></a>
-    <button $else class="action" type="button" from:disabled="disabled" $ref="control"><slot></slot></button>
+    <a $when="$as = 'a'" class="action" from:href="{ true: null, false: $href }[concat($disabled)]" from:data-tags="$tags" from:data-space-tags="$spaceTags" $ref="control"><slot></slot></a>
+    <button $else class="action" type="button" from:disabled="$disabled" $ref="control"><slot></slot></button>
   </template>
   <style>:host { display: inline-flex; }</style>
 </template>`);
@@ -644,17 +644,17 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const section = generateVueComponent(parseComponent(componentSource(
       "x-section",
       `<prop name="as" type="keyword" values="a, b" default="a">Kind.</prop>`,
-      `<section $match from:data-as="as"><p $when="as = 'a'">A</p><p $else>B</p></section>`,
+      `<section $match from:data-as="$as"><p $when="$as = 'a'">A</p><p $else>B</p></section>`,
     )));
     assert.match(section, /<section[\s\S]*<p v-if="checkedProps\.as === 'a'">A<\/p>/);
     assert.throws(() => generateVueComponent(parseComponent(componentSource(
       "x-guarded",
       '<prop name="show" type="boolean" default="true">Show.</prop>',
-      `<section $if="show" from:data-show="show">Visible</section>`,
+      `<section $if="$show" from:data-show="$show">Visible</section>`,
     ))), /HT021/);
     // $html is supported through a generated, feature-specific sanitizer helper.
     const source = `<template component="demo-html" status="experimental" summary="Html.">
-      <defs><state name="markup" type="string" value="<b>x</b>"></state></defs><div $html="markup"></div></template>`;
+      <defs><state name="markup" type="string" value="<b>x</b>"></state></defs><div $html="$markup"></div></template>`;
     const artifacts = generated(source);
     assert.match(artifacts.get("vue/DemoHtml.vue")!, /from '\.\/html'/);
     assert.equal(artifacts.has("vanilla/DemoHtml.js"), true);
@@ -699,7 +699,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles numeric two-way controls directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-number" status="experimental" summary="Numeric binding fallback.">
       <defs><state type="number" name="count" value="0"></state></defs>
-      <section><input type="number" bind:value="count"><output $value="count"></output></section>
+      <section><input type="number" bind:value="count"><output $value="$count"></output></section>
     </template>`).get("vanilla/DemoBoundNumber.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -710,7 +710,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles radio two-way controls directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-radio" status="experimental" summary="Radio binding fallback.">
       <defs><state type="boolean" name="selected" value="false"></state></defs>
-      <section><input type="radio" bind:checked="selected"><output $value="selected"></output></section>
+      <section><input type="radio" bind:checked="selected"><output $value="$selected"></output></section>
     </template>`).get("vanilla/DemoBoundRadio.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -721,7 +721,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
   it("compiles multi-select bindings directly through the shared control writer", () => {
     const module = generated(`<template component="demo-bound-many" status="experimental" summary="Multi-select binding fallback.">
       <defs><state type="string" name="choice" value="one"></state></defs>
-      <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="choice"></output></section>
+      <section><select multiple bind:value="choice"><option value="one">One</option><option value="two">Two</option></select><output $value="$choice"></output></section>
     </template>`).get("vanilla/DemoBoundMany.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -754,9 +754,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-inert" status="experimental" summary="Typed direct primitive fallback.">
       <defs>
         <state name="open" type="string" value="false"></state>
-        <handler name="toggle"><set name="open" expr:value="not open"></set></handler>
+        <handler name="toggle"><set name="open" expr:value="not $open"></set></handler>
       </defs>
-      <button on:click="toggle" from:aria-expanded="open"><output $value="open"></output></button>
+      <button on:click="toggle" from:aria-expanded="$open"><output $value="$open"></output></button>
     </template>`).get("vanilla/DemoInert.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -769,9 +769,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
       <state name="query" type="string" value="first"></state>
       <state name="token" type="string" value="a"></state>
       <data name="result" src="/api/search" type="string">
-        <param name="q" from:value="query"></param>
-        <param name="token" expr:value="token"></param>
-      </data></defs><output $value="result.value"></output></template>`).get("vue/XParamModes.vue")!;
+        <param name="q" from:value="$query"></param>
+        <param name="token" expr:value="$token"></param>
+      </data></defs><output $value="$result.value"></output></template>`).get("vue/XParamModes.vue")!;
     compileVue(vue, "XParamModes.vue");
     assert.match(vue, /sources: \(\) => \[query\.value\]/);
     assert.match(vue, /parameters: \(\) => \(\{ q: query\.value, token: token\.value \}\)/);
@@ -781,11 +781,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const source = `<template component="demo-initial-order" status="experimental" summary="State initialization order fallback.">
       <defs>
         <state type="number" name="count" value="0"></state>
-        <computed name="derived" from="count + 1"></computed>
-        <state name="snapshot" from:value="derived"></state>
-        <handler name="increment"><set name="count" expr:value="count + 1"></set></handler>
+        <computed name="derived" from="$count + 1"></computed>
+        <state name="snapshot" from:value="$derived"></state>
+        <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
       </defs>
-      <button on:click="increment"><output $value="snapshot"></output></button>
+      <button on:click="increment"><output $value="$snapshot"></output></button>
     </template>`;
 
     assert.throws(() => generated(source), /uses a literal `value`/);
@@ -797,7 +797,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
         <state type="string" name="destination" value="/start"></state>
         <handler name="change"><set name="destination" expr:value="'javascript:alert(1)'"></set></handler>
       </defs>
-      <a on:click="change" from:href="destination"><output $value="destination"></output></a>
+      <a on:click="change" from:href="$destination"><output $value="$destination"></output></a>
     </template>`).get("vanilla/DemoLink.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -808,9 +808,9 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(`<template component="demo-svg-bound" status="experimental" summary="Bound SVG attribute.">
       <defs>
         <state type="number" name="size" value="24"></state>
-        <handler name="grow"><set name="size" expr:value="size + 1"></set></handler>
+        <handler name="grow"><set name="size" expr:value="$size + 1"></set></handler>
       </defs>
-      <button on:click="grow"><svg from:viewBox="size"><path d="M0 0"></path></svg></button>
+      <button on:click="grow"><svg from:viewBox="$size"><path d="M0 0"></path></svg></button>
     </template>`).get("vanilla/DemoSvgBound.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -821,7 +821,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-prop-values",
       `<prop name="value" type="number" default="1">Value.</prop><prop name="label" type="string" default="Ready">Label.</prop>`,
-      `<section><input type="number" .value="value" from:data-label="label"></section>`,
+      `<section><input type="number" .value="$value" from:data-label="$label"></section>`,
     )).get("vanilla/DemoPropValues.js")!;
 
     assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/);
@@ -831,7 +831,7 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
     const module = generated(componentSource(
       "demo-link",
       `<prop name="target" type="string" default="https://example.test">Target.</prop>`,
-      `<a from:href="target"><slot></slot></a>`,
+      `<a from:href="$target"><slot></slot></a>`,
     )).get("vanilla/DemoLink.js")!;
 
     // tests/vanilla-blocks.test.ts holds the written URLs to the live runtime's.

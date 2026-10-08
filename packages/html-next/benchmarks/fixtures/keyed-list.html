@@ -3,6 +3,6 @@
     <state type="list(unknown)" name="rows" value="[]"></state>
   </defs>
   <ul>
-    <li $each="row of rows" $key="row.id"><span $value="row.label"></span></li>
+    <li $each="row of $rows" $key="$row.id"><span $value="$row.label"></span></li>
   </ul>
 </template>

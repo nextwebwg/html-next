@@ -19,14 +19,14 @@ const rows = `<template component="x-rows" status="early" summary="Rows."><defs>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
   <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
 </defs><div><button type="button" class="add" on:click="add">Add</button>
-  <ul><slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot></ul>
+  <ul><slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul>
 </div><style>:host { display: block; background: rgb(238 244 250); padding: 4px; } :slotted(li) { color: rgb(32 48 64); }</style></template>`;
 const app = `<template component="x-app" status="early" summary="App."><defs>
   <state type="object" name="item" value="{ name: 'Parent' }"></state>
   <state name="heading" value="Team"></state>
   <handler name="rename"><set name="heading" value="Group"></set></handler>
-</defs><main><button type="button" class="rename" on:click="rename">Rename</button><output $value="item.name"></output>
-  <x-rows><template slot="row"><li .title="item.name"><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small><input .value="item.name"></li></template></x-rows>
+</defs><main><button type="button" class="rename" on:click="rename">Rename</button><output $value="$item.name"></output>
+  <x-rows><template slot="row"><li .title="$item.name"><b $value="$item.name"></b><em $value="$heading"></em><small $value="$index"></small><input .value="$item.name"></li></template></x-rows>
   <x-rows></x-rows>
 </main></template>`;
 

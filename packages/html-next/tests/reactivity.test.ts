@@ -163,7 +163,7 @@ describe("reactive scope", () => {
   it("reads frozen nested values without violating native proxy invariants", () => {
     const source = Object.freeze({ nested: Object.freeze({ value: 7 }) });
     const scope = new ReactiveScope([["source", source]]);
-    assert.equal(evaluate("source.nested.value", scope), 7);
+    assert.equal(evaluate("$source.nested.value", scope), 7);
   });
   it("stores native events without proxying them, including inside reactive structures", () => {
     const event = new CustomEvent("select", { detail: { item: "Ada" }, cancelable: true });
@@ -536,15 +536,15 @@ describe("reactive scope", () => {
     let unrelatedRuns = 0;
     createEffect(scope.scheduler, () => {
       computedRuns += 1;
-      scope.set("double", evaluate("state.count * 2", scope));
+      scope.set("double", evaluate("$state.count * 2", scope));
     }, 0);
     createEffect(scope.scheduler, () => {
       domRuns += 1;
-      evaluate("double", scope);
+      evaluate("$double", scope);
     });
     createEffect(scope.scheduler, () => {
       unrelatedRuns += 1;
-      evaluate("state.unrelated", scope);
+      evaluate("$state.unrelated", scope);
     });
 
     const state = scope.get("state") as { count: number };
@@ -584,7 +584,7 @@ describe("reactive scope", () => {
     const child = parent.fork([["row", { label: "A" }]]);
     const seen: unknown[] = [];
     createEffect(parent.scheduler, () => {
-      seen.push([evaluate("row.label", child), evaluate("suffix", child)]);
+      seen.push([evaluate("$row.label", child), evaluate("$suffix", child)]);
     });
     child.set("row", { label: "B" });
     parent.set("suffix", "?");

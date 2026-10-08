@@ -160,8 +160,8 @@ describe("compiled roots in the live runtime's inspection and serialization", as
       <defs><prop name="tone" type="keyword" values="info, warn" default="info">Tone.</prop>
         <prop name="count" type="integer" default="1">Count.</prop>
         <state name="open" type="boolean" value="true"></state></defs>
-      <article from:data-tone="tone"><header><slot name="head">Untitled</slot></header><p>{count}</p>
-        <div $if="open"><slot></slot></div><footer><slot name="foot"><em>{tone}</em></slot></footer></article></template>`, "file:///card.html");
+      <article from:data-tone="$tone"><header><slot name="head">Untitled</slot></header><p>{$count}</p>
+        <div $if="$open"><slot></slot></div><footer><slot name="foot"><em>{$tone}</em></slot></footer></article></template>`, "file:///card.html");
     const { runtime, document } = await load(card);
     const head = document.createElement("h2");
     head.textContent = "Head";
@@ -194,7 +194,7 @@ describe("compiled roots in the live runtime's inspection and serialization", as
   it("keeps a root's consumer attributes, merged with its literals, through live hydration", async () => {
     const card = parseComponent(`<template component="x-plain" status="early" summary="Plain.">
       <defs><state name="n" type="integer" value="1"></state></defs>
-      <section class="card own" style="color: red" title="own"><b>{n}</b></section></template>`, "file:///plain.html");
+      <section class="card own" style="color: red" title="own"><b>{$n}</b></section></template>`, "file:///plain.html");
     const { runtime, document } = await load(card);
     const element = runtime.factory({ attributes: { class: "mine", style: "margin: 1px", title: "theirs" } });
     const container = document.createElement("main");

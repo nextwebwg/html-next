@@ -20,9 +20,9 @@ const field = `<template component="x-field" status="early" summary="Focusable i
 </template>`;
 const form = `<template component="x-ref-actions" status="early" summary="Reference actions."><defs>
   <state type="number" name="count" value="0"></state>
-  <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="count + 1"></set></handler>
+  <handler name="submit"><validate target="form"></validate><focus ref="field"></focus><set name="count" expr:value="$count + 1"></set></handler>
 </defs><section><form $ref="form"><x-field $ref="field"></x-field></form>
-  <button type="button" on:click="submit">Submit</button><output $value="count"></output></section>
+  <button type="button" on:click="submit">Submit</button><output $value="$count"></output></section>
 <style>:host { display: block; width: 180px; padding: 4px; font: 16px/24px Arial, sans-serif; }</style></template>`;
 
 async function snapshot(page: Page) {

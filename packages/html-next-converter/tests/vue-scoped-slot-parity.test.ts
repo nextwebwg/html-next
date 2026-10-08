@@ -19,11 +19,11 @@ const rows = `<template component="x-scoped-rows"><defs>
   <state type="list(unknown)" name="rows" value="[{ id: 'a', name: 'Ada' }]"></state>
   <state type="boolean" name="alternate" value="false"></state>
   <handler name="add"><set name="rows" expr:value="[{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Bea' }]"></set></handler>
-  <handler name="switch"><set name="alternate" expr:value="not alternate"></set></handler>
-</defs><template $match><ol $when="alternate"><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
-  <slot name="row" $each="row of rows" $key="row.id" from:index="loop.index"><li>Missing</li></slot></ol>
+  <handler name="switch"><set name="alternate" expr:value="not $alternate"></set></handler>
+</defs><template $match><ol $when="$alternate"><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
+  <slot name="row" $each="row of $rows" $key="$row.id" from:index="$loop.index"><li>Missing</li></slot></ol>
   <ul $else><button type="button" class="add" on:click="add">Add</button><button type="button" class="switch" on:click="switch">Switch</button>
-  <slot name="row" $each="row of rows" $key="row.id" from:item="row" from:index="loop.index"><li>Missing</li></slot></ul>
+  <slot name="row" $each="row of $rows" $key="$row.id" from:item="$row" from:index="$loop.index"><li>Missing</li></slot></ul>
 </template></template>`;
 const consumer = `<link rel="component" href="./rows.html">
 <template component="x-scoped-consumer"><defs>
@@ -31,8 +31,8 @@ const consumer = `<link rel="component" href="./rows.html">
   <state name="heading" value="Team"></state>
   <handler name="rename"><set name="heading" expr:value="'Group'"></set></handler>
 </defs><main><button type="button" class="rename" on:click="rename">Rename</button>
-  <output class="parent" $value="item.name"></output><x-scoped-rows><template slot="row">
-    <li><b $value="item.name"></b><em $value="heading"></em><small $value="index"></small></li>
+  <output class="parent" $value="$item.name"></output><x-scoped-rows><template slot="row">
+    <li><b $value="$item.name"></b><em $value="$heading"></em><small $value="$index"></small></li>
   </template></x-scoped-rows></main></template>`;
 
 async function snapshot(page: Page, expected: string): Promise<{ readonly behavior: unknown; readonly pixels: Buffer }> {

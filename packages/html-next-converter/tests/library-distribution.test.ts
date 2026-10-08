@@ -39,10 +39,10 @@ describe.skipIf(!enabled)("distributable component library", () => {
 <template component="x-card" status="early" summary="A card."><defs>
   <prop name="title" type="string" default="Ready">Title.</prop>
   <prop name="body" type="string" default="&lt;b&gt;Safe&lt;/b&gt;">Body.</prop>
-</defs><article class="card" from:aria-label="title"><x-badge></x-badge><div $html="body"></div><slot></slot></article>
+</defs><article class="card" from:aria-label="$title"><x-badge></x-badge><div $html="$body"></div><slot></slot></article>
 <style>:host { display: block; padding: 4px; }</style></template>`);
       await writeFile(badge, `<template component="x-badge" status="early" summary="A badge.">
-<defs><prop name="label" type="string" default="New">Label.</prop></defs><span class="badge" $value="label"></span><style>:host { color: red; }</style></template>`);
+<defs><prop name="label" type="string" default="New">Label.</prop></defs><span class="badge" $value="$label"></span><style>:host { color: red; }</style></template>`);
       await writeFile(unused, `<template component="x-unused" status="early" summary="Unused.">
 <aside>UNUSED_COMPONENT_MARKER</aside><style>:host { --unused-component-style: keep-out; }</style></template>`);
 

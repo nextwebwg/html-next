@@ -14,7 +14,7 @@ import { convertComponents } from "../src/index.js";
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-required-number" status="early" summary="Required numeric prop."><defs>
   <prop name="n" type="number" required>Number.</prop>
-</defs><div from:data-n="n"><output from:data-sum="n + 1" $value="n + 1"></output></div></template>`;
+</defs><div from:data-n="$n"><output from:data-sum="$n + 1" $value="$n + 1"></output></div></template>`;
 
 async function observe(page: Page): Promise<{ readonly behavior: { readonly value: string | null; readonly sum: string | null; readonly output: string | null; readonly valid: boolean; readonly valueMissing: boolean; readonly badInput: boolean }; readonly pixels: Buffer }> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
