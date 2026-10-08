@@ -86,73 +86,26 @@ describe("application platform", () => {
     } finally { await unscripted.close(); }
   });
 
-  // A generated application: in-memory pages, a layout whose loader is a module object, a head
-  // script, a public file, and registered-route order. Each call is a new generation.
-  async function generated() {
+  it("serves rendered pages for native Requests through application.fetch", async () => {
     const root = await app();
-    await write(root, "notes/diagram.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
-    let generation = 0;
-    const generate = (order: readonly (string | null)[] = [null, "2"]) => {
-      generation += 1;
-      const shell = { component: join(root, "virtual/shell.html"), server: { load: async ({ navigation }: { navigation: (query: { from: string }) => Promise<readonly { href: string }[]> }) =>
-        ({ props: { links: (await navigation({ from: "/notes/" })).map(item => item.href).join(" ") } }) } };
-      return { routes: [
-        { pattern: "/notes/alpha/", component: join(root, "virtual/alpha.html"), order, layouts: [shell] },
-        { pattern: "/notes/beta/", component: join(root, "virtual/beta.html"), order: [null, "1"], layouts: [shell] },
-      ], files: new Map([
-        [join(root, "virtual/shell.html"), '<template component="note-shell"><defs><prop name="links" type="string" required>Links</prop></defs><main><nav $value="$links"></nav><slot name="page"></slot></main></template>'],
-        [join(root, "virtual/alpha.html"), `<template component="note-alpha"><title>Alpha</title><p>Alpha ${generation}</p></template>`],
-        [join(root, "virtual/beta.html"), '<template component="note-beta"><p>Beta</p></template>'],
-        [join(root, "app/head.js"), "window.generated = true;"],
-      ]), publicFiles: new Map([["notes-assets/diagram.svg", join(root, "notes/diagram.svg")]]) };
-    };
-    return { root, generate };
-  }
-
-  it("serves a generated application from in-memory sources and loader modules through fetch", async () => {
-    const { root, generate } = await generated();
-    const application = await createApplication({ root, fileRoutes: false, generate: () => generate() });
+    const application = await createApplication({ root });
     try {
       // Unbound, as runtimes receive it: Deno.serve(application.fetch).
       const { fetch: handle } = application;
-      const alpha = await handle(new Request("http://localhost/notes/alpha/"));
-      expect(alpha.status).toBe(200);
-      expect(alpha.headers.get("content-type")).toBe("text/html; charset=utf-8");
-      const html = await alpha.text();
-      expect(html).toMatch(/>Alpha \d+<\/p>/);
-      expect(html).toContain("<nav>/notes/beta/ /notes/alpha/</nav>");
-      expect(html).toContain("<script>window.generated = true;</script>");
+      const home = await handle(new Request("http://localhost/"));
+      expect([home.status, home.headers.get("content-type")]).toEqual([200, "text/html; charset=utf-8"]);
+      const html = await home.text();
+      expect(html).toContain("<title>Home &amp; kit</title>");
+      expect(html).toContain("<script>document.documentElement.dataset.prepaint");
       expect(html).not.toContain("@vite/client");
-      expect(await (await handle(new Request("http://localhost/notes/alpha/", { method: "HEAD" }))).text()).toBe("");
-      const redirect = await handle(new Request("http://localhost/notes/alpha?query"));
-      expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/notes/alpha/"]);
+      expect(await (await handle(new Request("http://localhost/", { method: "HEAD" }))).text()).toBe("");
+      const redirect = await handle(new Request("http://localhost/items/one?query"));
+      expect([redirect.status, redirect.headers.get("location")]).toEqual([308, "/items/one/"]);
+      expect(await (await handle(new Request("http://localhost/items/one/"))).text()).toContain("kit: one");
       expect((await handle(new Request("http://localhost/missing/"))).status).toBe(404);
-      const post = await handle(new Request("http://localhost/notes/alpha/", { method: "POST" }));
+      const post = await handle(new Request("http://localhost/", { method: "POST" }));
       expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
     } finally { await application.close(); }
-    await expect(createApplication({ root, fileRoutes: false, generate: () => generate(["2"]) })).rejects.toThrow("Route order");
-  }, 60_000);
-
-  it("regenerates a generated application in development after a file under the root changes", async () => {
-    const { root, generate } = await generated();
-    const server = await devApplication({ root, base: "/dev/", port: 0, fileRoutes: false, generate: () => generate() });
-    try {
-      const first = await (await fetch(server.url + "notes/alpha/")).text();
-      expect(first).toContain("@vite/client");
-      const svg = await fetch(server.url + "notes-assets/diagram.svg");
-      expect([svg.status, svg.headers.get("content-type")]).toEqual([200, "image/svg+xml"]);
-      const before = Number(/Alpha (\d+)/.exec(first)![1]);
-      await write(root, "notes/edited.txt", "changed");
-      await expect.poll(async () => Number(/Alpha (\d+)/.exec(await (await fetch(server.url + "notes/alpha/")).text())?.[1]), { timeout: 10_000 }).toBeGreaterThan(before);
-    } finally { await server.close(); }
-  }, 60_000);
-
-  it("builds a generated application with its public files and head script", async () => {
-    const { root, generate } = await generated();
-    const result = await buildApplication({ root, outDir: join(root, "notes-site"), fileRoutes: false, generate: () => generate() });
-    expect(result.routes).toEqual(["/notes/alpha/", "/notes/beta/"]);
-    expect(await readFile(join(result.outDir, "notes-assets/diagram.svg"), "utf8")).toContain("<svg");
-    expect(await readFile(join(result.outDir, "notes/alpha/index.html"), "utf8")).toContain("<script>window.generated = true;</script>");
   }, 60_000);
 
   it("discovers routes and named layouts without importing controllers", async () => {

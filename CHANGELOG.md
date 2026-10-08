@@ -3,7 +3,6 @@
 ## 1.0.0-alpha.37
 
 - HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
-- A tool can supply an HTMLKit application in memory with `generate()`: registered routes whose loaders may be module objects, source text by path for pages, layouts, components and `app/head.js`, and extra public files. It runs again whenever routes are rediscovered, so a development server reflects source edits without the tool writing files. Registered routes accept the same per-segment navigation `order` that `routeOrdering` derives from file names.
 - The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
 
 ## 1.0.0-alpha.36

@@ -46,24 +46,3 @@ uses it for every page; CI runs it on Deno and Bun. Pass the function itself, as
 generation is the only production target, and documents served this way include browser modules only
 when an adapter supplies them, as the development server does.
 
-## Generated applications
-
-A tool that produces pages from other sources, such as Markdown, can supply the application in memory
-instead of writing files. `generate()` runs again at each route discovery, including after any file
-under the root changes in development, and returns:
-
-- `routes`: registered routes, added after file and configured routes. A layer's `server` may be the
-  loader module object itself, and `order` gives each segment the numeric navigation rank that
-  `routeOrdering` would derive from a file name (`null` for none).
-- `files`: source text by absolute path for page, layout, and component resources or `app/head.js`,
-  read before the filesystem. Diagnostics and relative references use these paths.
-- `publicFiles`: extra public files, from deployment-relative path to absolute file, served in
-  development and copied by builds like `public/`.
-
-```ts
-const application = await createApplication({ root, fileRoutes: false, generate: async () => ({
-  routes: [{ pattern: '/guide/', component: join(root, 'docs/guide.md'), order: ['1'],
-    server: { load: () => ({ props: { title: 'Guide' } }) } }],
-  files: new Map([[join(root, 'docs/guide.md'), compiledResource]]),
-}) });
-```

@@ -124,16 +124,8 @@ export async function devApplication(options: ServerOptions = {}): Promise<Appli
     if (!pathname.startsWith(config.base) || pathname.slice(config.base.length).startsWith("@")) { next(); return; }
     void (async () => {
       if (dirty) { application = await createApplication(options, vite, assets); dirty = false; sources.clear(); }
-      let file: string | undefined;
-      try { file = application.publicFiles.get(decodeURIComponent(pathname.slice(config.base.length))); } catch { /* Not a generated file. */ }
-      if (file === undefined && /\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
+      if (/\.[A-Za-z0-9]+$/.test(pathname) && matchRoute(application.routes, pathname, config.base) === undefined) { next(); return; }
       if (!methodAllowed(request, response)) return;
-      if (file !== undefined) {
-        const body = await readFile(file);
-        response.writeHead(200, { "content-type": mime[extname(file)] ?? "application/octet-stream", "content-length": body.length });
-        response.end(request.method === "HEAD" ? undefined : body);
-        return;
-      }
       // The page itself comes from the runtime-neutral handler; this adapts Node's request and response.
       const page = await application.fetch(new Request(new URL(pathname, "http://localhost"), { method: request.method! }));
       response.writeHead(page.status, Object.fromEntries(page.headers));
