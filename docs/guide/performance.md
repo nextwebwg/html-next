@@ -37,7 +37,7 @@ Each measurement is the application with its tree-shaken runtime, compressed at 
 
 ## Build the same way
 
-The benchmark uses the default Vite setup, with no options beyond the entry file:
+The benchmark app is built with the standard Vite setup from the [usage guide](/html-next/usage):
 
 ```ts title="vite.config.ts"
 import { defineConfig } from "vite";
@@ -48,7 +48,7 @@ export default defineConfig({
 });
 ```
 
-Every build compiles this way; there is no faster mode to switch on. The framework entries use their production builds.
+It compiles each component to JavaScript that clones the component's markup and updates only the parts of the page its state changes. The framework entries use their production builds.
 
 [Set up a native application →](/html-next/usage)
 
@@ -66,7 +66,7 @@ The measured HTML Next artifact has SHA-256 `ab245c7054ada544fa4cf237b8a77f9cf5b
 
 ## How builds compile components {#compiled-output}
 
-The Vite plugin and `html-next build` compile every component to plain JavaScript that creates and updates native DOM. No template interpreter, type parser or component parser ships to the browser, and there is no faster mode to switch on: this is the only build output.
+The Vite plugin and `html-next build` compile every component to plain JavaScript that creates and updates native DOM. No template interpreter, type parser or component parser ships to the browser.
 
 - **Templates are cloned.** Each component's static markup is built once into a prototype and cloned for every instance, branch and list row.
 - **Updates are direct.** Every binding knows which state it reads, and writes its element only when its converted text or value changes. A change to one state value touches only the bindings that read it.
