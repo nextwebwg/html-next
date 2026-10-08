@@ -256,7 +256,7 @@ describe("HTML Next unplugin", () => {
     assert.equal(scripts.length, 1);
     const bundle = await readFile(join(root, "dist/assets", scripts[0]!));
     assert.doesNotMatch(bundle.toString("utf8"), /html-next:item-start|function parseTypedValue/);
-    // The js-framework-benchmark entry is 8,617 B gzip-6 (controller included). Default-on direct
+    // The js-framework-benchmark entry is 8,620 B gzip-6 (controller included). Default-on direct
     // output added what every direct component may need: the compiled-root handle, declared
     // dispatch, computeds, SVG prototypes, row disposal and positions, unchecked control writes, the live scheduler's
     // priority order (owner-approved, 2026-10-07), more than 29 state roots, the host's prop channel, a

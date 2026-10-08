@@ -15,6 +15,11 @@ export const DATA_URL_SOURCE = String.raw`function dataURL(source: string, baseU
     else url.searchParams.set(name, String(value));
   }
   return url.href;
+}
+
+/** What the from-parameters send, as dataURL writes them: an equal key requests nothing new. */
+function dataKey(values: readonly unknown[]): string {
+  return JSON.stringify(values.map((value) => value == null ? null : Array.isArray(value) ? value.map(String) : String(value)));
 }`;
 
 /** One sanitizer policy for both generated frameworks; node projection stays target-owned. */

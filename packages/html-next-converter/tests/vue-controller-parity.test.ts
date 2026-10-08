@@ -18,11 +18,13 @@ const nodeModulesPath = new URL("../../html-next/node_modules", import.meta.url)
 const browserLoaderPath = new URL("../../html-next/src/browser-loader.ts", import.meta.url).pathname;
 const component = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
   <prop name="amount" type="number" default="5">The amount.</prop>
+  <prop name="tone" type="string" default="plain">A prop no effect reads.</prop>
   <state name="receivers" type="list(number)" value="[1,2]"></state>
   <handler name="sendOne"><dispatch target="button" event="saved" value="7"></dispatch></handler>
   <handler name="sendAll"><dispatch target="receivers" event="saved" value="7"></dispatch></handler>
   <state type="number" name="count" value="0"></state>
   <computed name="double" from="$count * 2"></computed>
+  <computed name="flat" from="$count * 0"></computed>
   <state name="arm" type="keyword" value="section"></state>
   <event name="saved" type="number" bubbles="false" composed="false" cancelable="true"></event>
   <event name="helper-loaded" type="number"></event>
@@ -47,6 +49,9 @@ const controller = `function connect(host) {
     host.root.setAttribute("data-double", String(host.state.double));
     return () => { window.trace.effectCleanups++; };
   });
+  // Unchanged values notify nothing: a computed that recomputes to 0, and another prop.
+  const stopFlat = host.effect(() => { window.trace.flatEffects = (window.trace.flatEffects ?? 0) + 1; void host.state.flat; });
+  const stopAmount = host.effect(() => { window.trace.amountEffects = (window.trace.amountEffects ?? 0) + 1; void host.props.amount.value; });
   const stopListening = host.effect(() => {
     const root = host.root;
     const onClick = (event) => {
@@ -58,7 +63,7 @@ const controller = `function connect(host) {
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
   });
-  const cleanup = () => { stop(); stopListening(); window.trace.disconnects++; };
+  const cleanup = () => { stop(); stopFlat(); stopAmount(); stopListening(); window.trace.disconnects++; };
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }
@@ -109,7 +114,10 @@ describe.skipIf(!enabled)("public Vue converter controller parity", () => {
     await writeFile(join(directory, "components", "controlled.js"), controller);
     await writeFile(join(directory, "components", "helper.js"), helper);
     loaderBundle = join(directory, "loader.js");
-    await build({ entryPoints: [browserLoaderPath], outfile: loaderBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
+    const loaderEntry = join(directory, "loader-entry.ts");
+    await writeFile(loaderEntry, `export { startBrowserComponents } from ${JSON.stringify(browserLoaderPath)};
+export { updateComponentProps } from ${JSON.stringify(new URL("../../html-next/src/runtime.ts", import.meta.url).pathname)};`);
+    await build({ entryPoints: [loaderEntry], outfile: loaderBundle, bundle: true, format: "iife", globalName: "HtmlNextLoader", platform: "browser", target: ["es2022"] });
     for (const mode of ["application", "library"] as const) {
       const output = join(directory, `generated-${mode}`);
       const manifest = await convertComponents({ mode, target: "vue", entries: ["components/controlled.html"], root: directory, outDirectory: output });
@@ -138,11 +146,13 @@ describe.skipIf(!enabled)("public Vue converter controller parity", () => {
       if (mode === "application") {
         const entry = join(output, "entry.ts");
         vueBundle = join(output, "vue.js");
-        await writeFile(entry, `import { createApp, h } from "vue";
+        await writeFile(entry, `import { createApp, h, reactive } from "vue";
 import XControlled from "./${manifest.components[0]!.artifact.replace(/\.vue$/, "")}";
 window.trace = { connects: 0, effects: 0, effectCleanups: 0, requests: 0, disconnects: 0 };
 window.delayController = location.search.includes("delay");
-window.vueApp = createApp({ render: () => h(XControlled, { id: "case" }) });
+const props = reactive<Record<string, unknown>>({ id: "case" });
+window.vueSetProps = (next: Record<string, unknown>) => { Object.assign(props, next); };
+window.vueApp = createApp({ render: () => h(XControlled, props) });
 window.vueApp.mount(document.querySelector("main"));\n`);
         await build({ entryPoints: [entry], outfile: vueBundle, bundle: true, format: "iife", platform: "browser", target: ["es2022"], nodePaths: [nodeModulesPath],
           plugins: [{ name: "compiled-vue-sfc", setup(pluginBuild) {
@@ -291,6 +301,16 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
             root.dispatchEvent(new Event("request-helper"));
           }))));
         assert.deepEqual(helperResults, [42, 42], "relative dynamic controller import differs");
+        // Another prop changing does not rerun an effect that read only `amount`; `flat` stayed 0 through every click.
+        const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
+        await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
+          updateComponentProps(element: Element, props: Record<string, unknown>): void;
+        } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+        await vue.evaluate(() => window.vueSetProps({ tone: "loud" }));
+        await Promise.all([live, vue].map((page) => page.waitForTimeout(50)));
+        const [toneLive, toneVue] = await Promise.all([snapshot(live), snapshot(vue)]);
+        assert.deepEqual(toneVue.behavior, toneLive.behavior, "another prop changes controller behavior");
+        assert.deepEqual([toneLive.behavior.trace.amountEffects, toneLive.behavior.trace.flatEffects], [amountRuns, 1]);
 
         await Promise.all([live, vue].map((page) => page.locator("#case button").click()));
         await Promise.all([live, vue].map((page) => page.waitForFunction(() => document.querySelector("#case output")?.textContent === "2" && document.querySelector("#case")?.localName === "section")));
@@ -407,8 +427,9 @@ export const render = () => renderToString(createSSRApp({ render: () => h(XContr
 
 declare global {
   interface Window {
-    trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number };
+    trace: { connects: number; effects: number; effectCleanups: number; requests: number; disconnects: number; flatEffects?: number; amountEffects?: number };
     HtmlNextLoader: { startBrowserComponents(): Promise<unknown> };
+    vueSetProps(props: Record<string, unknown>): void;
     vueApp: { unmount(): void };
     delayController: boolean;
     releaseController: () => void;

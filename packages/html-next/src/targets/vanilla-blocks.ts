@@ -25,7 +25,7 @@ import { foreignContent } from "parse5";
 
 import { isUrlAttribute } from "../sanitize.js";
 import { keyedEquality } from "../selection.js";
-import { elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
+import { dynamicSlotNames, elementMatchRoot, iteratedRefNames, rootArms, type ComponentDefinition, type DataDeclaration, type ElementNode, type ElementTransition, type Flow, type TemplateNode } from "../template.js";
 import { fail } from "../diagnostics.js";
 import { parseTransitionValue, transitionClass, transitionCss, TRANSITIONS_EXTENSION } from "../transition-syntax.js";
 import { parseDuration } from "../duration.js";
@@ -113,8 +113,8 @@ interface Binding {
   readonly initial: string;
   /**
    * The name of the reads array of a binding that writes whenever what it read changed, as a live
-   * effect re-runs, rather than when its converted output differs: property writes, and the class
-   * attribute with the class toggles it overwrites.
+   * effect re-runs, rather than when its converted output differs: properties and bound control
+   * values, which the element itself may have changed.
    */
   readonly exact?: string | undefined;
   /** Mixed text: literal strings and lowered segments, joined in order. */
@@ -139,16 +139,14 @@ interface Region {
    * -1 for none, or NONCONFORMING), with the match value in `m` when it has one.
    */
   readonly test?: Lowered;
-  /** The reads array of a decision that reads below a root or an item: it rebuilds only when they change. */
-  readonly recorded?: string | undefined;
+  /** The dynamic slot names each body reads as it renders (one list per `$match` arm), when any does. */
+  readonly names?: readonly (readonly Lowered[])[] | undefined;
   readonly list?: Lowered;
   /** Keyed rows' key, or undefined for rows that follow positions. */
   readonly key?: Lowered | undefined;
   readonly alias?: string;
   /** Rows read their index or `loop`. */
   readonly positional?: boolean;
-  /** `$match`: the matched expression, bound to its alias in the arms. */
-  readonly matched?: Lowered | undefined;
   /** A slot's name: a literal, or an expression evaluated when the slot renders. */
   readonly slot?: string | Lowered;
   /** A slot has fallback content, which renders when nothing is projected into it. */
@@ -704,17 +702,6 @@ function maskOf(value: Lowered): number {
   return value.bits | (value.nested || value.item ? NESTED : 0);
 }
 
-/** The dynamic slot names a body reads as it renders: outside its own regions, fallbacks included. */
-function dynamicSlotNames(children: readonly TemplateNode[]): CompiledExpression[] {
-  return children.flatMap((child): CompiledExpression[] => {
-    if (child.kind === "slot") {
-      if (child.flow !== undefined) return [];
-      return [...child.nameExpression === undefined ? [] : [child.nameExpression], ...dynamicSlotNames(child.fallback ?? [])];
-    }
-    return child.kind === "element" && child.flow === undefined ? dynamicSlotNames(child.children) : [];
-  });
-}
-
 /** The mask of an outer-state sweep: what a row reads that is not its own item. */
 function outerOf(value: Lowered): number {
   return value.bits | (value.nested ? NESTED : 0);
@@ -1064,23 +1051,19 @@ class Planner {
     const svg = parentSvg || node.name === "svg";
     const literal = (name: string): string | undefined =>
       literals.find((attribute) => attribute.name === name)?.value;
-    // A bound class attribute overwrites the class toggles, which then stay overwritten until their
-    // own inputs change, so on such an element both write exactly when their reads change.
-    const classOverwrites = node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === undefined &&
-      attribute.name === "class") && node.attributes.some((attribute) => attribute.kind === "attribute" && attribute.target === "class");
     let content: Lowered | undefined;
-    let html: { readonly expression: Lowered; readonly record: string | undefined } | undefined;
+    let html: Lowered | undefined;
     const selectValue = (name: string): boolean => node.name === "select" && name === "value";
     for (const attribute of node.attributes) {
       if (attribute.kind === "literal") continue;
-      const exact = attribute.kind === "property" || attribute.kind === "directive" && attribute.name === "html" ||
-        attribute.kind === "attribute" && attribute.twoWay === true ||
-        classOverwrites && attribute.kind === "attribute" && (attribute.target === "class" || attribute.target === undefined && attribute.name === "class");
+      // A property (a bound control's value included) is written with each new result, as the element
+      // may have changed it; every other binding writes only a result that differs from its last.
+      const exact = attribute.kind === "property" || attribute.kind === "attribute" && attribute.twoWay === true;
       const bindingScope = exact ? this.recording(scope) : scope;
       const plan = attribute.expressionPlan ?? compileExpression(attribute.expression);
       const expression = this.checked(plan, bindingScope);
       if (attribute.kind === "directive") {
-        if (attribute.name === "html") html = { expression, record: bindingScope.record };
+        if (attribute.name === "html") html = expression;
         else content = expression;
         continue;
       }
@@ -1104,7 +1087,7 @@ class Planner {
       if (attribute.target === "class") {
         // The root's invocation may carry the class, so its first evaluation always writes.
         const initial = root ? "undefined" : String((literal("class") ?? "").split(/\s+/).includes(attribute.name));
-        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial, exact: bindingScope.record });
+        block.bindings.push({ site, kind: "class", name: attribute.name, expression, initial });
         continue;
       }
       if (attribute.target === "style") {
@@ -1114,14 +1097,14 @@ class Planner {
       const name = svg ? svgAttributeName(attribute.name) : attribute.name;
       const value = literal(attribute.name);
       block.bindings.push({
-        site, kind: isUrlAttribute(name) ? "url" : "attribute", name, expression, exact: bindingScope.record,
-        initial: root || bindingScope.record !== undefined ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
+        site, kind: isUrlAttribute(name) ? "url" : "attribute", name, expression,
+        initial: root ? "undefined" : value === undefined ? "null" : JSON.stringify(value),
       });
     }
     const spec: unknown[] = [node.name, literals.flatMap((attribute) => [attribute.name, attribute.value])];
     if (html !== undefined) {
-      // `$html` replaces the element's content with sanitized markup whenever what it read changes.
-      block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html.expression, initial: "undefined", exact: html.record });
+      // `$html` replaces the element's content with sanitized markup when that markup changes.
+      block.bindings.push({ site: this.site(block, path), kind: "html", name: "", expression: html, initial: "undefined" });
       return spec;
     }
     if (content !== undefined) {
@@ -1242,8 +1225,7 @@ class Planner {
         block.bindings.push({ site, kind: "text", name: "", expression: this.checked(directive.expressionPlan, scope), initial: '""' });
         return [0];
       }
-      const recording = this.recording(scope);
-      block.bindings.push({ site, kind: "range", name: "", expression: this.checked(directive.expressionPlan, recording), initial: "undefined", exact: recording.record });
+      block.bindings.push({ site, kind: "range", name: "", expression: this.checked(directive.expressionPlan, scope), initial: "undefined" });
       return [3];
     }
     return this.children(block, node, node.children, path, index, scope, svg);
@@ -1290,35 +1272,29 @@ class Planner {
     const { flow: _flow, ...body } = node;
     const site = this.site(block, path);
     const plan = (compiled: CompiledExpression | undefined, source: string): CompiledExpression => compiled ?? compileExpression(source);
-    /** A decision rebuilds its body whenever what it read changes, as its live effect re-runs. */
-    const decide = (lowerTest: (decisionScope: Scope) => Lowered): { test: Lowered; recorded: string | undefined } => {
-      // A body's dynamic slot names are read as it renders, so a change rebuilds it, as live's region
-      // effect re-runs; a name reading the region's own alias changes only with the decision.
-      const own = new Set([flow.kind === "with" || flow.kind === "match" ? flow.alias : undefined]);
-      const names = dynamicSlotNames(node.children).filter((name) => !name.dependencies.some((dependency) => own.has(dependency)));
-      const lowerDecision = (decisionScope: Scope): Lowered => {
-        const test = lowerTest(decisionScope);
-        if (names.length === 0) return test;
-        const read = names.map((name) => lower(name.ast, decisionScope));
-        return { ...read.reduce<Reads>((all, name) => merge(all, name), test) as Lowered, source: `(${[...read.map((name) => name.source), test.source].join(", ")})` };
-      };
-      const exact = lowerDecision(scope);
-      // A decision that reads only roots rebuilds on their change bits, which are exactly live's notifications.
-      if (!exact.nested && !exact.item) return { test: exact, recorded: undefined };
-      const recording = this.recording(scope);
-      return { test: lowerDecision(recording), recorded: recording.record };
+    /**
+     * A body rebuilds only when its decision changes, as live's region compares it: the `$if` result,
+     * the `$match` arm, or the text of a dynamic slot name the body reads as it renders. The names
+     * read the region's alias as the value it decided, `mv`; their reads join the decision's.
+     */
+    const decide = (test: Lowered, bodies: readonly ElementNode[], alias?: string, type?: TypeNode): { test: Lowered; names?: Lowered[][] } => {
+      const nameScope = alias === undefined ? scope : this.layer(scope, alias, type, "item", "mv");
+      const names = bodies.map((body) => dynamicSlotNames(body).map((name) => lower(name.ast, nameScope)));
+      if (names.every((list) => list.length === 0)) return { test };
+      return { test: { ...test, ...names.flat().reduce<Reads>((all, name) => merge(all, name), test), fails: test.fails }, names };
     };
     const inner: Scope = { ...scope, level: scope.level + 1 };
     if (flow.kind === "if") {
-      const { test, recorded } = decide((decisionScope) => truthiness(this.checked(plan(flow.testPlan, flow.test), decisionScope), decisionScope.record));
-      block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), test, recorded });
+      const decision = decide(truthiness(this.checked(plan(flow.testPlan, flow.test), scope)), [node]);
+      block.regions.push({ kind: "if", site, block: this.block(body, false, inner, false, svg, false), ...decision });
       return 1;
     }
     if (flow.kind === "with") {
       const expression = plan(flow.expressionPlan, flow.expr);
-      const { test, recorded } = decide((decisionScope) => this.checked(expression, decisionScope));
-      const aliasScope = this.layer(inner, flow.alias, declaredExpressionType(expression, scope.types), "item");
-      block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), test, recorded });
+      const type = declaredExpressionType(expression, scope.types);
+      const decision = decide(this.checked(expression, scope), [node], flow.alias, type);
+      const aliasScope = this.layer(inner, flow.alias, type, "item");
+      block.regions.push({ kind: "with", site, block: this.block(body, false, aliasScope, false, svg, true), ...decision, alias: flow.alias });
       return 1;
     }
     if (flow.kind === "match") {
@@ -1338,29 +1314,25 @@ class Planner {
         chosen.push(arm);
         if (arm.flow?.kind === "else") break;
       }
-      let matched: Lowered | undefined;
-      const { test, recorded } = decide((decisionScope) => {
-        const value = expression === undefined ? undefined : this.checked(expression, decisionScope);
-        if (decisionScope === scope) matched = value;
-        const testScope = { ...testBase, record: decisionScope.record };
-        // The arms' tests run in order until one is truthy, so only those are read.
-        let reads: Reads = value ?? none("", "");
-        const lines = chosen.map((arm, index) => {
-          if (arm.flow?.kind === "else") return `return ${index};`;
-          const armTest = this.checked(plan((arm.flow as { testPlan?: CompiledExpression }).testPlan, (arm.flow as { test: string }).test), testScope);
-          reads = merge(reads, converted(armTest));
-          return `{ const t = ${armTest.source}; if (t === NONCONFORMING) return t; if (truthy(t)) return ${index}; }`;
-        });
-        const source = `((o) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : `mv = ${value.source}`})`;
-        const selection = value === undefined ? source : `((mv = ${value.source}) === NONCONFORMING ? mv : ${source.replace(`mv = ${value.source}`, "mv")})`;
-        return { ...none(`match:${site}`, selection), ...reads, fails: true };
+      const value = expression === undefined ? undefined : this.checked(expression, scope);
+      // The arms' tests run in order until one is truthy, so only those are read.
+      let reads: Reads = value ?? none("", "");
+      const lines = chosen.map((arm, index) => {
+        if (arm.flow?.kind === "else") return `return ${index};`;
+        const armTest = this.checked(plan((arm.flow as { testPlan?: CompiledExpression }).testPlan, (arm.flow as { test: string }).test), testBase);
+        reads = merge(reads, converted(armTest));
+        return `{ const t = ${armTest.source}; if (t === NONCONFORMING) return t; if (truthy(t)) return ${index}; }`;
       });
+      const source = `((o) => { ${lines.join(" ")} return -1; })(${value === undefined ? "undefined" : "mv"})`;
+      const selection = value === undefined ? source : `((mv = ${value.source}) === NONCONFORMING ? mv : ${source})`;
+      const decision = decide({ ...none(`match:${site}`, selection), ...reads, fails: true }, chosen, alias,
+        expression === undefined ? undefined : declaredExpressionType(expression, scope.types));
       const armBlocks = chosen.map((arm) => {
         const { flow: _armFlow, ...armBody } = arm;
         return this.block(armBody, false, armScope, false, svg, alias !== undefined);
       });
       block.regions.push({ kind: "match", site, block: armBlocks[0] ?? this.block({ ...body, children: [] }, false, inner, false, svg, false),
-        arms: armBlocks, test, recorded, matched });
+        arms: armBlocks, ...decision, ...alias === undefined ? {} : { alias } });
       return 1;
     }
     const listPlan = plan(flow.listPlan, flow.list);
@@ -1665,7 +1637,7 @@ export function emitBlocks(
       if (region.kind !== "each") {
         entries.push(`a${region.site}: ${start}`, `e${index}: ${start}.nextSibling`, `b${index}: undefined`,
           ...region.kind === "slot" ? [`f${index}: undefined`, ...region.props === undefined ? [] : [`x${index}: undefined`]] : []);
-        if (region.recorded !== undefined) entries.push(`q${index}: undefined`);
+        if (region.names !== undefined) entries.push(`q${index}: undefined`);
       } else {
         const child = region.block.id;
         const key = region.key === undefined ? "undefined" : `(${keyParameters(region.key.source)}) => ${region.key.source}`;
@@ -1793,19 +1765,14 @@ export function emitBlocks(
         if (binding.exact !== undefined) {
           // Written whenever what it read changed, as its live effect re-runs (see `Binding.exact`).
           const value = `x${temporary++}`;
-          const expression = binding.kind === "class" ? truthiness(binding.expression, binding.exact) : binding.expression;
+          const expression = binding.expression;
           lines.push(`    const ${binding.exact} = [];`, `    const ${value} = ${convertible(expression)};`,
             // A full render (a reconnect) re-runs every live effect, and a root write notifies its
             // readers even when a later write in the batch restores it; nested reads compare values.
             `    if (c === -1${rootsWritten(expression)} || readsChanged(${last}, ${binding.exact})) {`,
             `      ${last} = ${binding.exact};`);
           const name = JSON.stringify(binding.name);
-          const write = binding.kind === "property" ? `${site}[${name}] = ${value};`
-            : binding.kind === "class" ? `${site}.classList.toggle(${name}, ${value});`
-            : binding.kind === "control" ? `writeControl(${site}, ${name}, ${value});`
-            : binding.kind === "html" ? `writeHtml(${site}, toText(${value}));`
-            : binding.kind === "range" ? `writeHtmlRange(${site}, toText(${value}));`
-            : `${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${name}, toAttribute(${value}, ${name}));`;
+          const write = binding.kind === "property" ? `${site}[${name}] = ${value};` : `writeControl(${site}, ${name}, ${value});`;
           lines.push(expression.fails ? `      if (${value} !== NONCONFORMING) ${write}` : `      ${write}`, "    }");
           continue;
         }
@@ -1828,6 +1795,11 @@ export function emitBlocks(
             break;
           case "value":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) writeText(${site}, ${last} = ${output});`);
+            break;
+          case "html":
+          case "range":
+            lines.push(`    const ${output} = toText(${value});`,
+              `    if (${output} !== ${last}) ${binding.kind === "html" ? "writeHtml" : "writeHtmlRange"}(${site}, ${last} = ${output});`);
             break;
           case "text":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) ${site}.data = ${last} = ${output};`);
@@ -1909,44 +1881,77 @@ export function emitBlocks(
       if (region.kind !== "each") {
         const test = region.test!;
         const body = `r.b${index}`;
-        const patchBody = region.kind === "match"
-          ? `${region.arms!.map((arm, armIndex) => `if (${body}.s === ${armIndex}) p${arm.id}(${body}, c, d);`).join(" ")}`
-          : `p${child}(${body}, c, d);`;
+        const patchBody = (changes: string): string => region.kind === "match"
+          ? `{ ${region.arms!.map((arm, armIndex) => `if (${body}.s === ${armIndex}) p${arm.id}(${body}, ${changes}, d);`).join(" ")} }`
+          : `p${child}(${body}, ${changes}, d);`;
         // What a rebuilt body is made from: nothing, the `$with` value, or the chosen arm and match value.
         const linked = [region.block, ...region.arms ?? []].some((body) => body.needsParent === true) ? ", r" : "";
         const make = region.kind === "if" ? `m${child}(d${linked === "" ? "" : ", undefined, r"})`
           : region.kind === "with" ? `m${child}(d, t${index}${linked})`
-          : `[${region.arms!.map((arm) => `m${arm.id}`).join(", ")}][t${index}](d, mv${linked})`;
+          : `[${region.arms!.map((arm) => `m${arm.id}`).join(", ")}][t${index}](d${region.alias !== undefined ? `, mv${linked}` : linked === "" ? "" : ", undefined, r"})`;
         const show = region.kind === "if" ? `t${index}` : region.kind === "with" ? "true" : `t${index} >= 0`;
         const shown = region.kind === "match" ? `(${body} === undefined ? -1 : ${body}.s)` : `(${body} !== undefined)`;
         const marked = participating(region);
         const rebuild = [
-          ...marked && region.kind !== "with" ? [`      const vt${index} = ${shown};`] : [],
+          ...marked ? [`      const vt${index} = ${shown};`] : [],
           ...([region.block, ...region.arms ?? []].some(disposable) ? [`      dispose(${body});`] : []),
           `      ${body} = undefined;`,
           `      clearRegion(r.a${region.site}, r.e${index});`,
           `      if (${show}) { ${body} = ${make};${region.kind === "match" ? ` ${body}.s = t${index};` : ""} r.e${index}.before(${body}.n); }`,
-          // A rebuild that keeps the same decision replaces nothing a transition should show.
-          ...!marked ? [] : region.kind === "with" ? ["      transitionChanged();"] : [`      if (vt${index} !== ${shown}) transitionChanged();`],
+          // A rebuild that keeps the same decision (a slot name changed) replaces nothing a transition should show.
+          ...marked ? [`      if (vt${index} !== ${shown}) transitionChanged();`] : [],
         ];
-        const decide = region.recorded === undefined ? [] : [`    const ${region.recorded} = [];`];
-        const changed = region.recorded === undefined ? test.overflow === undefined ? "true" : `c === -1${rootsWritten(test)}`
-          : `c === -1${rootsWritten(test)} || readsChanged(r.q${index}, ${region.recorded})`;
         const reselect = selectOf(block, region.site);
         if (reselect !== undefined) rebuild.push(`      queueMicrotask(r.c${reselect});`);
+        // The body rebuilds when its decision flips, as live's region compares it; otherwise it is
+        // patched, and a `$with` or `$match` body given another value updates against it in full.
+        const flip = region.kind === "if" ? `!t${index} !== !${body}` : region.kind === "with" ? `${body} === undefined` : `t${index} !== ${shown}`;
+        // Slot names: the shown body's, or the chosen arm's, compared by their text.
+        const names = region.names?.map((list) => `[${list.map((name) => `toText(${name.source})`).join(", ")}]`);
+        const named = names === undefined ? undefined : region.kind === "if" ? `t${index} ? ${names[0]} : []`
+          : region.kind === "with" ? names[0]! : names.reduceRight((rest, list, arm) => `t${index} === ${arm} ? ${list} : ${rest}`, "[]");
+        const changed = named === undefined ? flip : `${flip} || readsChanged(r.q${index}, q${index})`;
+        const remember = named === undefined ? [] : [`        r.q${index} = q${index};`];
+        if (region.kind === "if" && named === undefined && !test.fails) {
+          // An `$if` flips by building its body or tearing it down.
+          lines.push(
+            `  if (${guard(maskOf(test))} && !(${test.source}) !== !${body}) {`,
+            `    if (${body}) { ${disposable(region.block) ? `dispose(${body}); ` : ""}${body} = undefined; clearRegion(r.a${region.site}, r.e${index}); }`,
+            `    else { ${body} = ${make}; r.e${index}.before(${body}.n); }`,
+            ...marked ? ["    transitionChanged();"] : [],
+            ...reselect === undefined ? [] : [`    queueMicrotask(r.c${reselect});`],
+            `  } else if (${body} !== undefined) ${patchBody("c")}`,
+          );
+          return;
+        }
+        if (region.kind === "if" || region.alias === undefined) {
+          // Without an alias, a decision that holds, fails to conform or was not reached patches alike.
+          const decided = named === undefined ? flip : `(q${index} = ${named}, ${changed})`;
+          lines.push(
+            `  let t${index}${named === undefined ? "" : `, q${index}`};`,
+            `  if (${guard(maskOf(test))} && ${test.fails ? `(t${index} = ${test.source}) !== NONCONFORMING && ${decided}` : `(t${index} = ${test.source}, ${decided})`}) {`,
+            ...remember.map((line) => line.slice(4)),
+            ...rebuild.map((line) => line.slice(2)),
+            `  } else if (${body} !== undefined) ${patchBody("c")}`,
+          );
+          return;
+        }
+        // A `$with` or `$match` body that stays takes the new value, and updates against it in full.
+        const value = region.kind === "with" ? `t${index}` : "mv";
+        const keep = `${region.kind === "match" ? `if (${body} !== undefined) ` : ""}{ if (${body}.i !== ${value}) { ${body}.i = ${value}; ${patchBody("-1")} } else ${patchBody("c")} }`;
         lines.push(
           `  if (${guard(maskOf(test))}) {`,
           ...(region.kind === "match" ? ["    let mv;"] : []),
-          ...decide,
           `    const t${index} = ${test.source};`,
-          `    if (${changed}) {`,
-          ...(region.recorded === undefined ? [] : [`      r.q${index} = ${region.recorded};`]),
           // A nonconforming decision leaves the region as it is, and its body keeps updating.
-          test.fails ? `      if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${patchBody} } else {` : "      {",
+          test.fails ? `    if (t${index} === NONCONFORMING) { if (${body} !== undefined) ${patchBody("c")} } else {` : "    {",
+          ...named === undefined ? [] : [...region.kind === "with" ? [`      const mv = t${index};`] : [], `      const q${index} = ${named};`],
+          `      if (${changed}) {`,
+          ...remember,
           ...rebuild.map((line) => `  ${line}`),
-          "      }",
-          `    } else if (${body} !== undefined) ${patchBody}`,
-          `  } else if (${body} !== undefined) ${patchBody}`,
+          `      } else ${keep}`,
+          "    }",
+          `  } else if (${body} !== undefined) ${patchBody("c")}`,
         );
         return;
       }
@@ -2169,15 +2174,16 @@ export function emitBlocks(
       "  I.A = dataHandles(S, v, DT);"],
     ...plan.reads.flatMap((read, at) => {
       // A parameter that does not conform keeps the value it last accepted, and a `from` one holds the request.
-      const parameter = (value: Lowered, name: string, from: boolean): string =>
-        `const x = ${convertible(value)}; if (x === NONCONFORMING) { p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else p[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
+      const parameter = (value: Lowered, name: string, from: boolean, into = "p"): string =>
+        `const x = ${convertible(value)}; if (x === NONCONFORMING) { ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
       return [
         `  const DP${at} = {};`,
         `  let DQ${at}, DR${at};`,
-        // The `from` parameters, recorded so a change to what they read re-requests.
-        `  const DF${at} = () => { const p = {}; let ok = true; ${read.parameters.map((item) => item.from
+        // The `from` parameters, recorded so a change to what they read re-requests, and compared so an
+        // unchanged one requests nothing. The others only record what they accept.
+        `  const DF${at} = () => { const p = {}, s = {}; let ok = true; ${read.parameters.map((item) => item.from
           ? `{ const ${item.record} = []; ${parameter(item.recorded!, item.name, true)} DQ${at} = ${item.record}; }`
-          : `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return [p, ok]; };`,
+          : `{ ${parameter(item.value, item.name, false, "s")} }`).join(" ")} return [p, ok]; };`,
         // Every parameter, sampled again when the request is sent.
         `  const DS${at} = () => { const p = {}; ${read.parameters.map((item) => `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return p; };`,
       ];

@@ -99,8 +99,8 @@ Gzip bytes for one component compiled alone; an application pays the shared supp
 
 | Measure | Size |
 | --- | ---: |
-| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,617 B |
-| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,145 B |
+| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,620 B |
+| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,140 B |
 | `static-card` fixture (gzip-9) | 6,875 B |
 | `prop-button` fixture (gzip-9) | 11,287 B |
 | Same, before prop types compiled to their own checks | 18,325 B |

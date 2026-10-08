@@ -40,6 +40,10 @@ function requestURL(source: string, baseURL: string, parameters: Readonly<Record
   return url.href;
 }
 
+/** What `requestURL` makes of the parameters: each one as text, a list item by item. */
+const requestKey = (parameters: Readonly<Record<string, unknown>>): string => JSON.stringify(Object.entries(parameters)
+  .map(([name, value]) => [name, value == null ? null : Array.isArray(value) ? value.map(String) : String(value)]));
+
 /** An owned, abortable declared read with injectable network and clock boundaries. */
 export class DataResource<T = unknown> {
   readonly #fetch: typeof fetch;
@@ -52,6 +56,8 @@ export class DataResource<T = unknown> {
   #timer?: unknown;
   #generation = 0;
   #connected = false;
+  /** The parameters the current request was asked for, as `requestKey` writes them. */
+  #requested: string | undefined;
 
   constructor(readonly options: DataRequestOptions<T>) {
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -59,7 +65,11 @@ export class DataResource<T = unknown> {
     this.#clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   }
 
+  /** Requests with these parameters, unless the connected read already has them: equal ones do not request again. */
   update(parameters: Readonly<Record<string, unknown>>): void {
+    const requested = requestKey(parameters);
+    if (this.#connected && requested === this.#requested) return;
+    this.#requested = requested;
     this.#parameters = { ...parameters };
     this.#connected = true;
     this.#cancel();

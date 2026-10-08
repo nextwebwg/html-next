@@ -138,7 +138,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       }
     };
     const dependencies = new Map<string, Dependency>();
-    const computedDependencies = new Set<Dependency>();
+    const readComputed = new Set<string>();
     const previousValues = new Map<string, unknown>();
     const dependency = (name: string): Dependency => {
       let result = dependencies.get(name);
@@ -156,11 +156,19 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         validate: validity,
       });
     }
+    // A computed the controller read notifies its readers only when its value changed.
+    const checkComputed = (): void => {
+      for (const name of readComputed) {
+        const value = latest.current.computed[name]!();
+        if (!Object.is(previousValues.get("state:" + name), value)) notify(dependency("state:" + name));
+        previousValues.set("state:" + name, value);
+      }
+    };
     const changedState = (name: string): void => {
       notify(dependency("state:" + name));
-      // Fresh generated getters bypass this host's dependency tracker. Invalidate only the
-      // computed sources controllers have actually read; idle declarations add no write cost.
-      for (const source of computedDependencies) notify(source);
+      // Fresh generated getters bypass this host's dependency tracker. Check only the computed
+      // values controllers have actually read; idle declarations add no write cost.
+      checkComputed();
     };
     const namespaces = controllerNamespaces({
       state: Object.fromEntries(Object.keys(options.state).map((name) => [name, {
@@ -174,10 +182,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
       }])),
       computed: Object.fromEntries(Object.keys(options.computed).map((name) => [name,
         () => {
-          const source = dependency("state:" + name);
-          computedDependencies.add(source);
-          track(source);
-          return latest.current.computed[name]!();
+          track(dependency("state:" + name));
+          const value = latest.current.computed[name]!();
+          if (!readComputed.has(name)) { readComputed.add(name); previousValues.set("state:" + name, value); }
+          return value;
         }])),
       data: Object.fromEntries(Object.keys(options.data).map((name) => [name,
         () => { track(dependency("data:" + name)); return latest.current.data[name]!(); }])),
@@ -365,7 +373,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         if (previousValues.has(name) && !Object.is(previousValues.get(name), value)) notify(dependency(name));
         previousValues.set(name, value);
       }
-      for (const name of Object.keys(current.computed)) notify(dependency("state:" + name));
+      checkComputed();
     };
     runtime.current = { host, synchronize, disconnect, checkValues };
   }

@@ -1,5 +1,7 @@
 export const controllerParitySource = `<template component="x-controlled" status="early" summary="Controller parity." controller="./controlled.js"><defs>
   <prop name="amount" type="number" default="5">Controller prop.</prop>
+  <prop name="tone" type="string" default="plain">A prop no effect reads.</prop>
+  <computed name="flat" from="$count * 0"></computed>
   <state name="receivers" type="list(number)" value="[1,2]"></state>
   <handler name="sendOne"><dispatch target="button" event="saved" expr:value="{ reason: 'action' }"></dispatch></handler>
   <handler name="sendAll"><dispatch target="receivers" event="saved" expr:value="{ reason: 'action' }"></dispatch></handler>
@@ -34,13 +36,16 @@ export const controllerParityModule = `function connect(host) {
     window.trace.nestedEffects++;
     host.root.setAttribute("data-nested", String(host.state.nested.value));
   });
+  // Unchanged values notify nothing: a computed that recomputes to 0, another prop, a value written back.
+  const stopFlat = host.effect(() => { window.trace.flatEffects = (window.trace.flatEffects ?? 0) + 1; void host.state.flat; });
+  const stopAmount = host.effect(() => { window.trace.amountEffects = (window.trace.amountEffects ?? 0) + 1; void host.props.amount.value; });
   const stopClick = host.effect(() => {
     const button = host.refs.button;
-    const click = () => { local.update((value) => value + 1); host.state.count += 1; };
+    const click = () => { local.update((value) => value + 1); host.state.count += 1; host.state.nested = host.state.nested; };
     button.addEventListener("click", click);
     return () => button.removeEventListener("click", click);
   });
-  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopClick(); window.trace.disconnects++; };
+  const cleanup = () => { window.cleanupRoot = host.root.localName; stopDisplay(); stopProp(); stopNested(); stopFlat(); stopAmount(); stopClick(); window.trace.disconnects++; };
   if (window.delayController) return new Promise((resolve) => { window.releaseController = () => resolve(cleanup); });
   return cleanup;
 }

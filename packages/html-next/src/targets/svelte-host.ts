@@ -93,8 +93,10 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
   const propHandles = Object.create(null) as Record<string, ControllerHost["props"][string]>;
   for (const name of options.propNames ?? []) {
     const validity = (): unknown => options.propValidity?.(name);
+    // One derived value per prop: a reader of this prop does not run again when another prop changes.
+    const value = $derived(options.props()[name]);
     propHandles[name] = Object.freeze({
-      get value() { return options.props()[name]; },
+      get value() { return value; },
       get inputValue() { return options.propInputs?.(name); },
       get validity() { return validity(); },
       validate: validity,

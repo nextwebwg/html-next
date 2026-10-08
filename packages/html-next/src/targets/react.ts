@@ -318,6 +318,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         return `<RetainedValue value={${value}} accepts={() => true} render={(${alias}, hasValue) => hasValue ? (${content}) : null} />`;
       };
       const arms = node.children.filter((child): child is ElementNode => child.kind === "element");
+      // Live builds a newly chosen arm afresh, so a nested arm is keyed: React must not reuse the
+      // previous arm's DOM when both have the same shape. A root switch follows live's own rules.
+      const renderArm = (body: ElementNode, index: number): string => {
+        const content = renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg);
+        return rootTag === undefined ? `<React.Fragment key={${index}}>${content}</React.Fragment>` : content;
+      };
       const retainsChoice = arms.some((arm) => arm.flow?.kind === "when" && arm.flow.testPlan !== undefined &&
         mayProduceInvalidResult(arm.flow.testPlan.ast, scoped));
       if (retainsChoice) {
@@ -334,17 +340,17 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         let selected = "null";
         for (let index = arms.length - 1; index >= 0; index -= 1) {
           const { flow: _choice, ...body } = arms[index]!;
-          selected = `selected === ${index} ? (${renderNode(body, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)}) : (${selected})`;
+          selected = `selected === ${index} ? (${renderArm(body, index)}) : (${selected})`;
         }
         const markup = `<RetainedValue value={${choice}} render={(selected) => ${selected}} />`;
         return withAlias(markup);
       }
       let expression = "null";
-      for (const arm of arms.toReversed()) {
+      for (const [index, arm] of [...arms.entries()].toReversed()) {
         const { flow: choice, ...choiceBody } = arm;
-        if (choice?.kind === "else") expression = `(${renderNode(choiceBody, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)})`;
+        if (choice?.kind === "else") expression = `(${renderArm(choiceBody, index)})`;
         else if (choice?.kind === "when" && choice.testPlan !== undefined) {
-          expression = `${lowering.condition(choice.testPlan.ast, scoped)} ? (${renderNode(choiceBody, scoped, lowering, imports, handlers, attachments, state, rootTag, projected, inSvg)}) : (${expression})`;
+          expression = `${lowering.condition(choice.testPlan.ast, scoped)} ? (${renderArm(choiceBody, index)}) : (${expression})`;
         } else fail("HT030", "React conversion of an invalid $match arm is not implemented.");
       }
       if (flow.alias === undefined) return `{${expression}}`;
@@ -956,7 +962,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...data.map((declaration) => {
       const parameters = declaration.parameters.map((parameter) =>
         `${propKey(parameter.name)}: ${lowering.value(parameter.expression.ast, scope)}`).join(", ");
-      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}parameters: () => ({ ${parameters} }) });`;
+      const sources = declaration.parameters.filter((parameter) => parameter.mode === "from")
+        .map((parameter) => lowering.value(parameter.expression.ast, scope)).join(", ");
+      return `  const ${valueNames.get(declaration.name)!} = useDataRead<${dataTypes.get(declaration)!}>({ ${declaration.source === undefined ? "" : `source: ${quote(declaration.source)}, `}definition: ${quote(definition.source.file)}, ${declaration.type === undefined ? "" : `type: ${quote(declaration.type)}, `}${declaration.debounce === undefined ? "" : `debounce: ${parseDuration(declaration.debounce)}, `}${declaration.poll === undefined ? "" : `poll: ${parseDuration(declaration.poll)}, `}sources: () => [${sources}], parameters: () => ({ ${parameters} }) });`;
     }),
     ...contexts.flatMap((context, index) => {
       const variable = `__context${index}`;
