@@ -624,6 +624,24 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("updates nested rows that read an outer row's position, item or outer state like the general runtime", async () => {
+    const text = component(`
+      <state name="title" type="string" value="a"></state>
+      <state name="rows" type="list(object({ id: number, label: string }))" value="[]"></state>`, `
+      <section><ul><li $each="row, i of $rows" $key="$row.id"><b $each="n of [1]">{$i}:{$row.label}</b></li></ul>
+        <ol><li $each="row, i of $rows" $key="$row.id"><p $each="n of [1]"><s $if="$row.id > 1"><b $each="m of [1]">{$i}/{$loop.count}</b></s></p><i>{$row.label} {$loop.last}</i></li></ol>
+        <dl><template $each="row of $rows"><dt $each="n of [1]">{$title}{$row.id}</dt><dd><b $each="m of [1]"><i $each="k of [1]">{$title}</i></b></dd></template></dl></section>`);
+    await same(text, [
+      (host) => { host.state.rows = [1, 2, 3].map((id) => ({ id, label: `l${id}` })); },
+      (host) => { host.state.rows = host.state.rows.toReversed(); },
+      (host) => { host.state.rows.splice(1, 1); },
+      (host) => { host.state.rows.unshift({ id: 4, label: "l4" }); },
+      (host) => { host.state.rows[2].label = "x"; host.state.title = "b"; },
+      (host) => { host.state.rows = host.state.rows.slice(1).concat(host.state.rows.slice(0, 1)); },
+      (host) => { host.state.rows.push({ id: 5, label: "l5" }); },
+    ]);
+  });
+
   // The older direct paths compile these primitive, controller-free shapes; they must match live too.
   const older = (defs: string, body: string): string => component(defs, body, false);
   const fire = (target: any, type: string, init: EventInit & { key?: string; ctrlKey?: boolean } = {}): boolean => {
