@@ -82,6 +82,8 @@ interface RenderState {
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
   usesOutputValue: boolean;
+  /** Inputs and textareas render through memoized wrappers, so an unrelated render commits nothing to them. */
+  usesControlMemo: boolean;
 }
 
 interface RenderScope extends Scope {
@@ -401,7 +403,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   const component = node.name.includes("-") && getDomInterface(node.name) === undefined;
   const outputValue = node.name === "output" && node.attributes.some((attribute) =>
     attribute.kind === "directive" && attribute.name === "value");
-  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : node.name;
+  // React DOM rewrites an input's name and type, and a textarea's default, whenever it commits one.
+  const memoControl = !component && !outputValue && !inSvg && (node.name === "input" || node.name === "textarea");
+  if (memoControl) state.usesControlMemo = true;
+  const tag = outputValue ? "OutputValue" : component ? componentName(node.name) : memoControl
+    ? node.name === "input" ? "HtmlNextInput" : "HtmlNextTextarea" : node.name;
   const svg = !component && (inSvg || node.name === "svg");
   if (component) imports.add(node.name);
   const componentContracts = component ? state.propContractsByTag?.get(node.name) : undefined;
@@ -657,19 +663,18 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
     const name = `attachEvents${attachments.length}`;
-    const scoped = scope.local === true && (control !== undefined || properties.length > 0);
+    const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
+      ? `() => ${write.path} as unknown as readonly (string | number)[]` : "undefined");
+    // A path that depends on the render goes through ScopedAttachment, whose ref stays the same between renders.
+    const scoped = scope.local === true && (control !== undefined || properties.length > 0) || dynamicPaths.some((path) => path !== "undefined");
     const attachment: EventAttachment = { name, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
-    const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
-      ? `() => ${write.path} as unknown as readonly (string | number)[]` : "undefined");
     if (scoped) {
       const ref = `__htmlNextScopedRef${attachments.length - 1}`;
       scopedAttachment = { attachment, ref, paths: dynamicPaths };
       bindings.push(`ref={${ref}}`);
-    } else bindings.push(dynamicPaths.some((path) => path !== "undefined")
-      ? `ref={(element) => ${name}(element, [${dynamicPaths.join(", ")}])}`
-      : `ref={${name}}`);
+    } else bindings.push(`ref={${name}}`);
   }
   const children = outputValue || node.name === "textarea" && control?.name === "value" ? ""
     : content ?? componentChildren.map((child) => renderNode(node.name === "select" && control?.name === "value" ? withoutAuthoredSelection(child) : child,
@@ -727,6 +732,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const reactStateSetters = new Map(states.map((state, index) => [state.name, allocate(`__htmlNextReactSetState${index}`)] as const));
   const stateValuesName = states.length === 0 ? "" : allocate("__htmlNextStateValues");
   const invalidateStateName = usesController && states.length > 0 ? allocate("__htmlNextInvalidateState") : "";
+  // The paths handler and bound-control writes changed, which the controller host reads after each commit.
+  const stateWritesName = invalidateStateName === "" ? "" : allocate("__htmlNextStateWrites");
   const handlerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextHandlerComputed${index}`)] as const));
   const controllerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextControllerComputed${index}`)] as const));
   const computedPreviousNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedPrevious${index}`)] as const));
@@ -799,7 +806,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const styles = compileComponentStylesForBuild(definition.css, definition);
   const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
-    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false };
+    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, usesControlMemo: false };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
     { tag: definition.contract.tag, reflections, captureRoot: true, hostState: styles.stateNames.length > 0 });
   const usesEvents = attachments.some((attachment) => attachment.bindings.length > 0) || target.events.length > 0;
@@ -912,7 +919,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     `  const { children: _children, slots: _slots, ${target.props.map((prop) => `${propKey(prop.name)}: _${prop.name.replace(/[^A-Za-z0-9_$]/g, "_")}`).join(", ")}${target.props.length === 0 ? "" : ", "}...nativeAttrs } = props;`,
     ...(target.props.length > 0 || usesNativeControls ? [
       "  const hasMounted = React.useRef(false);",
-      "  React.useLayoutEffect(() => { hasMounted.current = true; }, []);",
+      // Bound controls switch to their authored defaults once mounted. Render that switch as part of
+      // mounting, so it never reaches the DOM with an unrelated later update.
+      ...usesNativeControls ? [
+        "  const [, settleMounted] = React.useReducer((revision: number) => revision + 1, 0);",
+        "  React.useLayoutEffect(() => { hasMounted.current = true; settleMounted(); }, []);",
+      ] : ["  React.useLayoutEffect(() => { hasMounted.current = true; }, []);"],
     ] : []),
     ...(target.props.length === 0 ? [] : [
       `  const acceptedProps = React.useRef<Record<string, unknown>>({ ${target.props.map((prop) =>
@@ -930,7 +942,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       const initial = state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope);
       return `  const [${valueNames.get(state.name)!}, ${reactStateSetters.get(state.name)!}] = React.useState<${stateType(state)}>(${initial});`;
     }),
-    ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
+    ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`,
+      `  const ${stateWritesName} = React.useRef<unknown[][]>([]);`]),
     ...(states.length === 0 ? [] : [
       `  const ${stateValuesName} = React.useRef<{ ${states.map((state) => `${propKey(state.name)}: typeof ${valueNames.get(state.name)!}`).join("; ")} } | null>(null);`,
       `  if (${stateValuesName}.current === null) ${stateValuesName}.current = { ${states.map((state) => `${propKey(state.name)}: ${valueNames.get(state.name)!}`).join(", ")} };`,
@@ -940,7 +953,10 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const value = valueNames.get(state.name)!;
         const setter = stateSetters.get(state.name)!;
         const rawSetter = reactStateSetters.get(state.name)!;
-        return `  function ${setter}(update: (previous: typeof ${value}) => typeof ${value}): void { const next = update(${stateSnapshotName}[${quote(state.name)}]); ${stateSnapshotName}[${quote(state.name)}] = next; ${rawSetter}(() => next); }`;
+        if (stateWritesName === "") {
+          return `  function ${setter}(update: (previous: typeof ${value}) => typeof ${value}): void { const next = update(${stateSnapshotName}[${quote(state.name)}]); ${stateSnapshotName}[${quote(state.name)}] = next; ${rawSetter}(() => next); }`;
+        }
+        return `  function ${setter}(update: (previous: typeof ${value}) => typeof ${value}, path: readonly unknown[] = []): void { const previous = ${stateSnapshotName}[${quote(state.name)}]; const next = update(previous); ${stateSnapshotName}[${quote(state.name)}] = next; ${rawSetter}(() => next); if (!Object.is(previous, next)) ${stateWritesName}.current.push([${quote(state.name)}, ...path]); }`;
       }),
     ]),
     ...stateSelectedProps.map((prop) => {
@@ -1088,8 +1104,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
         const write = step.writablePath.length === 1
           ? `${setter}(() => ${candidate} as typeof ${valueNames.get(state.name)!});`
-          : `${setter}((previous) => writeStatePath(previous, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
-            ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${candidate}));`;
+          : `{ const path = [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
+            ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}]; ${setter}((previous) => writeStatePath(previous, path, ${candidate})${stateWritesName === "" ? "" : ", path"}); }`;
         if (check === undefined) return `    ${guard}{ const ${candidate} = ${value}; ${write} }`;
         return `    ${guard}{ const ${candidate} = ${value}; if (${check}) { ${write} } }`;
       });
@@ -1137,12 +1153,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         const setter = write === undefined ? "" : stateSetters.get(write.state)!;
         const update = write === undefined ? "undefined" : write.path === "[]"
           ? `(value) => ${setter}(() => value as typeof ${valueNames.get(write.state)!})`
-          : `(value) => ${setter}((previous) => writeBoundPath(previous, ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}, value))`;
+          : `(value) => { const path = ${write.dynamic ? "paths?.[0]?.() ?? []" : write.path}; ${setter}((previous) => writeBoundPath(previous, path, value)${stateWritesName === "" ? "" : ", path"}); }`;
         const genericUpdates = attachment.genericWrites.map((generic, index) => {
           const writeSetter = stateSetters.get(generic.state)!;
           const valueName = valueNames.get(generic.state)!;
           const source = generic.path === "[]" ? `(value) => ${writeSetter}(() => value as typeof ${valueName})`
-            : `(value) => ${writeSetter}((previous) => writeBoundPath(previous, ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}, value))`;
+            : `(value) => { const path = ${generic.dynamic ? `paths?.[${index + 1}]?.() ?? []` : generic.path}; ${writeSetter}((previous) => writeBoundPath(previous, path, value)${stateWritesName === "" ? "" : ", path"}); }`;
           return `const genericCleanup${index} = attachGenericBinding(element, ${source});`;
         });
         const callback = control === undefined && attachment.genericWrites.length === 0 && !attachment.forward && attachment.properties.length === 0 && attachment.importantStyles.length === 0 && attachment.ref === undefined ? attach : [
@@ -1157,7 +1173,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
           ...(control === undefined || attachment.scoped ? [] : [`controlRef${attachment.name}.current = element;`]),
           ...(attachment.properties.length === 0 || attachment.scoped ? [] : [`propertyRef${attachment.name}.current = element;`]),
           ...attachment.importantStyles.map((style) =>
-            `if (element !== null) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
+            `if (element !== null && ((element as HTMLElement).style.getPropertyValue(${quote(style.name)}) !== ${quote(style.value)} || (element as HTMLElement).style.getPropertyPriority(${quote(style.name)}) !== "important")) (element as HTMLElement).style.setProperty(${quote(style.name)}, ${quote(style.value)}, "important");`),
           ...(bindings.length === 0 ? [] : [`const nativeCleanup = ${attach};`]),
           ...(control === undefined ? [] : [`const controlCleanup = attachBoundControl(element, ${quote(control.name)}, ${attachment.scoped ? "scoped?.control" : `controlValue${attachment.name}.current`}, ${control.defaults}, ${update}, ${control.nativeProperty}, ${attachment.scoped ? "scoped?.controlAccepted ?? true" : control.accepts ?? "true"});`]),
           ...genericUpdates,
@@ -1190,6 +1206,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...propInputValues${propSelectors.map((selector) => `, ${propKey(selector)}: checkedProps[${quote(selector)}]`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${valueNames.get(selector)!}`).join("")} } }, name),`,
       ]),
       `    state: { ${states.map((state) => `${propKey(state.name)}: { get: () => ${stateSnapshotName}[${quote(state.name)}], set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
+      ...(stateWritesName === "" ? [] : [`    written: () => ${stateWritesName}.current.splice(0),`]),
       `    computed: { ${[
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),
@@ -1252,6 +1269,23 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  });",
       "  return render(ref);",
       "}",
+    ] : []),
+    ...(renderState.usesControlMemo ? [
+      "",
+      "/** Equal props, with style compared entry by entry: a control with them commits nothing. */",
+      "function sameControlProps(previousProps: object, nextProps: object): boolean {",
+      "  const [previous, next] = [previousProps as Readonly<Record<string, unknown>>, nextProps as Readonly<Record<string, unknown>>];",
+      "  const keys = Object.keys(next);",
+      "  if (keys.length !== Object.keys(previous).length) return false;",
+      "  return keys.every((key) => {",
+      "    const [before, after] = [previous[key], next[key]];",
+      "    if (key !== 'style' || before === null || after === null || typeof before !== 'object' || typeof after !== 'object') return Object.is(before, after);",
+      "    const entries = Object.entries(after);",
+      "    return entries.length === Object.keys(before).length && entries.every(([name, value]) => Object.is((before as Record<string, unknown>)[name], value));",
+      "  });",
+      "}",
+      "const HtmlNextInput = React.memo((props: React.ComponentProps<'input'>) => <input {...props} />, sameControlProps);",
+      "const HtmlNextTextarea = React.memo((props: React.ComponentProps<'textarea'>) => <textarea {...props} />, sameControlProps);",
     ] : []),
     ...(renderState.usesOutputValue ? [
       "",

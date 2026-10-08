@@ -31,6 +31,7 @@ function bareElement(localName: string) {
     localName,
     attributes,
     hasAttribute: (name: string) => attributes.has(name),
+    getAttribute: (name: string) => attributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => { attributes.set(name, value); },
     removeAttribute: (name: string) => { attributes.delete(name); },
     toggleAttribute: (name: string, force: boolean) => { if (force) attributes.set(name, ""); else attributes.delete(name); return force; },
