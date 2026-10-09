@@ -575,7 +575,7 @@ export const KeyedBoundary = /* @__PURE__ */ defineComponent({
 `;
 
 /** Every name the shared module exports, which a component's own identifiers must not take. */
-export const VUE_HOST_EXPORTS: readonly string[] = [...`${SOURCE}\n${vueExpressionHelpersSource()}`
+export const VUE_HOST_EXPORTS: readonly string[] = [...`${SOURCE}\n${expressionHelpersSource()}`
   .matchAll(/^export (?:const|function|class) ([\w$]+)/gm)].map((match) => match[1]!);
 
 /** The shared module's source, formatted the way the converted components are. */
