@@ -135,9 +135,10 @@ const controllerGenerated = await generatedFixture("controller-lifecycle", 7_000
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
-// uses, 25 B for a host root that follows a root `$match` switch, as live's does, and 50 B for the
-// node methods through which keyed lists also hold rows of several nodes.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_150);
+// uses, 25 B for a host root that follows a root `$match` switch, as live's does, 50 B for the
+// node methods through which keyed lists also hold rows of several nodes, and 15 B for the reconcile
+// recording the rows it kept in place, so lists whose rows read their position visit only moved rows.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_165);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
 const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, computedGenerated, controllerKeyedGenerated];
