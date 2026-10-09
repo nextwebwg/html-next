@@ -12,17 +12,66 @@ import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
 import { dependentPropTypeSource, isNativeBooleanAttribute, isVoidElement, propKey, quote, selectorGenerics, typeSource, SSR_BOOLEAN_PROPERTIES, SSR_STRING_PROPERTIES } from "./shared.js";
-import { Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
-import { declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck } from "./type-guards.js";
+import { category, Lowering, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript, UNKNOWN } from "./vue-lowering.js";
+import { conformingLiteralWrite, declaredReferenceGuard, destinationTypeCheck, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValue } from "../type-system.js";
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
 import { parseFragment } from "parse5";
 
+/**
+ * Identifiers the generated component already uses: JavaScript names, the helpers it imports, its
+ * own locals, and the parameters of the callbacks it writes. Authored names avoid them.
+ */
+const REACT_RESERVED = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export",
+  "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super",
+  "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield", "let", "static", "implements",
+  "interface", "package", "private", "protected", "public", "await", "arguments", "eval", "async", "of", "type",
+  "React", "ReactNode", "Symbol", "Object", "String", "Number", "Boolean", "Array", "Math", "JSON", "Error", "Event",
+  "CustomEvent", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "undefined", "NaN", "Infinity", "window",
+  "document", "console", "globalThis",
+  "props", "nativeAttrs", "children", "slots", "hasMounted", "acceptedProps", "inputAccepted", "checkedProps",
+  "propInputValues", "reflectedAttrs", "hostState", "rootRef", "propValidityContract", "propValidityElement",
+  "propValidityCleanup", "refElements", "refTarget", "latestHandlers", "nestedDepth", "rootFocusPending",
+  "controllerStateTypes", "rerender", "element", "paths", "event", "value", "next", "previous", "update", "scoped", "node",
+  "ref", "cleanup", "binding", "attrs", "detail", "name", "keys",
+  "useLiveState", "checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", "propValidityState",
+  "selectedPropNode", "acceptsControllerWrite", "attachNativeEvents", "dispatchDeclared", "dispatchDeclaredTargets",
+  "attachBoundControl", "syncBoundControl", "attachGenericBinding", "writeBoundPath", "useDataRead", "SanitizedHtml",
+  "useComponentHost", "componentContext", "NestedDepthContext", "ScopedAttachment",
+]);
+
+/** A generated name the component builds from an index, such as `attachEvents2`, or a private `__` name. */
+const GENERATED_NAME = /^(?:__|_|attachEvents\d|controlRef|controlValue|previousProperty|propertyRef|genericCleanup|HtmlNextContext_)/;
+
+/** The component tags a template invokes, whose imported names the component's scope holds. */
+function componentTagsIn(node: TemplateNode, tags = new Set<string>()): Set<string> {
+  if (node.kind === "text") return tags;
+  if (node.kind === "slot") {
+    for (const child of node.fallback ?? []) componentTagsIn(child, tags);
+    return tags;
+  }
+  if (node.name.includes("-") && getDomInterface(node.name) === undefined) tags.add(node.name);
+  for (const child of node.children) componentTagsIn(child, tags);
+  return tags;
+}
+
+/** An authored name as a JavaScript identifier: `step-up` becomes `stepUp`. */
+function identifierFor(name: string): string {
+  const camel = name.replace(/[^A-Za-z0-9_$]+(.)?/g, (_match, next: string | undefined) => next?.toUpperCase() ?? "");
+  return /^[0-9]/.test(camel) || camel === "" ? `_${camel}` : camel;
+}
+
+function pascal(name: string): string {
+  const identifier = identifierFor(name);
+  return identifier[0]!.toUpperCase() + identifier.slice(1);
+}
+
 /** Where the shared rendering module's import goes; filled once the component's code is known. */
 const RENDER_IMPORT = "\u0000render-import";
 /** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
-const REACT_RENDER_COMPONENTS = ["warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+const REACT_RENDER_COMPONENTS = ["useLiveState", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean", "warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
   "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
@@ -59,6 +108,10 @@ interface RootAttributes {
 
 interface EventAttachment {
   readonly name: string;
+  /** Only native listeners: the element's ref is \`useNativeEvents\`'s callback. */
+  readonly listensOnly: boolean;
+  /** The root's ref alone: it is \`rootRef\` itself. */
+  readonly forwardsOnly: boolean;
   readonly scoped: boolean;
   readonly bindings: readonly EventBinding[];
   readonly forward: boolean;
@@ -90,6 +143,8 @@ interface RenderState {
   usesRetainedText: boolean;
   usesRetainedValue: boolean;
   usesOutputValue: boolean;
+  /** A free name in the component's scope, for an element's event hook. */
+  readonly allocate: (base: string) => string;
 }
 
 interface RenderScope extends Scope {
@@ -680,9 +735,13 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
   ].join(", ")} } as unknown as React.CSSProperties}`);
   if ((node.events?.length ?? 0) > 0 || rootTag?.captureRoot === true || control !== undefined || genericWrites.length > 0 || properties.length > 0 || importantStyles.length > 0 || node.ref !== undefined) {
     for (const event of node.events ?? []) if (!handlers.has(event.handler)) fail("HT033", `Handler \`${event.handler}\` is not declared.`);
-    const name = `attachEvents${attachments.length}`;
     const scoped = scope.local === true && (control !== undefined || properties.length > 0);
-    const attachment: EventAttachment = { name, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
+    const listensOnly = (node.events?.length ?? 0) > 0 && rootTag === undefined && control === undefined && genericWrites.length === 0
+      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined;
+    const forwardsOnly = rootTag !== undefined && !component && (node.events?.length ?? 0) === 0 && control === undefined && genericWrites.length === 0
+      && properties.length === 0 && importantStyles.length === 0 && node.ref === undefined && rootArms(state.definition.template) === undefined;
+    const name = forwardsOnly ? "rootRef" : listensOnly ? state.allocate(`${identifierFor(node.events![0]!.handler)}Events`) : `attachEvents${attachments.length}`;
+    const attachment: EventAttachment = { name, listensOnly, forwardsOnly, scoped, bindings: node.events ?? [], forward: rootTag !== undefined, properties, genericWrites, importantStyles,
       ...(node.ref === undefined ? {} : { ref: node.ref }), ...(control === undefined ? {} : { control }) };
     attachments.push(attachment);
     const dynamicPaths = [control?.write, ...genericWrites].map((write) => write?.dynamic === true
@@ -737,26 +796,29 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const providedContexts = new Set(states.map((state) => state.name));
   const usesContext = providedContexts.size > 0 || contexts.length > 0;
   const nestedDepthLimit = options.guardNestedDepth ? definitionMayInvokeComponents(definition) ? 32 : 33 : undefined;
-  const occupiedNames = new Set([...target.props.map((prop) => prop.name), ...declarations.map((declaration) => declaration.name)]);
-  const allocate = (base: string): string => {
-    let name = base;
+  const name = definition.contract.name;
+  const occupiedNames = new Set([...REACT_RESERVED, name, `${name}Inner`, `${name}Props`, ...[...componentTagsIn(definition.template)].map(componentName)]);
+  /** An authored name where it is free, and otherwise the name with a suffix. */
+  const allocate = (base: string, suffix = ""): string => {
+    let name = GENERATED_NAME.test(base) ? `${base}${suffix || "_"}` : base;
+    if (occupiedNames.has(name) && suffix !== "") name = `${base}${suffix}`;
     while (occupiedNames.has(name)) name += "_";
     occupiedNames.add(name);
     return name;
   };
-  const handlerNames = new Map(handlers.map((handler, index) => [handler.name, allocate(`__htmlNextHandler${index}`)] as const));
-  const valueNames = new Map([...states, ...data, ...contexts, ...computed].map((declaration, index) =>
-    [declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name, allocate(`__htmlNextValue${index}`)] as const));
-  const stateSetters = new Map(states.map((state, index) => [state.name, allocate(`__htmlNextSetState${index}`)] as const));
-  const reactStateSetters = new Map(states.map((state, index) => [state.name, allocate(`__htmlNextReactSetState${index}`)] as const));
-  const stateValuesName = states.length === 0 ? "" : allocate("__htmlNextStateValues");
-  const invalidateStateName = usesController && states.length > 0 ? allocate("__htmlNextInvalidateState") : "";
+  const handlerNames = new Map(handlers.map((handler) => [handler.name, allocate(identifierFor(handler.name), "Handler")] as const));
+  const valueNames = new Map([...states, ...data, ...contexts, ...computed].map((declaration) => {
+    const name = declaration.kind === "context" ? declaration.as ?? declaration.name : declaration.name;
+    return [name, allocate(identifierFor(name), declaration.kind === "state" ? "State" : declaration.kind === "computed" ? "Computed" : declaration.kind === "data" ? "Data" : "Context")] as const;
+  }));
+  const stateSetters = new Map(states.map((state) => [state.name, allocate(`set${pascal(valueNames.get(state.name)!)}`)] as const));
+  const stateGetters = new Map(states.map((state) => [state.name, allocate(`get${pascal(valueNames.get(state.name)!)}`)] as const));
+  const invalidateStateName = usesController && states.length > 0 ? allocate("rerender") : "";
   const handlerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextHandlerComputed${index}`)] as const));
   const controllerComputedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextControllerComputed${index}`)] as const));
   const computedPreviousNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedPrevious${index}`)] as const));
   const computedAcceptedNames = new Map(computed.map((value, index) => [value.name, allocate(`__htmlNextComputedAccepted${index}`)] as const));
   const computedByName = new Map(computed.map((value) => [value.name, value] as const));
-  const stateSnapshotName = states.length === 0 ? "" : allocate("__htmlNextStateSnapshot");
   const controllerStateTypes = Object.fromEntries(states.map((state) => [state.name, declarationTypeNode(state.type, state.shape)]));
   const checksControllerWrites = usesController && Object.values(controllerStateTypes).some((type) => type !== undefined);
   const eventSchemas = new Map(target.events.map((event, index) =>
@@ -823,11 +885,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const styles = compileComponentStylesForBuild(definition.css, definition);
   const renderState: RenderState = { definition, slotsByTag: options.slotsByTag, propsByTag: options.propsByTag, propContractsByTag: options.propContractsByTag,
     nextSlotAlias: 0, nextRetainedAlias: 0, usesHtml: false, usesPlainSlots: false, usesScopedSlots: false, usesKeyedLists: false,
-    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false };
+    usesRetainedText: false, usesRetainedValue: false, usesOutputValue: false, allocate };
   const markup = renderNode(root, scope, lowering, imports, new Set(handlers.map((handler) => handler.name)), attachments, renderState,
     { tag: definition.contract.tag, reflections, captureRoot: true, hostState: styles.stateNames.length > 0 });
   const usesEvents = attachments.some((attachment) => attachment.bindings.length > 0) || target.events.length > 0;
-  const hasNativeBindings = attachments.some((attachment) => attachment.bindings.length > 0);
+  const hasNativeBindings = attachments.some((attachment) => attachment.bindings.length > 0 && !attachment.listensOnly);
+  const usesEventHooks = attachments.some((attachment) => attachment.listensOnly);
   const usesControls = attachments.some((attachment) => attachment.control !== undefined || attachment.genericWrites.length > 0);
   const usesNativeControls = attachments.some((attachment) => attachment.control !== undefined);
   const usesScopedAttachments = attachments.some((attachment) => attachment.scoped);
@@ -839,7 +902,6 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const capturesRoot = attachments.some((attachment) => attachment.forward);
   const usesRefActions = handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate"));
   const usesRefs = usesTargetDispatch || usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
-  const name = definition.contract.name;
   const rootType = rootArms(template) === undefined ? getDomInterface(template.name) ?? "HTMLElement"
     : [...new Set(rootArms(template)!.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
   const preservesRootFocus = rootArms(template) !== undefined;
@@ -874,8 +936,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     : `Readonly<{ ${namedSlots.map((slot) => `${propKey(slot.name!)}?: ${slotValueType(slot)};`).join(" ")}${dynamicSlots ? " [name: string]: ReactNode | ((props: Record<string, any>) => ReactNode);" : ""} }>`;
   const rootMarkup = markup.startsWith("{") ? `<>${markup}</>` : markup;
   const contextMarkup = states.reduceRight((content, state) =>
-    `<${contextExportName(definition.contract.tag, state.name)}.Provider value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}.Provider>`, rootMarkup);
-  const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext.Provider value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext.Provider>`;
+    `<${contextExportName(definition.contract.tag, state.name)} value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}>`, rootMarkup);
+  const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext>`;
   const body = [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
@@ -884,7 +946,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(target.props.length === 0 ? [] : ["checkedProp", "mountPropValidity", "updatePropValidity", "PropBoundary", ...(usesController ? ["propValidityState"] : []), ...(target.props.some((prop) => prop.contract.select !== undefined) ? ["selectedPropNode"] : [])]),
       ...(checksControllerWrites ? ["acceptsControllerWrite"] : []),
     ].join(", ")} } from ${quote(options.propsSpecifier ?? "./props")};`]),
-    ...(usesEvents ? [`import { ${[...(attachments.some((attachment) => attachment.bindings.length > 0) ? ["attachNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
+    ...(usesEvents ? [`import { ${[...(hasNativeBindings ? ["attachNativeEvents"] : []), ...(usesEventHooks ? ["useNativeEvents"] : []), ...(target.events.length > 0 ? ["dispatchDeclared", ...(usesTargetDispatch ? ["dispatchDeclaredTargets"] : [])] : [])].join(", ")} } from ${quote(options.eventsSpecifier ?? "./events")};`] : []),
     ...(usesControls ? [`import { ${[
       ...(usesNativeControls ? ["attachBoundControl", "syncBoundControl"] : []),
       ...(usesGenericBindings ? ["attachGenericBinding"] : []),
@@ -947,23 +1009,12 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       }),
       "  };",
     ]),
+    // Handlers read a state's latest write through its getter; rendering reads the value React has.
     ...states.map((state) => {
       const initial = state.expression === undefined ? "undefined" : lowering.value(state.expression.ast, scope);
-      return `  const [${valueNames.get(state.name)!}, ${reactStateSetters.get(state.name)!}] = React.useState<${stateType(state)}>(${initial});`;
+      return `  const [${valueNames.get(state.name)!}, ${stateSetters.get(state.name)!}, ${stateGetters.get(state.name)!}] = useLiveState<${stateType(state)}>(${initial});`;
     }),
     ...(invalidateStateName === "" ? [] : [`  const [, ${invalidateStateName}] = React.useReducer((revision: number) => revision + 1, 0);`]),
-    ...(states.length === 0 ? [] : [
-      `  const ${stateValuesName} = React.useRef<{ ${states.map((state) => `${propKey(state.name)}: typeof ${valueNames.get(state.name)!}`).join("; ")} } | null>(null);`,
-      `  if (${stateValuesName}.current === null) ${stateValuesName}.current = { ${states.map((state) => `${propKey(state.name)}: ${valueNames.get(state.name)!}`).join(", ")} };`,
-      `  const ${stateSnapshotName} = ${stateValuesName}.current;`,
-      `  React.useLayoutEffect(() => { ${states.map((state) => `${stateSnapshotName}[${quote(state.name)}] = ${valueNames.get(state.name)!};`).join(" ")} });`,
-      ...states.map((state) => {
-        const value = valueNames.get(state.name)!;
-        const setter = stateSetters.get(state.name)!;
-        const rawSetter = reactStateSetters.get(state.name)!;
-        return `  function ${setter}(update: (previous: typeof ${value}) => typeof ${value}): void { const next = update(${stateSnapshotName}[${quote(state.name)}]); ${stateSnapshotName}[${quote(state.name)}] = next; ${rawSetter}(() => next); }`;
-      }),
-    ]),
     ...stateSelectedProps.map((prop) => {
       const select = prop.contract.select!;
       return `  checkedProps[${quote(prop.name)}] = checkedProp<${typeSource(prop.contract.type)}>(props[${quote(prop.name)}], selectedPropNode(${valueNames.get(select.from)!}, ${JSON.stringify(select.options)}), ${prop.contract.required}, ${quote(prop.name)}, acceptedProps.current, inputAccepted, false);`;
@@ -1049,7 +1100,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...handlers.map((handler) => {
       const handlerCode = new Map(scope.code);
-      for (const state of states) handlerCode.set(state.name, `${stateSnapshotName}[${quote(state.name)}]`);
+      for (const state of states) handlerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const value of computed) handlerCode.set(value.name, `${handlerComputedNames.get(value.name)!}.get()`);
       handlerCode.set("$$event", "event");
       const handlerScope: Scope = { code: handlerCode, types: new Map([...scope.types, ["$$event", { type: { kind: "terminal", name: "event" }, nullable: false }]]) };
@@ -1098,22 +1149,27 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         if (state === undefined) fail("HT031", `\`${step.path}\` is not a writable state path.`);
         const setter = stateSetters.get(state.name)!;
         const value = lowering.value(step.value.ast, handlerScope);
-        const candidate = `__htmlNextCandidate${index}`;
-        const destinationCheck = handlerDestinationCheck(handlerScope.types.get(state.name)?.type,
-          step.writablePath, 1, candidate, handlerScope, lowering);
-        const check = destinationCheck === undefined ? undefined : lowering.authoredCheck(
-          `(${candidate} === undefined || ${destinationCheck})`,
-          `handler:${handler.name}:${step.path}`,
-          `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
-        const write = step.writablePath.length === 1
-          ? `${setter}(() => ${candidate} as typeof ${valueNames.get(state.name)!});`
-          : `${setter}((previous) => writeStatePath(previous, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
-            ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${candidate}));`;
-        if (check === undefined) return `    ${guard}{ const ${candidate} = ${value}; ${write} }`;
-        return `    ${guard}{ const ${candidate} = ${value}; if (${check}) { ${write} } }`;
+        const mayBeInvalid = mayProduceInvalidResult(step.value.ast, handlerScope);
+        const destinationCheck = conformingLiteralWrite(step, definition) ? undefined
+          : handlerDestinationCheck(handlerScope.types.get(state.name)?.type, step.writablePath, 1, "value", handlerScope, lowering);
+        const destination = handlerScope.types.get(state.name)?.type;
+        // A value of the state's own kind writes as it is; another kind is cast after its check. A
+        // function-valued state writes through an updater, which the setter would otherwise call.
+        const write = (written: string): string => step.writablePath.length > 1
+          ? `${setter}((previous) => writeStatePath(previous, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
+            ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${written}));`
+          : destination === undefined || category(destination) === "unknown" ? `${setter}(() => ${written} as typeof ${valueNames.get(state.name)!});`
+          : category(destination) === category(typeOf(step.value.ast, handlerScope).type) && !mayBeInvalid ? `${setter}(${written});`
+          : `${setter}(${written} as typeof ${valueNames.get(state.name)!});`;
+        if (destinationCheck === undefined && !mayBeInvalid) return `    ${guard}${write(value)}`;
+        // One checked write per handler reads as `next`; later ones number theirs.
+        const next = setSteps(handler) > 1 ? `next${index}` : "next";
+        const check = destinationCheck === undefined ? "" : `, ${writePredicate(destinationCheck)}, ${quote(definition.source.file)}, ${quote(handler.name)}, ${quote(step.path)}`;
+        const lines = [`const ${next}${mayBeInvalid ? ": any" : ""} = ${value};`, `if (acceptsWrite(${next}${check})) ${write(next)}`];
+        return guard === "" ? lines.map((line) => `    ${line}`).join("\n") : `    ${guard}{ ${lines.join(" ")} }`;
       });
       return [
-        `  function ${handlerNames.get(handler.name)!}(event: Event): void {`,
+        `  function ${handlerNames.get(handler.name)!}(${[...handlerComputed, ...steps].some((line) => /\bevent\b/.test(line)) ? "event: Event" : ""}): void {`,
         ...handlerComputed,
         ...steps,
         "  }",
@@ -1144,10 +1200,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ]),
     ...(attachments.length > 0 ? [
       ...(hasNativeBindings ? [
-        `  const latestHandlers = React.useRef({ ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} });`,
+        `  const latestHandlers = React.useRef<Record<string, (event: Event) => void>>({ ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} });`,
         `  React.useLayoutEffect(() => { latestHandlers.current = { ${handlers.map((handler) => `${quote(handler.name)}: ${handlerNames.get(handler.name)!}`).join(", ")} }; });`,
       ] : []),
-      ...attachments.map((attachment) => {
+      ...attachments.filter((attachment) => !attachment.forwardsOnly).map((attachment) => {
+        // An element that only listens takes its ref from the hook, which keeps the latest handlers.
+        if (attachment.listensOnly) return `  const ${attachment.name} = useNativeEvents([${attachment.bindings.map((event) =>
+          `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: ${handlerNames.get(event.handler)!} }`).join(", ")}]);`;
         const bindings = attachment.bindings.map((event) =>
           `{ type: ${quote(event.name)}, modifiers: ${JSON.stringify(event.modifiers)}, handler: (event: Event) => latestHandlers.current[${quote(event.handler)}](event) }`);
         const attach = bindings.length === 0 ? "undefined" : `attachNativeEvents(element, [${bindings.join(", ")}])`;
@@ -1188,7 +1247,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ] : []),
     ...(usesController ? computed.map((value) => {
       const controllerCode = new Map(scope.code);
-      for (const state of states) controllerCode.set(state.name, `${stateSnapshotName}[${quote(state.name)}]`);
+      for (const state of states) controllerCode.set(state.name, `${stateGetters.get(state.name)!}()`);
       for (const declaration of computed) controllerCode.set(declaration.name, `${controllerComputedNames.get(declaration.name)!}.get()`);
       const controllerScope: Scope = { code: controllerCode, types: scope.types };
       const expression = value.expression === undefined ? "undefined" : lowering.value(value.expression.ast, controllerScope);
@@ -1208,7 +1267,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
         `    propInputs: (name: string) => props[name] ?? null,`,
         `    propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: { ...propInputValues${propSelectors.map((selector) => `, ${propKey(selector)}: checkedProps[${quote(selector)}]`).join("")}${stateSelectors.map((selector) => `, ${propKey(selector)}: ${valueNames.get(selector)!}`).join("")} } }, name),`,
       ]),
-      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: () => ${stateSnapshotName}[${quote(state.name)}], set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
+      `    state: { ${states.map((state) => `${propKey(state.name)}: { get: ${stateGetters.get(state.name)!}, set: (value: unknown) => { ${stateSetters.get(state.name)!}(() => value as typeof ${valueNames.get(state.name)!}); }, touch: ${invalidateStateName} }`).join(", ")} },`,
       `    computed: { ${[
         ...computed.map((value) => `${propKey(value.name)}: () => ${controllerComputedNames.get(value.name)!}.get()`),
         ...contexts.map((value) => `${propKey(value.as ?? value.name)}: () => ${valueNames.get(value.as ?? value.name)!}`),

@@ -18,13 +18,30 @@ export const REACT_RENDER_EXPORTS = [
   "warnUnless", "acceptsWrite", "isString", "isNumber", "isInteger", "isBoolean",
   "truthy", "text", "attribute", "list", "number", "concat", "join", "math", "arithmetic", "sortBy", "eachRows", "uniqueKeys", "formatValue",
   "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary", "hostStateTokens",
-  "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath",
+  "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath", "useLiveState",
 ] as const;
 
 const SOURCE = `import React from "react";
 import type { ReactNode } from "react";
 
 ${expressionHelpersSource()}
+
+/**
+ * React state a handler reads and writes in step order, as HTML Next handlers do: a write is the
+ * next read's value at once, before React renders it. The setter takes a value or an updater.
+ */
+export function useLiveState<T>(initial: T): readonly [T, (next: T | ((previous: T) => T)) => void, () => T] {
+  const [value, setValue] = React.useState<T>(initial);
+  const latest = React.useRef(value);
+  React.useLayoutEffect(() => { latest.current = value; });
+  const set = React.useCallback((next: T | ((previous: T) => T)) => {
+    const resolved = typeof next === "function" ? (next as (previous: T) => T)(latest.current) : next;
+    latest.current = resolved;
+    setValue(() => resolved);
+  }, []);
+  const get = React.useCallback(() => latest.current, []);
+  return [value, set, get];
+}
 
 /** Text that keeps its last accepted value while an expression is invalid. */
 export function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {
