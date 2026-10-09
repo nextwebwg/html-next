@@ -14,7 +14,7 @@ import { escapeHtml, literalAttribute, isScriptIdentifier, isVoidElement, isNati
 import { Lowering, category, mayProduceInvalidResult, present, type Scope, type Static, typeOf, typeScript } from "./vue-lowering.js";
 import { conformingLiteralWrite, declaredReferenceGuard, handlerDestinationCheck, setSteps, writePredicate } from "./type-guards.js";
 import { CONTROL_CAPTURE_CONTEXT } from "./svelte-control.js";
-import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
+import { BINDING_INPUTS_PROP, DECORATIONS_PROP, LITERAL_INPUTS_PROP, NATIVE_BINDINGS_PROP, ROOT_OWNER_PROP, SLOTS_PROP, SVELTE_RENDER_COMPONENTS, SVELTE_RENDER_EXPORTS, SVELTE_RENDER_SPECIFIER } from "./svelte-render.js";
 import { formatSvelteScript } from "./vue-format.js";
 
 function hasStructuredHtmlInput(type: TypeNode): boolean {
@@ -1061,12 +1061,11 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   };
   const reserved = new Set(("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis window document String Number Boolean Object Array Symbol Map Set WeakMap WeakSet Reflect JSON Math Date RegExp Intl Promise Error TypeError CustomEvent Event Element HTMLElement Node HTMLInputElement HTMLTextAreaElement HTMLSelectElement queueMicrotask requestAnimationFrame "
     + "retainedBindingInput htmlPropValue parseHtmlLiteral acceptsBindingDestination classText styleText Decoration Props Snippet untrack useComponentHost propValidityState getContext setContext rootElement rootFocusPending event children slots rest rootAttrs next guard detail warnUnless acceptsWrite isString isNumber isInteger isBoolean rootAttributes writePath checkedSlot setProperty decorate checkedProps acceptedProps inputAccepted propValidityContract propInputValues hostState hostStateTokens checkedProp selectedPropNode selectedBindingNode mountPropValidity updatePropValidity attachGenericBinding attachBoundControl syncBoundControl controlDefaults prepareHydrationControls observeBoundOptions BoundDefaults attachNativeEvents dispatchDeclared dispatchDeclaredTargets retainedSanitizedHtml useDataRead cycleCheckedComputed retainedValue retainedStructuralValue truthy text attribute math arithmetic concat join sortBy eachRows uniqueKeys").split(" "));
-  for (const name of importedNames) reserved.add(name);
+  for (const name of [...importedNames, ...SVELTE_RENDER_EXPORTS]) reserved.add(name);
   const inputNames = new Map(target.props.map((prop) => [prop.name, freshIdentifier("htmlNextInputValue")]));
   for (const name of inputNames.values()) reserved.add(name);
-  reserved.add("formatValue");
-  reserved.add("createFormatValue");
-  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextStructural\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
+  // `next<N>` is a handler's numbered checked write, which shares the handler's scope with state reads.
+  const declarationName = (name: string): string => !isScriptIdentifier(name) || reserved.has(name) || name.startsWith("$") || /^retained\d+$|^htmlSite\d+$|^htmlNextStructural\d+$|^next\d+$/.test(name) ? freshIdentifier("htmlNextValue") : name;
   const contextNames = new Map<ContextDeclaration, string>();
   for (const declaration of contexts) {
     const alias = declaration.as ?? declaration.name;

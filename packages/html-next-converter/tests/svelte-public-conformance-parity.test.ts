@@ -90,6 +90,18 @@ const regressions: readonly ConverterCase[] = [
       result: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'] },
   },
   {
+    name: "declared names and loop aliases never take render helper names or a handler's step locals",
+    source: `<template component="x-step-names" status="early" summary="Generated names."><defs>
+      <state name="items" value=""></state><state name="step" type="number" value="10"></state>
+      <state name="next0" type="number" value="1"></state><state name="count" type="number" value="0"></state>
+      <state name="list" type="string" value="kept"></state>
+      <handler name="advance"><set name="next0" expr:value="$next0 + 1"></set><set name="count" expr:value="$next0 + 1"></set><set name="items" expr:value="[1, 2]"></set></handler>
+      </defs><section><ul><li $each="number of $items">{$number + $step}</li></ul><output>{$next0}/{$count}/{$list}</output><button type="button" on:click="advance">Go</button></section></template><x-step-names></x-step-names>`,
+    expect: { probe: `return [qa('li').map(e => e.textContent), q('output').textContent];`, result: [[], "1/0/kept"], after: [
+      { action: `document.querySelector('button').click();`, result: [["11", "12"], "2/3/kept"] },
+    ] },
+  },
+  {
     name: "one-way native controls preserve authored defaults without duplicate attributes",
     source: `<template component="x-oneway-defaults" status="early" summary="One-way control defaults."><defs>
       <state name="value" type="string" value="One"></state><state name="checked" type="boolean" value="false"></state>
