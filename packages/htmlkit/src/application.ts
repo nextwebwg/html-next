@@ -40,15 +40,27 @@ function packageResource(path: string) {
   return { url: pathToFileURL(path).href, trustRoot: pathToFileURL(directory + "/").href };
 }
 
+// A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
+export async function readHeadScript(root: string): Promise<string | undefined> {
+  const path = join(root, "app/head.js");
+  const script = existsSync(path) ? await readFile(path, "utf8") : undefined;
+  if (script !== undefined && /<!--|<\/?script/i.test(script)) {
+    throw new HtmlKitError("app/head.js cannot contain <!--, <script, or </script, which would end or nest its inline script.", path);
+  }
+  return script;
+}
+
+// Every page gets the head script, the not-found page included, so it cannot flash either.
+export function notFoundPage(headScript: string | undefined) {
+  const head: RenderedHead = headScript === undefined ? { title: "Page not found" } : { title: "Page not found", script: headScript };
+  const body = "<main><h1>Page not found</h1></main>";
+  return { head, body, html: documentHTML(body, head) };
+}
+
 export async function createApplication(options: ApplicationOptions = {}, moduleServer?: ViteDevServer): Promise<Application> {
   const config = configure(options);
   const routes = await discoverRoutes(config.root, options);
-  // A classic script inlined into each document head runs before first paint, e.g. to apply a saved theme.
-  const headPath = join(config.root, "app/head.js");
-  const headScript = existsSync(headPath) ? await readFile(headPath, "utf8") : undefined;
-  if (headScript !== undefined && /<!--|<\/?script/i.test(headScript)) {
-    throw new HtmlKitError("app/head.js cannot contain <!--, <script, or </script, which would end or nest its inline script.", headPath);
-  }
+  const headScript = await readHeadScript(config.root);
   const ownsServer = moduleServer === undefined;
   const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom",
     mode: "development", publicDir: false, server: { middlewareMode: true, watch: null, hmr: false },
@@ -139,9 +151,7 @@ export async function createApplication(options: ApplicationOptions = {}, module
       if (url.origin !== config.origin || url.search || url.hash) throw new HtmlKitError("Static rendering requires an application pathname without a query or fragment.");
       const matched = matchRoute(routes, url.pathname, config.base);
       if (matched === undefined) {
-        const head = { title: "Page not found" };
-        const body = '<main><h1>Page not found</h1></main>';
-        return { status: 404, pathname, html: documentHTML(body, head), css: "", head, body, components: [] };
+        return { status: 404, pathname, ...notFoundPage(headScript), css: "", components: [] };
       }
       const { route, params } = matched;
       const layers = [...route.layouts, route];
