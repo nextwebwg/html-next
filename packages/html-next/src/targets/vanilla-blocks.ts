@@ -1487,15 +1487,18 @@ export function blockPlan(definition: ComponentDefinition, invocations?: Readonl
     }
     const props = Object.keys(definition.contract.props).length + roots.filter((item) => item.data !== undefined || item.alias !== undefined).length;
     // Each read's parameters, checked as live's `evalConforming` reads them; `from` ones also recorded,
-    // so a change to what they read re-requests, as live's request effect re-runs.
+    // so a change to what they read re-requests, as live's request effect re-runs. A whole list or
+    // object sent as a parameter also records its contents, so an in-place change re-requests too.
     const reads = roots.flatMap((item, index) => item.data === undefined ? [] : [{
       index, declaration: item.data,
       parameters: item.data.parameters.map((parameter) => {
         const recording = planner.recording(planner.scope);
+        const recorded = parameter.mode === "from" ? planner.checked(parameter.expression, recording) : undefined;
         return {
           name: parameter.name, from: parameter.mode === "from",
           value: planner.checked(parameter.expression, planner.scope),
-          recorded: parameter.mode === "from" ? planner.checked(parameter.expression, recording) : undefined, record: recording.record!,
+          recorded: recorded?.deep === true ? { ...converted(recorded), source: `recContents(${recording.record!}, ${recorded.source})` } : recorded,
+          record: recording.record!,
         };
       }),
     }]);
@@ -2324,11 +2327,12 @@ export function emitBlocks(
         `const x = ${convertible(value)}; if (x === NONCONFORMING) { ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] ?? null;${from ? " ok = false;" : ""} } else ${into}[${JSON.stringify(name)}] = DP${at}[${JSON.stringify(name)}] = x === ABSENT ? null : x;`;
       return [
         `  const DP${at} = {};`,
-        `  let DQ${at}, DR${at};`,
+        `  const DQ${at} = {};`,
+        `  let DR${at};`,
         // The `from` parameters, recorded so a change to what they read re-requests, and compared so an
         // unchanged one requests nothing. The others only record what they accept.
         `  const DF${at} = () => { const p = {}, s = {}; let ok = true; ${read.parameters.map((item) => item.from
-          ? `{ const ${item.record} = []; ${parameter(item.recorded!, item.name, true)} DQ${at} = ${item.record}; }`
+          ? `{ const ${item.record} = []; ${parameter(item.recorded!, item.name, true)} DQ${at}.${item.record} = ${item.record}; }`
           : `{ ${parameter(item.value, item.name, false, "s")} }`).join(" ")} return [p, ok]; };`,
         // Every parameter, sampled again when the request is sent.
         `  const DS${at} = () => { const p = {}; ${read.parameters.map((item) => `{ ${parameter(item.value, item.name, false)} }`).join(" ")} return p; };`,
@@ -2338,7 +2342,7 @@ export function emitBlocks(
       "  const DU = (c, d) => {",
       "    if (c === -1) return;",
       ...plan.reads.flatMap((read, at) => read.parameters.filter((item) => item.from).map((item) =>
-        `    if (${guard(maskOf(item.recorded!))}) { const ${item.record} = []; ${convertible(item.recorded!)}; if (${rootsWritten(item.recorded!).replace(/^ \|\| /, "") || "false"} || readsChanged(DQ${at}, ${item.record})) DR${at}(); }`)),
+        `    if (${guard(maskOf(item.recorded!))}) { const ${item.record} = []; ${convertible(item.recorded!)}; if (${rootsWritten(item.recorded!).replace(/^ \|\| /, "") || "false"} || readsChanged(DQ${at}.${item.record}, ${item.record})) DR${at}(); }`)),
       "  };",
     ],
     // A context provider tells its readers after each render.
