@@ -10,6 +10,7 @@ import { reactHtmlArtifact as makeReactHtmlArtifact } from "./targets/react-html
 import { reactHostArtifact as makeReactHostArtifact } from "./targets/react-host.js";
 import { reactContextArtifact as makeReactContextArtifact } from "./targets/react-context.js";
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
+import { reactRenderArtifact as makeReactRenderArtifact } from "./targets/react-render.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
 import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
@@ -164,6 +165,11 @@ export function reactContextArtifact(): GeneratedArtifact {
 
 export function reactDepthArtifact(): GeneratedArtifact {
   return makeReactDepthArtifact(GENERATOR_VERSION);
+}
+
+/** The rendering helpers converted React components share; every package that emits React ships it once. */
+export function reactRenderArtifact(): GeneratedArtifact {
+  return makeReactRenderArtifact(GENERATOR_VERSION);
 }
 
 export { importsVueHost } from "./targets/vue-host.js";

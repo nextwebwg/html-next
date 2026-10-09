@@ -33,6 +33,7 @@ export {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type GeneratedArtifact,
 } from "./generate.js";
 export { addControllerGraph } from "./controller-files.js";

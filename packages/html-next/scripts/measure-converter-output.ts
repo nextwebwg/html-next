@@ -66,10 +66,32 @@ async function application(sources: readonly string[]): Promise<number> {
     bundler.onLoad({ filter: /.*/, namespace: "component" }, (args) => ({ contents: modules[Number(args.path.slice("component:".length))]!, loader: "ts", resolveDir: "." }));
   } };
   const bundle = await build({ stdin: { contents: modules.map((_module, index) => `export { default as C${index} } from "component:${index}";`).join("\n"), loader: "ts" },
-    bundle: true, write: false, format: "esm", minify: true, treeShaking: true, external: ["vue", "*.vue"], plugins: [entry, helpers], logLevel: "silent" });
+    bundle: true, write: false, format: "esm", minify: true, treeShaking: true, external: ["vue", "parse5", "*.vue"], plugins: [entry, helpers], logLevel: "silent" });
   return gzipSync(bundle.outputFiles[0]!.contents).length;
 }
 
+/** A converted React component's helper imports, resolved to the modules a build ships beside it. */
+const reactHelpers: Plugin = { name: "react-helpers", setup(bundler) {
+  bundler.onResolve({ filter: /^\.\/(?:render|events|context|props|control|data|html|host|depth)$/ }, (args) => ({ path: args.path.slice(2), namespace: "react-helpers" }));
+  bundler.onLoad({ filter: /.*/, namespace: "react-helpers" }, (args) => {
+    const make = (generate as unknown as Record<string, ((declared?: boolean) => { content: string }) | undefined>)[`react${args.path[0]!.toUpperCase()}${args.path.slice(1)}Artifact`];
+    return { contents: make?.(true).content ?? "", loader: "tsx" };
+  });
+} };
+
+/** Every React component in one application bundle, sharing the helpers they import. */
+async function reactApplication(sources: readonly string[]): Promise<number> {
+  const entry: Plugin = { name: "entry", setup(bundler) {
+    bundler.onResolve({ filter: /^component:\d+$/ }, (args) => ({ path: args.path, namespace: "component" }));
+    bundler.onLoad({ filter: /.*/, namespace: "component" }, (args) => ({ contents: sources[Number(args.path.slice("component:".length))]!, loader: "tsx", resolveDir: "." }));
+  } };
+  const bundle = await build({ stdin: { contents: sources.map((_source, index) => `export { default as C${index} } from "component:${index}";`).join("\n"), loader: "ts" },
+    bundle: true, write: false, format: "esm", minify: true, treeShaking: true, jsx: "automatic", external: ["react", "react/*", "react-dom", "parse5", "*.tsx", "*.css"],
+    plugins: [entry, reactHelpers], logLevel: "silent" });
+  return gzipSync(bundle.outputFiles[0]!.contents).length;
+}
+
+const reactSources: string[] = [];
 const vueSources: string[] = [];
 const bundled = process.argv.includes("--bundle");
 let shippedGzip = 0;
@@ -93,6 +115,7 @@ for (const testCase of cases) {
       shippedGzip += await shipped(source, `c${vueSources.length}`);
       vueSources.push(source);
     } catch { skipped++; }
+    try { reactSources.push(generateReactConversion(definition).component); } catch { skipped++; }
   }
 }
-console.log(JSON.stringify({ skipped, targets: Object.fromEntries(totals), ...(bundled ? { vueShippedGzip: shippedGzip, vueApplicationGzip: await application(vueSources) } : {}) }, null, 2));
+console.log(JSON.stringify({ skipped, targets: Object.fromEntries(totals), ...(bundled ? { vueShippedGzip: shippedGzip, vueApplicationGzip: await application(vueSources), reactApplicationGzip: await reactApplication(reactSources) } : {}) }, null, 2));

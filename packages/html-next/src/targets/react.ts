@@ -6,7 +6,8 @@ import { parseDuration } from "../duration.js";
 import { componentName, kebabCase } from "../names.js";
 import { getDomInterface } from "../platform.js";
 import { definitionMayInvokeComponents, elementMatchRoot, rootArms, type ComponentDefinition, type ContextDeclaration, type DataDeclaration, type ElementNode, type EventBinding, type HandlerDeclaration, type ReactiveDeclaration, type SlotContract, type TemplateNode } from "../template.js";
-import { HOST_STATE_TOKENS_SOURCE } from "./host-state-source.js";
+import { REACT_RENDER_SPECIFIER } from "./react-render.js";
+import { formatReact } from "./vue-format.js";
 import { compileComponentStylesForBuild } from "../component-styles-build.js";
 import { stateAttribute } from "../component-styles.js";
 import { targetComponent } from "./backend.js";
@@ -17,6 +18,12 @@ import { declarationTypeNode, normalizeType, parseTypeExpression, parseTypedValu
 import type { PropContract } from "../types.js";
 import postcss from "postcss";
 import { parseFragment } from "parse5";
+
+/** Where the shared rendering module's import goes; filled once the component's code is known. */
+const RENDER_IMPORT = "\u0000render-import";
+/** Rendering helpers a component names directly, as opposed to the expression helpers its lowering records. */
+const REACT_RENDER_COMPONENTS = ["warnUnless", "RetainedText", "RetainedValue", "OutputValue", "cycleCheckedComputed", "KeyedBoundary",
+  "hostStateTokens", "renderPlainSlot", "renderScopedSlot", "markProjected", "writeStatePath"] as const;
 
 export interface ReactConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
@@ -32,6 +39,7 @@ export interface ReactConversionOptions {
   readonly hostSpecifier?: string;
   readonly contextSpecifier?: string;
   readonly depthSpecifier?: string;
+  readonly renderSpecifier?: string;
   readonly guardNestedDepth?: boolean;
   readonly controllerSpecifier?: string;
 }
@@ -39,7 +47,7 @@ export interface ReactConversionOptions {
 export interface ReactConversionOutput {
   readonly component: string;
   readonly css: string;
-  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth")[];
+  readonly helpers: readonly ("props" | "events" | "control" | "data" | "html" | "host" | "context" | "depth" | "render")[];
 }
 
 interface RootAttributes {
@@ -119,8 +127,9 @@ class ReactLowering extends Lowering {
   }
 }
 
-function nullableText(value: string): string {
-  return `String(((value: unknown) => value ?? "")(${value}))`;
+/** A value as HTML Next text: absent and null are empty, as in the live runtime. */
+function nullableText(value: string, lowering: Lowering): string {
+  return `${lowering.use("text")}(${value})`;
 }
 
 const adjustedSvgAttributes = new Map<string, string>();
@@ -155,8 +164,27 @@ function literalStyle(value: string, importantStyles: Array<{ readonly name: str
   });
 }
 
+/**
+ * Authored text as JSX text, written as authored with JSX's own whitespace handling: each
+ * whitespace run is one space. Text JSX would read as markup, or that starts or ends with a space a
+ * formatter could move to a line edge, stays a string expression.
+ */
 function jsxText(value: string): string {
-  return `{${quote(value)}}`;
+  const collapsed = value.replace(/\s+/g, " ");
+  return /[{}<>&]|^ | $/.test(collapsed) ? `{${quote(collapsed)}}` : collapsed;
+}
+
+/**
+ * One text node's authored and computed parts as a template literal, without the indentation at
+ * its ends: the live runtime renders them as one Text node, which a browser shapes as one run.
+ */
+function jsxTextParts(segments: readonly { readonly value: string; readonly computed?: string }[]): string {
+  const parts = segments.map((segment) => segment.computed === undefined ? { text: segment.value.replace(/\s+/g, " ") } : segment);
+  const first = parts[0];
+  if (first !== undefined && "text" in first && /^\s*\n/.test(segments[0]!.value)) first.text = first.text.trimStart();
+  const last = parts.at(-1);
+  if (last !== undefined && "text" in last && /\n\s*$/.test(segments.at(-1)!.value)) last.text = last.text.trimEnd();
+  return `{\`${parts.map((part) => "text" in part ? part.text.replace(/[\\`]|\$(?=\{)/g, (character) => `\\${character}`) : `\${${part.computed}}`).join("")}\`}`;
 }
 
 function selectedOptionDefaults(node: ElementNode): boolean[] {
@@ -214,28 +242,28 @@ function localIdentifier(name: string, scope: RenderScope, state: RenderState): 
 function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, imports: Set<string>, handlers: ReadonlySet<string>, attachments: EventAttachment[], state: RenderState, rootTag?: RootAttributes, projected = false, inSvg = false): string {
   if (node.kind === "text") {
     if (node.segments !== undefined) {
-      const parts: string[] = [];
+      const parts: { value: string; computed?: string }[] = [];
       const retained: { alias: string; value: string; guard?: string }[] = [];
       for (const segment of node.segments) {
         const plan = segment.expressionPlan;
-        if (plan === undefined) { parts.push(quote(segment.value)); continue; }
+        if (plan === undefined) { parts.push({ value: segment.value }); continue; }
         const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
         if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
           state.usesRetainedValue = true;
           const alias = `__retained${state.nextRetainedAlias++}`;
           retained.push({ alias, value: lowering.value(plan.ast, scope), ...(guard === undefined ? {} : { guard }) });
           const local = localScope(scope, [[alias, typeOf(plan.ast, scope)]]);
-          parts.push(nullableText(lowering.text({ kind: "id", name: alias }, local)));
-        } else parts.push(nullableText(lowering.text(plan.ast, scope)));
+          parts.push({ value: segment.value, computed: nullableText(lowering.text({ kind: "id", name: alias }, local), lowering) });
+        } else parts.push({ value: segment.value, computed: nullableText(lowering.text(plan.ast, scope), lowering) });
       }
-      let content = `{[${parts.join(", ")}].join("")}`;
+      let content = jsxTextParts(parts);
       for (const part of retained.toReversed()) content = `<RetainedValue value={${part.value}} accepts={() => ${part.guard ?? "true"}} render={(${part.alias}) => <>${content}</>} />`;
       return content;
     }
     const plan = node.expressionPlan;
     if (plan === undefined) return jsxText(node.value);
     const guard = declaredReferenceGuard(plan, scope, state.definition, undefined, lowering);
-    const text = nullableText(lowering.text(plan.ast, scope));
+    const text = nullableText(lowering.text(plan.ast, scope), lowering);
     if (mayProduceInvalidResult(plan.ast, scope) || guard !== undefined) {
       state.usesRetainedText = true;
       return `<RetainedText value={${lowering.value(plan.ast, scope)}} text={${text}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
@@ -370,21 +398,22 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
     if (html?.kind === "directive" && html.expressionPlan !== undefined) {
       state.usesHtml = true;
       const guard = declaredReferenceGuard(html.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard !== undefined) {
+      // An invalid result, or a declared reference that does not conform, keeps the last content.
+      if (guard !== undefined || mayProduceInvalidResult(html.expressionPlan.ast, scope)) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
-        return `<RetainedValue value={${lowering.text(html.expressionPlan.ast, scope)}} accepts={() => ${guard}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias)}}${projected ? " projected" : ""} />} />`;
+        return `<RetainedValue value={${lowering.text(html.expressionPlan.ast, scope)}} accepts={() => ${guard ?? "true"}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias, lowering)}}${projected ? " projected" : ""} />} />`;
       }
-      return `<SanitizedHtml value={${nullableText(lowering.text(html.expressionPlan.ast, scope))}}${projected ? " projected" : ""} />`;
+      return `<SanitizedHtml value={${nullableText(lowering.text(html.expressionPlan.ast, scope), lowering)}}${projected ? " projected" : ""} />`;
     }
     const value = node.attributes.find((attribute) => attribute.kind === "directive" && attribute.name === "value");
     if (value?.kind === "directive" && value.expressionPlan !== undefined) {
       const guard = declaredReferenceGuard(value.expressionPlan, scope, state.definition, undefined, lowering);
       if (mayProduceInvalidResult(value.expressionPlan.ast, scope) || guard !== undefined) {
         state.usesRetainedText = true;
-        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope))}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
+        return `<><RetainedText value={${lowering.value(value.expressionPlan.ast, scope)}} text={${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} /></>`;
       }
-      return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope))}}</>`;
+      return `<>{${nullableText(lowering.text(value.expressionPlan.ast, scope), lowering)}}</>`;
     }
     if (node.attributes.length === 1 && node.attributes[0]?.kind === "literal" && node.attributes[0].name === "slot") {
       return `<template slot=${quote(node.attributes[0].value)}${projected ? ' data-slotted=""' : ""}>${node.children.map((child) => renderNode(child, scope, lowering, imports, handlers, attachments, state, undefined, false, inSvg)).join("")}</template>`;
@@ -545,11 +574,12 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         const defaults = authoredControlDefaults(node, name);
         control = { name, value, defaults, nativeProperty: true };
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-        const alias = guard === undefined ? value : `__retained${state.nextRetainedAlias++}`;
-        if (guard !== undefined) {
+        const retains = guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope);
+        const alias = retains ? `__retained${state.nextRetainedAlias++}` : value;
+        if (retains) {
           state.usesRetainedValue = true;
-          retainedBindings.push({ alias, value, accepts: `() => ${guard}` });
-          control = { ...control, accepts: guard };
+          retainedBindings.push({ alias, value, accepts: `() => ${guard ?? "true"}` });
+          if (guard !== undefined) control = { ...control, accepts: guard };
         }
         const selectValue = node.name === "select" && node.attributes.some((entry) => entry.kind === "literal" && entry.name === "multiple")
           ? `[String(${alias})]` : `String(${alias})`;
@@ -562,10 +592,10 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
         bindings.push(`${name === "checked" ? "defaultChecked" : "defaultValue"}={hasMounted.current ? ${authored} : ${initial}}`);
       } else if (attribute.name === "textContent") {
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-        if (guard !== undefined) {
+        if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
           state.usesRetainedText = true;
-          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope))}} accepts={() => ${guard}} />`;
-        } else content = `{${nullableText(value)}}`;
+          content = `<RetainedText value={${value}} text={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}}${guard === undefined ? "" : ` accepts={() => ${guard}}`} />`;
+        } else content = `{${nullableText(value, lowering)}}`;
       }
       else {
         const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
@@ -586,7 +616,7 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
       const retained = mayProduceInvalidResult(attribute.expressionPlan.ast, scope) || guard !== undefined;
       const raw = lowering.value(attribute.expressionPlan.ast, scope);
-      const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope));
+      const text = nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering);
       const defined = attribute.expressionPlan.ast.kind === "array" || attribute.expressionPlan.ast.kind === "object"
         ? undefined : `(${raw}) !== undefined`;
       const accepts = [defined, guard === undefined ? undefined : `(${guard})`].filter(Boolean).join(" && ");
@@ -603,11 +633,11 @@ function renderNode(node: TemplateNode, scope: RenderScope, lowering: Lowering, 
       if (attribute.expressionPlan === undefined) fail("HT030", `Uncompiled HTML ${attribute.expression}.`);
       state.usesHtml = true;
       const guard = declaredReferenceGuard(attribute.expressionPlan, scope, state.definition, undefined, lowering);
-      if (guard !== undefined) {
+      if (guard !== undefined || mayProduceInvalidResult(attribute.expressionPlan.ast, scope)) {
         state.usesRetainedValue = true;
         const alias = `__retained${state.nextRetainedAlias++}`;
-        content = `<RetainedValue value={${lowering.text(attribute.expressionPlan.ast, scope)}} accepts={() => ${guard}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias)}} />} />`;
-      } else content = `<SanitizedHtml value={${nullableText(lowering.text(attribute.expressionPlan.ast, scope))}} />`;
+        content = `<RetainedValue value={${lowering.text(attribute.expressionPlan.ast, scope)}} accepts={() => ${guard ?? "true"}} render={(${alias}) => <SanitizedHtml value={${nullableText(alias, lowering)}} />} />`;
+      } else content = `<SanitizedHtml value={${nullableText(lowering.text(attribute.expressionPlan.ast, scope), lowering)}} />`;
     } else {
       fail("HT030", `React conversion of ${attribute.kind === "directive" ? `$${attribute.name}` : `:${attribute.name}`} is not implemented.`);
     }
@@ -736,7 +766,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   }
   const template = definition.template;
   if (template.name === "template" && template.flow?.kind !== "match") fail("HT030", "React conversion requires one element root.");
-  const lowering = new ReactLowering(allocate("htmlNextAuthoredCheck"));
+  const lowering = new ReactLowering("warnUnless");
   const code = new Map<string, string>();
   const types = new Map<string, Static>();
   for (const prop of target.props) {
@@ -850,7 +880,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
   const contextMarkup = states.reduceRight((content, state) =>
     `<${contextExportName(definition.contract.tag, state.name)}.Provider value={{ value: ${valueNames.get(state.name)!} }}>${content}</${contextExportName(definition.contract.tag, state.name)}.Provider>`, rootMarkup);
   const componentMarkup = nestedDepthLimit === undefined ? contextMarkup : `<NestedDepthContext.Provider value={nestedDepth + 1}>${contextMarkup}</NestedDepthContext.Provider>`;
-  const component = [
+  const body = [
     `// Generated by HTML Next ${version} for React 19. Do not edit.`,
     'import React from "react";',
     'import type { ReactNode } from "react";',
@@ -869,6 +899,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     ...(usesController ? [`import { useComponentHost } from ${quote(options.hostSpecifier ?? "./host")};`] : []),
     ...(usesContext ? [`import { componentContext } from ${quote(options.contextSpecifier ?? "./context")};`] : []),
     ...(nestedDepthLimit === undefined ? [] : [`import { NestedDepthContext } from ${quote(options.depthSpecifier ?? "./depth")};`]),
+    RENDER_IMPORT,
     ...(styles.css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${name}.css`)};`]),
     ...[...imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.tsx`)};`),
     ...[...new Map(contexts.filter((context) => context.from !== definition.contract.tag || !providedContexts.has(context.name))
@@ -1192,18 +1223,8 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       `    dispatch: (root: Element, name: string, detail?: unknown) => { switch (name) { ${target.events.map((event) => `case ${quote(event.name)}: return dispatchDeclared(root, name, detail, ${eventSchemas.get(event.name)!}.type, ${eventSchemas.get(event.name)!}.init);`).join(" ")} default: return root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable: false })); } },`,
       `  });`,
     ] : []),
-    ...lowering.fallbacks().flatMap((source) => source.split("\n").map((line) => `  ${line}`)),
     `  return (${componentMarkup});`,
     "}",
-    ...(renderState.usesRetainedText ? [
-      "",
-      "function RetainedText({ value, text, accepts }: { readonly value: unknown; readonly text: string; readonly accepts?: () => boolean }): ReactNode {",
-      "  const accepted = value !== Symbol.for('html-next.invalid-result') && (accepts?.() ?? true);",
-      "  const last = React.useRef(accepted ? text : \"\");",
-      "  React.useLayoutEffect(() => { if (accepted) last.current = text; }, [accepted, text]);",
-      "  return accepted ? text : last.current;",
-      "}",
-    ] : []),
     ...(usesScopedAttachments ? [
       "",
       "type ScopedPath = (() => readonly (string | number)[]) | undefined;",
@@ -1245,144 +1266,13 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       "  return render(ref);",
       "}",
     ] : []),
-    ...(renderState.usesOutputValue ? [
-      "",
-      "function OutputValue({ htmlNextValue, htmlNextText, htmlNextRetain, htmlNextAccepts = true, ref, ...attrs }: React.OutputHTMLAttributes<HTMLOutputElement> & { readonly htmlNextValue: unknown; readonly htmlNextText: string; readonly htmlNextRetain: boolean; readonly htmlNextAccepts?: boolean; readonly ref?: React.Ref<HTMLOutputElement> }): ReactNode {",
-      "  const accepted = !htmlNextRetain || (htmlNextValue !== undefined && htmlNextValue !== Symbol.for('html-next.invalid-result') && htmlNextAccepts);",
-      "  const last = React.useRef(accepted ? htmlNextText : \"\");",
-      "  const output = React.useRef<HTMLOutputElement | null>(null);",
-      "  const attach = React.useCallback((element: HTMLOutputElement | null) => {",
-      "    output.current = element;",
-      "    if (typeof ref === \"function\") {",
-      "      const cleanup = ref(element);",
-      "      return () => { output.current = null; if (typeof cleanup === \"function\") cleanup(); else ref(null); };",
-      "    }",
-      "    if (ref != null) (ref as { current: HTMLOutputElement | null }).current = element;",
-      "    return () => { output.current = null; if (ref != null) (ref as { current: HTMLOutputElement | null }).current = null; };",
-      "  }, [ref]);",
-      "  const shown = accepted ? htmlNextText : last.current;",
-      "  React.useLayoutEffect(() => {",
-      "    if (accepted) last.current = htmlNextText;",
-      "    if (output.current !== null && output.current.textContent !== shown) output.current.textContent = shown;",
-      "  });",
-      "  return <output {...attrs} ref={attach}>{shown}</output>;",
-      "}",
-    ] : []),
-    ...(renderState.usesRetainedValue ? [
-      "",
-      "function RetainedValue({ value, accepts, render }: { readonly value: unknown; readonly accepts?: (value: unknown) => boolean; readonly render: (value: any, hasValue: boolean) => ReactNode }): ReactNode {",
-      "  const accepted = value !== Symbol.for('html-next.invalid-result') && (accepts === undefined ? value !== undefined : accepts(value));",
-      "  const last = React.useRef<{ value: unknown; hasValue: boolean }>({ value: undefined, hasValue: false });",
-      "  React.useLayoutEffect(() => { if (accepted) last.current = { value, hasValue: true }; }, [accepted, value]);",
-      "  return render(accepted ? value : last.current.value, accepted || last.current.hasValue);",
-      "}",
-    ] : []),
-    ...(computed.length === 0 ? [] : [
-      "",
-      "function cycleCheckedComputed<T>(evaluate: () => T, cache = true): { get(): T } {",
-      "  let reading = false;",
-      "  let ready = false;",
-      "  let cached!: T;",
-      "  return { get() {",
-      "    if (reading) {",
-      "      const message = 'A reactive computed value depends on itself.';",
-      "      throw Object.assign(new Error(`HR006: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR006', message }) });",
-      "    }",
-      "    if (!cache || !ready) {",
-      "      reading = true;",
-      "      try { cached = evaluate(); ready = true; } finally { reading = false; }",
-      "    }",
-      "    return cached;",
-      "  } };",
-      "}",
-    ]),
-    ...(usesKeyedLists ? [
-      "",
-      "type KeyedRowsRender = () => ReactNode;",
-      "interface KeyedBoundaryState { readonly failed: boolean; readonly renderRows: KeyedRowsRender; }",
-      "class KeyedBoundary extends React.Component<{ readonly renderRows: KeyedRowsRender }, KeyedBoundaryState> {",
-      "  state: KeyedBoundaryState = { failed: false, renderRows: this.props.renderRows };",
-      "  private lastCommittedRender: KeyedRowsRender | undefined;",
-      "  static getDerivedStateFromProps(props: { readonly renderRows: KeyedRowsRender }, state: KeyedBoundaryState): Partial<KeyedBoundaryState> | null {",
-      "    return props.renderRows === state.renderRows ? null : { failed: false, renderRows: props.renderRows };",
-      "  }",
-      "  static getDerivedStateFromError(error: unknown): Partial<KeyedBoundaryState> {",
-      "    if ((error as { diagnostic?: { code?: string } } | null)?.diagnostic?.code !== 'HR004') throw error;",
-      "    return { failed: true };",
-      "  }",
-      "  componentDidMount(): void { this.lastCommittedRender = this.props.renderRows; }",
-      "  componentDidUpdate(): void { if (!this.state.failed) this.lastCommittedRender = this.props.renderRows; }",
-      "  render(): ReactNode {",
-      "    return <KeyedRows renderRows={this.state.failed ? this.lastCommittedRender ?? (() => null) : this.props.renderRows} />;",
-      "  }",
-      "}",
-      "function KeyedRows(props: { readonly renderRows: KeyedRowsRender }): ReactNode { return props.renderRows(); }",
-    ] : []),
-    ...(styles.stateNames.length === 0 ? [] : ["", HOST_STATE_TOKENS_SOURCE]),
-    ...(usesSlots ? [
-      "",
-      "function renderPlainSlot(slot: ReactNode | ((props: Record<string, any>) => ReactNode) | undefined, fallback: ReactNode): ReactNode {",
-      "  if (typeof slot === \"function\") return null;",
-      "  return hasSlotContent(slot) ? markProjected(slot) : fallback;",
-      "}",
-      "",
-      "function hasSlotContent(value: ReactNode): boolean {",
-      "  if (value == null || typeof value === \"boolean\" || value === \"\") return false;",
-      "  if (Array.isArray(value)) return value.some(hasSlotContent);",
-      "  if (React.isValidElement(value) && value.type === React.Fragment) {",
-      "    return hasSlotContent((value.props as { children?: ReactNode }).children);",
-      "  }",
-      "  return true;",
-      "}",
-    ] : []),
-    ...(usesScopedSlots ? [
-      "",
-      "function renderScopedSlot<T extends Record<string, unknown>>(slot: ReactNode | ((props: T) => ReactNode) | undefined, values: T, name: string, fallback: ReactNode): ReactNode {",
-      "  if (slot === undefined) return fallback;",
-      "  if (typeof slot !== \"function\") {",
-      "    const message = 'Scoped slot `' + name + '` requires a consumer <template slot=\"' + name + '\">.';",
-      "    throw Object.assign(new Error(`HR007: ${message}`), { name: 'HtmlDiagnosticError', diagnostic: Object.freeze({ code: 'HR007', message }) });",
-      "  }",
-      "  return markProjected(slot(values));",
-      "}",
-    ] : []),
-    ...(usesSlots || usesScopedSlots ? [
-      "",
-      "function markProjected(value: ReactNode): ReactNode {",
-      "  if (Array.isArray(value)) return value.map(markProjected);",
-      "  if (!React.isValidElement(value)) return value;",
-      "  if (value.type === React.Fragment) return React.cloneElement(value, {}, markProjected((value.props as { children?: ReactNode }).children));",
-      "  return React.cloneElement(value as React.ReactElement<Record<string, unknown>>, { 'data-slotted': '' });",
-      "}",
-    ] : []),
-    ...(usesNestedHandlerWrites ? [
-      "",
-      "function writeStatePath<T>(root: T, path: readonly unknown[], value: unknown): T {",
-      "  if (root === null || typeof root !== 'object') return root;",
-      "  const result = Array.isArray(root) ? root.slice() : { ...root };",
-      "  let source: unknown = root;",
-      "  let target: unknown = result;",
-      "  for (const [index, segment] of path.entries()) {",
-      "    if (typeof segment !== 'string' && typeof segment !== 'number') return root;",
-      "    if (index === path.length - 1) {",
-      "      if (Object.is((source as Record<string | number, unknown>)[segment], value)) return root;",
-      "      (target as Record<string | number, unknown>)[segment] = value;",
-      "    }",
-      "    else {",
-      "      const next = (source as Record<string | number, unknown>)[segment];",
-      "      if (next === null || typeof next !== 'object') return root;",
-      "      const copy = Array.isArray(next) ? next.slice() : { ...next };",
-      "      (target as Record<string | number, unknown>)[segment] = copy;",
-      "      source = next; target = copy;",
-      "    }",
-      "  }",
-      "  return result as T;",
-      "}",
-    ] : []),
     "",
-    ...lowering.moduleFallbacks(),
-    ...lowering.authoredFallbacks(),
   ].join("\n");
+  // The shared module's helpers this component calls: the expression helpers its lowering used,
+  // and the rendering components and functions its markup and handlers name.
+  const rendered = [...new Set([...lowering.helpers(), ...REACT_RENDER_COMPONENTS.filter((name) => new RegExp(`\\b${name}\\b`).test(body))])].sort();
+  const component = formatReact(body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? ""
+    : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? REACT_RENDER_SPECIFIER)};\n`), `${name}.tsx`);
   return {
     component,
     css: styles.css,
@@ -1395,6 +1285,7 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
       ...(usesController ? ["host" as const] : []),
       ...(usesContext ? ["context" as const] : []),
       ...(nestedDepthLimit === undefined ? [] : ["depth" as const]),
+      ...(rendered.length === 0 ? [] : ["render" as const]),
     ],
   };
 }

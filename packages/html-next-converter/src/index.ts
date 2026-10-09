@@ -35,6 +35,7 @@ import {
   reactHostArtifact,
   reactContextArtifact,
   reactDepthArtifact,
+  reactRenderArtifact,
   type DiagnosticLocation,
   type ComponentGraph,
   type TemplateNode,
@@ -491,6 +492,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           hostSpecifier: reactHelperSpecifier("host"),
           contextSpecifier: reactHelperSpecifier("context"),
           depthSpecifier: reactHelperSpecifier("depth"),
+          renderSpecifier: reactHelperSpecifier("render"),
           ...(node.definition.controller === undefined ? {} : { controllerSpecifier: node.definition.controller }),
         })).component;
       } catch (error) {
@@ -604,6 +606,9 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   }
   if (options.target === "react" && neededHelpers.has("depth")) {
     claim(reactDepthArtifact(), "helper");
+  }
+  if (options.target === "react" && neededHelpers.has("render")) {
+    claim(reactRenderArtifact(), "helper");
   }
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");

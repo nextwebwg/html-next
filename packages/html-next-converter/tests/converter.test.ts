@@ -337,8 +337,8 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       entries: ["components/**"], publicRootURL: "/app/" });
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "react/data.ts" && artifact.kind === "helper"));
     const component = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
-    assert.match(component, /source: "\.\/api\/feed", definition: "\/app\/components\/feed\.html"/);
-    assert.match(component, /debounce: 500, poll: 1500/);
+    assert.match(component, /source: "\.\/api\/feed",\s+definition: "\/app\/components\/feed\.html"/);
+    assert.match(component, /debounce: 500,\s+poll: 1500/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
     await typecheckReact(root, manifest.output.artifacts
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
@@ -567,7 +567,7 @@ export const render = () => renderToStaticMarkup(<XProvider><XReader /></XProvid
       .filter((artifact) => artifact.path.endsWith(".tsx") || artifact.path.endsWith(".ts") || artifact.path.endsWith(".d.ts"))
       .map((artifact) => join(outDirectory, artifact.path)));
     const component = await readFile(join(outDirectory, "react/XCard.tsx"), "utf8");
-    assert.match(component, /reason.*action.*programmatic/);
+    assert.match(component, /reason[\s\S]*action[\s\S]*programmatic/);
     assert.doesNotMatch(component, /@nextwebwg\/html-next/);
   });
 
