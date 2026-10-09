@@ -39,7 +39,7 @@ describe("resolved prop and state selectors", () => {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
       // The build scopes the root as :scope; Vue's scoped styles select it by its tag class.
-      assert.match(result.css, /(?::scope|\.x-style-contract)\.active/);
+      assert.match(result.css, /:scope\.active/);
     }
   });
 
@@ -75,4 +75,15 @@ describe("resolved prop and state selectors", () => {
       assert.throws(() => compile(":host-state([sourceEvent]) { color: red; }", event), /HY002/);
     }
   });
+});
+
+
+it("keeps Vue grouping rules in the component scope and keyframes document-wide", () => {
+  const result = compileComponentStylesForVue(`@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }
+    @media (min-width: 0px) { :host::before { animation: pulse 1s; } *::after { box-sizing: border-box; } }`, definition);
+  assert.match(result.css, /^@keyframes pulse/);
+  assert.match(result.css, /@scope \(\.x-style-contract\) \{\s*@media/);
+  assert.match(result.css, /:scope::before/);
+  assert.match(result.css, /\*::after/);
+  assert.doesNotMatch(result.css.slice(result.css.indexOf("@scope")), /@keyframes/);
 });

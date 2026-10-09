@@ -886,10 +886,11 @@ void [scalar, invalidObject, invalidSymbol, invalidEmpty];
 
     const vue = artifacts.get("vue/XFeature.vue")!;
     const style = vue.slice(vue.indexOf("<style scoped>"));
-    // Vue's scoped styles select the root through its tag as a class, and a styled child component
-    // through the same class on its invocation, which Vue passes to the child's root.
-    assert.match(style, /\.x-feature \{\n  display: block;\n\}/);
-    assert.match(style, /\.x-feature\[data-x-feature-state~="open"\] \.panel/);
+    // Vue's scoped styles sit in a native scope rooted at the root's tag class and bounded by each
+    // invoked component's tag class, which Vue passes to that component's root.
+    assert.match(style, /@scope \(\.x-feature\) to \(\.x-badge\)/);
+    assert.match(style, /:scope \{\s+display: block;\s+\}/);
+    assert.match(style, /:scope\[data-x-feature-state~="open"\] \.panel/);
     assert.match(style, /:slotted\(p\)/);
     assert.match(style, /:is\(x-badge, \.x-badge\)/);
     assert.match(vue, /<section\s+class="x-feature panel"/);
