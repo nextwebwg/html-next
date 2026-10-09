@@ -48,6 +48,7 @@ import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
   compileComponentStyles,
+  COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   markProjectedRoot,
   stateAttribute,
@@ -331,7 +332,17 @@ function registryFor(root: Document): DocumentRegistry {
 const stateNamesByDefinition = new WeakMap<ComponentDefinition, readonly string[]>();
 
 type ComponentStyleCompiler = (css: string, definition: ComponentDefinition, source?: string,
-  adopters?: readonly ComponentDefinition[]) => CompiledComponentStyles;
+  adopters?: readonly ComponentDefinition[], includeBoundaryReset?: boolean) => CompiledComponentStyles;
+
+/** Shared platform-workaround rules are independent of authored import conditions and layers. */
+function installStyleBoundaries(document: Document): void {
+  if (document.head.querySelector("style[data-html-next-style-boundaries]") !== null) return;
+  // Owned build sheets may be conditional or disabled independently of live styles.
+  const style = document.createElement("style");
+  style.setAttribute("data-html-next-style-boundaries", "");
+  style.textContent = COMPONENT_STYLE_BOUNDARIES;
+  document.head.append(style);
+}
 
 const sharedStyleDefinitions = new WeakMap<Document, Map<string, ComponentDefinition>>();
 
@@ -350,8 +361,9 @@ function installSharedStyles(definition: ComponentDefinition, document: Document
     const tags = adopters.map(owner => owner.contract.tag).join(" ");
     if (carrier.getAttribute("data-html-next-shared-adopters") !== tags) {
       const compiled = compiler === undefined
-        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters)
-        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters);
+        ? compileComponentStyles(stylesheet.css, adopters[0]!, document, stylesheet.url, adopters, false)
+        : compiler(stylesheet.css, adopters[0]!, stylesheet.url, adopters, false);
+      if (compiled.css !== "") installStyleBoundaries(document);
       carrier.setAttribute("data-html-next-shared-styles", id);
       carrier.setAttribute("data-html-next-shared-adopters", tags);
       carrier.setAttribute("data-html-next-style-states", JSON.stringify(compiled.stateNamesByTag ?? { [adopters[0]!.contract.tag]: compiled.stateNames }));
@@ -386,8 +398,9 @@ function installComponentStyles(
   if (definition.css === "" && carrier === undefined && (definition.stylesheets?.length ?? 0) === 0) return undefined;
   const style = carrier ?? document.createElement("style");
   const compiled = styleCompiler === undefined
-    ? compileComponentStyles(definition.css, definition, document)
-    : styleCompiler(definition.css, definition);
+    ? compileComponentStyles(definition.css, definition, document, undefined, undefined, false)
+    : styleCompiler(definition.css, definition, undefined, undefined, false);
+  if (compiled.css !== "") installStyleBoundaries(document);
   const stateNames = [...new Set([...sharedNames, ...compiled.stateNames])];
   stateNamesByDefinition.set(definition, stateNames);
   style.textContent = compiled.css;

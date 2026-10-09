@@ -12,6 +12,7 @@ import {
   componentStyleNameResolver,
   guardComponentPseudoElements,
   COMPONENT_ATTRIBUTE,
+  COMPONENT_STYLE_BOUNDARIES,
   type CompiledComponentStyles,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
@@ -31,8 +32,9 @@ export function compileComponentStylesForBuild(
   definition: ComponentDefinition,
   source?: string,
   adopters?: readonly ComponentDefinition[],
+  includeBoundaryReset = true,
 ): CompiledComponentStyles {
-  const compiled = compileStyles(css, definition, source, undefined, adopters);
+  const compiled = compileStyles(css, definition, source, undefined, adopters, includeBoundaryReset);
   return adopters === undefined ? withImportedStateNames(compiled, definition) : compiled;
 }
 
@@ -42,9 +44,9 @@ function withImportedStateNames(compiled: CompiledComponentStyles, definition: C
 }
 
 /** One shared body, with selector tests resolved independently for every adopting contract. */
-export function compileSharedComponentStylesForBuild(css: string, adopters: readonly ComponentDefinition[], source?: string): CompiledComponentStyles {
+export function compileSharedComponentStylesForBuild(css: string, adopters: readonly ComponentDefinition[], source?: string, includeBoundaryReset = true): CompiledComponentStyles {
   if (adopters.length === 0) return { css: "", stateNames: [] };
-  return compileStyles(css, adopters[0]!, source, undefined, adopters);
+  return compileStyles(css, adopters[0]!, source, undefined, adopters, includeBoundaryReset);
 }
 
 /** Delivers a closed graph in definition order, interleaving imports and local overrides. */
@@ -53,11 +55,12 @@ export function compileComponentGraphStylesForBuild(definitions: readonly Compon
   const css: string[] = [];
   for (const definition of definitions) {
     for (const group of groups.filter(group => group.adopters[0] === definition)) {
-      css.push(wrapStylesheetConditions(compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url).css, group.stylesheet.conditions));
+      css.push(wrapStylesheetConditions(compileSharedComponentStylesForBuild(group.stylesheet.css, group.adopters, group.stylesheet.url, false).css, group.stylesheet.conditions));
     }
-    css.push(compileComponentStylesForBuild(definition.css, definition).css);
+    css.push(compileComponentStylesForBuild(definition.css, definition, undefined, undefined, false).css);
   }
-  return hoistStylesheetNamespaces(css.filter(part => part !== "").join("\n"));
+  const body = css.filter(part => part !== "").join("\n");
+  return hoistStylesheetNamespaces(body === "" ? "" : COMPONENT_STYLE_BOUNDARIES + "\n" + body);
 }
 
 /** Snippets are opaque on the server, so scope by authored ownership instead of mutating them. */
@@ -68,7 +71,7 @@ export function compileComponentStylesForSvelte(css: string, definition: Compone
 }
 
 function compileStyles(css: string, definition: ComponentDefinition, source?: string,
-  projected?: string, adopters: readonly ComponentDefinition[] = [definition]): CompiledComponentStyles {
+  projected?: string, adopters: readonly ComponentDefinition[] = [definition], includeBoundaryReset = true): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const renamed = renameComponentPseudoClasses(normalizeStylesheetNamespacesForBuild(css));
@@ -113,7 +116,7 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
   const own = compile("own");
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), projected), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), projected, includeBoundaryReset), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 
