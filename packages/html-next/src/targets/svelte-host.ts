@@ -3,6 +3,7 @@ import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 
 const SOURCE = `import { flushSync, untrack } from "svelte";
 import { cycleCheckedComputed } from "./reactivity.svelte";
+import { componentRoot } from "./render.svelte";
 
 import { observeConnection } from "./connection.svelte";
 
@@ -125,7 +126,7 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         const current = host.root;
         const slot = name === "default" ? "" : name;
         return Array.from(current.querySelectorAll("[data-slotted]"))
-          .filter((element) => element.parentElement?.closest("[data-component]") === current &&
+          .filter((element) => componentRoot(element.parentElement) === current &&
             (element.getAttribute("slot") ?? "") === slot);
       },
       has: (_target, name) => typeof name === "string" && host.slots[name]!.length > 0,

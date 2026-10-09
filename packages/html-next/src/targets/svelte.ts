@@ -1,7 +1,7 @@
 /** Svelte 5 output from the shared, checked component definition. */
 import { fail } from "../diagnostics.js";
 import type { CompiledExpression } from "../expression.js";
-import { compileComponentStylesForSvelte, SVELTE_OWNER_ATTRIBUTE } from "../component-styles-build.js";
+import { compileComponentStylesForSvelte } from "../component-styles-build.js";
 import { kebabCase, componentName } from "../names.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, type TypeNode } from "../type-system.js";
 import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "../template.js";
@@ -31,7 +31,6 @@ function unknownValueScope(name: string): Scope {
 export interface SvelteConversionOptions {
   readonly slotsByTag?: ReadonlyMap<string, readonly SlotContract[]>;
   readonly importSpecifier?: (tag: string) => string;
-  readonly stylesheetSpecifier?: string;
   readonly rootBindings?: readonly string[] | undefined;
   readonly rootDecorations?: { readonly classes: boolean; readonly styles: boolean } | undefined;
   readonly decorationsSpecifier?: string;
@@ -51,7 +50,6 @@ export interface SvelteConversionOptions {
 
 export interface SvelteConversionOutput {
   readonly component: string;
-  readonly css: string;
   readonly usesHtml: boolean;
   readonly helpers: readonly ("props" | "html" | "events" | "control" | "data" | "reactivity" | "host" | "connection" | "decorations" | "style" | "render")[];
 }
@@ -92,11 +90,12 @@ function literalPropValue(value: string, contract: PropContract): string {
   return parsed.ok ? literalValueSource(parsed.value) : `${quote(value)} as any`;
 }
 
-/** A missing class base differs from an authored empty class attribute. */
-function classBaseSource(node: ElementNode, root: boolean): string {
+/** A missing class base differs from an authored empty class attribute. `scope` precedes the authored classes. */
+function classBaseSource(node: ElementNode, root: boolean, scope: readonly string[]): string {
   const literal = node.attributes.find((entry) => entry.kind === "literal" && entry.name === "class");
   const empty = literal?.kind === "literal" ? quote("") : root ? `(rest.class == null || rest.class === false ? undefined : ${quote("")})` : "undefined";
-  return `([${literal?.kind === "literal" ? quote(literal.value) : quote("")}${root ? ", rest.class" : ""}].filter(Boolean).join(" ") || ${empty})`;
+  const authored = [...scope, ...literal?.kind === "literal" ? [literal.value] : []].join(" ");
+  return `([${quote(authored)}${root ? ", rest.class" : ""}].filter(Boolean).join(" ") || ${empty})`;
 }
 
 function checkSupported(definition: ComponentDefinition): { importedNames: ReadonlySet<string>; refs: Set<string> } {
@@ -142,6 +141,11 @@ interface RenderContext {
   usesSampledSlots: boolean;
   readonly propContractsByTag?: SvelteConversionOptions["propContractsByTag"];
   readonly styleOwner?: string;
+  /** The scoped styles' root and limits: the root's tag, and each invoked component's, as classes. */
+  readonly hostClass: boolean;
+  readonly styledComponents: ReadonlySet<string>;
+  /** Scope classes the root takes through its attribute spread, when no class binding writes them. */
+  rootScope?: string;
   htmlSites: number;
   readonly localHtmlSites: Set<number>;
   readonly optionHtmlSites: Set<number>;
@@ -575,6 +579,11 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     bindings.push(`{@attach ${context.bindingHelperName}("value", () => Object.keys(rest).includes("value") ? ${read} : Symbol.for('html-next.invalid-result'))}`);
   }
   const authoredClass = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "class") : undefined;
+  // The scoped styles' root and limits are the root's and each invoked component's tag, as classes.
+  const scopeClasses = [
+    ...(root && context.hostClass ? [context.definition.contract.tag] : []),
+    ...(component && context.styledComponents.has(node.name) ? [node.name] : []),
+  ];
   const authoredStyle = root ? node.attributes.find((attribute) => attribute.kind === "literal" && attribute.name === "style") : undefined;
   const rootScope = root ? scope as RootScope : undefined;
   const reflectedNames = new Set(rootScope?.props.map((prop) => `data-${kebabCase(prop)}`) ?? []);
@@ -674,6 +683,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         context.usesAttributeBinding = true;
         literals.push(`{...(typeof document === 'undefined' ? { ${objectKey(attribute.name)}: ${quote(attribute.value)} } : {})}`);
         if (!nativeControlBinding(node.name, attribute.name)) bindings.push(`{@attach ${context.bindingHelperName}(${quote(attribute.name)}, () => ${quote(attribute.value)})}`);
+        continue;
+      }
+      if (component && attribute.name === "class" && scopeClasses.length > 0) {
+        literals.push(`class={${quote([...scopeClasses, attribute.value].join(" "))}}`);
         continue;
       }
       const declared = childProp(attribute.name);
@@ -879,6 +892,10 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
   if (selectedBindings.length > 0) bindings.push(`${BINDING_INPUTS_PROP}={{ ${selectedBindings.join(", ")} }}`);
   // Svelte preserves NUL-named component props; a spread adds a proxy to every invocation.
   if (literalInputs.length > 0) bindings.push(`${LITERAL_INPUTS_PROP}={{ ${literalInputs.join(", ")} }}`);
+  if (component && !root && !decoratesClasses && scopeClasses.length > 0 && !node.attributes.some((attribute) => attribute.name === "class")) {
+    // ponytail: an invocation that binds `class` keeps its binding and leaves the scope unlimited there.
+    literals.push(`class={${quote(scopeClasses.join(" "))}}`);
+  }
   const attributes = [...(selectedOption === undefined ? [] : [selectedOption]), ...literals];
   if (root) {
     attributes.push("{...rootAttrs()}");
@@ -889,7 +906,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
       ? "{@attach (element: Element) => { rootElement = element; return () => { if (rootElement === element) rootElement = undefined; }; }}"
       : "bind:this={rootElement}");
     if (authoredClass?.kind === "literal" && !decoratesClasses) {
-      const base = classBaseSource(node, root);
+      const base = classBaseSource(node, root, scopeClasses);
       if (component) attributes.push(`class={${base}}`);
       else {
         context.usesAttributeBinding = true;
@@ -898,6 +915,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
         attributes.push(`{@attach ${context.bindingHelperName}("class", () => ${base})}`);
       }
     }
+    else if (!decoratesClasses && scopeClasses.length > 0) context.rootScope = scopeClasses.join(" ");
     if (authoredStyle?.kind === "literal" && (component || !decoratesStyles)) {
       attributes.push(`style={[${quote(authoredStyle.value)}, rest.style].filter(Boolean).join("; ")}`);
     }
@@ -920,14 +938,14 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     if (component) {
       if (decoratesClasses) {
         context.usesInvocationClasses = true;
-        const base = classBaseSource(node, root);
+        const base = classBaseSource(node, root, scopeClasses);
         attributes.push(`class={${context.initialClassName}(${base}, ${rules})}`);
       }
       attributes.push(`{...{ ${quote(DECORATIONS_PROP)}: ${rules} }}`);
     } else {
       context.usesDecorationAttachment = true;
       if (decoratesClasses) {
-        const base = classBaseSource(node, root);
+        const base = classBaseSource(node, root, scopeClasses);
         context.usesAttributeBinding = true;
         if (root) context.rootAttributeBindings.add("class");
         attributes.push(`{...(typeof document === 'undefined' ? { class: classText(${base}, ${rules}) } : {})}`);
@@ -943,7 +961,6 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     }
   }
   attributes.push(...bindings);
-  if (!component && context.styleOwner !== undefined) attributes.push(`${SVELTE_OWNER_ATTRIBUTE}=${quote(context.styleOwner)}`);
   if (node.ref !== undefined) {
     context.refs.add(node.ref);
     attributes.push(`{@attach ${context.refAttachmentName}(${quote(node.ref)})}`);
@@ -997,8 +1014,9 @@ function svelteImport(names: readonly string[]): string[] {
 }
 
 /** The options \`rootAttributes\` takes, only those that differ from its defaults. */
-function rootAttributeOptions(nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
+function rootAttributeOptions(scope: string | undefined, nativeRoot: boolean, omit: readonly string[], clientOmit: readonly string[], server: string | undefined): string {
   const options = [
+    ...(scope === undefined ? [] : [`scope: ${quote(scope)}`]),
     ...(nativeRoot ? [] : ["forwardBindings: true"]),
     ...(omit.length === 0 ? [] : [`omit: ${JSON.stringify(omit)}`]),
     ...(clientOmit.length === 0 ? [] : [`clientOmit: ${JSON.stringify(clientOmit)}`]),
@@ -1039,7 +1057,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   const target = targetComponent(definition);
   const usesController = definition.controller !== undefined;
   const styles = compileComponentStylesForSvelte(definition.css, definition);
-  const css = styles.css;
   const declarations = definition.declarations ?? [];
   const states = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "state");
   const computed = declarations.filter((declaration): declaration is ReactiveDeclaration => declaration.kind === "computed");
@@ -1113,7 +1130,8 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   };
   const lowering = new Lowering("warnUnless");
   const context: RenderContext = { lowering, definition, handlerNames, inputNames, imports: new Set(), slotsByTag: options.slotsByTag, usesScopedSlots: false, usesSampledSlots: false, propContractsByTag: options.propContractsByTag,
-    ...((css !== "" || (definition.stylesheets?.length ?? 0) > 0) && (definition.slots?.length ?? 0) > 0 ? { styleOwner: definition.contract.tag } : {}),
+    ...(styles.hashed === true ? { styleOwner: definition.contract.tag } : {}),
+    hostClass: styles.components !== undefined, styledComponents: new Set(styles.components ?? []),
     htmlSites: 0, localHtmlSites: new Set(), optionHtmlSites: new Set(), retentions: new Map(), localRetentions: new Set(),
     usesAttributeBinding: false, usesComponentBindings: false, usesDeclaredFormats: false, usesProperties: false, usesDecorations: false, usesStyleDecorations: false, usesInvocationClasses: false, initialClassName: freshIdentifier("htmlNextInitialClass"), usesDecorationAttachment: false, rootDecorations: options.rootDecorations, rootBindings: options.rootBindings, initialBindingsName: freshIdentifier("htmlNextInitialBindings"), initialBindingReadName: freshIdentifier("htmlNextInitialBinding"), nativeBindingReadName: freshIdentifier("htmlNextNativeBinding"), rootBindingAttributeName: freshIdentifier("htmlNextRootBindingAttribute"), usesControls: false, usesNestedBindings: false, boundSelect: false, controlAttachmentName: freshIdentifier("htmlNextControl"), bindingHelperName: freshIdentifier("boundAttribute"),
     bindingValueName: freshIdentifier("boundValue"), rootAttributeBindings: new Set(),
@@ -1305,7 +1323,6 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
     ...(usesControllerTypeChecks ? [`import { acceptsControllerWrite } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...(hasProps ? [`import { checkedProp, mountPropValidity, updatePropValidity${usesController ? ", propValidityState" : ""}${selectors.length === 0 ? "" : ", selectedPropNode, selectedBindingNode, retainedBindingInput, htmlPropValue"}${structuredInputs.size > 0 ? ", parseHtmlLiteral" : ""} } from ${quote(options.propsSpecifier ?? "./props")};`] : []),
     ...[...context.imports].sort().map((tag) => `import ${componentName(tag)} from ${quote(options.importSpecifier?.(tag) ?? `./${componentName(tag)}.svelte`)};`),
-    ...(css === "" ? [] : [`import ${quote(options.stylesheetSpecifier ?? `./${definition.contract.name}.css`)};`]),
     ...(nestedDepthLimit === undefined ? [] : [
       `const ${nestedDepthName} = getContext<number>("html-next:nested-depth") ?? 0;`,
       `if (${nestedDepthName} >= ${nestedDepthLimit}) {`,
@@ -1340,7 +1357,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       `  return untrack(() => rootElement === undefined ? (${context.initialBindingsName} as Record<string, unknown>)[name] : rootElement.getAttribute(name) ?? undefined);`,
       "}",
     ]),
-    `const rootAttrs = rootAttributes(() => rest, ${quote(definition.contract.tag)}${rootAttributeOptions(nativeRoot, [...context.rootAttributeBindings], nativeRoot ? context.rootBindings ?? [] : [], initialBindingSources.length === 0 ? undefined : context.initialBindingsName)});`,
+    `const rootAttrs = rootAttributes(() => rest${rootAttributeOptions(context.rootScope, nativeRoot, [...context.rootAttributeBindings], nativeRoot ? context.rootBindings ?? [] : [], initialBindingSources.length === 0 ? undefined : context.initialBindingsName)});`,
     "let rootElement = $state<Element | undefined>(undefined);",
     ...(scope.preservesRootFocus ? ["let rootFocusPending = false;"] : []),
     ...(context.implicitOptionValueName === undefined ? [] : [
@@ -1373,13 +1390,23 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
       "  return (element: Element) => {",
       "    // An attribute binding writes only a result that differs from its last.",
       "    let last: string | null | undefined;",
+      ...(styles.hashed !== true ? [] : [
+        "    // Svelte's style class is all the class attribute holds before the binding first writes, and it stays.",
+        "    const scoped = name === 'class' ? element.getAttribute('class') : null;",
+      ]),
       "    const apply = (value: unknown) => {",
       "      if (value === Symbol.for('html-next.invalid-result')) return;",
       "      const output = value == null ? null : String(value);",
       "      if (output === last) return;",
       "      last = output;",
-      "      if (output === null) element.removeAttribute(name);",
-      "      else element.setAttribute(name, output);",
+      ...(styles.hashed !== true ? [
+        "      if (output === null) element.removeAttribute(name);",
+        "      else element.setAttribute(name, output);",
+      ] : [
+        "      const written = scoped === null ? output : output === null ? scoped : `${output} ${scoped}`;",
+        "      if (written === null) element.removeAttribute(name);",
+        "      else element.setAttribute(name, written);",
+      ]),
       "    };",
       "    // Options must expose their initial DOM value before the parent select binding runs.",
       "    if (initialize) apply(untrack(read));",
@@ -1502,8 +1529,9 @@ export function generateSvelteOutput(definition: ComponentDefinition, version: s
   body = body.replace(`${RENDER_IMPORT}\n`, rendered.length === 0 ? "" : `import { ${rendered.join(", ")} } from ${quote(options.renderSpecifier ?? SVELTE_RENDER_SPECIFIER)};\n`);
   // Svelte's convention indents the script under its tag.
   const formatted = formatSvelteScript(body, `${definition.contract.name}.ts`).trimEnd().split("\n").map((line) => line === "" ? line : `\t${line}`).join("\n");
-  const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n`;
-  return { component, css, usesHtml: context.htmlSites > 0,
+  const style = styles.css === "" ? "" : `\n<style>\n${formatSvelteScript(styles.css, `${definition.contract.name}.css`).trimEnd().split("\n").map((line) => line === "" ? line : `\t${line}`).join("\n")}\n</style>\n`;
+  const component = `<!-- Generated by HTML Next ${version} for Svelte 5. Do not edit. -->\n${open}\n${formatted}\n</script>\n\n${template}\n${style}`;
+  return { component, usesHtml: context.htmlSites > 0,
     helpers: [
       ...(hasProps || usesControllerTypeChecks || context.usesComponentBindings || context.usesDeclaredFormats || target.events.length > 0 ? ["props" as const] : []),
       ...(context.htmlSites > 0 ? ["html" as const] : []),

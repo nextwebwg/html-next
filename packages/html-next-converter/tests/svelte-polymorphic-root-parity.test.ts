@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -20,7 +20,6 @@ async function snapshot(page: Page) {
     behavior: await page.locator("#case").evaluate((root) => ({
       tag: root.localName,
       text: root.textContent,
-      component: root.getAttribute("data-component"),
       controllerRoot: root.getAttribute("data-controller-root"),
       focused: document.activeElement === root,
       hasLink: "link" in (window as unknown as { switchHost: { refs: object } }).switchHost.refs,
@@ -43,8 +42,6 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte polymorphic-ro
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, `out-${mode}`);
       const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["switch.html"] });
-      const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-        .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
       const app = join(outDirectory, "App.svelte");
       await writeFile(app, `<script>import XSwitch from "./${manifest.components[0]!.artifact}";</script><XSwitch id="case" />`);
       const entry = join(outDirectory, "mount.ts");
@@ -61,7 +58,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const serverMarkup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(serverMarkup, /<button\b/);
-      outputs.set(mode, { svelteBundle, serverMarkup, css });
+      outputs.set(mode, { svelteBundle, serverMarkup, css: svelteStyles(outDirectory) });
     }
     liveBundle = join(directory, "live.js");
     await build({ entryPoints: [fileURLToPath(new URL("../../html-next/src/browser-loader.ts", import.meta.url))],

@@ -77,10 +77,9 @@ graph definition order, matching live installation and SSR. DOM moves and repeat
 never reorder style carriers. Vite emits one graph CSS module so module traversal cannot
 reorder a component's shared imports relative to another definition's overrides.
 
-React output shares graph CSS in the same way. Svelte's ownership-based slot limits and Vue's
-generated scope IDs can require separate transformed occurrences. Their imported CSS follows
-the same component/slot boundaries as their inline CSS; framework scoping never becomes
-document-wide ordinary selectors.
+React output shares graph CSS in the same way. Vue and Svelte put a component's imported CSS in
+its own `<style>`, within the same component/slot boundaries as its inline CSS; framework
+scoping never becomes document-wide ordinary selectors.
 
 Defaults are explicit author CSS. For example, `:host, *, :host::before, :host::after,
 *::before, *::after { box-sizing: border-box; }` covers elements and pseudo-elements. `*`
@@ -99,9 +98,9 @@ This property is reserved for the tools; author properties still inherit normall
 Live loading installs one independent common reset per document; closed graph CSS includes
 one outside authored import conditions. Mixing live and precompiled delivery can retain both
 copies because an application can disable or condition the precompiled sheet independently.
-Each definition supplies its root identity. Svelte
-uses its existing authored-ownership selectors for projection; Vue's scoped selectors already
-exclude projected SVG. No mutation observer or new element ownership attribute is needed.
+Each definition supplies its root identity. Vue and Svelte bound their scopes with classes,
+which the defect leaves alone, and tell projected content apart by their own scoping: Vue's scope
+attributes and Svelte's hash class. No mutation observer or new element ownership attribute is needed.
 Browser tests assert compiled exclusion in every engine and retain the independent native
 fixture as evidence of the platform defect.
 
@@ -150,6 +149,17 @@ results, and early/late loading comparisons.
 Converted components use `<style scoped>` with a native scope that excludes nested component
 roots. `:host` becomes `:scope`; prop and state tests add the generated root's state tokens.
 Vue's own `:slotted()` handles projected content.
+
+## Svelte
+
+Converted components carry their styles in their `<style>`, in Vue's native scope: rooted at the
+component's tag as a class, and limited by the tag classes of the components it invokes. Each
+selector is `:global()`, so Svelte keeps rules for markup it cannot see, such as sanitized HTML.
+In a component with slots, a selector's subject also tests Svelte's hash class, which Svelte puts
+on the component's own markup and not on content a consumer projects: `:where(*)` for ordinary
+selectors, and `:not(:scope, * *)` for `:slotted()`. Sanitized HTML there carries
+`data-html-next-owner`. `:host` is `:scope`, and keyframes keep their names. A `:slotted()` rule
+also reaches into components the consumer projects.
 
 ## Proof
 

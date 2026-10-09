@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,7 +8,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { convertComponents } from "../src/index.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 
 const receiver = `<template component="x-slot-host" controller="./slots.js"><defs>
   <state name="item" value="Ada"></state><handler name="rename"><set name="item" value="Grace"></set></handler>
@@ -66,8 +66,6 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte controller pro
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, mode);
       const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["components/owner.html"] });
-      const css = (await Promise.all(manifest.output.artifacts.filter(artifact => artifact.kind === 'style')
-        .map(artifact => readFile(join(outDirectory, artifact.path), 'utf8')))).join('\n');
       const artifact = manifest.components.find((entry) => entry.tag === "x-slot-owner")!.artifact;
       await writeFile(join(outDirectory, "App.svelte"), `<script>import Owner from './${artifact}';</script><Owner />`);
       const entry = join(outDirectory, "mount.ts");
@@ -84,7 +82,7 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte controller pro
       await build({ entryPoints: [server], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
         packages: "external", plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
-      outputs.set(mode, { bundle, markup, css });
+      outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
   });
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });

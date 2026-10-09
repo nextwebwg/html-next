@@ -151,7 +151,7 @@ The Svelte adapter turns this HTML definition into a Svelte component when your 
 	};
 	let { children, slots, ...restProps }: Props = $props();
 	const rest = restProps as Record<string, unknown>;
-	const rootAttrs = rootAttributes(() => rest, 'x-counter');
+	const rootAttrs = rootAttributes(() => rest);
 	let count = $state<number>(0);
 	setContext('html-next:context:x-counter\u0000count', {
 		get value() {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,7 +8,7 @@ import { build } from "esbuild";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { componentDecorationsSource as source, componentDecorationsController } from "./fixtures/component-decorations.js";
 
@@ -17,7 +17,10 @@ async function snapshot(page: Page) {
   return {
     behavior: await page.locator("#case").evaluate((element) =>
       [...element.querySelectorAll<HTMLElement | SVGElement>("article, button, i, g")].map((root) => ({
-        tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"), components: root.getAttribute("data-component"), classValue: root.getAttribute("class"), classes: [...root.classList],
+        // Live roots carry data-component, and Svelte scopes styles by component tags as classes: both are target styling markers.
+        tag: root.localName, hasClass: root.hasAttribute("class"), hasStyle: root.hasAttribute("style"),
+        classValue: root.getAttribute("class")?.split(" ").filter((name) => !/^x-styled-|^x-empty-class$/.test(name)).join(" ") ?? null,
+        classes: [...root.classList].filter((name) => !/^x-styled-|^x-empty-class$/.test(name)),
         properties: Object.fromEntries([...root.style].map((name) => [name, [root.style.getPropertyValue(name), root.style.getPropertyPriority(name)]])),
         color: getComputedStyle(root).color, padding: getComputedStyle(root).padding,
       }))),
@@ -40,8 +43,6 @@ describe.skipIf(process.env.HTMLNEXT_TARGET_TEST !== "1")("Svelte component deco
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, mode);
       const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["refs.html"] });
-      const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-        .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
       await writeFile(join(outDirectory, "App.svelte"), `<script>import XStyledParent from "./${manifest.components.find((component) => component.tag === "x-styled-parent")!.artifact}";</script><XStyledParent id="case" />`);
       const entry = join(outDirectory, "mount.ts");
       await writeFile(entry, `import { mount, hydrate } from "svelte"; import App from "./App.svelte";
@@ -59,7 +60,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /<button\b/);
-      outputs.set(mode, { bundle, markup, css });
+      outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
   }, 60_000);
   afterAll(async () => { if (directory !== "") await rm(directory, { recursive: true, force: true }); });
