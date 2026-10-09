@@ -31,6 +31,7 @@ import type { WritablePath } from "../expression.js";
 import { declarationTypeNode, formatType, normalizeType, parseTypedValue, textForm, typeAtKey, type TypeInput, type TypeNode } from "../type-system.js";
 import { hasBounds } from "../validate.js";
 import { kebabCase } from "../names.js";
+import { conformingStates, literalInitial, NotLiteral } from "./state-roots.js";
 import type { Invoked } from "../generate.js";
 
 /** Item data, or anything reached through a controller facade, changed. */
@@ -266,9 +267,6 @@ export interface BlockPlan {
   readonly arms?: { readonly blocks: readonly Block[]; readonly nodes: readonly ElementNode[]; readonly select: Lowered };
 }
 
-/** A state's initial value that is not a plain literal, which the factory then evaluates instead. */
-class NotLiteral extends Error {}
-
 /** What the parser already rules out; reaching it is a compiler defect, reported at build time. */
 function unreachable(what: string): never {
   throw new Error(`HTML Next compiler invariant: ${what}`);
@@ -401,26 +399,6 @@ function valueSource(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(valueSource).join(", ")}]`;
   return `{ ${Object.entries(value as Record<string, unknown>)
     .map(([key, item]) => `${JSON.stringify(key)}: ${valueSource(item)}`).join(", ")} }`;
-}
-
-/** The value of a literal initial-state expression; anything else is evaluated by the factory. */
-function literalValue(node: ExpressionNode): unknown {
-  if (node.kind === "literal") {
-    const value = node.value;
-    if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") return value;
-    throw new NotLiteral();
-  }
-  if (node.kind === "array") return node.items.map(literalValue);
-  if (node.kind === "object") {
-    const value: Record<string, unknown> = {};
-    for (const pair of node.pairs) {
-      // ponytail: the interpreter assigns `__proto__` through its setter; the factory evaluates it so.
-      if (pair.key === "__proto__") throw new NotLiteral();
-      value[pair.key] = literalValue(pair.value);
-    }
-    return value;
-  }
-  throw new NotLiteral();
 }
 
 /** A local name: a row's item, index or `loop` record, or a `$with`/`$match` alias. */
@@ -735,38 +713,9 @@ function outerOf(value: Lowered, level: number): number {
   return value.bits | (value.nested || (value.items ?? 0) & outer ? NESTED : 0) | ((value.positional ?? 0) & outer ? POSITION : 0);
 }
 
-/** The value of a literal initializer, or undefined for one that needs evaluating. */
-function literalInitial(node: ExpressionNode): { readonly value: unknown } | undefined {
-  try { return { value: literalValue(node) }; }
-  catch (error) {
-    if (error instanceof NotLiteral) return undefined;
-    throw error;
-  }
-}
-
-/** Roots a two-way binding writes: a control's value is stored unchecked, as live stores it. */
-function twoWayRoots(definition: ComponentDefinition): Set<string> {
-  const names = new Set<string>();
-  const visit = (node: TemplateNode): void => {
-    if (node.kind === "text") return;
-    if (node.kind === "slot") {
-      node.fallback?.forEach(visit);
-      return;
-    }
-    for (const attribute of node.attributes) {
-      if (attribute.kind === "attribute" && attribute.twoWay === true && typeof attribute.writablePath?.[0] === "string") {
-        names.add(attribute.writablePath[0]);
-      }
-    }
-    node.children.forEach(visit);
-  };
-  visit(definition.template);
-  return names;
-}
-
 function compileRoots(definition: ComponentDefinition): Root[] {
   const declarations = definition.declarations ?? [];
-  const controlled = twoWayRoots(definition);
+  const conforming = conformingStates(definition);
   const states: Root[] = [];
   const computeds: Root[] = [];
   const contexts: Root[] = [];
@@ -798,10 +747,9 @@ function compileRoots(definition: ComponentDefinition): Root[] {
       continue;
     }
     // A literal that conforms keeps every read of the root free of the reference check.
-    const conforming = literal.value === null || node === undefined || parseTypedValue(literal.value, node, "$", "value").ok;
     states.push({
       name: declaration.name, type, initial: valueSource(literal.value), undefinable,
-      checked: (!conforming || controlled.has(declaration.name)) && node !== undefined,
+      checked: node !== undefined && !conforming.has(declaration.name),
     });
   }
   // Props follow, read-only: an accepted value always satisfies its type, so reads need no check.

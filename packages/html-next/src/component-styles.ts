@@ -92,8 +92,11 @@ function stateTokens(tests: string, tag: string, names: Set<string>, canonical: 
   return kind === "state" ? output.replace(/\s+/g, "") : output;
 }
 
+/** What a component's root is in the default build: its `data-component` owner list. */
+const componentOwner = (tag: string): string => `:where([${COMPONENT_ATTRIBUTE}~="${tag}"])`;
+
 /** Type selectors naming components, outside brackets and strings. */
-function rewriteComponentTags(selector: string): string {
+function rewriteComponentTags(selector: string, componentRoot: (tag: string) => string): string {
   let output = "";
   for (let index = 0; index < selector.length; index += 1) {
     const character = selector[index]!;
@@ -108,7 +111,7 @@ function rewriteComponentTags(selector: string): string {
     const startsCompound = previous === undefined || /[\s>+~(,]/.test(previous);
     const tag = startsCompound ? /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w-]|\()/.exec(selector.slice(index))?.[0] : undefined;
     if (tag !== undefined) {
-      output += `:is(${tag}, :where([${COMPONENT_ATTRIBUTE}~="${tag}"]))`;
+      output += `:is(${tag}, ${componentRoot(tag)})`;
       index += tag.length - 1;
       continue;
     }
@@ -129,6 +132,7 @@ export function rewriteComponentSelector(
   names: Set<string>,
   canonical: StyleNameResolver = (name) => name,
   projected: string = `[${PROJECTED_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}] *`,
+  componentRoot: (tag: string) => string = componentOwner,
 ): string {
   if (/:scope(?![\w-])/.test(selector)) {
     fail("HY003", `\`:scope\` is not part of component styles; select the root with \`:host\` (in <${tag}>).`);
@@ -148,7 +152,7 @@ export function rewriteComponentSelector(
   output = output
     .replace(/:where\(\s*\[--slotted\]\s*\):is\(/g, `:where(${projected}):is(`)
     .replace(/:host(?![\w-])/g, host);
-  return rewriteComponentTags(rewriteValiditySelectors(output));
+  return rewriteComponentTags(rewriteValiditySelectors(output), componentRoot);
 }
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
@@ -209,6 +213,8 @@ export interface CompiledComponentStyles {
   readonly css: string;
   /** The props and state the state attribute must carry, in first-use order. */
   readonly stateNames: readonly string[];
+  /** Vue: the components the styles select by tag, whose invocations carry the tag as a class. */
+  readonly components?: readonly string[];
 }
 
 type RuleContainer = CSSStyleSheet | CSSGroupingRule;

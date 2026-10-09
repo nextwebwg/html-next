@@ -106,7 +106,8 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-card id="case" class="consumer" label="Save"><strong>Now</strong></x-card>`,
     vueRender: `h(XCard, { id: "case", class: "consumer", label: "Save" }, { default: () => h("strong", "Now") })`,
     root: "#case",
-    probe: `({ tag: root.localName, label: root.getAttribute("aria-label"), className: root.className, text: root.textContent?.trim(), background: getComputedStyle(root).backgroundColor, childColor: getComputedStyle(root.querySelector("strong")).color })`,
+    // The component's own tag is Vue's styling class for :host, as data-component is live's; both are target markers.
+    probe: `({ tag: root.localName, label: root.getAttribute("aria-label"), className: [...root.classList].filter((name) => name !== "x-card").join(" "), text: root.textContent?.trim(), background: getComputedStyle(root).backgroundColor, childColor: getComputedStyle(root.querySelector("strong")).color })`,
     action: `root.setAttribute("data-probe", "untouched")`,
   },
   {
@@ -660,7 +661,7 @@ const cases: readonly ParityCase[] = [
     invocation: `<x-root-choice id="case"></x-root-choice>`,
     vueRender: `h(XRootChoice, { id: "case" })`,
     root: "#case",
-    probe: `({ tag: root.localName, dataKind: root.getAttribute("data-kind"), child: root.querySelector("p")?.textContent, className: root.querySelector("p")?.className, rootCount: document.querySelectorAll("[data-component=x-root-choice]").length, border: getComputedStyle(root).borderTopWidth, childMargin: getComputedStyle(root.querySelector("p")).marginTop })`,
+    probe: `({ tag: root.localName, dataKind: root.getAttribute("data-kind"), child: root.querySelector("p")?.textContent, className: root.querySelector("p")?.className, rootCount: root.parentElement.children.length, border: getComputedStyle(root).borderTopWidth, childMargin: getComputedStyle(root.querySelector("p")).marginTop })`,
     action: `root.querySelector("p").click()`,
     expectedAfter: { tag: "section", dataKind: "b", child: "Second", className: "second", rootCount: 1, border: "1px", childMargin: "0px" },
   },
@@ -866,16 +867,28 @@ function vueInvocation(invocation: string, definition: ComponentDefinition): str
 }
 
 /** Styling markers are target-owned implementation details, not the component's public behavior. */
-function withoutStylingMarkers(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutStylingMarkers);
+function withoutStylingMarkers(value: unknown, tags: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withoutStylingMarkers(entry, tags));
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
     key === "attributes" && Array.isArray(entry)
-      ? entry.filter((attribute) => Array.isArray(attribute) &&
-        typeof attribute[0] === "string" && attribute[0] !== "data-slotted" && !attribute[0].startsWith("data-v-"))
-      : withoutStylingMarkers(entry),
+      ? entry.flatMap((attribute) => {
+        if (!Array.isArray(attribute) || typeof attribute[0] !== "string") return [];
+        const [name, text] = attribute as [string, string];
+        if (name === "data-slotted" || name === "data-component" || name.startsWith("data-v-")) return [];
+        // Vue selects a root, or a styled child, through its component tag as a class.
+        if (name !== "class") return [attribute];
+        const classes = text.split(/\s+/).filter((token) => token !== "" && !tags.has(token)).join(" ");
+        return classes === "" ? [] : [[name, classes]];
+      })
+      : withoutStylingMarkers(entry, tags),
   ]));
+}
+
+/** The component tags a conformance case defines. */
+function definedTags(source: string): ReadonlySet<string> {
+  return new Set([...source.matchAll(/<template\s+component="([^"]+)"/g)].map((match) => match[1]!));
 }
 
 const knownConversionGaps = new Map<string, string>();
@@ -1272,7 +1285,8 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
                 vue.evaluate((script) => Function(script)(), program),
               ]);
               assert.deepEqual(liveResult, expectation.result, "live runtime characterization changed");
-              assert.deepEqual(withoutStylingMarkers(vueResult), withoutStylingMarkers(liveResult), "Vue browser behavior differs");
+              const tags = definedTags(testCase.source);
+              assert.deepEqual(withoutStylingMarkers(vueResult, tags), withoutStylingMarkers(liveResult, tags), "Vue browser behavior differs");
               const capturePixels = async (page: Page): Promise<Buffer> => {
                 await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
                 return page.screenshot({ animations: "disabled" });
@@ -1288,7 +1302,7 @@ describe.skipIf(!enabled)("HTML Next → Vue browser parity", () => {
                   vue.evaluate((script) => Function(script)(), program),
                 ]);
                 assert.deepEqual(afterLive, step.result, "live runtime changed after interaction");
-                assert.deepEqual(withoutStylingMarkers(afterVue), withoutStylingMarkers(afterLive), "Vue behavior differs after interaction");
+                assert.deepEqual(withoutStylingMarkers(afterVue, tags), withoutStylingMarkers(afterLive, tags), "Vue behavior differs after interaction");
                 await assertPixelsEqual(vue, afterVuePixels, afterLivePixels, "Vue pixels differ after interaction");
               }
             } finally {

@@ -1,13 +1,15 @@
 /**
- * The one module every converted Vue component shares: the controller host and the event dispatcher.
- * Both are the same for every component, so they ship once beside the components rather than being
- * repeated in each `<script setup>`; only a component's own values, refs, and event types are
- * generated. It depends on Vue alone.
+ * The one module every converted Vue component shares: the controller host, the event dispatcher,
+ * and the helpers its templates render and bind values with. They are the same for every
+ * component, so they ship once beside the components rather than being repeated in each
+ * `<script setup>`; only a component's own values, refs, and event types are generated. It
+ * depends on Vue alone.
  */
 import { formatVue } from "./vue-format.js";
 import { DISPATCH_TARGETS_SOURCE, DATA_URL_SOURCE } from "./shared-generated.js";
 import { CONTROLLER_STATE_SOURCE } from "./controller-state-source.js";
 import { NATIVE_CONNECTION_SOURCE } from "./native-connection-source.js";
+import { vueExpressionHelpersSource } from "./vue-lowering.js";
 
 /** Where the shared module sits, relative to the package root, and how a component imports it. */
 export const VUE_HOST_PATH = "vue/host.ts";
@@ -19,7 +21,8 @@ export function importsVueHost(source: string): boolean {
 }
 
 const SOURCE = `
-import { computed, Fragment, getCurrentInstance, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
+import { computed, createTextVNode, defineComponent, Fragment, getCurrentInstance, h, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, shallowRef, useSlots, watch, watchEffect } from "vue";
+import type { PropType, VNode } from "vue";
 
 ${CONTROLLER_STATE_SOURCE}
 ${DISPATCH_TARGETS_SOURCE}
@@ -217,7 +220,7 @@ export function useComponentHost(
   const stops: Array<() => void> = [];
   const connected = shallowRef(false);
   const pauses = new Map<() => void, () => void>();
-  const subscriptions = new Set<{ type: string; callback: (event: Event) => void | (() => void); target?: Element; cleanup?: void | (() => void) }>();
+  const subscriptions = new Set<{ type: string; callback: (event: Event) => void | (() => void); target?: Element | undefined; cleanup?: void | (() => void) }>();
   type Subscription = typeof subscriptions extends Set<infer S> ? S : never;
   const activate = (entry: Subscription): void => {
     if (entry.type === "connect") entry.cleanup = entry.callback(new Event("connect"));
@@ -253,7 +256,7 @@ export function useComponentHost(
       state: Object.fromEntries(Object.entries(state).map(([name, value]) => [name, { get: () => value.value, set: (next: unknown) => { value.value = next; } }])),
       computed: Object.fromEntries([...Object.entries(computedValues), ...Object.entries(context)].map(([name, value]) => [name, () => value.value])),
       data: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, () => value.value])),
-      acceptsState: options.acceptsState,
+      ...(options.acceptsState === undefined ? {} : { acceptsState: options.acceptsState }),
     }, options.controllerSource?.definition ?? "<component>"),
     on(type: string, callback: (event: Event) => void | (() => void)): () => void {
       const entry: Subscription = { type, callback };
@@ -459,9 +462,119 @@ export function createDispatch(
     return root.value?.dispatchEvent(event) ?? true;
   };
 }
+
+/**
+ * A consumer's attributes for the root. Vue sets a name that is also an object property, such as
+ * \`constructor\`, as a DOM property; capitalized, it stays an attribute, which HTML lowercases.
+ */
+export function nativeAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const names = Object.keys(attrs);
+  if (!names.some((name) => Object.hasOwn(Object.prototype, name))) return attrs;
+  return Object.fromEntries(names.map((name) => [
+    Object.hasOwn(Object.prototype, name) ? name === "__proto__" ? "__Proto__" : name[0]!.toUpperCase() + name.slice(1) : name,
+    attrs[name],
+  ]));
+}
+
+/** Hydrating server markup needs its root to be the element this component renders. */
+export function checkHydratedRoot(expected: string | undefined, tag: string): void {
+  const node = getCurrentInstance()?.vnode.el;
+  if (typeof window === "undefined" || node == null || node instanceof Element && node.localName === expected) return;
+  const message = \`Server markup for <\${tag}> has an incompatible root.\`;
+  throw Object.assign(new Error(\`HR005: \${message}\`), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code: "HR005", message }) });
+}
+
+function diagnostic(code: string, message: string): Error {
+  return Object.assign(new Error(\`\${code}: \${message}\`), { name: "HtmlDiagnosticError", diagnostic: Object.freeze({ code, message }) });
+}
+
+/** A component's context value from the ancestor that provides it; a missing provider is an error. */
+export function injectContext(tag: string, from: string, name: string): any {
+  const value = inject<any>(\`html-next:\${from}:\${name}\`);
+  if (value === undefined) throw diagnostic("HR009", \`<\${tag}> requires context \\\`\${name}\\\` from <\${from}>.\`);
+  return value;
+}
+
+/** Vue may return an in-progress computed value on a cyclic read; guard the public value access instead. */
+export function cycleCheckedComputed<T>(evaluate: () => T) {
+  const value = computed(evaluate);
+  let reading = false;
+  return new Proxy(value, {
+    get(target, property) {
+      if (property !== "value") return Reflect.get(target, property);
+      if (reading) throw diagnostic("HR006", "A reactive computed value depends on itself.");
+      reading = true;
+      try { return target.value; } finally { reading = false; }
+    },
+  });
+}
+
+/**
+ * A declared prop's reflected root attribute: the authored literal until the consumer passes the
+ * prop, then its value as text, absent for null.
+ */
+export function useReflectedProp() {
+  const instance = getCurrentInstance();
+  return (name: string, kebab: string, value: unknown, fallback: string | undefined, bound: boolean, separator?: string): string | undefined => {
+    const incoming = instance?.vnode.props;
+    if (!bound && (incoming === null || incoming === undefined || (!Object.hasOwn(incoming, name) && !Object.hasOwn(incoming, kebab)))) return fallback;
+    if (value === null || value === undefined) return undefined;
+    return Array.isArray(value) && separator !== undefined ? value.join(separator) : typeof value === "object" ? JSON.stringify(value) : String(value);
+  };
+}
+
+/** A scoped slot's name, which the consumer must fill with a \`<template slot>\` rather than plain children. */
+export function useScopedSlotName() {
+  const slots = useSlots();
+  return (value: unknown): string => {
+    const name = value == null ? "" : String(value);
+    if (slots[name] === undefined && slots.default?.().some((node) => node.props?.slot === name)) {
+      throw diagnostic("HR007", 'Scoped slot \`' + name + '\` requires a consumer <template slot="' + name + '">.');
+    }
+    return name;
+  };
+}
+
+/** An inline text part that keeps its last accepted text while its value is invalid. */
+export type InlineTextSegment = { readonly value: unknown; readonly text: string; readonly accepted: boolean };
+
+export function inlineTextSegment(value: unknown, accepted: boolean, text: (value: any) => string): InlineTextSegment {
+  return { value, accepted, text: accepted && value !== Symbol.for("html-next.invalid-result") ? text(value) ?? "" : "" };
+}
+
+export const RetainedInlineText = /* @__PURE__ */ defineComponent({
+  props: { segments: { type: Array as PropType<InlineTextSegment[]>, required: true } },
+  setup(props) {
+    const previous: string[] = [];
+    return () => createTextVNode(props.segments.map((segment, index) => {
+      if (segment.accepted && segment.value !== Symbol.for("html-next.invalid-result")) previous[index] = segment.text;
+      return previous[index] ?? "";
+    }).join(""));
+  },
+});
+
+const KeyedFailure = /* @__PURE__ */ defineComponent({
+  props: { error: { type: null, required: true } },
+  setup(props) { return () => { throw props.error; }; },
+});
+
+/** A keyed list that produces a duplicate key keeps its last rows and reports the error in the browser. */
+export const KeyedBoundary = /* @__PURE__ */ defineComponent({
+  setup(_props, { slots }) {
+    let last: VNode[] = [];
+    return () => {
+      try { last = slots.default?.() ?? []; return last; }
+      catch (error) {
+        if (!(error instanceof Error) || (error as Error & { diagnostic?: { code?: string } }).diagnostic?.code !== "HR004") throw error;
+        if (typeof window === "undefined") throw error;
+        return [...last, h(KeyedFailure, { error })];
+      }
+    };
+  },
+});
 `;
 
 /** The shared module's source, formatted the way the converted components are. */
 export function vueHostModule(version: string): string {
-  return formatVue(`// Generated by HTML Next ${version} for Vue 3.5. Do not edit.\n${SOURCE.trimStart()}`, "host.ts");
+  return formatVue(`// Generated by HTML Next ${version} for Vue 3.5. Do not edit.\n${SOURCE.trimStart()}\n${vueExpressionHelpersSource()}\n`, "host.ts");
 }

@@ -80,6 +80,7 @@
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
     "generate:dom": "tsx scripts/generate-dom-properties.ts",
     "generate:snapshots": "tsx scripts/update-generate-snapshots.ts",
+    "measure:converters": "tsx scripts/measure-converter-output.ts --bundle",
     "measure:hydration": "tsx scripts/measure-hydration.ts",
     "measure:list-memory": "tsx scripts/measure-list-memory.ts",
     "measure:performance": "tsx scripts/measure-performance.ts",

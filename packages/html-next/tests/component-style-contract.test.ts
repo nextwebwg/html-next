@@ -38,7 +38,8 @@ describe("resolved prop and state selectors", () => {
     for (const compile of compilers) {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
-      assert.match(result.css, /(?::scope|\[data-component~="x-style-contract"\])\.active/);
+      // The build scopes the root as :scope; Vue's scoped styles select it by its tag class.
+      assert.match(result.css, /(?::scope|\.x-style-contract)\.active/);
     }
   });
 

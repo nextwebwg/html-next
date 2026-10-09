@@ -7,7 +7,6 @@ import postcss, { type AtRule, type ChildNode, type Container, type Rule } from 
 import {
   assembleComponentStyles,
   componentStyleNameResolver,
-  COMPONENT_ATTRIBUTE,
   type CompiledComponentStyles,
   renameComponentPseudoClasses,
   rewriteComponentSelector,
@@ -80,8 +79,9 @@ function compileStyles(css: string, definition: ComponentDefinition, source?: st
 /**
  * Styles for a converted Vue component, emitted as `<style scoped>`. Vue's scoping already bounds
  * the region: projected content carries the consumer's scope, and Vue's own `:slotted()` reaches it.
- * The generated root carries `data-component` and the state attribute, so `:host` and
- * `:host-state()` become attribute selectors on it.
+ * `:host` is the root's tag class, `:host()` and `:host-state()` add the state attribute the root
+ * binds, and a component selected by tag is that class on its invocation, which Vue passes to the
+ * child's root.
  */
 export function compileComponentStylesForVue(
   css: string,
@@ -91,12 +91,25 @@ export function compileComponentStylesForVue(
   const tag = definition.contract.tag;
   if (css.trim() === "") return { css: "", stateNames: [] };
   const names = new Set<string>();
+  // Components the styles select by tag; the template marks their invocations with that class.
+  const components = new Set<string>();
   const canonical = componentStyleNameResolver(definition, source);
   const root = postcss.parse(renameComponentPseudoClasses(css, ["host-state"]));
   root.walkRules((rule) => {
     const parent = rule.parent;
     if (parent?.type === "atrule" && /keyframes$/i.test((parent as AtRule).name)) return;
-    rule.selector = rewriteComponentSelector(rule.selector, tag, `[${COMPONENT_ATTRIBUTE}~="${tag}"]`, names, canonical);
+    rule.selector = rewriteComponentSelector(rule.selector, tag, vueHostSelector(tag), names, canonical, undefined, (component) => {
+      components.add(component);
+      return vueHostSelector(component);
+    });
   });
-  return { css: root.toString().trim(), stateNames: Array.from(names) };
+  return { css: root.toString().trim(), stateNames: Array.from(names), components: Array.from(components) };
+}
+
+/**
+ * In Vue, `:host` is the root's class, the component's tag: the root carries it only when its
+ * scoped styles select the root, and Vue merges it with the consumer's own classes.
+ */
+export function vueHostSelector(tag: string): string {
+  return `.${tag.replace(/[^\w-]/g, (character) => `\\${character}`)}`;
 }

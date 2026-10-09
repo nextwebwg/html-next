@@ -411,6 +411,43 @@ function concat<T extends unknown[]>(...values: T): ConcatResult<T> {
 
 const FALLBACK_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = { attribute: ["text"], sortBy: ["text"], uniqueKeys: ["text"] };
 
+/**
+ * The expression helpers every converted Vue component shares, exported from the host module so a
+ * component imports the ones it calls instead of carrying its own copies.
+ */
+export function vueExpressionHelpersSource(): string {
+  return [
+    `const warned = new Set<string>();
+/** An authored value's check: false warns once per authored location. */
+export function warnUnless(accepted: boolean, location: string, message: string): boolean {
+  if (!accepted && !warned.has(location)) {
+    warned.add(location);
+    console.warn(message);
+  }
+  return accepted;
+}
+
+/**
+ * Whether a handler may write a value: never an invalid result, and absent or of the destination's
+ * type. A wrong type warns once for its authored write and leaves the destination as it was.
+ */
+export function acceptsWrite(value: unknown, check?: (value: any) => boolean, file?: string, handler?: string, path?: string): boolean {
+  if (value === Symbol.for("html-next.invalid-result")) return false;
+  if (check === undefined || value === undefined || check(value)) return true;
+  return warnUnless(false, \`handler:\${handler}:\${path}\`, \`\${file}: HR007: State \${path} does not satisfy its declared type.\`);
+}
+
+export const isString = (value: unknown): value is string => typeof value === "string";
+export const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+export const isInteger = (value: unknown): value is number => Number.isInteger(value);
+export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";`,
+    ...Object.values(FALLBACKS),
+    formattingHelperSource("formatValue"),
+  ].join("\n\n").replace(/^(function|type|const formatValue) /gm, "export $1 ")
+    // Only a component that formats keeps the formatter: the module-level call has no other effect.
+    .replace(/= createFormatValue\(\)/, "= /* @__PURE__ */ createFormatValue()");
+}
+
 /** Vue's boolean attributes: it removes them for false and writes them empty for true. */
 const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,checked,controls,default,defer,disabled,"
   + "formnovalidate,hidden,inert,ismap,itemscope,loop,multiple,muted,nomodule,novalidate,open,playsinline,readonly,"
@@ -418,15 +455,18 @@ const BOOLEAN_ATTRIBUTES = new Set(("allowfullscreen,async,autofocus,autoplay,ch
 
 const IDENTIFIER_PATH = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*$/;
 
-/** Emits expressions for one component, recording which fallback functions it needs. */
+/** Emits expressions for one component, recording which helper functions it calls. */
 export class Lowering {
   readonly #used = new Set<string>();
+
+  readonly #direct = new Set<string>();
 
   constructor(readonly warningName = "htmlNextAuthoredCheck") {}
 
   /** Warn once for an authored location while retaining the existing acceptance predicate. */
   authoredCheck(check: string, location: string, message: string): string {
     this.#used.add("authoredWarning");
+    this.#direct.add(this.warningName);
     return `${this.warningName}(${check}, ${quote(location)}, ${quote(message)})`;
   }
 
@@ -444,6 +484,7 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
 
   #use(name: string): string {
     this.#used.add(name);
+    this.#direct.add(name);
     for (const dependency of FALLBACK_DEPENDENCIES[name] ?? []) this.#used.add(dependency);
     return name;
   }
@@ -456,6 +497,11 @@ function ${this.warningName}(accepted: boolean, location: string, message: strin
   /** Stateful Intl reuse belongs to the module, outside component setup or render. */
   moduleFallbacks(binding = "formatValue"): string[] {
     return this.#used.has("formatValue") ? [formattingHelperSource(binding)] : [];
+  }
+
+  /** The helpers the emitted code calls by name, for a component that imports them from a shared module. */
+  helpers(): string[] {
+    return [...this.#direct].sort();
   }
 
   /** The expression's value. */

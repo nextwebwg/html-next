@@ -11,7 +11,13 @@ Firefox currently parses malformed table content differently from Chromium, WebK
 which would make hydration browser-dependent. Props, state, computed values, bindings, structural
 directives and slots map to Vue's own facilities; declared events remain native
 `CustomEvent`s on the lowered root (Vue emits are reserved for `v-model` updates), and styles become
-`<style scoped>`.
+`<style scoped>`. `:host` selects the root by its tag as a class, and a component the styles select
+by tag carries that class where it is used, so Vue passes it to the child's root.
+
+Every component imports the shared `vue/host.ts` for what each one does the same way: consumer
+attributes on the root, the hydration root check, checked handler writes, and the expression and
+rendering helpers its template calls. A bundler keeps only the helpers a component imports, and an
+application ships each one once.
 
 Components declaring props import `vue/props.ts`. Invalid incoming values remain available at
 their source while the root reports validity; a later typed binding is checked separately. A

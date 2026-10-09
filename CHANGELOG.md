@@ -2,6 +2,11 @@
 
 ## 1.0.0-alpha.37
 
+- Converted Vue components read like hand-written Vue. The quick-start counter converts to `const count = ref(0)`, `count.value = 0`, a two-line checked `count.value + 1`, and `Count: {{ count }}`. Rendering and binding helpers (`nativeAttrs`, `checkHydratedRoot`, `acceptsWrite`, `isNumber`, `text`, `KeyedBoundary` and the rest) come from the shared `vue/host.ts` rather than being repeated in each component. A state with a conforming literal initial value is no longer checked on each read, since every write to it is checked, as the compiled build already does. Across the conformance corpus the generated Vue is 46 KB (previously 120 KB), and an application of all its components ships 13.7 KB gzip (previously 16.9 KB); a single small component bundled alone is about 100 bytes larger.
+- Converted Vue components no longer carry `data-component`. `:host` in their scoped styles selects the root by the component's tag as a class, which the root carries only when its styles use it, and a component the styles select by tag carries that class where it is used. The proposal treats both as target styling markers.
+- Converted Vue templates write text as authored, such as `Count: {{ count }}`, and follow Vue's whitespace handling: each authored run of whitespace renders as one space, so `textContent` differs from the live runtime's where the source indents or repeats spaces. `<pre>` text is kept exactly.
+- The shared `vue/host.ts` typechecks under `exactOptionalPropertyTypes`.
+
 - Compiled components update rows inside a nested `$each` when an outer row moves, or when its item or an outer state value changes, as the live runtime does. Before, `<li $each="row, i of $rows"><b $each="n of $row.tags">{$i}</b></li>` kept each row's old `$i` after a reorder (and showed `undefined` at first), an inner row's `{$row.label}` missed writes to that row's `label`, and rows two loops deep missed state changes. Rows keep their position only when something in or below them reads it. A reorder re-runs only the moved rows' position bindings, and a count change only rows that read `loop.count` or `loop.last`.
 
 ## 1.0.0-alpha.36

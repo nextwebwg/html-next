@@ -1031,10 +1031,11 @@ export default function initialize(host) { host.on("connect", () => connect(host
     compileVue(source, path);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.doesNotMatch(source, /html-next:nested-depth/, "ordinary graphs must not pay for the recursion guard");
-    assert.deepEqual([...source.matchAll(/^import[^\n]*from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./props"]);
+    // Every component takes its root attributes and hydration check from the shared host.
+    assert.deepEqual([...source.matchAll(/from ['"]([^'"]+)['"]/gm)].map((match) => match[1]).filter((from) => from !== "vue"), ["./host", "./props"]);
     assert.ok(manifest.output.artifacts.some((artifact) => artifact.path === "vue/props.ts" && artifact.kind === "helper"));
     assert.match(await readFile(join(outDirectory, "vue", "props.ts"), "utf8"), /function checkedProp/);
-    assert.match(source, /<style scoped>\n\[data-component~="x-card"\] \{\n  display: block;\n\}/);
+    assert.match(source, /<style scoped>\n\.x-card \{\n  display: block;\n\}/);
     assert.equal(manifest.graph, "application");
     assert.deepEqual(manifest.entries, [{ source: "x-card.html", tag: "x-card", artifact: "vue/XCard.vue" }]);
     assert.equal(manifest.output.entry, "vue/application.ts");
@@ -1078,13 +1079,14 @@ export default function initialize(host) { host.on("connect", () => connect(host
     assert.match(await readFile(join(outDirectory, "vue", "host.ts"), "utf8"), /function useComponentHost/);
     assert.doesNotMatch(source, /@nextwebwg/);
     assert.match(source, /const count = ref\(0\)\n/);
-    assert.match(source, /const double = cycleCheckedComputed\(\(\) => \{[\s\S]*return doublePrevious = count\.value \* 2/);
+    // A conforming state's own value needs no read check, so the computed reads it directly.
+    assert.match(source, /const double = cycleCheckedComputed\(\(\) => count\.value \* 2\)\n/);
     assert.match(source, /function increment\(\): void \{/);
-    assert.match(source, /const next0 = count\.value \+ 1/);
-    assert.match(source, /count\.value = next0 as never/);
+    assert.match(source, /const next = count\.value \+ 1\n/);
+    assert.match(source, /if \(acceptsWrite\(next, isNumber, '[^']*', 'increment', 'count'\)\) count\.value = next\n/);
     assert.match(source, /dispatch\('count-change', count\.value\)/);
-    assert.match(source, /const isCountChangeDetail = \(\s*detail: unknown,?\s*\): boolean => \(?typeof detail === 'number' && Number\.isFinite\(detail\)/);
-    assert.match(source, /:data-count="guarded"/);
+    assert.match(source, /'count-change': isNumber,/);
+    assert.match(source, /:data-count="count"/);
   });
 
   it("keeps root-relative data requests on the browser origin", async () => {
