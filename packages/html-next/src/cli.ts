@@ -22,6 +22,7 @@ import {
 import { addControllerGraph } from "./controller-files.js";
 import type { TemplateNode } from "./template.js";
 import { loadNodeComponents, type NodeComponentGraph } from "./node-loader.js";
+import { compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 
 export type BuildTarget = "docs" | "styles" | "vanilla" | "vue";
 
@@ -109,6 +110,10 @@ export async function buildComponents(
   const components: Array<BuildManifest["components"][number]> = [];
   const selected = new Set(options.targets ?? ["docs", "styles", "vanilla", "vue"]);
   const graph = await componentGraph(entries);
+  const sharedCSS = [...graph.nodes.values()].some(node => (node.definition.stylesheets?.length ?? 0) > 0);
+  if (sharedCSS && selected.has("styles")) artifacts.set("styles/components.css", {
+    path: "styles/components.css", content: compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition)) + "\n",
+  });
   const displayPath = (url: string): string => relative(process.cwd(), fileURLToPath(url)).split(sep).join("/") + new URL(url).hash;
 
   for (const node of [...graph.nodes.values()].sort((left, right) => left.url.localeCompare(right.url))) {
@@ -128,7 +133,10 @@ export async function buildComponents(
       return id !== node.id && definitionInvokes(node.definition.template, tag)
         ? [[tag, { module: `./${invoked.contract.name}.js`, definition: invoked }] as const] : [];
     }));
-    const generated = generateComponent(definition, { invocations }).filter((artifact) => selected.has(artifact.path.split("/", 1)[0] as BuildTarget));
+    const generated = generateComponent(definition, { invocations })
+      .filter((artifact) => selected.has(artifact.path.split("/", 1)[0] as BuildTarget) && !(sharedCSS && artifact.path.startsWith("styles/")))
+      .map(artifact => sharedCSS && artifact.path.endsWith(".js")
+        ? { ...artifact, content: artifact.content.replace(`../styles/${definition.contract.tag}.css`, "../styles/components.css") } : artifact);
     for (const artifact of generated) {
       if (artifacts.has(artifact.path)) {
         throw new Error(`Generated artifact collision at ${artifact.path}.`);

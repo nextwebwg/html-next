@@ -30,7 +30,7 @@ export default defineConfig({
 | `pages` | `[{ dir: 'app/pages' }]` | Page folders and the URL prefix each serves. |
 | `routes` | none | Pages at URLs of your choosing (below). |
 | `fileRoutes` | `true` | `false` turns off page folders, so only `routes` remain. |
-| `css` | none | Global stylesheets for every page, such as `['@/styles/site.css']`. |
+| `css` | none | Page-wide stylesheets for rules such as `html` and `body`, for example `['@/styles/page.css']`. Components keep their own styles. |
 | `plugins` | none | [Plugins](#plugins), such as a Markdown page format. |
 
 A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
