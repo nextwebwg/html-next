@@ -2,7 +2,7 @@ import { typeCheckedDependencies, type CompiledExpression, type WritablePathSegm
 import { declarationTypeNode, formatType, normalizeType, parseTypeExpression, typeAtKey, type TypeNode } from "../type-system.js";
 import type { ComponentDefinition } from "../template.js";
 import { quote } from "./shared.js";
-import { conformingStates } from "./state-roots.js";
+import { conformingScalarStates } from "./state-roots.js";
 import type { Lowering, Scope } from "./vue-lowering.js";
 
 /** A JavaScript predicate for a declared type, used by generated event and handler code. */
@@ -130,8 +130,8 @@ export function declaredReferenceGuard(plan: CompiledExpression, scope: Scope, d
     if (prop === undefined) {
       const declaration = definition.declarations?.find((entry) => entry.name === root);
       if (declaration?.kind === "state" || declaration?.kind === "computed") {
-        // A conforming state's own value is checked on every write, so reading it cannot fail.
-        if (declaration.kind === "state" && steps.length === 0 && conformingStates(definition).has(root!)) return [];
+        // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
+        if (declaration.kind === "state" && steps.length === 0 && conformingScalarStates(definition).has(root!)) return [];
         const type = declarationTypeNode(declaration.type, declaration.shape);
         return type === undefined ? [] : check(type, steps);
       }

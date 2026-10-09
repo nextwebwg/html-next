@@ -836,13 +836,9 @@ export function generateReactOutput(definition: ComponentDefinition, version: st
     attachment.control?.write?.path !== undefined && attachment.control.write.path !== "[]" ||
     attachment.genericWrites.some((write) => write.path !== "[]"));
   const usesHtml = renderState.usesHtml;
-  const usesSlots = renderState.usesPlainSlots;
-  const usesScopedSlots = renderState.usesScopedSlots;
-  const usesKeyedLists = renderState.usesKeyedLists;
   const capturesRoot = attachments.some((attachment) => attachment.forward);
   const usesRefActions = handlers.some((handler) => handler.steps.some((step) => step.kind === "focus" || step.kind === "validate"));
   const usesRefs = usesTargetDispatch || usesRefActions || attachments.some((attachment) => attachment.ref !== undefined);
-  const usesNestedHandlerWrites = handlers.some((handler) => handler.steps.some((step) => step.kind === "set" && step.writablePath.length > 1));
   const name = definition.contract.name;
   const rootType = rootArms(template) === undefined ? getDomInterface(template.name) ?? "HTMLElement"
     : [...new Set(rootArms(template)!.map((arm) => getDomInterface(arm.name) ?? "HTMLElement"))].join(" | ");
