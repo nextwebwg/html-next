@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.43
+
+- HTMLKit has built-in `<hk-breadcrumbs>` and `<hk-pager>`, unstyled and accessible like `<hk-nav>` and needing no component link. Loaders get `breadcrumbs()`, the existing pages from the home page (or `from`) down to the current one, and `pager()`, the pages before and after it in navigation order.
+
 ## 1.0.0-alpha.41
 
 ### Breaking

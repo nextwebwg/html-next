@@ -13,7 +13,7 @@ import { documentHTML, escapeHTML } from "./document.js";
 import { discover, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
 import { renderHead } from "./head.js";
-import type { Application, ApplicationOptions, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, RenderedHead, RenderedPage, RouteLayer, ServerModule } from "./types.js";
+import type { Application, ApplicationOptions, ApplicationRoute, BrowserDefinition, LoaderResult, NavigationItem, NavigationQuery, PagerLinks, RenderedHead, RenderedPage, RouteLayer, ServerModule } from "./types.js";
 
 function invocation(definition: ComponentDefinition, result: LoaderResult, id: string, child: string, nested: boolean): string {
   const props = result.props ?? {};
@@ -36,7 +36,8 @@ function invocation(definition: ComponentDefinition, result: LoaderResult, id: s
 
 // Built-in components need no link: a resource that uses one gets it added after its content, so
 // diagnostics keep their line numbers. The import map below resolves it from this package.
-const builtins = [["hk-nav", "@nextwebwg/htmlkit/components/nav.html"]] as const;
+const builtins = [["hk-nav", "@nextwebwg/htmlkit/components/nav.html"], ["hk-breadcrumbs", "@nextwebwg/htmlkit/components/breadcrumbs.html"],
+  ["hk-pager", "@nextwebwg/htmlkit/components/pager.html"]] as const;
 
 /** HTMLKit's import map: @/ is the project root, as in Nuxt, and built-ins resolve from this package. */
 function importMap(root: string) {
@@ -111,11 +112,17 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
     }
     return paths;
   })();
-  const navigation = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
-    const from = query.from ?? "/";
+  const checkedFrom = (from = "/"): string => {
     if (!/^\/(?:[^/]+\/)*$/.test(from) || from.includes("[") || from.includes("?") || from.includes("#")) {
       throw new HtmlKitError("Navigation from requires a concrete application-relative directory prefix.", from);
     }
+    return from;
+  };
+  const item = (href: string, route: ApplicationRoute, depth: number, current: string | undefined): NavigationItem => Object.freeze({
+    href, label: route.label ?? decodeURIComponent(href.slice(config.base.length).split("/").filter(Boolean).at(-1) ?? "Home"),
+    current: href === current ? "page" as const : "false" as const, depth, pageName: route.pageName });
+  const navigation = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
+    const from = checkedFrom(query.from);
     const prefix = config.base + from.slice(1);
     const depth = from.split("/").filter(Boolean).length;
     // Hidden pages and alias routes stay routable but out of navigation.
@@ -137,12 +144,30 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       }
       return aParts.length - bParts.length || a.localeCompare(b);
     });
-    return Object.freeze(items.map(([href, route]) => {
-      const parts = href.slice(config.base.length).split("/").filter(Boolean);
-      return Object.freeze({ href, label: route.label ?? decodeURIComponent(parts.at(-1) ?? "Home"),
-        current: href === query.current ? "page" as const : "false" as const,
-        depth: parts.length - depth, pageName: route.pageName });
-    }));
+    return Object.freeze(items.map(([href, route]) => item(href, route, href.slice(config.base.length).split("/").filter(Boolean).length - depth, query.current)));
+  };
+  // Each existing page from `from` down to the current one, by URL; the current page is included even when hidden.
+  const breadcrumbs = async (query: NavigationQuery = {}): Promise<readonly NavigationItem[]> => {
+    const from = checkedFrom(query.from);
+    const current = query.current;
+    if (current === undefined || !current.startsWith(config.base + from.slice(1))) return Object.freeze([]);
+    const paths = await concreteRoutes();
+    const parts = current.slice(config.base.length).split("/").filter(Boolean);
+    const start = from.split("/").filter(Boolean).length;
+    const trail: NavigationItem[] = [];
+    for (let i = start; i <= parts.length; i++) {
+      const href = config.base + parts.slice(0, i).map(part => part + "/").join("");
+      const route = paths.get(href);
+      if (route !== undefined && route.canonical === undefined) trail.push(item(href, route, i - start, current));
+    }
+    return Object.freeze(trail);
+  };
+  // The neighbours of the current page in navigation order.
+  const pager = async (query: NavigationQuery = {}): Promise<PagerLinks> => {
+    const items = await navigation(query);
+    const index = items.findIndex(entry => entry.current === "page");
+    if (index < 0) return Object.freeze({});
+    return Object.freeze({ ...(index > 0 ? { previous: items[index - 1]! } : {}), ...(index < items.length - 1 ? { next: items[index + 1]! } : {}) });
   };
   const application: Application = {
     ...config, routes, navigation, files,
@@ -208,13 +233,16 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const results: LoaderResult[] = [];
       let parent: Readonly<Record<string, unknown>> = Object.freeze({});
       let head: RenderedHead = {};
+      // An alias marks its page's own entry current.
+      const current = route.canonical === undefined ? url.pathname : config.base + route.canonical.slice(1);
       for (const layer of layers) {
         signal.throwIfAborted();
         const loaded = await module(layer);
         const context = { phase: "prerender" as const, url: new URL(url), base: config.base, params, parent,
           fetch: globalThis.fetch, signal,
-          // An alias marks its page's own entry current.
-          navigation: (query?: NavigationQuery) => navigation({ current: route.canonical === undefined ? url.pathname : config.base + route.canonical.slice(1), ...query }),
+          navigation: (query?: NavigationQuery) => navigation({ current, ...query }),
+          breadcrumbs: (query?: NavigationQuery) => breadcrumbs({ current, ...query }),
+          pager: (query?: NavigationQuery) => pager({ current, ...query }),
           get request(): Request { throw new HtmlKitError("request is unavailable during static generation.", origin(layer)); } };
         const result = loaded.load === undefined ? {} : await loaded.load(context);
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new HtmlKitError("load() must return a LoaderResult object.", origin(layer));

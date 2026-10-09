@@ -87,6 +87,10 @@ export interface LoadContext {
   readonly signal: AbortSignal;
   /** Ordered concrete routes. from is an application-relative directory prefix. */
   readonly navigation: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
+  /** Each existing page from `from` (default /) down to the current page, for <hk-breadcrumbs>. */
+  readonly breadcrumbs: (options?: NavigationQuery) => Promise<readonly NavigationItem[]>;
+  /** The pages before and after the current one in navigation order, for <hk-pager>. */
+  readonly pager: (options?: NavigationQuery) => Promise<PagerLinks>;
   /** Unavailable during static generation; accessing it throws a diagnostic. */
   readonly request: Request;
 }
@@ -123,6 +127,10 @@ export interface NavigationQuery {
   readonly from?: string;
   /** Deployment pathname used for aria-current. Loaders default to their current URL. */
   readonly current?: string;
+}
+export interface PagerLinks {
+  readonly previous?: NavigationItem;
+  readonly next?: NavigationItem;
 }
 export interface NavigationItem {
   readonly href: string;

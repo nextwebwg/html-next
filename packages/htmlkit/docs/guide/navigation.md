@@ -71,6 +71,43 @@ out of navigation while remaining a page:
 An `hk:alias` URL, such as `<meta name="hk:alias" content="/start/">`, opens the same page but never
 gets its own link. Visiting it marks the page's own link as current.
 
+## Breadcrumbs and previous/next links
+
+`<hk-breadcrumbs>` shows the trail from the home page to the current page, and `<hk-pager>` links
+the pages before and after it in navigation order. Both are built in, and their loader helpers sit
+next to `navigation()`:
+
+```ts
+// app/layouts/default.server.ts
+export async function load({ breadcrumbs, pager }) {
+  return { props: { crumbs: await breadcrumbs(), ...await pager() } };   // pager() gives { previous, next }
+}
+```
+
+```html
+<!-- app/layouts/default.html -->
+<template component="site-shell">
+  <defs>
+    <prop name="crumbs" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Trail</prop>
+    <prop name="previous" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>Previous page</prop>
+    <prop name="next" type="object({ href: string, label: string, current: string, depth: number, pageName: string })" nullable>Next page</prop>
+  </defs>
+  <main>
+    <hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs>
+    <slot name="page"></slot>
+    <hk-pager from:previous="$previous" from:next="$next"></hk-pager>
+  </main>
+</template>
+```
+
+| Component | Renders |
+| --- | --- |
+| `<hk-breadcrumbs>` | `<nav aria-label="Breadcrumb">` with an ordered list of links. The last is the current page, with `aria-current="page"`. Only pages that exist appear, so a folder without an `index` page is skipped. |
+| `<hk-pager>` | `<nav aria-label="Pages">` with `rel="prev"` and `rel="next"` links. Each starts with "Previous" or "Next", which `previous-text` and `next-text` change. A link is left out at either end. |
+
+`breadcrumbs({ from })` starts the trail at a folder instead of the home page, and `pager({ from })`
+moves only between the pages under it.
+
 ## Part of the site
 
 `navigation({ from: '/guide/' })` lists only the pages under `/guide/`. Each item has:

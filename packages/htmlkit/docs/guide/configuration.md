@@ -46,8 +46,9 @@ A page's own `hk:layout` wins over `layoutDefaults`, which win over `layout`.
 import { site } from '@/lib/site.ts';
 ```
 
-It works in component links, controllers, stylesheet `@import`s, and loader imports. Built-in
-components such as `<hk-nav>` need no link at all; the `hk-` prefix is reserved for them.
+It works in component links, controllers, stylesheet `@import`s, and loader imports. The built-in
+components `<hk-nav>`, `<hk-breadcrumbs>`, and `<hk-pager>` need no link at all; the `hk-` prefix is
+reserved for them.
 
 ## Routes in code
 

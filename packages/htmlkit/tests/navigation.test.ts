@@ -73,3 +73,26 @@ it("names the hk: spelling for metadata written with the old htmlkit: prefix", a
   await write(root, "app/pages/about.html", '<template component="page-about"><meta name="htmlkit:label" content="About"><h1>about</h1></template>');
   await expect(discoverRoutes(root)).rejects.toThrow(/write hk:label instead of htmlkit:label/);
 });
+
+it("renders built-in breadcrumbs and previous/next links from navigation order", async () => {
+  const root = await site();
+  const item = "object({ href: string, label: string, current: string, depth: number, pageName: string })";
+  await write(root, "app/layouts/default.html", `<template component="trail-shell"><defs>
+    <prop name="crumbs" type="list(${item})" required>Trail</prop>
+    <prop name="previous" type="${item}" nullable>Previous page</prop>
+    <prop name="next" type="${item}" nullable>Next page</prop></defs>
+    <main><hk-breadcrumbs from:items="$crumbs"></hk-breadcrumbs><slot name="page"></slot><hk-pager from:previous="$previous" from:next="$next"></hk-pager></main></template>`);
+  await write(root, "app/layouts/default.server.ts", 'export const load = async ({ breadcrumbs, pager }) => ({ props: { crumbs: await breadcrumbs(), ...await pager() } });');
+  const application = await createApplication({ root, base: "/kit/" });
+  try {
+    const html = (await application.render("/kit/guide/install/")).body;
+    const trail = /<nav aria-label="Breadcrumb"[^>]*>([\s\S]*?)<\/nav>/.exec(html)![1]!;
+    expect([...trail.matchAll(/<a href="([^"]+)"[^>]*aria-current="(\w+)"[^>]*>([^<]+)<\/a>/g)].map(match => match.slice(1))).toEqual([
+      ["/kit/", "false", "Home"], ["/kit/guide/", "false", "guide"], ["/kit/guide/install/", "page", "install"]]);
+    expect(html).toMatch(/<a rel="prev" href="\/kit\/guide\/"><small>Previous<\/small> guide<\/a>/);
+    expect(html).toMatch(/<a rel="next" href="\/kit\/guide\/next\/"><small>Next<\/small> next<\/a>/);
+    // The first page has no previous link and the last has no next.
+    expect((await application.render("/kit/")).body).not.toContain('rel="prev"');
+    expect((await application.render("/kit/about/")).body).not.toContain('rel="next"');
+  } finally { await application.close(); }
+});
