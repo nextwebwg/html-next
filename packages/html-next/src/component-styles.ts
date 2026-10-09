@@ -22,6 +22,14 @@ export const COMPONENT_ATTRIBUTE = "data-component";
 /** Marks each top-level projected node. */
 export const PROJECTED_ATTRIBUTE = "data-slotted";
 
+// A private inherited value keeps Firefox SVG styles inside their scope limits.
+// Roots override the normal reset even when their authored sheet is in a cascade layer.
+const SCOPE_OWNER = "--html-next-scope-owner";
+export const COMPONENT_STYLE_BOUNDARIES = `@supports (-moz-appearance: none) {
+:where([data-component], [data-slotted]) { --html-next-scope-owner: boundary; }
+:where([data-slotted]:not([data-component])) { --html-next-scope-owner: projected !important; }
+}`;
+
 export function addAttributeToken(element: Element, attribute: string, token: string): void {
   const tokens = new Set((element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean));
   tokens.add(token);
@@ -198,10 +206,17 @@ export function guardComponentPseudoElements(selector: string): string {
 
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
 export function assembleComponentStyles(tag: string | readonly string[], own: string, slotted: string, hoisted: string,
-  projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`): string {
-  const root = (typeof tag === "string" ? [tag] : tag).map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
+  projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`, includeBoundaryReset = true): string {
+  const tags = typeof tag === "string" ? [tag] : tag;
+  const root = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
+  const scoped = own.trim() !== "" || slotted.trim() !== "";
+  const identities = tags.map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"] { ${SCOPE_OWNER}: "${name}" !important; }`).join("\n");
+  const projected = projectedBoundary === `[${PROJECTED_ATTRIBUTE}]` ? ""
+    : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) { :where(${projectedBoundary}) { ${SCOPE_OWNER}: projected !important; } }`;
   return [
     hoisted,
+    scoped && includeBoundaryReset ? COMPONENT_STYLE_BOUNDARIES : "",
+    scoped ? `@supports (-moz-appearance: none) {\n${identities}${projected === "" ? "" : "\n" + projected}\n}` : "",
     own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], ${projectedBoundary}) {\n${own}\n}`,
     slotted.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}]) {\n${slotted}\n}`,
   ].filter((part) => part !== "").join("\n");
@@ -266,6 +281,7 @@ export function compileComponentStyles(
   document: Document,
   source?: string,
   adopters: readonly ComponentDefinition[] = [definition],
+  includeBoundaryReset = true,
 ): CompiledComponentStyles {
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
@@ -323,7 +339,7 @@ export function compileComponentStyles(
   const own = compile("own");
   const slotted = compile("slotted");
   for (const owner of owners) for (const name of owner.names) names.add(name);
-  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n")), stateNames: Array.from(names),
+  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n"), undefined, includeBoundaryReset), stateNames: Array.from(names),
     ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 
