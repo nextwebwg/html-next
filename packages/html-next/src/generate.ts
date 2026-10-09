@@ -1,3 +1,4 @@
+import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
@@ -29,7 +30,7 @@ import type { ComponentDefinition } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.38";
+export const GENERATOR_VERSION = "1.0.0-alpha.39";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -210,6 +211,6 @@ export function generateSvelteConversion(definition: ComponentDefinition, option
 
 function inlineStylesheetSources(definition: ComponentDefinition): ComponentDefinition {
   if ((definition.stylesheets?.length ?? 0) === 0) return definition;
-  return { ...definition, stylesheets: [], css: definition.stylesheets!.map(sheet =>
-    wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + definition.css };
+  return { ...definition, stylesheets: [], css: hoistStylesheetNamespaces(definition.stylesheets!.map(sheet =>
+    wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + definition.css) };
 }

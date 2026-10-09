@@ -52,6 +52,8 @@ export const liveRuntimeSubsystemModules = {
   componentResources: [
     "packages/html-next/src/stylesheet-resources.ts",
     "packages/html-next/src/stylesheet-resources-browser.ts",
+    "packages/html-next/src/stylesheet-namespaces.ts",
+    "packages/html-next/src/stylesheet-namespaces-browser.ts",
     "packages/html-next/src/graph.ts",
     "packages/html-next/src/resource-metadata.ts",
     "packages/html-next/src/resolve.ts",

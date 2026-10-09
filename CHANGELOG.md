@@ -1,10 +1,14 @@
 # Changelog
 
-## 1.0.0-alpha.39
+## 1.0.0-alpha.40
 
 - HTMLKit inlines an optional `app/head.js` as a classic script after each page's charset declaration and before its stylesheets, so it runs before first paint, for example to apply a saved color theme without a flash of the default one. Text that would end or nest the script (`<!--`, `<script`, `</script`) is rejected.
 - HTMLKit applications serve pages through `application.fetch(request)`, which takes a native `Request` and returns a `Response` on Node, Deno 2.8+, and Bun. The development server uses it for every page, and CI runs it on Deno and Bun.
 - The HTMLKit development server's component stylesheet links load again. Vite requests them with a `?direct` query that HTMLKit's virtual sources did not recognize, so they returned 404 and each dev page first painted without component CSS until its module injected the styles, fading any transitioned colors in.
+
+## 1.0.0-alpha.39
+
+- Shared and inline component styles preserve stylesheet-local `@namespace` declarations in live loading, Vite builds, SSR, and framework conversion. Imported default namespaces become explicit selector constraints; conflicting named prefixes remain isolated. Firefox 155's native SVG scope-limit defect is documented with a standalone reproduction and Mozilla bug 2080046.
 
 ## 1.0.0-alpha.38
 
