@@ -1648,6 +1648,8 @@ export function emitBlocks(
     block.sites[site]!.length === 0 ? "r.n" : `r.a${site}`;
   const participates = (block: Block): boolean => block.transitions === true ||
     block.regions.some((region) => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates));
+  const transitioned = (block: Block, site: number): boolean =>
+    block.bindings.some((binding) => binding.site === site && binding.kind === "style" && binding.name === "view-transition-name");
   const participating = (region: Region): boolean => region.kind !== "slot" && [region.block, ...region.arms ?? []].some(participates);
   // What a scheduler's pending changes must touch to hold its flush for a transition.
   const transitionMask = plan.transitions === undefined ? 0 : blocks.reduce((mask, block) => block.regions.reduce((inner, region) =>
@@ -1830,10 +1832,15 @@ export function emitBlocks(
         const start = lines.length;
         switch (binding.kind) {
           case "attribute":
-          case "url":
+          case "url": {
+            // A bound style attribute would drop the transition's own properties, written once.
+            const write = binding.kind === "url" ? `writeUrlAttribute(${site}, ${JSON.stringify(binding.name)}, `
+              : binding.name === "style" && transitioned(block, binding.site) ? `writeTransitionStyle(${site}, `
+              : `writeAttribute(${site}, ${JSON.stringify(binding.name)}, `;
             lines.push(`    const ${output} = toAttribute(${value}, ${JSON.stringify(binding.name)});`,
-              `    if (${output} !== ${last}) ${binding.kind === "url" ? "writeUrlAttribute" : "writeAttribute"}(${site}, ${JSON.stringify(binding.name)}, ${last} = ${output});`);
+              `    if (${output} !== ${last}) ${write}${last} = ${output});`);
             break;
+          }
           case "value":
             lines.push(`    const ${output} = toText(${value});`, `    if (${output} !== ${last}) writeText(${site}, ${last} = ${output});`);
             break;
@@ -2374,7 +2381,7 @@ export function emitBlocks(
     "checkAbsent", "checkBoolean", "checkConstrained", "checkEvent", "checkFormat", "checkFunction", "checkInteger", "checkKeyword", "checkList",
     "checkNull", "checkNumber", "checkObject", "checkRecord", "checkSelectedType", "checkSeparated", "checkString", "checkTrusted", "checkUnion",
     "checkUnknown", "boundFailures", "holdTransitions", "transitionChanged", "transitionName", "transitionRows", "transitionRowsChanged",
-    "transitionStyles"]
+    "transitionStyles", "writeTransitionStyle"]
     .filter((name) => name === "attachGeneratedController" || new RegExp(`\\b${name}\\b`).test(`${source}\n${stateSpec}\n${propsSpec ?? ""}\n${registration}`));
   // A root without children, and an arm without them, build no prototype.
   const built = (block: Block): boolean => armIds.has(block.id) ? (block.spec as unknown[]).length > 2 : block.id !== 0 || rootChildren;

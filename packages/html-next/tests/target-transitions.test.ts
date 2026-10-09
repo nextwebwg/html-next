@@ -18,10 +18,11 @@ const source = `<template component="x-shelf" controller="./shelf-controller.js"
   <defs>
     <state name="open" type="boolean" value="false"></state>
     <state name="count" type="number" value="0"></state>
+    <state name="tint" type="string" value="''"></state>
     <state name="items" type="list(object({ id: string, label: string }))" value="[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }]"></state>
   </defs>
   <section>
-    <aside $if="$open" $transition="fly 300ms">Panel</aside>
+    <aside $if="$open" $transition="fly 300ms" from:style="$tint">Panel</aside>
     <output $value="$count"></output>
     <ul><li $each="item of $items" $key="$item.id" $transition="fade 300ms">{$item.label}</li></ul>
   </section>
@@ -93,7 +94,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
       const { page, close } = await open(type);
       try {
         const result = await page.evaluate(async () => {
-          type Host = { state: { open: boolean; count: number; items: { id: string; label: string }[] } };
+          type Host = { state: { open: boolean; count: number; tint: string; items: { id: string; label: string }[] } };
           const w = window as unknown as { hosts: Host[]; transitions: ViewTransition[]; played: (transition: ViewTransition) => Promise<unknown[]> };
           const [first, second] = w.hosts as [Host, Host];
           const asides = () => document.querySelectorAll("aside").length;
@@ -112,6 +113,12 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
           out.transitionsForOneTask = w.transitions.length;
           out.shownInside = asides();
           await settle();
+
+          // A bound style attribute keeps the transition's own properties.
+          first.state.tint = "color: red";
+          await tick();
+          const aside = document.querySelector("aside")!;
+          out.styled = [aside.style.color, aside.style.getPropertyValue("view-transition-name"), aside.style.getPropertyValue("view-transition-class").startsWith("hn-t")];
 
           first.state.open = false;
           out.leaving = await w.played(await next());
@@ -153,6 +160,7 @@ describe.skipIf(!enabled)("transitions extension in compiled output", () => {
         assert.equal(result.transitionsForOneTask, 1);
         assert.equal(result.shownInside, 2);
         assert.deepEqual(result.arriving, [["::view-transition-new", "hn-fly", 300, "normal"], ["::view-transition-new", "hn-fly", 300, "normal"]]);
+        assert.deepEqual(result.styled, ["red", "match-element", true]);
         assert.deepEqual(result.leaving, [["::view-transition-old", "hn-fly", 300, "reverse"]]);
         assert.deepEqual(result.unrelated, [0, "5"]);
         // Moved rows animate as the browser's own move; the moving rows' names carry no keyframes.

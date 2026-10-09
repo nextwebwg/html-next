@@ -33,7 +33,7 @@ export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textC
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
-export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles } from "./generated-transitions.js";
+export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles, writeTransitionStyle } from "./generated-transitions.js";
 export { eventPasses } from "./event-filter.js";
 export {
   checkAbsent, checkBoolean, checkConstrained, checkEvent, checkFormat, checkFunction, checkInteger, checkKeyword, checkList,

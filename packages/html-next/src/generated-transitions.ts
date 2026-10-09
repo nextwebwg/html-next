@@ -138,6 +138,17 @@ export function transitionRowsChanged(list: RowList, before: readonly Node[] | u
   }
 }
 
+/** A bound `style` attribute on a participating element, written without dropping its view-transition properties. */
+export function writeTransitionStyle(element: Element & ElementCSSInlineStyle, value: string | null): void {
+  const { style } = element;
+  const name = style.getPropertyValue("view-transition-name");
+  const cls = style.getPropertyValue("view-transition-class");
+  if (value === null) element.removeAttribute("style");
+  else element.setAttribute("style", value);
+  style.setProperty("view-transition-name", name);
+  style.setProperty("view-transition-class", cls);
+}
+
 // Keywords the property reads as itself rather than as a name.
 const KEYWORDS = new Set(["none", "auto", "match-element", "initial", "inherit", "unset", "revert", "revert-layer", "default"]);
 
