@@ -20,8 +20,8 @@ Use Node `>=22.22.2 <23 || >=24.15 <25`. Install `@nextwebwg/htmlkit` and add it
 
 Then run `pnpm dev`, `pnpm build`, or `pnpm preview` (`npm run dev` and the others work too).
 
-**Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers routes and layouts,
-loaders and browser delivery, ordered routes and navigation, and configuration. Its source is
+**Guide:** [nextwebwg.org/htmlkit](https://nextwebwg.org/htmlkit/) covers pages and routing,
+loading data, navigation, and configuration. Its source is
 [`docs/guide`](./docs/guide/) in this package.
 
 ## Proof applications
