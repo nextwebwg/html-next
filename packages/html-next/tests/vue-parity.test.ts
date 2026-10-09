@@ -40,6 +40,28 @@ import { formattingSource, formattingProbe } from "./formatting-fixture.js";
 
 const cases: readonly ParityCase[] = [
   {
+    name: "template text keeps spaces between siblings, non-breaking spaces and preformatted runs",
+    features: ["text", "whitespace"],
+    definitions: {
+      "x-text-spacing": `<template component="x-text-spacing"><defs><state name="count" type="number" value="1"></state>
+        <handler name="next"><set name="count" expr:value="$count + 1"></set></handler></defs><section>
+        <p class="sibling"><b>Total:</b>
+          {$count} items</p>
+        <p class="nbsp">a&nbsp;&nbsp;{$count}</p>
+        <pre>{$count}  two
+  three</pre>
+        <button on:click="next">Next</button>
+      </section></template>`,
+    },
+    invocation: `<x-text-spacing id="case"></x-text-spacing>`,
+    vueRender: `h(XTextSpacing, { id: "case" })`,
+    root: "#case",
+    // Vue renders authored text with its own whitespace handling; the rendered words and spaces match.
+    probe: `({ sibling: root.querySelector(".sibling").textContent.replace(/[\\t\\n\\f\\r ]+/g, " ").trim(), nbsp: root.querySelector(".nbsp").textContent, pre: root.querySelector("pre").textContent })`,
+    action: `root.querySelector("button").click()`,
+    expectedAfter: { sibling: "Total: 2 items", nbsp: "a\u00a0\u00a02", pre: "2  two\n  three" },
+  },
+  {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
     features: ["scoped styles", "delegated root", "host pseudo-elements"],
     definitions: {
