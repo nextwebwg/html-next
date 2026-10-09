@@ -62,6 +62,20 @@ const cases: readonly ParityCase[] = [
     expectedAfter: { sibling: "Total: 2 items", nbsp: "a\u00a0\u00a02", pre: "2  two\n  three" },
   },
   {
+    name: "SVG class rules stay inside owned scope with inherited and explicit projected fills",
+    features: ["scoped styles", "SVG", "slots", "inheritance"],
+    definitions: {
+      "x-svg-boundary": `<template component="x-svg-boundary"><div><svg><rect class="shape" width="10" height="10"></rect></svg><slot></slot></div>
+        <style>:host { fill: green; } .shape { fill: red; } :slotted(.styled) { fill: blue; }</style></template>`,
+    },
+    invocation: '<x-svg-boundary id="case"><svg><rect class="shape" width="10" height="10"></rect><rect class="shape styled" x="20" width="10" height="10"></rect></svg></x-svg-boundary>',
+    vueRender: 'h(XSvgBoundary, { id: "case" }, { default: () => h("svg", {}, [h("rect", { class: "shape", width: 10, height: 10 }), h("rect", { class: "shape styled", x: 20, width: 10, height: 10 })]) })',
+    root: '#case',
+    probe: `Array.from(root.querySelectorAll('rect'), node => getComputedStyle(node).fill)`,
+    action: `root.setAttribute('data-probe', 'done')`,
+    expectedAfter: ['rgb(255, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)'],
+  },
+  {
     name: "delegated roots retain explicit host selectors and exclude ordinary root selectors",
     features: ["scoped styles", "delegated root", "host pseudo-elements"],
     definitions: {

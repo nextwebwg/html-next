@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-alpha.40
+
+- Component CSS prevents Firefox 155's scoped SVG class rules from leaking across scope limits. Live loading, graph CSS, Vite, SSR, React and Svelte keep owned, projected and nested component styling distinct through DOM moves. The compiler uses a Firefox-specific private CSS marker; shared boundary rules are delivered once per graph or live document. Author inheritance remains intact; no DOM observers or ownership attributes are added. Mozilla bug 2080046 tracks the underlying browser defect.
+
+## 1.0.0-alpha.39
+
+- Shared and inline component styles preserve stylesheet-local `@namespace` declarations in live loading, Vite builds, SSR, and framework conversion. Imported default namespaces become explicit selector constraints; conflicting named prefixes remain isolated. Firefox 155's native SVG scope-limit defect is documented with a standalone reproduction and Mozilla bug 2080046.
+
+
+## 1.0.0-alpha.38
+
+- Component styles support shared CSS with ordinary `@import`. Live loading, Node graphs, SSR, HTMLKit, native Vite builds, and framework conversion resolve nested imports before scoping, retain source-relative assets and import conditions, and reuse source fetches. Compatible uses share one delivered body; distinct layers, conditions, cascade positions, global overrides, and target scope boundaries retain separate occurrences when needed. Styles follow graph order and stay in place when instances move or remount. Synchronous compilation diagnoses unresolved imports instead of emitting global imports. Imported `@namespace` is currently HY004 because flattening it would change selector matching.
+- Component style compilation preserves conditional and layered name-defining rules, including keyframes, in source order. Zero-specificity owner and pseudo-element guards prevent Firefox scope-boundary leaks and stale root styles. Defaults remain explicit CSS; no automatic box-model reset is installed.
+
 ## 1.0.0-alpha.37
 
 - Vue component styles preserve native selector boundaries: ordinary selectors match owned descendants, while root elements and their pseudo-elements require explicit `:host` selectors. Nested component roots remain outside the parent’s style scope, and Vue slot scoping is preserved.
