@@ -15,3 +15,27 @@ On 2026-10-08, Chromium 153, Firefox 155, and WebKit 26.6 retained `CSSImportRul
 Direct `box-sizing` rules respect nested-component and projected-content scope limits; inheritance still follows the DOM. A selector list combining universal and pseudo-element selectors exposed a Firefox 155 scope-limit defect: a projected element received the regular element's box-sizing rule. A zero-specificity boundary guard on affected own selectors prevents the leak while retaining the scope root. The guard belongs in the compiler rather than application defaults.
 
 Firefox also retained the previous root's scoped host style during dynamic root replacement. A zero-specificity owner qualifier on the rewritten host selector prevents that stale match. Firefox's HTML preload scanner can fetch imports from authored template source before the loader starts; the loader's inert CSS parser does not initiate those requests.
+
+
+## Stylesheet namespaces
+
+On 2026-10-08, Chromium 153, Firefox 155, and WebKit 26.6 parsed `CSSNamespaceRule` in
+constructed stylesheets and accepted namespace-qualified `CSSStyleRule.selectorText` updates.
+All three rejected removing a namespace declaration while dependent style rules remained.
+The compiler therefore leaves declarations in each parsed sheet while pruning and rewriting
+rules, and moves their serialized declarations into the delivered stylesheet's preamble.
+
+Namespace prefixes and defaults are local to each stylesheet under
+[CSS Namespaces](https://www.w3.org/TR/css-namespaces-3/). Combining sheets needs a source
+transform: stable URI-derived named prefixes, explicit default namespace constraints, and
+rewrites of selector-valued functions and scope/supports preludes. CSSOM owns browser parsing;
+PostCSS owns build parsing. Unprefixed attributes keep their ordinary no-namespace behavior.
+The subject compound inside `:is()`, `:where()`, and `:not()` follows the default-namespace
+exception in [Selectors Level 4](https://www.w3.org/TR/selectors-4/).
+
+A reduced standalone SVG test exposes a Firefox 155 scope-limit defect even without
+namespaces: both an owned rect and a rect below an excluded SVG receive a scoped class rule.
+Chromium and WebKit style only the owned rect. The reproduction is checked in at
+`packages/html-next/tests/fixtures/firefox-svg-scope.html` and filed as
+[Mozilla bug 2080046](https://bugzilla.mozilla.org/show_bug.cgi?id=2080046). This observation
+uses Playwright's Firefox build; a stock release/Nightly reproduction remains unverified.
