@@ -59,6 +59,7 @@ const selected = new Set([
   "bind: renders its initial state; declared on: bindings are consumed",
   "reactive declarations seed once: state initializes, computed evaluates, data is pending",
   ".property binding resolves through the generated DOM contract",
+  "handler writes satisfy each state's declared type, and a nonconforming write leaves the state",
 ]);
 const shared = cases.filter((testCase) => selected.has(testCase.name) && "probe" in testCase.expect);
 assert.equal(shared.length, selected.size, "Every selected public case must still exist");
