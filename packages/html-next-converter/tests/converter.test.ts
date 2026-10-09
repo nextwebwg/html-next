@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
-import { compileScript, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
+import { compileScript, compileStyle, compileTemplate, parse as parseVue } from "@vue/compiler-sfc";
 import { build, transform } from "esbuild";
 import { parseFragment } from "parse5";
 import { createElement, type ComponentType } from "react";
@@ -77,7 +77,7 @@ describe("framework converter", () => {
       const root = await mkdtemp(join(tmpdir(), "html-next-converter-shared-"));
       temporary.push(root);
       await writeFile(join(root, "package.json"), "{}");
-      await writeFile(join(root, "defaults.css"), ':host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
+      await writeFile(join(root, "defaults.css"), '@namespace svg "http://www.w3.org/2000/svg"; svg|rect { fill: rebeccapurple; } :host, *, *::before, *::after { box-sizing: border-box; } :host-state([open]) { color: rebeccapurple; }');
       await writeFile(join(root, "components.html"), ["x-a", "x-b"].map(tag => `<template component="${tag}"><defs><state name="open" type="boolean" value="true"></state></defs><section><span>own</span><slot></slot></section><style>@import "defaults.css";</style></template>`).join(""));
       const output = join(root, "out");
       const manifest = await convertComponents({ entries: ["components.html"], target, root, outDirectory: output, mode: "library" });
@@ -86,6 +86,11 @@ describe("framework converter", () => {
         .map(async file => ({ path: file.path, content: await readFile(join(output, file.path), "utf8") })));
       for (const file of files) assert.doesNotMatch(file.content, /@import "defaults\.css"/);
       const css = files.filter(file => file.path.endsWith(".css")).map(file => file.content).join("\n");
+      if (target !== "vue") {
+        assert.equal(css.match(/@namespace/g)?.length, 1);
+        assert.ok(css.indexOf("@namespace") < css.indexOf("@scope"));
+        assert.match(css, /htmlnextns[0-9a-f]+\|rect/);
+      }
       if (target === "react") assert.equal(css.match(/box-sizing: border-box/g)?.length, 1);
       if (target === "svelte") {
         assert.match(css, /:not\(\[data-html-next-owner~="x-a"\]\)/);
@@ -95,6 +100,11 @@ describe("framework converter", () => {
       if (target === "vue") for (const file of files) {
         assert.match(file.content, /box-sizing: border-box/);
         compileVue(file.content, file.path);
+        const parsed = parseVue(file.content, { filename: file.path });
+        for (const style of parsed.descriptor.styles) {
+          assert.match(style.content, /@namespace/);
+          assert.deepEqual(compileStyle({ source: style.content, filename: file.path, id: 'namespace-test', scoped: style.scoped ?? false }).errors, []);
+        }
       }
       for (const tag of ["x-a", "x-b"]) assert.match(files.map(file => file.content).join("\n"), new RegExp(`data-${tag}-state`));
     });
