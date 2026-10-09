@@ -141,24 +141,23 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("development and docu
   }, 60_000);
 });
 
-describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("global stylesheets", () => {
-  it("style built-in components on first paint in built and development pages", async () => {
-    const root = await mkdtemp(join(tmpdir(), "htmlkit-global-css-"));
+describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("page-wide stylesheets", () => {
+  it("apply on first paint in built and development pages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-page-css-"));
     await write(root, "package.json", '{"type":"module"}');
-    await write(root, "styles/site.css", '[data-component="hk-nav"] ul { list-style: none; }');
-    await write(root, "app/layouts/default.html", '<template component="css-shell"><defs><prop name="pages" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Pages</prop></defs><main><hk-nav from:items="$pages"></hk-nav><slot name="page"></slot></main></template>');
-    await write(root, "app/layouts/default.server.ts", "export const load = async ({ navigation }) => ({ props: { pages: await navigation() } });");
+    await write(root, "styles/page.css", "html { background: rgb(1, 2, 3); } body { margin: 0; }");
     await write(root, "app/pages/index.html", '<template component="page-home"><h1>Home</h1></template>');
-    const options = { root, css: ["@/styles/site.css"] };
+    const options = { root, css: ["@/styles/page.css"] };
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await (await browser.newContext({ javaScriptEnabled: false })).newPage();
-      const listStyle = () => page.locator('[data-component="hk-nav"] ul').evaluate(element => getComputedStyle(element).listStyleType);
+      const check = async () => expect(await page.evaluate(() => [getComputedStyle(document.documentElement).backgroundColor, getComputedStyle(document.body).marginTop]))
+        .toEqual(["rgb(1, 2, 3)", "0px"]);
       await buildApplication(options);
       const preview = await previewApplication({ ...options, port: 0 });
-      try { await page.goto(preview.url); expect(await listStyle()).toBe("none"); } finally { await preview.close(); }
+      try { await page.goto(preview.url); await check(); } finally { await preview.close(); }
       const dev = await devApplication({ ...options, port: 0 });
-      try { await page.goto(dev.url); expect(await listStyle()).toBe("none"); } finally { await dev.close(); }
+      try { await page.goto(dev.url); await check(); } finally { await dev.close(); }
     } finally { await browser.close(); await rm(root, { recursive: true, force: true }); }
   }, 60_000);
 });
