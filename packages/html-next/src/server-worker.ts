@@ -1,3 +1,4 @@
+import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { parentPort, workerData } from "node:worker_threads";
 
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -48,7 +49,7 @@ try {
   lowerDocument(document, { connect: false });
   const result = {
     html: serializeRenderedForm(document.body),
-    css: Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n"),
+    css: hoistStylesheetNamespaces(Array.from(document.head.querySelectorAll("style"), (style) => style.textContent).join("\n")),
     styleOwnership: Object.assign({}, ...Array.from(document.head.querySelectorAll("style[data-html-next-component-styles]"),
       (style) => JSON.parse(style.getAttribute("data-html-next-style-states") ?? "{}"))) as Record<string, string[]>,
   };

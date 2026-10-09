@@ -1,3 +1,4 @@
+import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-browser.js";
 /**
  * Component style compilation (nextwebwg.org/html-next/styling).
  *
@@ -113,10 +114,12 @@ function rewriteComponentTags(selector: string): string {
       continue;
     }
     const previous = output.at(-1);
-    const startsCompound = previous === undefined || /[\s>+~(,]/.test(previous);
+    const namespace = previous === "|" ? /(?:[\w-]+|\*)?\|$/.exec(output)?.[0] : undefined;
+    const startsCompound = previous === undefined || /[\s>+~(,]/.test(previous) || namespace !== undefined;
     const tag = startsCompound ? /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w-]|\()/.exec(selector.slice(index))?.[0] : undefined;
     if (tag !== undefined) {
-      output += `:is(${tag}, :where([${COMPONENT_ATTRIBUTE}~="${tag}"]))`;
+      if (namespace !== undefined) output = output.slice(0, -namespace.length);
+      output += `:is(${namespace ?? ""}${tag}, :where(${namespace === undefined ? "" : namespace + "*"}[${COMPONENT_ATTRIBUTE}~="${tag}"]))`;
       index += tag.length - 1;
       continue;
     }
@@ -267,7 +270,7 @@ export function compileComponentStyles(
   if (css.trim() === "") return { css: "", stateNames: [] };
   assertResolvedStylesheet(css, source ?? definition.source.file);
   const Sheet = (document.defaultView ?? globalThis).CSSStyleSheet;
-  const renamed = renameComponentPseudoClasses(css);
+  const renamed = normalizeStylesheetNamespacesInBrowser(renameComponentPseudoClasses(css), document);
   const names = new Set<string>();
   const hoisted: string[] = [];
 
@@ -289,7 +292,10 @@ export function compileComponentStyles(
     const rules = container.cssRules;
     for (let index = 0; index < rules.length;) {
       const rule = rules[index]!;
-      if (rule instanceof StyleRule) {
+      if (rule.type === 10) {
+        if (topLevel && want === "own") hoisted.push(rule.cssText);
+        index += 1;
+      } else if (rule instanceof StyleRule) {
         if (styleRuleKind(rule.selectorText) === want) {
           rewriteNested(rule);
           index += 1;
@@ -312,7 +318,7 @@ export function compileComponentStyles(
     const sheet = new Sheet();
     sheet.replaceSync(renamed);
     prune(sheet, want, true);
-    return Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
+    return Array.from(sheet.cssRules).filter(rule => rule.type !== 10).map(rule => rule.cssText).join("\n");
   };
   const own = compile("own");
   const slotted = compile("slotted");
