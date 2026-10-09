@@ -50,6 +50,14 @@ export function renameComponentPseudoClasses(css: string, kinds: readonly ("slot
     kind === undefined || !kinds.includes(kind) ? match : `:where(${kind === "slotted" ? SENTINEL.slotted : SENTINEL.state}):is(`);
 }
 
+/** Constructed sheets discard imports, so synchronous compilation must diagnose them first. */
+export function assertResolvedStylesheet(css: string, source?: string): void {
+  const rules = css.replace(/\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, "");
+  if (/@import\b/i.test(rules)) {
+    fail("HY004", "Resolve component stylesheet imports with loadNodeComponents() or startBrowserComponents() before synchronous style compilation.", source);
+  }
+}
+
 /** Whether a renamed selector belongs to projected content rather than the component's own markup. */
 export function styleRuleKind(selector: string): StyleRuleKind {
   return /:where\(\s*\[--slotted\]\s*\)/.test(selector) ? "slotted" : "own";
@@ -151,10 +159,44 @@ export function rewriteComponentSelector(
   return rewriteComponentTags(rewriteValiditySelectors(output));
 }
 
+/** Firefox can leak a selector list containing pseudo-elements through an @scope limit. */
+export function guardComponentPseudoElements(selector: string): string {
+  if (!selector.includes("::")) return selector;
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  let pseudo = -1;
+  let subject = 0;
+  const emit = (end: number): void => {
+    const at = pseudo === -1 ? end : pseudo;
+    const guard = /:scope(?![\w-])/.test(selector.slice(subject, at)) ? ""
+      : `:where(:not([${COMPONENT_ATTRIBUTE}], [${PROJECTED_ATTRIBUTE}]))`;
+    const prefix = selector.slice(start, at);
+    parts.push((pseudo === -1 ? prefix.trimEnd() : prefix) + guard + selector.slice(at, end));
+    start = end + 1;
+    pseudo = -1;
+    subject = end + 1;
+  };
+  for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index]!;
+    if (character === "\\") { index += 1; continue; }
+    if (quote !== "") { if (character === quote) quote = ""; continue; }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (depth === 0 && character === ":" && selector[index + 1] === ":" && pseudo === -1) pseudo = index;
+    else if (depth === 0 && character === ",") emit(index);
+    else if (depth === 0 && /[\s>+~]/.test(character)) subject = index + 1;
+  }
+  emit(selector.length);
+  return parts.join(", ");
+}
+
 /** Wraps the compiled groups in the component's two scopes; `hoisted` rules stay document-wide. */
-export function assembleComponentStyles(tag: string, own: string, slotted: string, hoisted: string,
+export function assembleComponentStyles(tag: string | readonly string[], own: string, slotted: string, hoisted: string,
   projectedBoundary = `[${PROJECTED_ATTRIBUTE}]`): string {
-  const root = `[${COMPONENT_ATTRIBUTE}~="${tag}"]`;
+  const root = (typeof tag === "string" ? [tag] : tag).map(name => `[${COMPONENT_ATTRIBUTE}~="${name}"]`).join(", ");
   return [
     hoisted,
     own.trim() === "" ? "" : `@scope (${root}) to ([${COMPONENT_ATTRIBUTE}], ${projectedBoundary}) {\n${own}\n}`,
@@ -209,6 +251,7 @@ export interface CompiledComponentStyles {
   readonly css: string;
   /** The props and state the state attribute must carry, in first-use order. */
   readonly stateNames: readonly string[];
+  readonly stateNamesByTag?: Readonly<Record<string, readonly string[]>>;
 }
 
 type RuleContainer = CSSStyleSheet | CSSGroupingRule;
@@ -219,9 +262,10 @@ export function compileComponentStyles(
   definition: ComponentDefinition,
   document: Document,
   source?: string,
+  adopters: readonly ComponentDefinition[] = [definition],
 ): CompiledComponentStyles {
-  const tag = definition.contract.tag;
   if (css.trim() === "") return { css: "", stateNames: [] };
+  assertResolvedStylesheet(css, source ?? definition.source.file);
   const Sheet = (document.defaultView ?? globalThis).CSSStyleSheet;
   const renamed = renameComponentPseudoClasses(css);
   const names = new Set<string>();
@@ -230,9 +274,11 @@ export function compileComponentStyles(
   const view = document.defaultView ?? globalThis;
   const StyleRule = view.CSSStyleRule;
   const GroupingRule = view.CSSGroupingRule;
-  const canonical = componentStyleNameResolver(definition, source, true);
+  const owners = adopters.map(owner => ({ owner, names: new Set<string>(), canonical: componentStyleNameResolver(owner, source, true) }));
   const rewriteNested = (rule: CSSStyleRule): void => {
-    rule.selectorText = rewriteComponentSelector(rule.selectorText, tag, ":scope", names, canonical);
+    const rewritten = [...new Set(owners.map(({ owner, names: ownerNames, canonical }) =>
+      rewriteComponentSelector(rule.selectorText, owner.contract.tag, `:scope:where([${COMPONENT_ATTRIBUTE}~="${owner.contract.tag}"])`, ownerNames, canonical)))].join(", ");
+    rule.selectorText = styleRuleKind(rule.selectorText) === "own" ? guardComponentPseudoElements(rewritten) : rewritten;
     for (const child of Array.from(rule.cssRules ?? [])) {
       if (child instanceof StyleRule) rewriteNested(child);
     }
@@ -252,9 +298,13 @@ export function compileComponentStyles(
         prune(rule, want, false);
         index += 1;
       } else {
-        // Document-wide rules (@keyframes, @font-face, @property, …) are hoisted once, unscoped.
-        if (topLevel && want === "own") hoisted.push(rule.cssText);
-        container.deleteRule(index);
+        if (!/^@(namespace|charset|import)\b/i.test(rule.cssText) && want === "own") { index += 1; continue; }
+        // Only stylesheet preambles are hoisted; name-defining rules retain their context.
+        if (want === "own" && !topLevel) index += 1;
+        else {
+          if (topLevel && want === "own") hoisted.push(rule.cssText);
+          container.deleteRule(index);
+        }
       }
     }
   };
@@ -266,7 +316,9 @@ export function compileComponentStyles(
   };
   const own = compile("own");
   const slotted = compile("slotted");
-  return { css: assembleComponentStyles(tag, own, slotted, hoisted.join("\n")), stateNames: Array.from(names) };
+  for (const owner of owners) for (const name of owner.names) names.add(name);
+  return { css: assembleComponentStyles(adopters.map(owner => owner.contract.tag), own, slotted, hoisted.join("\n")), stateNames: Array.from(names),
+    ...(adopters.length <= 1 ? {} : { stateNamesByTag: Object.fromEntries(owners.map(({ owner, names: ownerNames }) => [owner.contract.tag, [...ownerNames]])) }) };
 }
 
 /** The state attribute's tokens for the current values: `name` while truthy, `name=value` for text. */
