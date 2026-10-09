@@ -45,6 +45,8 @@ const selected = new Set([
   "$each $where filters and reindexes the loop",
   "$sort with multiple keys and descending (a,-b)",
   "$match/$when/$else renders only the winning arm",
+  "bindings and bound controls write no attribute when a change leaves their result as it was",
+  "$if, $with and $match keep their content while the decision holds, and rebuild it when it changes",
   "$match selects a row inside <table><tbody>, falling back to $else",
   "a structural <template> produces no wrapper element",
   "$with binds an aliased expression into a child scope",

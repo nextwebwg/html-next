@@ -61,8 +61,10 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
       await writeFile(app, `<script lang="ts">
 import XControlled from "./${manifest.components[0]!.artifact}";
 let amount = $state<unknown>(undefined);
+let tone = $state<unknown>(undefined);
 if (typeof window !== "undefined") (window as any).svelteSetAmount = (next: unknown) => { amount = next; };
-</script><XControlled id="case" amount={amount as number} />`);
+if (typeof window !== "undefined") (window as any).svelteSetTone = (next: unknown) => { tone = next; };
+</script><XControlled id="case" amount={amount as number} tone={tone as string} />`);
       const mountEntry = join(outDirectory, "mount.ts");
       await writeFile(mountEntry, `import { mount, hydrate, unmount } from "svelte";
 import App from "./App.svelte";
@@ -137,6 +139,15 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
                 document.querySelector("#case")?.getAttribute("data-amount-input") === String(value), amount)));
               await compare();
             }
+            // Another prop changing does not rerun an effect that read only `amount`.
+            const amountRuns = (await snapshot(live)).behavior.trace.amountEffects;
+            await live.evaluate(() => (window as unknown as { HtmlNextLoader: {
+              updateComponentProps(element: Element, props: Record<string, unknown>): void;
+            } }).HtmlNextLoader.updateComponentProps(document.querySelector("#case")!, { tone: "loud" }));
+            await svelte.evaluate(() => (window as unknown as { svelteSetTone(value: unknown): void }).svelteSetTone("loud"));
+            await Promise.all([live, svelte].map((page) => page.waitForTimeout(50)));
+            assert.equal((await snapshot(live)).behavior.trace.amountEffects, amountRuns, "another prop must not rerun the amount effect");
+            await compare();
             const undeclared = await Promise.all([live, svelte].map((page) => page.evaluate(() => {
               const root = document.querySelector("#case")!;
               let observed: { detail: unknown; bubbles: boolean; composed: boolean; cancelable: boolean } | null = null;
@@ -208,6 +219,18 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
             await Promise.all([live, svelte].map((page) => page.locator("#case button").first().click()));
             await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
               document.querySelector("#case output")?.textContent === "1" && document.querySelector("#case")?.getAttribute("data-local") === "4")));
+            const unchanged = (await snapshot(live)).behavior.trace;
+            assert.deepEqual([unchanged.flatEffects, unchanged.nestedEffects, unchanged.nanEffects, unchanged.firstEffects], [1, 1, 1, 1],
+              "an equal computed, a written-back value or a push must not rerun effects");
+            await compare();
+            // A write to items.1.name changes only that path; one to items.0.name reaches its reader.
+            await Promise.all([live, svelte].map((page) => page.locator("#case button.rename-second").click()));
+            await Promise.all([live, svelte].map((page) => page.waitForTimeout(50)));
+            assert.equal((await snapshot(live)).behavior.trace.firstEffects, 1, "a write elsewhere in the list must not rerun the items.0.name effect");
+            await compare();
+            await Promise.all([live, svelte].map((page) => page.locator("#case button.rename-first").click()));
+            await Promise.all([live, svelte].map((page) => page.waitForFunction(() =>
+              (window as unknown as { trace: Record<string, number> }).trace.firstEffects === 2)));
             await compare();
             const results = await Promise.all([live, svelte].map((page) => page.evaluate(() =>
               new Promise<number>((resolve) => {
@@ -336,7 +359,7 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
             const traces = await Promise.all(pages.map((page) => page.evaluate(() =>
               ({ ...(window as unknown as { trace: Record<string, number> }).trace }))));
             assert.deepEqual(traces[1], traces[0]);
-            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, effectCleanups: 1, disconnects: 1 });
+            assert.deepEqual(traces[0], { connects: 1, effects: 1, nestedEffects: 1, flatEffects: 1, amountEffects: 1, nanEffects: 1, firstEffects: 1, effectCleanups: 1, disconnects: 1 });
           } finally {
             await Promise.all(pages.map((page) => page.close()));
             await browser.close();

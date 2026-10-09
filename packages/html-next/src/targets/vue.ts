@@ -210,7 +210,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   const name = context.identifiers.take("guarded", "Binding");
   if (!retains) {
     if (structural) {
-      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = { ready: true, value: ${emit(names.script)} }; });`);
+      context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; const value = ${emit(names.script)}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
       return name;
     }
     context.guarded.push(`let ${name}Previous: any;`, `const ${name} = computed(() => { if (!(${guard})) return ${name}Previous; return ${name}Previous = ${emit(names.script)}; });`);
@@ -220,7 +220,7 @@ function guardedBinding(plan: CompiledExpression, names: Names, context: Context
   const raw = retains ? context.lowering.value(plan.ast, names.script) : undefined;
   const next = raw === undefined ? output : raw === output ? "candidate" : output;
   if (structural) {
-    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = { ready: true, value: ${next} }; });`);
+    context.guarded.push(`let ${name}Previous = { ready: false, value: undefined as any };`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}const value = ${next}; return ${name}Previous.ready && Object.is(${name}Previous.value, value) ? ${name}Previous : (${name}Previous = { ready: true, value }); });`);
     return name;
   }
   context.guarded.push(`let ${name}Previous: any = null;`, `const ${name} = computed(() => { ${guard === undefined ? "" : `if (!(${guard})) return ${name}Previous; `}${raw === undefined ? "" : `const candidate: any = ${raw}; if (candidate === Symbol.for("html-next.invalid-result")) return ${name}Previous; `}return ${name}Previous = ${next}; });`);
@@ -572,7 +572,8 @@ function renderElement(node: ElementNode, names: Names, context: Context, isRoot
         const control = "($event.currentTarget as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)";
         const read = `readBoundControl(${control}) as any`;
         const update = node.name === "input" && attribute.name === "checked"
-          ? `(${control}.type !== 'radio' || ${control}.checked) && (${writable} = ${read})`
+          // Only an <input> binds checked, so the radio guard reads it as one.
+          ? `(($event.currentTarget as HTMLInputElement).type !== 'radio' || ($event.currentTarget as HTMLInputElement).checked) && (${writable} = ${read})`
           : `${writable} = ${read}`;
         attributes.push(`v-bind-control=${bound(`{ tag: ${quote(node.name)}, name: ${quote(attribute.name as "value" | "checked")}, value: ${writable}, ${authoredDefault(attribute.name as "value" | "checked")} }`)}`);
         attributes.push(`@${event}=${bound(update)}`);

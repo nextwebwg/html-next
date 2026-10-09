@@ -618,7 +618,7 @@ function renderNode(node: TemplateNode, root: boolean, scope: Scope, lowering: L
     const destination = scope.code.get(path[0] as string)!;
     const value = context.bindingValueName;
     if (path.length > 1) context.usesNestedBindings = true;
-    const write = path.length === 1 ? `${destination} = ${value} as typeof ${destination};`
+    const write = path.length === 1 ? `if (!Object.is(${destination}, ${value})) ${destination} = ${value} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${path.slice(1).map((segment) => typeof segment === "object" ? lowering.value(segment.expression, scope) : JSON.stringify(segment)).join(", ")}], ${value});`;
     return `(${value}: unknown) => { if (${value} !== Symbol.for('html-next.invalid-result')) { ${write} } }`;
   };
@@ -1185,7 +1185,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       `(${next} === undefined || ${destinationCheck})`, `handler:${handler.name}:${step.path}`,
       `${definition.source.file}: HR007: State ${step.path} does not satisfy its declared type.`);
     const destination = scope.code.get(state.name)!;
-    const write = step.writablePath.length === 1 ? `${destination} = ${next} as typeof ${destination};`
+    const write = step.writablePath.length === 1 ? `if (!Object.is(${destination}, ${next})) ${destination} = ${next} as typeof ${destination};`
       : `${context.writePathName}(${destination}, [${step.writablePath.slice(1).map((segment) => typeof segment === "object"
         ? lowering.value(segment.expression, handlerScope) : JSON.stringify(segment)).join(", ")}], ${next});`;
     const read = conformingRead(step.value, handlerScope, context, lowering.value(step.value.ast, handlerScope));
@@ -1337,12 +1337,19 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesDecorationAttachment ? [
       `function ${context.decorationAttachmentName}(decorations: readonly Decoration[]) {`,
       "  return (element: Element) => {",
-      "    for (const decoration of decorations) $effect(() => {",
-      "      const value = decoration.read();",
-      "      if (value === Symbol.for('html-next.invalid-result')) return;",
-      "      if (decoration.kind === 'class') element.classList.toggle(decoration.name, Boolean(value));",
-      "      else (element as HTMLElement).style.setProperty(decoration.name, value == null ? '' : String(value));",
-      "    });",
+      "    for (const decoration of decorations) {",
+      "      // A class or style decoration writes only a result that differs from its last.",
+      "      let last: unknown;",
+      "      $effect(() => {",
+      "        const value = decoration.read();",
+      "        if (value === Symbol.for('html-next.invalid-result')) return;",
+      "        const output = decoration.kind === 'class' ? Boolean(value) : value == null ? '' : String(value);",
+      "        if (output === last) return;",
+      "        last = output;",
+      "        if (decoration.kind === 'class') element.classList.toggle(decoration.name, output as boolean);",
+      "        else (element as HTMLElement).style.setProperty(decoration.name, output as string);",
+      "      });",
+      "    }",
       "  };",
       "}",
     ] : []),
@@ -1373,10 +1380,15 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
     ...(context.usesAttributeBinding ? [
       `function ${context.bindingHelperName}(name: string, read: () => unknown, update?: (value: any) => void, initialize = false) {`,
       "  return (element: Element) => {",
+      "    // An attribute binding writes only a result that differs from its last.",
+      "    let last: string | null | undefined;",
       "    const apply = (value: unknown) => {",
       "      if (value === Symbol.for('html-next.invalid-result')) return;",
-      "      if (value == null) element.removeAttribute(name);",
-      "      else element.setAttribute(name, String(value));",
+      "      const output = value == null ? null : String(value);",
+      "      if (output === last) return;",
+      "      last = output;",
+      "      if (output === null) element.removeAttribute(name);",
+      "      else element.setAttribute(name, output);",
       "    };",
       "    // Options must expose their initial DOM value before the parent select binding runs.",
       "    if (initialize) apply(untrack(read));",
@@ -1491,7 +1503,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
       "  let target = root;",
       "  for (const [index, key] of path.entries()) {",
       "    if (typeof key !== 'string' && typeof key !== 'number' || target === null || typeof target !== 'object') return;",
-      "    if (index === path.length - 1) (target as Record<string | number, unknown>)[key] = value;",
+      "    if (index === path.length - 1) { if (!Object.is((target as Record<string | number, unknown>)[key], value)) (target as Record<string | number, unknown>)[key] = value; }",
       "    else target = (target as Record<string | number, unknown>)[key];",
       "  }",
       "}",
@@ -1507,7 +1519,7 @@ export function generateSvelteOutput(definition: ComponentDefinition, options: S
         `  propInputs: (name: string) => { ${target.props.filter((prop) => selectedInputs.has(prop.name)).map((prop) => `if (name === ${quote(prop.name)}) return ${inputNames.get(prop.name)}.raw;`).join(" ")} const literal = rest[${quote(LITERAL_INPUTS_PROP)}] as Record<string, { raw: unknown }> | undefined; return literal !== undefined && Object.hasOwn(literal, name) ? literal[name]!.raw : ({ ${target.props.filter((prop) => !selectedInputs.has(prop.name)).map((prop) => `${objectKey(prop.name)}: ${inputNames.get(prop.name)} ?? null`).join(", ")} } as Record<string, unknown>)[name]; },`,
         "  propValidity: (name: string) => propValidityState({ contract: propValidityContract, values: propInputValues }, name),",
       ] : []),
-      `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
+      `  state: { ${states.map((state) => `${objectKey(state.name)}: { get: () => ${code.get(state.name)}, set: (value: unknown) => { if (!Object.is(${code.get(state.name)}, value)) ${code.get(state.name)} = value as typeof ${code.get(state.name)}; } }`).join(", ")} },`,
       `  computed: { ${[...computed, ...contexts].map((value) => { const name = value.kind === "context" ? value.as ?? value.name : value.name; return `${objectKey(name)}: () => ${code.get(name)}`; }).join(", ")} },`,
       `  data: { ${data.map((value) => `${objectKey(value.name)}: () => ${code.get(value.name)}`).join(", ")} },`,
       ...(usesControllerTypeChecks ? [`  acceptsState: (name: string, keys: readonly string[], value: unknown) => acceptsControllerWrite(value, ${controllerTypesName}[name], keys),`] : []),

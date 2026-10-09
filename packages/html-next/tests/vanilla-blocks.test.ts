@@ -552,6 +552,138 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("keeps a region's body while its decision holds, with its inputs, focus and nodes, like the general runtime", async () => {
+    const text = component(`
+      <state name="count" type="number" value="1"></state>
+      <state name="user" type="object({ name: string })" value='{ "name": "Ada" }'></state>`, `
+      <section>
+        <div $if="$count > 0"><input data-id="if"><span>{$count}</span></div>
+        <div $with="$user as u"><input data-id="with"><span>{$u.name}</span></div>
+        <template $match="$count as n"><p $when="$n < 5"><input data-id="small">{$n}</p><p $else><input data-id="large">{$n}</p></template>
+      </section>`);
+    const field = (host: any, id: string): HTMLInputElement | null => host.root.querySelector(`[data-id="${id}"]`);
+    const run = await same(text, [
+      (host) => {
+        for (const id of ["if", "with", "small"]) field(host, id)!.value = `typed ${id}`;
+        field(host, "if")!.focus();
+        field(host, "if")!.setSelectionRange(1, 3);
+        host.state.count = 2;
+      },
+      (host) => {
+        for (const id of ["if", "with", "small"]) assert.equal(field(host, id)!.value, `typed ${id}`);
+        assert.equal(host.root.ownerDocument.activeElement, field(host, "if"));
+        assert.deepEqual([field(host, "if")!.selectionStart, field(host, "if")!.selectionEnd], [1, 3]);
+        host.state.user = { name: "Grace" };
+      },
+      (host) => {
+        assert.equal(field(host, "with")!.value, "typed with");
+        assert.match(host.root.textContent, /Grace/);
+        // The `$if` flips; the `$match` keeps its arm.
+        host.state.count = 0;
+      },
+      (host) => {
+        assert.equal(field(host, "if"), null);
+        assert.equal(field(host, "small")!.value, "typed small");
+        // The `$if` flips back; the `$match` switches arm.
+        host.state.count = 7;
+      },
+      (host) => {
+        assert.equal(field(host, "if")!.value, "");
+        host.state.user.name = "Lin";
+      },
+    ]);
+    assert.deepEqual(run.identities, [
+      "if:new,with:new,small:new", "if:same,with:same,small:same", "if:same,with:same,small:same",
+      "with:same,small:same", "if:new,with:same,large:new", "if:same,with:same,large:same", "if:same,with:same,large:same",
+    ]);
+    assert.match(run.snapshots.at(-2)!, /Lin/);
+    // A `$match` that chose no arm stays empty while other state changes.
+    await same(component(`<state name="count" type="number" value="0"></state><state name="label" type="string" value="a"></state>`, `
+      <section><p>{$label}</p><template $match="$count as n"><b $when="$n = 1">one</b><i $when="$n = 2">two {$n}</i></template></section>`), [
+      (host) => { host.state.label = "b"; },
+      (host) => { host.state.count = 2; },
+      (host) => { host.state.count = 3; host.state.label = "c"; },
+      (host) => { host.state.label = "d"; },
+    ]);
+  });
+
+  it("stops at an unchanged value: no write, effect, request or rebuild follows it, like the general runtime", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      return { ok: true, status: 200, json: async () => ({ n: url.split("=").at(-1) }), text: async () => "" };
+    };
+    const text = `<template component="x-shape" controller="./changes-controller.js" status="early" summary="Shape.">
+      <defs><state name="a" type="number" value="1"></state><state name="b" type="number" value="2"></state>
+        <state name="label" type="string" value="x"></state>
+        <state name="items" type="list(object({ name: string }))" value='[{ "name": "a" }, { "name": "b" }]'></state>
+        <computed name="sum" from="$a + $b"></computed>
+        <data name="feed" src="https://example.test/feed" type="object({ n: string })"><param name="n" from:value="$a + $b"></param><param name="note" expr:value="$label"></param></data></defs>
+      <section from:title="$a + $b" class:wide="$a + $b > 2" style:--n="$a + $b"><p>{$a + $b}</p><b $value="$sum"></b>
+        <i $html="concat('&lt;em&gt;', $a + $b, '&lt;/em&gt;')"></i><template $html="concat('&lt;u&gt;', $sum, '&lt;/u&gt;')"></template>
+        <span>{$items.0.name}</span><div $with="$sum as s"><input data-id="with">{$s}</div></section></template>`;
+    const log = (): string[] => (globalThis as any).directExtendLog.events;
+    // Each run counts its own requests from its first step on.
+    let base = 0;
+    const requested = (): void => { log().push(`requests ${requests.length - base}`); };
+    let observer: MutationObserver | undefined;
+    try {
+      const run = await same(text, [
+        (host) => {
+          // From here on, every DOM write the bindings make is an event (sorted: the modes order one flush differently).
+          const watch: MutationObserver = new (host.root.ownerDocument.defaultView.MutationObserver)((records: MutationRecord[]) => {
+            log().push(...records.map((record) =>
+              `write ${record.type} ${record.attributeName ?? ""} ${(record.target as Element).localName ?? record.target.parentNode?.nodeName}`).sort());
+          });
+          watch.observe(host.root, { subtree: true, attributes: true, characterData: true, childList: true });
+          observer = watch;
+          base = requests.length - 1;
+          requested();
+          // The same sum: no binding writes, no effect runs, no request goes out.
+          host.state.a = 2;
+          host.state.b = 1;
+        },
+        (host) => {
+          requested();
+          // An equal write notifies nothing.
+          host.state.label = "x";
+          host.state.items[0].name = "a";
+        },
+        (host) => {
+          // Writes inside the list change only the paths written, so `items.0.name` readers stay.
+          host.state.items.push({ name: "c" });
+          host.state.items[1].name = "z";
+        },
+        (host) => {
+          host.state.items[0].name = "q";
+          requested();
+          // An `expr` parameter is sampled when a request goes out; changing it requests nothing.
+          host.state.label = "y";
+        },
+        () => { requested(); },
+        (host) => {
+          host.state.a = 5;
+        },
+        () => { requested(); observer?.disconnect(); },
+      ]);
+      assert.deepEqual(run.events, [
+        "effect first a", "effect sum 3", "effect label x",
+        // A swap that keeps the sum, an equal write, and writes inside the list: nothing ran, wrote or requested.
+        "requests 1", "requests 1",
+        "requests 1", "effect first q", "effect label y", "write characterData  SPAN", "requests 1",
+        // A new sum reaches its readers once: no class write (still wide), and the `$with` body kept its input.
+        "effect sum 6", "write attributes style section", "write attributes title section", "write characterData  B",
+        "write characterData  DIV", "write characterData  P", "write childList  i", "write childList  section", "write childList  section",
+        "requests 2",
+        // Reconnecting runs each effect once.
+        "effect first q", "effect sum 6", "effect label y",
+      ]);
+    } finally {
+      fetchStub = undefined;
+      observer?.disconnect();
+    }
+  });
+
   it("binds form controls both ways, sanitizes $html and inlines template carriers like the general runtime", async () => {
     const text = component(`
       <state name="ready" type="boolean" value="false"></state>
@@ -1218,6 +1350,15 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.state.which = "default"; },
       (host) => { host.state.which = ""; },
     ], projection);
+    // A name reading the region's alias, or inside the chosen `$match` arm, rebuilds that body too.
+    await same(slotsShape(`<state name="which" type="string" value="head"></state>`, `
+      <section><p $with="$which as w"><slot from:name="$w">none {$w}</slot></p>
+        <template $match><div $when="$open"><slot from:name="$which">open</slot></div><div $else><slot from:name="$which">shut</slot></div></template></section>`), [
+      (host) => { host.state.which = "default"; },
+      (host) => { host.state.open = true; },
+      (host) => { host.state.which = "head"; },
+      (host) => { host.state.label = "kept"; },
+    ], projection);
   });
 
   const armsShape = propsShape(`
@@ -1290,6 +1431,36 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       (host) => { host.root.querySelector("span").click(); },
       (host, update) => { (globalThis as any).directExtendLog.events.push(`ref ${host.refs.badge.className}`); update({ flag: true }); host.state.count = 5; },
     ]);
+  });
+
+  it("passes a child prop on only when its value changes, like live lowering", async () => {
+    const meter = `<template component="x-meter" controller="./props-controller.js" status="early" summary="Meter.">
+      <defs><prop name="amount" type="integer" default="0">Amount.</prop></defs><meter from:value="$amount"></meter></template>`;
+    const log = (): string[] => (globalThis as any).directExtendLog.events;
+    let observer: MutationObserver | undefined;
+    try {
+      const run = await same([parent(`<section><x-meter from:amount="$count + $rows.length"></x-meter></section>`), meter], [
+        (host) => {
+          const root = host.root.querySelector("meter");
+          observer = new (root.ownerDocument.defaultView.MutationObserver)((records: MutationRecord[]) => {
+            log().push(...records.map((record) => `write ${record.attributeName}`).sort());
+          });
+          observer!.observe(root, { attributes: true });
+          // 2 + 1 is the 1 + 2 it was: the child's input, validity and reflection stay as they are.
+          host.state.count = 2;
+          host.state.rows = [1];
+        },
+        (host) => { host.state.count = 5; },
+        () => { observer?.disconnect(); },
+      ]);
+      // The equal sum logs nothing and writes nothing; the new one updates the child once.
+      assert.deepEqual(run.events.slice(4, 11), [
+        "1 state |undefined", "1 props amount=3/3/true", "1 root meter true", "1 connect true null true",
+        "1 props amount=6/6/true", "write data-amount", "write value",
+      ]);
+    } finally {
+      observer?.disconnect();
+    }
   });
 
   it("binds invocation props by their values, after their attribute text", async () => {
@@ -1530,6 +1701,43 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
       // Both paths made the same requests: on connect, per changed `from` parameter, and on reconnect.
       assert.deepEqual(requests.slice(0, requests.length / 2), requests.slice(requests.length / 2));
       assert.ok(requests.length >= 8, requests.join("\n"));
+    } finally {
+      fetchStub = undefined;
+    }
+  });
+
+  it("requests again and passes a whole list on when it changes in place, like live", async () => {
+    const requests: string[] = [];
+    fetchStub = async (url) => {
+      requests.push(url);
+      await Promise.resolve();
+      return { ok: true, status: 200, json: async () => [], text: async () => "" };
+    };
+    const tags = `<template component="x-tags" status="early" summary="Tags.">
+      <defs><prop name="items" type="list(string)" default="[]">Items.</prop></defs><output>{$items}</output></template>`;
+    const shelf = parent(`<section><x-tags from:items="$filter.tags"></x-tags><x-tags from:items="$more"></x-tags></section>`, `
+      <state name="filter" type="object({ tags: list(string) })" value="{ tags: ['a'] }"></state>
+      <state name="more" type="list(string)" value="['x']"></state>
+      <data name="found" src="https://example.test/api/found" type="list(string)">
+        <param name="tags" from:value="$filter.tags"></param><param name="more" from:value="$more"></param></data>`);
+    // Each `from` parameter compares what it reads now with what it read for the last request.
+    const compared = [...[...graph([shelf, tags]).modules.values()].join("\n").matchAll(/readsChanged\(DQ0\.(f\d+), (f\d+)\)/g)];
+    assert.equal(compared.length, 2);
+    for (const [, last, now] of compared) assert.equal(last, now);
+    try {
+      // A parameter or prop that is a whole list depends on its contents, not only on which list it is.
+      await same([shelf, tags], [
+        (host) => { host.state.filter.tags.push("b"); },
+        (host) => { host.state.filter.tags[0] = "z"; },
+        (host) => { host.state.more.push("y"); },
+      ]);
+      const half = requests.length / 2;
+      assert.deepEqual(requests.slice(half), requests.slice(0, half));
+      assert.deepEqual(requests.slice(0, half).map((url) => new URL(url).search), [
+        "?tags=a&more=x", "?tags=a&tags=b&more=x", "?tags=z&tags=b&more=x", "?tags=z&tags=b&more=x&more=y",
+        // Reconnecting requests again.
+        "?tags=z&tags=b&more=x&more=y",
+      ]);
     } finally {
       fetchStub = undefined;
     }

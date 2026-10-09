@@ -131,11 +131,11 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Static markup | 6,875 | Cloned blocks, slot ranges, compiled-root handle and host |
 | Numeric state and handler | 6,856 | Same, with root bits and a handler |
 | Numeric computed state | 7,155 | Same, with a computed root, read-only to the controller |
-| Scalar and enum props | 11,287 | Same, with the live prop boundary and validity, each type compiled to its own checks |
+| Scalar and enum props | 11,353 | Same, with the live prop boundary and validity, each type compiled to its own checks |
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
-| Declared read | 7,455 | Cloned blocks and `DataResource` |
+| Declared read | 7,536 | Cloned blocks and `DataResource` |
 | Controller lifecycle | 6,907 | Cloned blocks and the generated controller host |
-| Controller keyed list | 8,145 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
+| Controller keyed list | 8,140 | Cloned blocks, `KeyedList`, compact type checks, generated controller host |
 
 The fixtures isolate authored capabilities so regressions remain attributable. They are not separate
 per-component runtimes: an application or library build combines the complete input graph,
@@ -206,6 +206,33 @@ A document has one MutationObserver for connection tracking, whatever runs on it
 compiled components and the React, Svelte and Vue targets' controller hosts all subscribe to the hub
 stored on the document under the shared runtime key. Bound `<select>` elements in the Svelte and Vue
 targets share one more observer per document for their option lists, which no native event reports.
+
+## Transitions extension
+
+The optional `transitions` extension is built only into compiled components that use it. The live
+distributable carries none of it beyond one warning, and other compiled components pay nothing: the
+`measure:runtime` fixtures and the benchmark entry keep their sizes.
+
+| Need | Platform mechanism | Gap the extension fills |
+| --- | --- | --- |
+| Element enters | `@starting-style` with `transition`; the View Transitions API's new-only group | None in CSS; the extension uses the group so entering, leaving and moving share one model |
+| Element leaves the DOM | The View Transitions API's old-only group (`::view-transition-old(...):only-child`) | CSS cannot animate a removal; the update must run inside `document.startViewTransition()` |
+| Rows reorder | `view-transition-name: match-element` gives each row its own group | The same: the reorder must run inside a transition |
+| Shared element | Two elements with one `view-transition-name` in the old and new states | The same, plus a valid identifier from any `$transition-name` value (`CSS.escape`) |
+| Animation per value | `view-transition-class` and class-selected `::view-transition-*` rules; author `@keyframes` | Component styles are `@scope`d and cannot select these pseudo-elements, so each component registers document-level rules in one constructable stylesheet |
+| Rest of the page | `:root { view-transition-name: none }`, `::view-transition { pointer-events: none }` | Applied only during the extension's transitions, so an author's own transitions are unchanged |
+| Reduced motion | `prefers-reduced-motion` | Checked before holding an update |
+
+The precise gap is the update itself: compiled instances flush in their own microtasks, and a
+parent's flush reaches its children in later ones, while a document runs one view transition at a
+time. One coordinator per document holds each participating instance's flush, starts one
+transition, runs the held flushes in its update callback, waits one task for cascades, and skips the
+transition when no participating region or list changed structure. The hold shadows that instance's
+scheduler `flush`; the scheduler class and the shared controller are unchanged.
+
+Evidence: `tests/target-transitions.test.ts` in Chromium, Firefox and WebKit. Remaining gaps: a
+second document transition skips a running one (`Element.startViewTransition` would run them side by
+side; Chromium only), and a leaving picture is not clipped by an `overflow` ancestor.
 
 ## Review sequence
 

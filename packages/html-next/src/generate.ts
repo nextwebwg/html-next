@@ -1,6 +1,7 @@
 import { hoistStylesheetNamespaces } from "./stylesheet-namespaces.js";
 import { generateDocs } from "./targets/docs.js";
 import { generateVanilla } from "./targets/vanilla.js";
+import { TRANSITIONS_EXTENSION } from "./transition-syntax.js";
 import { generateVue, type VueConversionOptions } from "./targets/vue.js";
 import { generateReact, generateReactOutput, type ReactConversionOptions, type ReactConversionOutput } from "./targets/react.js";
 import { generateSvelteOutput, type SvelteConversionOptions, type SvelteConversionOutput } from "./targets/svelte.js";
@@ -46,6 +47,16 @@ export interface GenerationOptions {
    * renders the registered component; a tag not listed stays a plain custom element.
    */
   readonly invocations?: ReadonlyMap<string, Invoked>;
+  /**
+   * Optional language extensions the build enables, by name. A component that uses one the build
+   * does not enable fails `HT024`.
+   */
+  readonly extensions?: readonly string[];
+  /**
+   * The Vanilla factory also adopts a server-rendered root, given as its third argument, binding that
+   * DOM in place (see `docs/compiled-direct-path.md`, Hydration).
+   */
+  readonly hydrate?: boolean;
 }
 
 /** A component another's template invokes: the module exporting its factory, and its definition. */
@@ -58,7 +69,8 @@ export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
 ): readonly GeneratedArtifact[] {
-  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations);
+  const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true);
   const vue = convertedToVue(definition);
   const docs = generateDocs(definition, GENERATOR_VERSION);
   const { name, tag } = definition.contract;

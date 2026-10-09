@@ -13,6 +13,7 @@ export type {
   DataParameter,
   DirectiveAttribute,
   ElementNode,
+  ElementTransition,
   EventBinding,
   EventDeclaration,
   Flow,

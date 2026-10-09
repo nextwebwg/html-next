@@ -84,8 +84,13 @@ export function useDataRead(state: { value: any }, options: DataReadOptions): vo
       }
     }
   };
+  let requested: string | undefined;
   const update = (sources: readonly unknown[]): void => {
     if (sources.includes(Symbol.for("html-next.invalid-result"))) return;
+    // A deep watch fires on any write it reaches; only changed parameters request again.
+    const key = dataKey(sources);
+    if (connected && key === requested) return;
+    requested = key;
     connected = true;
     cancel();
     const current = ++generation;
@@ -235,8 +240,10 @@ export function useComponentHost(
   const propHandles = Object.create(null) as Record<string, unknown>;
   for (const name of propNames) {
     const validity = () => options.propValidity?.(name);
+    // One computed per prop: a reader of this prop does not run again when another prop changes.
+    const value = computed(() => props?.value[name]);
     propHandles[name] = Object.freeze({
-      get value() { return props?.value[name]; },
+      get value() { return value.value; },
       get inputValue() { return propInputs(name); },
       get validity() { return validity(); },
       validate: validity,

@@ -63,6 +63,38 @@ The [native runtime audit](./native-runtime-audit.md#compiled-components) record
 mechanisms each helper composes and the remaining gap: the platform has no keyed reconciliation and no
 reactive binding of template parts.
 
+## Hydration
+
+A module generated with `hydrate: true` also adopts server output: `create<Name>(options, html, root)`
+takes a server-rendered root, in the [rendered form](https://nextwebwg.org/declarative-components/rendered-form)
+that `renderComponents` and `serializeRenderedForm` write, and binds that DOM in place instead of
+cloning its prototype. Modules generated without the option are unchanged, and every adoption helper is
+its own `generated-runtime` export, so only hydrating bundles carry them.
+
+| Need | Native mechanism composed | Remaining gap filled by code |
+| --- | --- | --- |
+| Find the nodes to bind | The parsed server DOM; `firstChild`, `nextSibling`, `localName` | `adoptTree` walks a block's prototype spec beside the server nodes, steps over region contents (comment and processing-instruction marks), inserts the empty `Text` a `""` value left out, and returns each prototype node's server node |
+| Instance values | `getAttribute`, `JSON.parse` | The `data-html-next-instance` record restores props, prop inputs and state, through the live decoder, then the attribute is removed |
+| Conditions, lists, slots | The marks already in the DOM | Each region adopts its server content on its first render; rows adopt their item ranges, slots their projected nodes, fallback or scoped rendering |
+| Nested components | `data-component` on each server root | An invocation adopts the server root where its placeholder would be; a parent binds what it projected inside the child's slot ranges |
+| Edits before startup | `value`, `checked`, `selectionStart`/`selectionEnd`, `defaultValue`, `defaultChecked`, `defaultSelected` | Control values and selection are captured before the first render and restored after it; `data-html-next-form-defaults` restores the template's defaults |
+| Markup that changed before startup | `remove()`, `insertBefore` | A block whose server nodes do not match its spec is created afresh in place of them; the blocks around it are still adopted |
+
+| Connection order | `isConnected`, `compareDocumentPosition` | Every root a hydration adopts connects once the outermost one has finished, in document order, so a context's reader finds its provider and each controller sees a complete tree |
+
+Adoption keeps every server node it binds in place, so focus, selection, media and frames are
+undisturbed. Each binding writes once on the first render, as live hydration's effects run once
+each; the server already shows the same value, so nothing visible changes. An `$html` element or
+range renders its sanitized content again, as the live runtime's does. A consumer's `<template slot>`
+written in the document, rather than in a compiled component, renders only through the live
+delivery's parser, when created or hydrated alike.
+
+`compiled-hydration.test.ts` holds hydration to the live runtime's over the cases in
+`hydration-fixtures.ts`, rendered by `renderComponents`: node identity, the consumed records, inspected
+instances and markup before and after interaction, retained rows, parent bindings, edits made before
+startup, controllers, and markup that changed before startup. `server-hydration.test.ts` runs the same
+cases in Chromium, Firefox and WebKit.
+
 ## Owner decisions (2026-10-06)
 
 These decisions govern compiled output:
@@ -99,10 +131,10 @@ Gzip bytes for one component compiled alone; an application pays the shared supp
 
 | Measure | Size |
 | --- | ---: |
-| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,617 B |
-| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,145 B |
+| Benchmark entry through Vite (unplugin test build, gzip-6, controller included) | 8,620 B |
+| `controller-keyed` `measure:runtime` fixture (gzip-9, controller external) | 8,140 B |
 | `static-card` fixture (gzip-9) | 6,875 B |
-| `prop-button` fixture (gzip-9) | 11,287 B |
+| `prop-button` fixture (gzip-9) | 11,353 B |
 | Same, before prop types compiled to their own checks | 18,325 B |
 | General-runtime output that compiled components replaced | about 39,500 B |
 

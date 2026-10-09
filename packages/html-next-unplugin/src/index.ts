@@ -18,6 +18,7 @@ import {
   type ComponentGraphNode,
   type ElementNode,
   type TemplateNode,
+  LANGUAGE_EXTENSIONS,
 } from "@nextwebwg/html-next";
 import {
   checkConversion,
@@ -52,6 +53,8 @@ export interface HtmlNextNativePluginOptions {
   readonly manifestFile?: string | false;
   readonly mode?: "application" | "library";
   readonly dynamicBoundaries?: readonly HtmlNextDynamicBoundary[];
+  /** Optional language extensions to build, such as `"transitions"`. Each is off until listed. */
+  readonly extensions?: readonly string[];
 }
 
 export type HtmlNextPluginOptions = HtmlNextNativePluginOptions | FrameworkPluginOptions;
@@ -270,6 +273,11 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
   if (delivery !== "application" && delivery !== "library") {
     diagnostic("HN012", `Unknown native build mode \`${String(delivery)}\`.`);
   }
+  for (const extension of options.extensions ?? []) {
+    if (!LANGUAGE_EXTENSIONS.includes(extension)) {
+      diagnostic("HN013", `Unknown language extension \`${extension}\`; the extensions are ${LANGUAGE_EXTENSIONS.map((name) => `\`${name}\``).join(", ")}.`);
+    }
+  }
   const entries = await expandComponentEntries(root, options.entries ?? []);
   const localURLs = entries.map((entry) => pathToFileURL(resolve(root, entry)).href);
   if (new Set(localURLs).size !== localURLs.length) {
@@ -334,6 +342,7 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
         : Object.freeze({ ...node.definition, controller: fileURLToPath(node.controller.url) });
       const artifacts = withDiagnosticLocation(getDiagnosticLocation(node.definition), () => generateComponent(definition, {
         noContextReaders: dynamicBoundaries.size === 0 && !contextProviders.has(definition.contract.tag),
+        ...options.extensions === undefined ? {} : { extensions: options.extensions },
         // Each component the template invokes, by the module exporting its factory.
         invocations: new Map([...invocations.edges.get(node.id) ?? []].map(([tag, url]) =>
           [tag, { module: componentId(url), definition: graph.nodes.get(url)!.definition }])),

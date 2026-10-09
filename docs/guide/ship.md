@@ -72,6 +72,10 @@ document.getElementById("app").append(createUiButton());
 
 Use your library's actual component names in the README. Consumers' usual Vite build handles the HTML, controllers, and component styles.
 
+## Say which versions you support
+
+An application's Vite plugin builds your `.html` files, so its tools version decides how they are read. Declare the HTML Next versions your components support in `peerDependencies`; [Versions and stability](/html-next/versions#library-versions) shows the fields and what each one promises.
+
 ## Pack, try, publish
 
 From your library's root:

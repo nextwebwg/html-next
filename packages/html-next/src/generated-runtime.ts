@@ -8,7 +8,8 @@ import { isNativeEvent } from "./freeze.js";
 import { NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue } from "./controls.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
-import { renderedFormMark } from "./rendered-form.js";
+import { renderedFormMark, serverMark, serverRanges } from "./rendered-form.js";
+import { regionEnd } from "./generated-hydration.js";
 import { hasExecutableUrl, markContentOnly, sanitizeFragment } from "./sanitize.js";
 import {
   createComputed,
@@ -33,6 +34,8 @@ export { ABSENT, binaryValue, formatCall, mathCall, negate, NONCONFORMING, textC
 export { manageGeneratedLifecycle } from "./generated-lifecycle.js";
 export { dispose, IndexedList, KeyedList, PositionalList, RangedIndexedList, RangedKeyedList, RangedPositionalList } from "./keyed.js";
 export { visitSelected } from "./selection.js";
+export { ADOPT, adoptLifecycle, adoptProjection, adoptRows, adoptTree, holdControls, recordInputs, regionEnd, renderedInstanceRecord, restoreInstance } from "./generated-hydration.js";
+export { holdTransitions, transitionChanged, transitionName, transitionRows, transitionRowsChanged, transitionStyles, writeTransitionStyle } from "./generated-transitions.js";
 export { eventPasses } from "./event-filter.js";
 export {
   checkAbsent, checkBoolean, checkConstrained, checkEvent, checkFormat, checkFunction, checkInteger, checkKeyword, checkList,
@@ -631,7 +634,7 @@ export function manageProps(instance: GeneratedInstance): void {
     const text = value === undefined || value === ABSENT || value === null ? null
       : reflected(value, selected(prop, prop.select === undefined ? {} : { [prop.select.from]: v[at(prop.select.from)] }));
     if (text === null) element.removeAttribute(`data-${kebabCase(name)}`);
-    else element.setAttribute(`data-${kebabCase(name)}`, text);
+    else if (element.getAttribute(`data-${kebabCase(name)}`) !== text) element.setAttribute(`data-${kebabCase(name)}`, text);
   };
   const job = new ReactiveEffect(instance.q, () => {
     if (!connected) return;
@@ -687,9 +690,12 @@ export function manageProps(instance: GeneratedInstance): void {
     for (const [name, value] of Object.entries(input)) {
       const prop = props[name];
       if (prop === undefined) continue;
+      // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
       const previous = inputs[name];
-      inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
-      notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      if (previous?.source !== "value" || previous.present !== (value !== undefined) || !Object.is(previous.value, value === undefined ? null : value)) {
+        inputs[name] = { value: value === undefined ? null : value, source: "value", present: value !== undefined };
+        notifyPropertySet(inputs, name, previous, inputs[name], undefined);
+      }
       // A bound data-* attribute is template output; only its binding writes it.
       const attribute = `data-${kebabCase(name)}`;
       if (value === undefined || value === null) {
@@ -698,7 +704,8 @@ export function manageProps(instance: GeneratedInstance): void {
       } else {
         explicit.add(name);
         if (!record.b.includes(name)) {
-          element.setAttribute(attribute, reflected(value, selected(prop, next)));
+          const text = reflected(value, selected(prop, next));
+          if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
           record.w.add(name);
         }
       }
@@ -1040,6 +1047,8 @@ export interface GeneratedInstance {
   /** Recorded refs, read by `host.refs` and handler steps. */
   readonly r: Record<string, unknown>;
   readonly c: () => boolean;
+  /** The change bits waiting for the next render: one per root, and NESTED for writes below a root. */
+  readonly d: () => number;
   /** A facade over a raw object, for writes into an outer local's data. */
   readonly p: (value: object) => unknown;
   /** Writes a root's value and schedules its render, as a prop update does. */
@@ -1220,6 +1229,102 @@ export function fillSlot(
     }
   }
   return rendered;
+}
+
+/**
+ * Adopts a slot the server rendered between `start` and `end` (a single `<?marker?>` when it rendered
+ * nothing), as `fillSlot` returns one: its projected nodes stay where they are and the components they
+ * hold are created over their server roots, a consumer's template adopts its rendering, and a fallback
+ * range is returned for the fallback block to adopt. A slot the server rendered otherwise fills afresh.
+ */
+export function adoptSlot(
+  start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
+): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
+  const mark = serverMark(start);
+  const rendered = mark?.target === "start" && start !== end;
+  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template") as Element | undefined;
+  const contents: Node[] = [];
+  if (rendered) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) contents.push(node);
+  // What `fillSlot` renders here: a consumer's template, the fallback, nothing, or the projected nodes.
+  if (props !== undefined && assigned.length > 0 || carrier !== undefined) {
+    const template = carrier === undefined ? undefined : scopedTemplates.get(carrier);
+    if (template !== undefined && rendered && mark.attributes.has("scoped") && !mark.attributes.has("fallback")) {
+      const record = (template.m as (dirty: Map<unknown, 1 | 2>, props: Record<string, unknown>, at?: Node) => ScopedRecord)(dirty ?? new Map(), props ?? {}, start);
+      if (record.n !== start) {
+        for (const node of contents) node.parentNode?.removeChild(node);
+        for (const node of Array.from(record.n.childNodes)) markProjectedRoot(node);
+        end.before(record.n);
+      }
+      template.l.add(record);
+      record.r = [start, end];
+      return [template, record];
+    }
+  } else if (assigned.length === 0) {
+    if (fallback && rendered && mark.attributes.has("fallback")) return start;
+    if (!fallback && mark?.target === "marker") return undefined;
+  } else if (rendered && !mark.attributes.has("fallback") && contents.length === assigned.length &&
+    contents.every((node, index) => node === assigned[index])) {
+    for (const node of assigned) {
+      const pending = waiting.get(node);
+      if (pending === undefined) continue;
+      waiting.delete(node);
+      for (const realize of pending.values()) realize();
+    }
+    return undefined;
+  }
+  // Rendered otherwise: the slot fills as it would have, in place of what the server rendered.
+  const doc = start.ownerDocument!;
+  const open = doc.createComment("html-next:slot-start"), close = doc.createComment("html-next:slot-end");
+  for (const node of contents) node.parentNode?.removeChild(node);
+  start.replaceWith(open);
+  if (end === start) open.after(close);
+  else end.replaceWith(close);
+  return fillSlot(open, close, name, projected, fallback, props, dirty);
+}
+
+/**
+ * Puts a fallback block's fresh nodes in its slot: before `at`, the range's close, or in place of the
+ * content of the range `at` opens, where the server rendered one the fallback did not adopt.
+ */
+export function placeFallback(at: ChildNode, nodes: Node): void {
+  if (serverMark(at)?.target !== "start") {
+    at.before(nodes);
+    return;
+  }
+  const close = regionEnd(at) as ChildNode;
+  while (at.nextSibling !== null && at.nextSibling !== close) at.nextSibling.remove();
+  close.before(nodes);
+}
+
+/**
+ * A server root's projection, as its factory is given one: what each of its rendered slot ranges
+ * holds, then what the serializer carried, by slot. The carrier is consumed.
+ */
+export function serverProjection(root: Element, tag: string): [children: Node[], slots: Record<string, Node[]>] {
+  const children: Node[] = [];
+  const slots: Record<string, Node[]> = {};
+  const server = serverRanges(root, true, tag);
+  const add = (node: Node, slot: string): void => { if (slot === "") children.push(node); else (slots[slot] ??= []).push(node); };
+  for (const range of server?.ranges ?? []) if (!range.fallback && !range.scoped) for (const node of range.content) add(node, range.slot);
+  for (const node of server?.carried ?? []) add(node, node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
+  return [children, slots];
+}
+
+/** A compiled factory that adopts a server-rendered root given as its third argument. */
+type AdoptingFactory = (options: object, html: Readonly<Record<string, string>> | undefined, root: Element) => Element;
+
+/**
+ * Invokes a component whose server root stands where its placeholder would: the factory adopts that
+ * root, or creates one in its place when it does not match; an earlier pass's instance is kept.
+ */
+export function adoptInvoke(
+  instance: GeneratedInstance, factory: GeneratedFactory, root: Element, options: object,
+  html: Readonly<Record<string, string>>, follow: (root: Element, previous: Element) => void, stops: (() => void)[],
+): GeneratedInstance {
+  return invoke(instance, (adopted, input) => (root as RuntimeElement)[lifecycleKey]?.h !== undefined ? root
+    : (factory as unknown as AdoptingFactory)(adopted, input, root), root.ownerDocument.createTextNode(""), options, html, follow, stops);
 }
 
 /** A control's write into state is not checked against the declared type, as live's is not. */
@@ -1607,7 +1712,7 @@ export function attachGeneratedController(
     dispatch: (event: string, detail?: unknown): boolean => (spec.x ?? dispatchUndeclared)(handle.e, event, detail, spec.d?.[event]),
   });
   // The handle is the lifecycle record too: inspection and serialization read its values and host.
-  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
+  Object.assign(handle, { S: spec, s: state, q: scheduler, o: entries, r: recorded, c: () => connected, d: () => dirty, p: (value: object) => wrap(value, 0, undefined, ""), w: assign, v: values, H: host, e: root });
   render(-1);
   const disconnect = (): void => {
     if (!gone) {

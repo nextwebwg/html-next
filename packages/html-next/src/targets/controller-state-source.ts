@@ -6,7 +6,10 @@ interface ControllerNamespaces {
   readonly computed: Readonly<Record<string, () => unknown>>;
   readonly data?: Readonly<Record<string, () => unknown>>;
   readonly acceptsState?: (name: string, keys: readonly string[], value: unknown) => boolean;
-  readonly changed?: (name: string) => void;
+  /** A read below a state root, by its path from the root. */
+  readonly read?: (name: string, keys: readonly string[]) => void;
+  /** A write below a state root changed the value at this path from the root. */
+  readonly changed?: (name: string, keys: readonly string[]) => void;
 }
 
 function controllerNamespaces(options: ControllerNamespaces, source: string): {
@@ -35,6 +38,9 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     else apply();
     return true;
   };
+  // Each proxy's own object: a value read through host.state and written back is the same value.
+  const plain = new WeakMap<object, unknown>();
+  const unwrap = (value: unknown): unknown => typeof value === "object" && value !== null && plain.has(value) ? plain.get(value) : value;
   const wrap = (value: unknown, name: string, keys: readonly string[], readonly: boolean): unknown => {
     if (value === null || typeof value !== "object" || nativeEvent(value)) return value;
     const path = [name, ...keys].join(".");
@@ -46,11 +52,20 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
     const surface = readonly ? (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))) : value;
     if (readonly && Array.isArray(value)) surface.length = value.length;
     const proxy = new Proxy(surface, {
-      get: (_target, key) => wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly),
-      set: (_target, key, next) => write(name, [...keys, String(key)], next, readonly, () => {
-        const previous = Reflect.get(value, key);
-        if (Reflect.set(value, key, next) && !Object.is(previous, next)) options.changed?.(name);
-      }),
+      get: (_target, key) => {
+        if (!readonly) options.read?.(name, [...keys, String(key)]);
+        return wrap(Reflect.get(value, key), name, [...keys, String(key)], readonly);
+      },
+      set: (_target, key, written) => {
+        const next = unwrap(written);
+        return write(name, [...keys, String(key)], next, readonly, () => {
+          const previous = Reflect.get(value, key);
+          const length = Array.isArray(value) ? value.length : undefined;
+          if (Reflect.set(value, key, next) && !Object.is(previous, next)) options.changed?.(name, [...keys, String(key)]);
+          // Setting an index past the end extends the list before any write of its length.
+          if (length !== undefined && length !== (value as unknown[]).length && key !== "length") options.changed?.(name, [...keys, "length"]);
+        });
+      },
       has: (_target, key) => Reflect.has(value, key),
       ownKeys: () => Reflect.ownKeys(value),
       getOwnPropertyDescriptor: (_target, key) => {
@@ -59,18 +74,19 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
         return descriptor === undefined ? undefined : readonly ? { ...descriptor, configurable: true } : descriptor;
       },
       deleteProperty: (_target, key) => write(name, [...keys, String(key)], undefined, readonly, () => {
-        if (Reflect.has(value, key) && Reflect.deleteProperty(value, key)) options.changed?.(name);
+        if (Reflect.has(value, key) && Reflect.deleteProperty(value, key)) options.changed?.(name, [...keys, String(key)]);
       }),
       defineProperty: (_target, key, descriptor) => {
         if (readonly || !("value" in descriptor) || options.acceptsState?.(name, [...keys, String(key)], descriptor.value) === false) {
           warn([name, ...keys, String(key)].join("."), readonly); return false;
         }
         const changed = Reflect.defineProperty(value, key, descriptor);
-        if (changed) options.changed?.(name);
+        if (changed) options.changed?.(name, [...keys, String(key)]);
         return changed;
       },
     });
     paths.set(path, proxy);
+    plain.set(proxy, value);
     return proxy;
   };
   const state = new Proxy({} as Record<string, unknown>, {
@@ -80,8 +96,8 @@ function controllerNamespaces(options: ControllerNamespaces, source: string): {
       if (Object.hasOwn(options.computed, name)) return wrap(options.computed[name]!(), name, [], true);
       return undefined;
     },
-    set: (_target, name, value) => write(String(name), [], value, typeof name !== "string" || !Object.hasOwn(options.state, name),
-      () => options.state[String(name)]!.set(value)),
+    set: (_target, name, value) => write(String(name), [], unwrap(value), typeof name !== "string" || !Object.hasOwn(options.state, name),
+      () => options.state[String(name)]!.set(unwrap(value))),
     deleteProperty: (_target, name) => { warn(String(name), true); return true; },
     defineProperty: (_target, name) => { warn(String(name), true); return false; },
     has: (_target, name) => typeof name === "string" && (Object.hasOwn(options.state, name) || Object.hasOwn(options.computed, name)),
