@@ -6,7 +6,7 @@ import { createServer, isRunnableDevEnvironment } from "vite";
 
 import { createApplication } from "./application.js";
 import { browserPlugin, browserSource, stylesheetSources } from "./browser.js";
-import { configure, HtmlKitError, withPlugins, within } from "./config.js";
+import { configure, HtmlKitError, rootAlias, withPlugins, within } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { matchRoute } from "./routes.js";
 import type { Application, ApplicationServer, RenderedPage, ServerOptions } from "./types.js";
@@ -88,7 +88,7 @@ export async function devApplication(input: ServerOptions = {}): Promise<Applica
   const sources = new Map<string, string>();
   let watchReady!: () => void;
   const watching = new Promise<void>(done => { watchReady = done; });
-  const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base,
+  const vite = await createServer({ root: config.root, configFile: false, appType: "custom", base: config.base, resolve: { alias: rootAlias(config.root) },
     mode: "development", plugins: [browserPlugin(sources), {
       name: "htmlkit-watch-ready", configureServer(server) { server.watcher.once("ready", watchReady); },
     }], optimizeDeps: { noDiscovery: true, include: [] },

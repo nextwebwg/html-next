@@ -10,7 +10,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./components/navigation.html": "./components/navigation.html"
+    "./components/nav.html": "./components/nav.html"
   },
   "files": [
     "dist",

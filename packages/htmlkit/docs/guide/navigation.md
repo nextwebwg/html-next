@@ -27,14 +27,15 @@ export async function load({ navigation }: LoadContext) {
 }
 ```
 
+`<hk-nav>` is built in, so it needs no component link:
+
 ```html
-<link rel="component" href="@nextwebwg/htmlkit/components/navigation.html">
 <template component="site-shell">
   <defs>
     <prop name="navigation" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop>
   </defs>
   <main>
-    <hk-navigation from:items="$navigation" label="Guide"></hk-navigation>
+    <hk-nav from:items="$navigation" label="Guide"></hk-nav>
     <slot name="page"></slot>
   </main>
 </template>

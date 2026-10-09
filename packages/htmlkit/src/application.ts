@@ -8,7 +8,7 @@ import { loadNodeComponents } from "@nextwebwg/html-next/node-loader";
 import { renderComponents } from "@nextwebwg/html-next/server";
 import { createServer, isRunnableDevEnvironment, type ViteDevServer } from "vite";
 
-import { configure, HtmlKitError, withPlugins } from "./config.js";
+import { configure, HtmlKitError, rootAlias, withPlugins } from "./config.js";
 import { documentHTML, escapeHTML } from "./document.js";
 import { discover, matchRoute, parameter, validSegment } from "./routes.js";
 import { applicationResource, pageDefinition } from "./resource.js";
@@ -34,6 +34,15 @@ function invocation(definition: ComponentDefinition, result: LoaderResult, id: s
   return `<${tag}${attributes}>${child}</${tag}>`;
 }
 
+// Built-in components need no link: a resource that uses one gets it added after its content, so
+// diagnostics keep their line numbers. The import map below resolves it from this package.
+const builtins = [["hk-nav", "@nextwebwg/htmlkit/components/nav.html"]] as const;
+
+/** HTMLKit's import map: @/ is the project root, as in Nuxt, and built-ins resolve from this package. */
+function importMap(root: string) {
+  return { imports: { "@/": pathToFileURL(root).href + "/", "@nextwebwg/htmlkit/components/": new URL("../components/", import.meta.url).href } };
+}
+
 function packageResource(path: string) {
   let directory = dirname(path);
   while (!existsSync(join(directory, "package.json")) && dirname(directory) !== directory) directory = dirname(directory);
@@ -56,7 +65,8 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
   }
   const headScript = [options.headScript, fileScript].filter(script => script !== undefined).join("\n") || undefined;
   const ownsServer = moduleServer === undefined;
-  const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom",
+  const map = importMap(config.root);
+  const server = moduleServer ?? await createServer({ root: config.root, configFile: false, appType: "custom", resolve: { alias: rootAlias(config.root) },
     mode: "development", publicDir: false, server: { middlewareMode: true, watch: null, hmr: false },
     optimizeDeps: { noDiscovery: true, include: [] }, logLevel: "silent" });
   const environment = server.environments.ssr;
@@ -162,13 +172,15 @@ export async function createApplication(input: ApplicationOptions = {}, moduleSe
       const graph = await loadNodeComponents(layers.map(layer => pathToFileURL(layer.component).href), {
         // The graph resolver is synchronous. Prepare its bare imports while asynchronously
         // reading each carrier, using Vite's ESM resolution from the consuming application.
+        importMap: map,
         readComponent: async (url) => {
-          const source = sources.get(fileURLToPath(url)) ?? await readFile(fileURLToPath(url), "utf8");
+          let source = sources.get(fileURLToPath(url)) ?? await readFile(fileURLToPath(url), "utf8");
+          for (const [tag, href] of builtins) if (new RegExp(`<${tag}[\\s/>]`).test(source)) source += `\n<link rel="component" href="${href}">`;
           const parsed = layerURLs.has(url) ? applicationResource(source, url) : parseComponentResource(source, url);
           if ("configuration" in parsed) resources.set(url, parsed);
           const imports = [...parsed.dependencies, ...parsed.definitions.flatMap(definition => definition.controller === undefined ? [] : [definition.controller])];
           for (const specifier of imports) {
-            if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier)) continue;
+            if (/^(?:[A-Za-z][A-Za-z\d+.-]*:|\/|\.\.?\/)/.test(specifier) || Object.keys(map.imports).some(key => specifier.startsWith(key))) continue;
             const resolved = await server.environments.client!.pluginContainer.resolveId(specifier, fileURLToPath(url));
             if (resolved === null || resolved.external) throw new HtmlKitError(`Cannot resolve component import ${specifier}.`, url);
             packages.set(`${url}\0${specifier}`, packageResource(resolved.id));

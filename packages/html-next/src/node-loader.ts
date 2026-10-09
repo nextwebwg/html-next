@@ -9,6 +9,9 @@ import {
   isWithinTrustRoot,
   type ComponentResourceResolver,
   type ResolvedResource,
+  importMapEntries,
+  resolveImportMap,
+  type ImportMapLike,
 } from "./resolve.js";
 import { fail, HtmlDiagnosticError } from "./diagnostics.js";
 
@@ -23,6 +26,8 @@ export interface NodeLoaderOptions {
   readonly collectDiagnostics?: boolean;
   readonly baseURL?: string;
   readonly resolvePackage?: (specifier: string, parentURL: string) => ResolvedResource;
+  /** Application import map; mapped bare specifiers resolve before package resolution, relative to baseURL. */
+  readonly importMap?: ImportMapLike;
   readonly readComponent?: (url: string) => Promise<{ readonly url: string; readonly source: string }>;
   readonly inspectModule?: (url: string) => Promise<InspectedModule>;
 }
@@ -63,9 +68,12 @@ class NodeResourceResolver implements ComponentResourceResolver {
   constructor(
     private readonly baseURL: string,
     private readonly resolvePackage: (specifier: string, parentURL: string) => ResolvedResource,
+    private readonly imports: ReadonlyMap<string, string> = new Map(),
   ) {}
 
   private resolveBare(specifier: string, parentURL: string): ResolvedResource {
+    const mapped = resolveImportMap(this.imports, specifier);
+    if (mapped !== undefined) return mapped;
     try {
       return this.resolvePackage(specifier, parentURL);
     } catch (error) {
@@ -122,7 +130,7 @@ export async function loadNodeComponents(
     source: await readFile(fileURLToPath(url), "utf8"),
   }));
   const graph = await buildComponentGraph(rootSpecifiers, {
-    resolver: new NodeResourceResolver(baseURL, resolvePackage),
+    resolver: new NodeResourceResolver(baseURL, resolvePackage, importMapEntries(options.importMap ?? {}, baseURL)),
     fetchComponent: readComponent,
     ...(options.collectDiagnostics === undefined ? {} : { collectDiagnostics: options.collectDiagnostics }),
   });

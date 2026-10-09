@@ -4,7 +4,9 @@
 
 ### Breaking
 
-- HTMLKit metadata uses the `hk:` prefix: `hk:page`, `hk:layout`, `hk:label`, `hk:navigation`, and `hk:alias`. The old `htmlkit:` spelling is an error that names its replacement. The navigation component is `<hk-navigation>`, rendered layers have `hk-layer-N` ids, and the browser event is `hk:ready`.
+- HTMLKit metadata uses the `hk:` prefix: `hk:page`, `hk:layout`, `hk:label`, `hk:navigation`, and `hk:alias`. The old `htmlkit:` spelling is an error that names its replacement. Rendered layers have `hk-layer-N` ids, and the browser event is `hk:ready`.
+- The navigation component is `<hk-nav>`, after the `<nav>` it renders, in `components/nav.html`. It and HTMLKit's other built-in components need no component link, and the `hk-` prefix is reserved for them.
+- `@/` is the project root in component links, controllers, stylesheet imports, and loader imports. HTML Next's Node loader accepts an application `importMap`, as its browser loader does, and HTMLKit passes `@/` through it and to Vite.
 - Ordering prefixes are a number and a dot, and always apply: `01.guide/02.install.html` routes to `/guide/install/` and orders navigation. The `routeOrdering` option is removed. A dash no longer marks an ordering prefix, so rename `01-guide` to `01.guide`; a name such as `2024-recap` keeps its URL.
 
 ## 1.0.0-alpha.39

@@ -79,3 +79,13 @@ loaders, layouts, head metadata, and navigation, and renders and builds them. Th
 is its component identity, so diagnostics and relative references name the original file.
 `page.href` returns a page's URL in the first directory that serves it. `page.asset` accepts files
 inside the application root and serves them under `/_htmlkit/files/`, in development and in builds.
+
+## `@/` and built-in components
+
+`@/` is the project root everywhere HTMLKit resolves a path: component links
+(`<link rel="component" href="@/components/card.html">`), controllers, stylesheet imports, and
+loader imports (`import { site } from '@/lib/site.ts'`). HTMLKit gives HTML Next an import map for
+component resources and Vite the same alias for modules and styles.
+
+HTMLKit's built-in components, such as `<hk-nav>`, need no link: using the tag is enough. The
+`hk-` prefix is reserved for them.

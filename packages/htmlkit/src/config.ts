@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { normalizePath } from "vite";
 import type { ApplicationOptions } from "./types.js";
 
 export class HtmlKitError extends Error {
@@ -36,4 +37,9 @@ export async function withPlugins(options: ApplicationOptions): Promise<Applicat
   merged = { ...merged };
   pluginsApplied.add(merged);
   return merged;
+}
+
+/** Vite's side of the import map's @/ entry, for loaders, controllers, and stylesheets. */
+export function rootAlias(root: string) {
+  return [{ find: /^@\//, replacement: normalizePath(root) + "/" }];
 }

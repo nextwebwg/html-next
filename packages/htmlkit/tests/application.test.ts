@@ -1,4 +1,5 @@
-import { readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -106,6 +107,28 @@ describe("application platform", () => {
       const post = await handle(new Request("http://localhost/", { method: "POST" }));
       expect([post.status, post.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
     } finally { await application.close(); }
+  }, 60_000);
+
+  it("resolves @/ from the project root and links built-in components without a link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "htmlkit-alias-")); roots.push(root);
+    await write(root, "package.json", '{"type":"module"}');
+    await write(root, "components/card.html", '<template component="app-card" controller="@/controllers/card.ts"><p>Card</p><style>@import "@/styles/card.css";</style></template>');
+    await write(root, "controllers/card.ts", "export default function (host) { host.root.dataset.card = 'ready'; }");
+    await write(root, "styles/card.css", "p { color: rgb(1, 2, 3); }");
+    await write(root, "lib/title.ts", "export const title = 'From @/';");
+    await write(root, "app/pages/index.html", '<link rel="component" href="@/components/card.html"><template component="page-home"><defs><prop name="links" type="list(object({ href: string, label: string, current: string, depth: number, pageName: string }))" required>Links</prop></defs><main><app-card></app-card><hk-nav from:items="$links"></hk-nav></main></template>');
+    await write(root, "app/pages/index.server.ts", "import { title } from '@/lib/title.ts'; export const load = async ({ navigation }) => ({ props: { links: await navigation() }, head: { title } });");
+    const application = await createApplication({ root });
+    try {
+      const { html } = await application.render("/");
+      expect(html).toContain("<title>From @/</title>");
+      expect(html).toContain("Card");
+      expect(html).toMatch(/<nav[^>]*data-component="hk-nav"/);
+    } finally { await application.close(); }
+    const result = await buildApplication({ root });
+    expect(result.browserInputs.some(input => input.endsWith("controllers/card.ts"))).toBe(true);
+    const styles = await Promise.all((await readdir(join(result.outDir, "_htmlkit"))).filter(name => name.endsWith(".css")).map(name => readFile(join(result.outDir, "_htmlkit", name), "utf8")));
+    expect(styles.join("")).toContain("#010203");
   }, 60_000);
 
   it("discovers routes and named layouts without importing controllers", async () => {
