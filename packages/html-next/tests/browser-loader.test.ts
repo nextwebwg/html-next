@@ -59,9 +59,8 @@ describe.skipIf(!enabled)("browser graph loader", () => {
       const instance = await engine.launch();
       try {
         const page = await instance.newPage();
-        // Compare the slot boundary with an independent native case. Firefox 155 has an SVG
-        // scope-limit defect that also occurs without namespaces; namespace compilation must
-        // retain native behavior while the browser workaround is investigated separately.
+        // Keep the independent native reproduction separate from compiled behavior.
+        // Firefox currently leaks this rule; compiled component CSS must exclude it in every engine.
         await page.setContent(await readFile(new URL('./fixtures/firefox-svg-scope.html', import.meta.url), 'utf8'));
         const nativeProjectedFill = await page.evaluate(() => getComputedStyle(document.querySelector('#projected rect')!).fill);
         if (engine !== firefox) assert.equal(nativeProjectedFill, 'rgb(0, 0, 0)');
@@ -69,8 +68,8 @@ describe.skipIf(!enabled)("browser graph loader", () => {
         const markup = '<div><p class="shape">HTML</p><svg data-code="{"><rect class="shape"></rect><circle></circle></svg><slot></slot></div>';
         const svg = '@namespace "http://www.w3.org/2000/svg"; @namespace n "http://www.w3.org/2000/svg"; .shape { fill: rgb(1, 2, 3); } n|circle { fill: rgb(4, 5, 6); } *|*:not(.skip):is(.shape) { stroke: rgb(7, 8, 9); }';
         const html = '@namespace n "http://www.w3.org/1999/xhtml"; @namespace s "http://www.w3.org/2000/svg"; n|p { color: rgb(10, 11, 12); } :host:is(n|x-a) { border-top: 1px solid rgb(16, 17, 18); } @scope (s|svg[data-code="{"]) { *|circle { stroke-width: 2px; } }';
-        const source = ['x-a', 'x-b'].map(tag => `<template component="${tag}">${markup}<style>@import "svg.css" layer(base); @import "html.css"; p { background-color: rgb(13, 14, 15); }</style></template>`).join('');
-        const files: Record<string, string> = { '/app.html': source, '/svg.css': svg, '/html.css': html };
+        const source = ['x-a', 'x-b'].map(tag => `<template component="${tag}">${markup}<style>@import "inactive.css" print; @import "svg.css" layer(base); @import "html.css"; p { background-color: rgb(13, 14, 15); }</style></template>`).join('');
+        const files: Record<string, string> = { '/app.html': source, '/inactive.css': '.shape { fill: magenta; }', '/svg.css': svg, '/html.css': html };
         await page.route('https://namespace.example/**', route => {
           const path = new URL(route.request().url()).pathname;
           return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'text/html', body: path === '/' ? '<!doctype html><head></head><body>' + source + '<x-a><svg id="projected"><rect class="shape"></rect></svg><x-b id="projected-component"></x-b><section><x-b id="nested-projected-component"></x-b></section></x-a><x-b></x-b>' : files[path]! });
@@ -88,13 +87,14 @@ describe.skipIf(!enabled)("browser graph loader", () => {
             stroke: style('[data-component~="x-a"] > p').stroke,
             projected: style('#projected rect').fill, projectedComponent: style('#projected-component svg rect').fill, nestedProjectedComponent: style('#nested-projected-component svg rect').fill };
         });
-        const expected = { nestedScopeWidth: '2px', hostBorder: 'rgb(16, 17, 18)', rect: 'rgb(1, 2, 3)', circle: 'rgb(4, 5, 6)', pFill: 'rgb(0, 0, 0)', pColor: 'rgb(10, 11, 12)', background: 'rgb(13, 14, 15)', stroke: 'rgb(7, 8, 9)', projected: nativeProjectedFill, projectedComponent: 'rgb(1, 2, 3)', nestedProjectedComponent: 'rgb(1, 2, 3)' };
+        const expected = { nestedScopeWidth: '2px', hostBorder: 'rgb(16, 17, 18)', rect: 'rgb(1, 2, 3)', circle: 'rgb(4, 5, 6)', pFill: 'rgb(0, 0, 0)', pColor: 'rgb(10, 11, 12)', background: 'rgb(13, 14, 15)', stroke: 'rgb(7, 8, 9)', projected: 'rgb(0, 0, 0)', projectedComponent: 'rgb(1, 2, 3)', nestedProjectedComponent: 'rgb(1, 2, 3)' };
         assert.deepEqual(await read(), expected);
+        assert.equal(await page.locator('style[data-html-next-style-boundaries]').count(), 1);
         const { loadNodeComponents } = await import('../src/node-loader.js');
         const { compileComponentGraphStylesForBuild } = await import('../src/component-styles-build.js');
         const graph = await loadNodeComponents(['https://namespace.example/app.html'], { readComponent: async url => ({ url, source: files[new URL(url).pathname]! }) });
         const css = compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition));
-        await page.evaluate(css => { document.head.querySelectorAll('style[data-html-next-component-styles], style[data-html-next-shared-styles]').forEach(style => style.remove()); const style = document.createElement('style'); style.textContent = css; document.head.append(style); }, css);
+        await page.evaluate(css => { document.head.querySelectorAll('style[data-html-next-component-styles], style[data-html-next-shared-styles], style[data-html-next-style-boundaries]').forEach(style => style.remove()); const style = document.createElement('style'); style.textContent = css; document.head.append(style); }, css);
         assert.deepEqual(await read(), expected);
       } finally { await instance.close(); }
     });
