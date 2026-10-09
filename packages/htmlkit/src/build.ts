@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFi
 import { basename, dirname, join, resolve } from "node:path";
 import type { Manifest, ManifestChunk } from "vite";
 
-import { createApplication } from "./application.js";
+import { createApplication, notFoundPage, readHeadScript } from "./application.js";
 import { browserSource, stylesheetSources } from "./browser.js";
 import { bundleBrowser } from "./bundle.js";
 import { configure, HtmlKitError, within } from "./config.js";
@@ -97,7 +97,7 @@ export async function buildApplication(options: ApplicationOptions = {}): Promis
     }
     await rm(join(stage, "_htmlkit/vite-manifest.json"));
     if (await exists(join(stage, "404.html"))) throw new HtmlKitError("Public asset collision: 404.html is generated.");
-    await writeFile(join(stage, "404.html"), documentHTML('<main><h1>Page not found</h1></main>', { title: "Page not found" }));
+    await writeFile(join(stage, "404.html"), notFoundPage(await readHeadScript(config.root)).html);
     await writeFile(join(stage, "_htmlkit/manifest.json"), JSON.stringify({ version: 1, base: config.base, routes, pages: delivery }, null, 2) + "\n");
     const previous = await exists(config.outDir);
     if (previous) await rename(config.outDir, backup);

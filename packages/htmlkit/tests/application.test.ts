@@ -65,6 +65,7 @@ describe("application platform", () => {
     } finally { await application.close(); }
   });
   it("inlines app/head.js before stylesheets and rejects text that would end its script", async () => {
+    const prepaint = "<script>document.documentElement.dataset.prepaint = String(document.body === null);</script>";
     const root = await app();
     await write(root, "app/layouts/default.html", '<template component="app-layout"><link rel="stylesheet" href="/shared.css"><main><slot name="page"></slot></main></template>');
     await write(root, "app/layouts/default.server.ts", 'export const load = () => ({ head: { title: "Loaded", script: "injected()" } });');
@@ -73,7 +74,11 @@ describe("application platform", () => {
       const { html } = await application.render("/");
       expect(html).toContain('<head><meta charset="utf-8"><script>document.documentElement.dataset.prepaint = String(document.body === null);</script><meta name="viewport"');
       expect(html.indexOf("<script>")).toBeLessThan(html.indexOf("/shared.css"));
+      // The not-found page gets it too, rendered and built, so a saved theme never flashes there.
+      expect((await application.render("/missing/")).html).toContain(prepaint);
     } finally { await application.close(); }
+    await buildApplication({ root });
+    expect(await readFile(join(root, "dist/404.html"), "utf8")).toContain(prepaint);
     await write(root, "app/head.js", 'console.log("</SCRIPT>");');
     await expect(createApplication({ root })).rejects.toThrow("app/head.js cannot contain");
     // Without app/head.js, a loader's untyped head fields still cannot add a script.
@@ -84,7 +89,7 @@ describe("application platform", () => {
       expect(html).toContain("<title>Home &amp; kit</title>");
       expect(html).not.toContain("injected()");
     } finally { await unscripted.close(); }
-  });
+  }, 60_000);
 
   it("serves rendered pages for native Requests through application.fetch", async () => {
     const root = await app();
