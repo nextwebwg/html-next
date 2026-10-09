@@ -500,10 +500,11 @@ export const htmlNext = createUnplugin<HtmlNextPluginOptions | undefined>((optio
     enforce: "pre",
     vite: { configResolved(config) {
       root = options.root ?? config.root;
-      const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style"], preferRelative: true, tryIndex: false });
+      const cssResolver = config.createResolver({ extensions: [".css"], mainFields: ["style"], conditions: ["style", "development|production"], preferRelative: true, tryIndex: false });
       resolveStylesheet = async (specifier, parentURL) => {
         const resolved = await cssResolver(specifier, fileURLToPath(parentURL));
-        return resolved === undefined ? undefined : pathToFileURL(resolved).href;
+        return resolved === undefined ? undefined
+          : pathToFileURL(resolved.replace(/[?#].*$/, "")).href + (/[?#].*$/.exec(resolved)?.[0] ?? "");
       };
     } },
     async buildStart() {

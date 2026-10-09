@@ -36,12 +36,24 @@ describe("HTML Next unplugin", () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-shared-css-"));
     temporary.push(root);
     await mkdir(join(root, "styles"));
+    const stylePackage = join(root, "node_modules/shared-defaults");
+    await mkdir(stylePackage, { recursive: true });
+    await writeFile(join(stylePackage, "package.json"), JSON.stringify({ name: "shared-defaults", exports: {
+      ".": { style: { production: "./production.css", development: "./development.css" }, default: "./fallback.css" },
+    } }));
+    await writeFile(join(stylePackage, "production.css"), ':host { font-weight: 700; }');
+    await writeFile(join(stylePackage, "development.css"), ':host { font-weight: 400; }');
+    await writeFile(join(stylePackage, "fallback.css"), ':host { font-weight: 900; }');
     await writeFile(join(root, "styles/defaults.css"), ':host, *, *::before, *::after { box-sizing: border-box; } .icon { background: url("./check.svg"); }');
     await writeFile(join(root, "styles/check.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>');
-    await writeFile(join(root, "a.html"), '<template component="x-a"><div></div><style>@import "@styles/defaults.css"; :host { box-sizing: content-box; }</style></template>');
-    await writeFile(join(root, "b.html"), '<template component="x-b"><section></section><style>@import "@styles/defaults.css";</style></template>');
+    await writeFile(join(root, "a.html"), '<template component="x-a"><div></div><style>@import "@styles/defaults.css?baseline=1"; @import "shared-defaults"; :host { box-sizing: content-box; }</style></template>');
+    await writeFile(join(root, "b.html"), '<template component="x-b"><section></section><style>@import "@styles/defaults.css?baseline=1"; @import "shared-defaults";</style></template>');
     await writeFile(join(root, "main.js"), `export { createXA, createXB } from ${JSON.stringify(componentsModule)};`);
-    await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["b.html", "a.html"] })],
+    let isProduction = false;
+    await build({ root, configFile: false, logLevel: "silent", plugins: [
+      { name: "capture-css-environment", configResolved(config) { isProduction = config.isProduction; } },
+      htmlNext.vite({ entries: ["b.html", "a.html"] }),
+    ],
       resolve: { alias: { ...generatedRuntimeAlias, "@styles": join(root, "styles") } },
       build: { minify: false, cssMinify: false, lib: { entry: join(root, "main.js"), formats: ["es"], cssFileName: "components" } } });
     const css = await readFile(join(root, "dist/components.css"), "utf8");
@@ -49,6 +61,8 @@ describe("HTML Next unplugin", () => {
     assert.match(css, /@scope\s*\(\[data-component~="x-a"\], \[data-component~="x-b"\]\)/);
     assert.ok(css.indexOf("border-box") < css.indexOf("content-box"));
     assert.match(css, /data:image\/svg\+xml/);
+    assert.equal(css.match(new RegExp(`font-weight: ${isProduction ? 700 : 400}`, "g"))?.length, 1, css);
+    assert.doesNotMatch(css, /font-weight: 900/);
     assert.doesNotMatch(css, /@import|@styles|file:\/\/|\/@fs\//);
   });
 
