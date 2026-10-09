@@ -45,14 +45,15 @@ export function formatReact(source: string, filePath: string): string {
 let svelteContext: ReturnType<typeof createContext> | undefined;
 
 /**
- * Formats a converted Svelte component's script, or the shared Svelte module, in `sv create`'s
- * style: tabs and single quotes. Its markup keeps the converter's own layout, which breaks lines
- * inside tags: Svelte renders whitespace between elements as a space.
+ * Formats a converted Svelte component's script or style, or the shared Svelte module, in `sv
+ * create`'s style: tabs and single quotes. Its markup keeps the converter's own layout, which breaks
+ * lines inside tags: Svelte renders whitespace between elements as a space.
  */
 export function formatSvelteScript(source: string, filePath: string): string {
   if (svelteContext === undefined) {
     svelteContext = createContext({ useTabs: true, lineWidth: 100 });
     svelteContext.addPlugin(readFileSync(require.resolve("@dprint/typescript/plugin.wasm")), { quoteStyle: "alwaysSingle", quoteProps: "asNeeded" });
+    svelteContext.addPlugin(readFileSync(require.resolve("dprint-plugin-malva/plugin.wasm")));
   }
   try {
     return svelteContext.formatText({ filePath, fileText: source });

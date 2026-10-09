@@ -33,7 +33,7 @@ A directory such as `components/` is also accepted, as are explicit `.html` file
 | --- | --- | --- |
 | Vue 3.5 | `.vue` single-file components | `<style scoped>` |
 | React 19.3 | `.tsx` components | Adjacent imported `.css` files |
-| Svelte 5.57.1 | `.svelte` single-file components | Adjacent imported `.css` files |
+| Svelte 5.57.1 | `.svelte` single-file components | `<style>` |
 
 The generated files use their target framework directly and have no HTML Next runtime dependency. The converter also copies controllers and writes the small helper files each component needs.
 

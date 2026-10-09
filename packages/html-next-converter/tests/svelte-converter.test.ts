@@ -57,12 +57,16 @@ it("converts a simple component to compilable Svelte 5 in both graph modes", asy
     const source = await readFile(join(outDirectory, "svelte/XCard.svelte"), "utf8");
     assert.doesNotMatch(source, /@nextwebwg\/html-next/);
     assert.doesNotMatch(source, /createFormatValue|const formatValue/);
-    compile(source, { filename: "XCard.svelte", generate: "client" });
+    assert.deepEqual(manifest.output.artifacts.filter((artifact) => artifact.kind === "style"), []);
+    const client = compile(source, { filename: "XCard.svelte", generate: "client" });
+    assert.match(client.css?.code ?? "", /@scope \(\.x-card\) \{\s*:scope \{\s*display: block;/);
+    assert.deepEqual(client.warnings.filter((warning) => warning.code.startsWith("css_")), []);
     const html = await serverHtml(outDirectory, "XCard", source, { label: "Hello", id: "case", class: "outside" });
-    assert.match(html, /<article[^>]*data-component="x-card"/);
+    assert.doesNotMatch(html, /data-component/);
     assert.match(html, /aria-label="Hello"/);
     assert.match(html, /id="case"/);
-    assert.match(html, /class="card outside"/);
+    // Only the root is styled, so Svelte gives no element its hash class.
+    assert.match(html, /class="x-card card outside"/);
     const defaulted = await serverHtml(outDirectory, "XCard", source);
     assert.match(defaulted, /aria-label="Ready"/);
     assert.doesNotMatch(defaulted, /data-label=/);

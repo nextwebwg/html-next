@@ -78,7 +78,7 @@ conformance corpus and feature-specific React fixtures compare browser behavior,
 hydration, and exact pixels with the live runtime in Chromium, Firefox, and WebKit. Constructs
 that cannot be represented fail conversion explicitly rather than silently changing behavior.
 Svelte output uses Svelte 5 runes, snippets, attachments, and public lifecycle APIs, with `.svelte`
-components and adjacent imported CSS under `generated/svelte/`. It supports props (including generic
+components under `generated/svelte/`, each with its styles in its `<style>`. It supports props (including generic
 and state-selected types), state/computed/handlers, named and scoped slots, native events, context, data reads, controllers and refs, native form controls, safe HTML, structural
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
 Svelte's normal compiler owns rendering, SSR, and hydration. Components import the rendering and

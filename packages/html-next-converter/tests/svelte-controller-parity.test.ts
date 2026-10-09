@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { build } from "esbuild";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { chromium, firefox, webkit, type BrowserType, type Page } from "playwright";
 
 import { convertComponents } from "../src/index.js";
@@ -55,8 +55,6 @@ export { updateComponentProps } from ${JSON.stringify(fileURLToPath(new URL("../
         entries: ["components/**"], publicRootURL: "/app/" });
       assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "controller" && artifact.path.endsWith("controlled.js")));
       assert.ok(manifest.output.artifacts.some((artifact) => artifact.kind === "helper" && artifact.path === "svelte/host.svelte.ts"));
-      const css = (await Promise.all(manifest.output.artifacts.filter((artifact) => artifact.kind === "style")
-        .map((artifact) => readFile(join(outDirectory, artifact.path), "utf8")))).join("\n");
       const app = join(outDirectory, "App.svelte");
       await writeFile(app, `<script lang="ts">
 import XControlled from "./${manifest.components[0]!.artifact}";
@@ -81,7 +79,7 @@ const instance = target.hasChildNodes() ? hydrate(App, { target }) : mount(App, 
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
       assert.match(markup, /<section[^>]*id="case"/);
-      outputs.set(mode, { bundle, markup, css });
+      outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
   }, 60_000);
 

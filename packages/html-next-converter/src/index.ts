@@ -15,7 +15,6 @@ import {
   loadNodeComponents,
   collectSharedStylesheets,
   compileComponentGraphStylesForBuild,
-  compileComponentStylesForSvelte,
   wrapStylesheetConditions,
   vueHostArtifact,
   vueHtmlArtifact,
@@ -397,7 +396,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   const sourceFiles = new Set([...graph.nodes.values()].map((node) => fileURLToPath(node.url)).concat(graph.stylesheetInputs.map(url => fileURLToPath(url))));
   const sharedStyles = collectSharedStylesheets([...graph.nodes.values()].map(node => node.definition));
   const sharedStylePath = `${options.target}/shared-components.css`;
-  const svelteLocalCSS = new Map<string, string>();
   const pathsByTag = new Map([...graph.nodes.values()].map((node) => [
     node.definition.contract.tag,
     componentArtifact(projectRoot, node.url, node.definition.contract.tag, node.definition.contract.name, options.target),
@@ -456,7 +454,7 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
       }
       const definition = Object.freeze({
         ...node.definition,
-        ...(options.target === "vue" && node.definition.stylesheets !== undefined ? {
+        ...(options.target !== "react" && node.definition.stylesheets !== undefined ? {
           css: node.definition.stylesheets.map(sheet => wrapStylesheetConditions(sheet.css, sheet.conditions)).join("\n") + "\n" + node.definition.css,
           stylesheets: [],
         } : {}),
@@ -496,7 +494,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           renderSpecifier: relativeImport(componentPath, "svelte/render.svelte.ts").replace(/\.ts$/, ""),
           importSpecifier,
           propContractsByTag,
-          stylesheetSpecifier: `./${node.definition.contract.name}.css`,
           propsSpecifier: relativeImport(componentPath, "svelte/props.ts").replace(/\.ts$/, ""),
           htmlSpecifier: relativeImport(componentPath, "svelte/html.ts").replace(/\.ts$/, ""),
           eventsSpecifier: relativeImport(componentPath, "svelte/events.ts").replace(/\.ts$/, ""),
@@ -529,16 +526,10 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
         throw error;
       }
       if (/@nextwebwg\//.test(content)) throw new FrameworkConversionError(options.target, source, tag);
-      if (sharedStyles.length > 0 && options.target !== "vue") {
-        const sharedImport = `import ${JSON.stringify(relativeImport(componentPath, sharedStylePath))};`;
-        if (options.target === "react") {
-          content = content.replace(/^import ["'][^"']+\.css["'];?\s*$/gm, "");
-          content = sharedImport + "\n" + content;
-          reactStyles = true;
-        } else {
-          content = content.replace(/^import ["'][^"']+\.css["'];?\s*$/gm, "");
-          content = content.replace(/(<script\s+lang="ts"[^>]*>)/, `$1\n${sharedImport}`);
-        }
+      if (sharedStyles.length > 0 && options.target === "react") {
+        content = content.replace(/^import ["'][^"']+\.css["'];?\s*$/gm, "");
+        content = `import ${JSON.stringify(relativeImport(componentPath, sharedStylePath))};\n${content}`;
+        reactStyles = true;
       }
       // TypeScript 6+ rejects a stylesheet import unless the program declares `*.css`.
       const component: GeneratedArtifact = reactConversion !== undefined && (reactConversion.css !== "" || sharedStyles.length > 0)
@@ -552,10 +543,6 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
           reactStyles = true;
           claim({ path: componentPath.replace(/\.tsx$/, ".css"), content: `${css}\n` }, "style", source);
         }
-      }
-      if (svelteConversion !== undefined) svelteLocalCSS.set(tag, compileComponentStylesForSvelte(node.definition.css, node.definition).css);
-      if (svelteConversion !== undefined && svelteConversion.css !== "" && sharedStyles.length === 0) {
-        claim({ path: componentPath.replace(/\.svelte$/, ".css"), content: `${svelteConversion.css}\n` }, "style", source);
       }
       if (svelteConversion !== undefined) for (const helper of svelteConversion.helpers) neededHelpers.add(helper);
       for (const helper of helpers) neededHelpers.add(helper);
@@ -652,13 +639,8 @@ async function planConversion(options: CheckConversionOptions, collectDiagnostic
   if (options.target === "react" && reactStyles) {
     claim({ path: "react/styles.d.ts", content: 'declare module "*.css";\n' }, "helper");
   }
-  if (sharedStyles.length > 0 && options.target !== "vue") {
-    const definitions = [...graph.nodes.values()].map(node => node.definition);
-    const css = options.target === "react" ? compileComponentGraphStylesForBuild(definitions) : definitions.flatMap(definition => [
-      ...(definition.stylesheets ?? []).map(sheet => wrapStylesheetConditions(
-        compileComponentStylesForSvelte(sheet.css, definition).css, sheet.conditions)),
-      svelteLocalCSS.get(definition.contract.tag) ?? "",
-    ]).join("\n");
+  if (sharedStyles.length > 0 && options.target === "react") {
+    const css = compileComponentGraphStylesForBuild([...graph.nodes.values()].map(node => node.definition));
     claim({ path: sharedStylePath, content: wrapStylesheetConditions(css, []) + "\n" }, "style");
   }
 

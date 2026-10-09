@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,7 +10,7 @@ import { chromium, firefox, webkit, type BrowserType, type Page } from "playwrig
 
 import { assertPixelsEqual, launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { convertComponents } from "../src/index.js";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
 const source = `<template component="x-keyed-list" status="early" summary="Keyed rows."><defs>
@@ -48,8 +48,6 @@ describe.skipIf(!enabled)("Svelte keyed rows and duplicate diagnostic parity", (
     for (const mode of ["application", "library"] as const) {
       const outDirectory = join(directory, mode);
       const manifest = await convertComponents({ mode, target: "svelte", root: directory, outDirectory, entries: ["list.html"] });
-      const style = manifest.output.artifacts.find((artifact) => artifact.kind === "style");
-      const css = style === undefined ? "" : await readFile(join(outDirectory, style.path), "utf8");
       await writeFile(join(outDirectory, "App.svelte"), `<script>import XKeyedList from "./${manifest.components[0]!.artifact}";</script><XKeyedList id="case" />`);
       const entry = join(outDirectory, "mount.ts");
       await writeFile(entry, `import { mount, hydrate } from "svelte"; import App from "./App.svelte";
@@ -64,7 +62,7 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
       await build({ entryPoints: [serverEntry], outfile: serverBundle, bundle: true, format: "esm", platform: "node",
         packages: "external", loader: { ".css": "empty" }, plugins: [sveltePlugin("server")] });
       const markup = (await import(pathToFileURL(serverBundle).href) as { html: string }).html;
-      outputs.set(mode, { bundle, markup, css });
+      outputs.set(mode, { bundle, markup, css: svelteStyles(outDirectory) });
     }
   });
 

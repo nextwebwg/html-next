@@ -12,6 +12,32 @@ it("preserves an implicit universal selector before a descendant pseudo-element"
   assert.equal(guardComponentPseudoElements(".item > ::after"), '.item > :where(:not([data-component], [data-slotted]))::after');
 });
 
+it("scopes Svelte selectors by the hash Svelte gives the component's own markup", () => {
+  const definition = parseComponent('<template component="x-svelte-scope"><div><p $html="\'<b>x</b>\'"></p><x-child></x-child><slot></slot></div></template>');
+  const compiled = compileComponentStylesForSvelte(`:host, :host-state([open]) span { color: red; } .item ::before, p:after { color: blue; }
+    :slotted(.projected) a::marker { color: green; } x-child { color: navy; } @keyframes spin { to { opacity: 0; } }`,
+  { ...definition, declarations: [{ kind: "state", name: "open", type: "boolean" }] });
+  const own = ':where(*, :global([data-html-next-owner~="x-svelte-scope"]))';
+  const layout = (css: string): string => css.replace(/\s*([{}])\s*/g, "$1").replace(/\s+/g, " ");
+  assert.equal(layout(compiled.css), layout(`@keyframes -global-spin { to { opacity: 0; } }
+    @scope (.x-svelte-scope) to (.x-child) {
+      :global(:scope), :global(:scope[data-x-svelte-scope-state~="open"] span)${own} { color: red; }
+      :global(.item *)${own}::before, :global(p)${own}:after { color: blue; }
+      :global(:is(.projected) a):not(:scope, * *, [data-html-next-owner~="x-svelte-scope"])::marker { color: green; }
+      :global(:is(x-child, .x-child))${own} { color: navy; }
+    }`));
+  assert.equal(compiled.hashed, true);
+  // Without slots nothing is projected, so the native scope alone bounds the rules and Svelte hashes nothing.
+  const unslotted = compileComponentStylesForSvelte("span { color: red; }", parseComponent('<template component="x-plain"><p><span></span></p></template>'));
+  assert.equal(layout(unslotted.css), layout("@scope (.x-plain) { :global(span) { color: red; } }"));
+  assert.equal(unslotted.hashed, undefined);
+  // Rules only for the root need no limits, so the invoked components carry no classes for them.
+  const host = compileComponentStylesForSvelte(":host { color: red; }", parseComponent('<template component="x-host"><p><x-child></x-child></p></template>'));
+  assert.equal(layout(host.css), layout("@scope (.x-host) { :global(:scope) { color: red; } }"));
+  assert.deepEqual(host.components, []);
+  assert.deepEqual(compiled.components, ["x-child"]);
+});
+
 it("preserves statement at-rule terminators in build styles", () => {
   const definition = parseComponent('<template component="import-demo"><div></div></template>');
   const compiled = compileComponentStylesForBuild('@layer one; @layer two; :host { color: red; }', definition).css;
@@ -48,8 +74,8 @@ describe("resolved prop and state selectors", () => {
     for (const compile of compilers) {
       const result = compile(":host(.active) { color: blue; }", definition);
       assert.deepEqual(result.stateNames, []);
-      assert.match(result.css, compile === compileComponentStylesForVue ? /:scope\.active/
-        : /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/);
+      assert.match(result.css, compile === compileComponentStylesForBuild ? /:scope:where\(\[data-component~="x-style-contract"\]\)\.active/
+        : /:scope\.active/);
     }
   });
 

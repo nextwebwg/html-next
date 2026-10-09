@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-import { sveltePlugin } from "./helpers/svelte.js";
+import { sveltePlugin, svelteStyles } from "./helpers/svelte.js";
 import { describe, it } from "vitest";
 
 import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
@@ -181,8 +181,10 @@ createRoot(document.querySelector("main")!).render(<XCard title="Hello"><XBadge 
       const svelteMounted = await build({ entryPoints: [svelteEntry], bundle: true, write: false, metafile: true,
         platform: "browser", format: "iife", outdir: join(consumer, "svelte-mounted"), plugins: [sveltePlugin("client")] });
       const svelteJS = svelteMounted.outputFiles.find((file) => file.path.endsWith(".js"))?.text;
-      const svelteCSS = svelteMounted.outputFiles.find((file) => file.path.endsWith(".css"))?.text;
-      assert.ok(svelteJS); assert.ok(svelteCSS);
+      // Svelte extracts each installed component's <style>, as a bundler's Svelte plugin emits it.
+      const svelteCSS = svelteStyles(consumer);
+      assert.ok(svelteJS);
+      assert.match(svelteCSS, /display:\s*block/, "card CSS must survive package bundling");
       const svelteInputs = Object.keys(svelteMounted.metafile!.inputs);
       assert.equal(svelteInputs.filter((path) => path.endsWith("/svelte/props.ts")).length, 1, "multiple installed entries share one prop helper");
       assert.equal(svelteInputs.some((path) => path.includes("/@nextwebwg/html-next/") || path.includes("/packages/html-next/src/")), false, "installed converted Svelte has no HTML Next runtime");
