@@ -76,3 +76,18 @@ export function conformingStates(definition: ComponentDefinition): ReadonlySet<s
   conforming.set(definition, names = result);
   return names;
 }
+
+/**
+ * Conforming states a framework target may also read unchecked. Its handler writes check only a
+ * value's own kind (an object is an object, nested fields keep their authored input), so only a
+ * string, number, integer or boolean state is checked in full on every write.
+ */
+export function conformingScalarStates(definition: ComponentDefinition): ReadonlySet<string> {
+  const scalars = new Set<string>();
+  for (const name of conformingStates(definition)) {
+    const declaration = definition.declarations?.find((entry) => entry.kind === "state" && entry.name === name);
+    const node = declaration?.kind === "state" ? declarationTypeNode(declaration.type, declaration.shape) : undefined;
+    if (node?.kind === "terminal" && ["string", "number", "integer", "boolean"].includes(node.name)) scalars.add(name);
+  }
+  return scalars;
+}

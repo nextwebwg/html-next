@@ -27,7 +27,7 @@ import { compileComponentStylesForVue, vueHostSelector } from "../component-styl
 import { stateAttribute } from "../component-styles.js";
 import { declarationTypeNode, normalizeType, parseTypedValue, parseTypeExpression, typeAtKey, typeScriptType, type TypeNode } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { conformingStates, literalInitial } from "./state-roots.js";
+import { conformingScalarStates, literalInitial } from "./state-roots.js";
 import { dependentPropTypeSource, escapeHtml, isVoidElement, propKey, quote, selectorGenerics, svgAttributeName, typeSource } from "./shared.js";
 import { formatVue } from "./vue-format.js";
 import { VUE_HOST_SPECIFIER } from "./vue-host.js";
@@ -178,8 +178,8 @@ function expressionGuard(plan: CompiledExpression, scope: Scope, definition: Com
     // Prop boundary handling is separate from these mutable declaration guards.
     if (definition.contract.props[root!] !== undefined) continue;
     if (declaration?.kind === "state" || declaration?.kind === "computed") {
-      // A conforming state's own value is checked on every write, so reading it cannot fail.
-      if (steps.length === 0 && declaration.kind === "state" && conformingStates(definition).has(root!)) continue;
+      // A conforming scalar state's own value is checked in full on every write, so reading it cannot fail.
+      if (steps.length === 0 && declaration.kind === "state" && conformingScalarStates(definition).has(root!)) continue;
       type = declarationTypeNode(declaration.type, declaration.shape);
     } else if (declaration?.kind === "data") {
       const first = steps.shift();
