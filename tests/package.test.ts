@@ -172,7 +172,7 @@ describe("workspace package contracts", () => {
       ],
       { cwd: root, shell: useCommandShell },
     );
-  }, 120_000);
+  }, 240_000); // Windows runners have taken over 120 s for this install and bundle.
 
   it("installs the source adapter and prepares React types through the consumer Vite config", () => {
     const tarballs = releaseDirectories.map(pack);
