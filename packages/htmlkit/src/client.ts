@@ -195,7 +195,8 @@ function navigate(runtime: Runtime, { base, prefetch: policy, manifest }: Client
   document.addEventListener("pointerover", intent);
   document.addEventListener("focusin", intent);
   document.addEventListener("touchstart", intent, { passive: true });
-  const idle = window.requestIdleCallback ?? ((run: () => void) => setTimeout(run, 1));
+  // At idle, or within 2 s on a busy page; a timer where requestIdleCallback is missing.
+  const idle = (run: () => void) => "requestIdleCallback" in window ? requestIdleCallback(run, { timeout: 2000 }) : setTimeout(run, 1);
   const visible = new IntersectionObserver(entries => {
     for (const { isIntersecting, target: anchor } of entries) {
       if (!isIntersecting) continue;

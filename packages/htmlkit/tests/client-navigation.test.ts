@@ -76,6 +76,8 @@ async function site(): Promise<string> {
   return root;
 }
 
+/** Prefetches wait for idle time and, in development, a render; a loaded CI runner needs longer than vitest's 1 s default. */
+const poll = <T>(read: () => T | Promise<T>) => expect.poll(read, { timeout: 15_000 });
 /** Waits for a navigation to settle on a page title. */
 async function settled(page: Page, title: string): Promise<void> {
   await page.waitForFunction(expected => document.title === expected && navigation.transition === null && document.readyState === "complete", title);
@@ -120,7 +122,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     // data-hk-prefetch="visible", which prefetches its page's payload and module.
     const payloads = () => requests.filter(request => request.path.includes("/_htmlkit/pages/")).map(request => request.path);
     const pageModules = () => requests.filter(request => Object.values(modules).includes(request.path) && request.path !== modules[""]).map(request => request.path);
-    await expect.poll(() => [payloads(), pageModules()]).toEqual([[payloadPath("counter/")], [modules["counter/"]]]);
+    await poll(() => [payloads(), pageModules()]).toEqual([[payloadPath("counter/")], [modules["counter/"]]]);
     await page.waitForTimeout(300);
     expect([payloads(), pageModules()]).toEqual([[payloadPath("counter/")], [modules["counter/"]]]);
     expect(count("/kit/_htmlkit/manifest.json")).toBe(built ? 1 : 0);
@@ -141,7 +143,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     // from them, keeping the layout, without fetching its HTML.
     const guide = page.getByRole("link", { name: "Guide", exact: true });
     await guide.hover();
-    await expect.poll(() => [count(payloadPath("guide/")), count(modules["guide/"]!)]).toEqual([1, 1]);
+    await poll(() => [count(payloadPath("guide/")), count(modules["guide/"]!)]).toEqual([1, 1]);
     await guide.click();
     await settled(page, "Guide");
     expect([count(payloadPath("guide/")), count(modules["guide/"]!), count("/kit/guide/")]).toEqual([1, 1, 0]);
@@ -162,7 +164,7 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
 
     // A touch prefetches at once.
     await page.locator("#items").evaluate(link => link.dispatchEvent(new Event("touchstart", { bubbles: true })));
-    await expect.poll(() => [count(payloadPath("items/one/")), count(modules["items/one/"]!)]).toEqual([1, 1]);
+    await poll(() => [count(payloadPath("items/one/")), count(modules["items/one/"]!)]).toEqual([1, 1]);
 
     // A page whose payload fails renders from its HTML instead. New entries scroll to their
     // fragment; back and forward restore the saved position.
@@ -173,14 +175,14 @@ async function scenario(browser: Browser, url: string, built: boolean): Promise<
     expect([await marked(page), count("/kit/guide/install/", "fetch")]).toEqual([true, 1]);
     expect(page.url()).toBe(url + "guide/install/#deep");
     expect(await page.locator("#hk-layer-1 h1").evaluate(heading => getComputedStyle(heading).borderBottomColor)).toBe("rgb(7, 8, 9)");
-    await expect.poll(() => page.evaluate(() => [Math.abs(Math.round(document.getElementById("deep")!.getBoundingClientRect().top)), scrollY > 2000])).toEqual([0, true]);
+    await poll(() => page.evaluate(() => [Math.abs(Math.round(document.getElementById("deep")!.getBoundingClientRect().top)), scrollY > 2000])).toEqual([0, true]);
     await page.evaluate(() => scrollTo(0, 1234));
     await page.evaluate(() => document.querySelector<HTMLAnchorElement>('nav a[href="/kit/guide/"]')!.click());
     await settled(page, "Guide");
     expect(await page.evaluate(() => scrollY)).toBe(0);
     await page.goBack();
     await settled(page, "Install");
-    await expect.poll(() => page.evaluate(() => scrollY)).toBe(1234);
+    await poll(() => page.evaluate(() => scrollY)).toBe(1234);
     expect(await page.locator('nav a[href="/kit/guide/install/"]').getAttribute("aria-current")).toBe("page");
     await page.goForward();
     await settled(page, "Guide");
@@ -338,8 +340,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")("client navigation", 
         await page.goto(visible.url);
         const paths = ["guide/", "guide/install/", "items/one/", "items/two/", "counter/"];
         const modules = await Promise.all(paths.map(path => moduleOf(visible.url, path)));
-        await expect.poll(() => paths.map(path => count(payloadPath(path)))).toEqual(paths.map(() => 1));
-        await expect.poll(() => modules.map(module => count(module))).toEqual(modules.map(() => 1));
+        await poll(() => paths.map(path => count(payloadPath(path)))).toEqual(paths.map(() => 1));
+        await poll(() => modules.map(module => count(module))).toEqual(modules.map(() => 1));
         expect(requests.filter(request => request.path === payloadPath(""))).toEqual([]);
       } finally { await browser.close(); }
     }, 60_000);
