@@ -1384,6 +1384,36 @@ describe("direct-extend parity with the general runtime (jsdom)", () => {
     ]);
   });
 
+  it("passes a child prop on only when its value changes, like live lowering", async () => {
+    const meter = `<template component="x-meter" controller="./props-controller.js" status="early" summary="Meter.">
+      <defs><prop name="amount" type="integer" default="0">Amount.</prop></defs><meter from:value="$amount"></meter></template>`;
+    const log = (): string[] => (globalThis as any).directExtendLog.events;
+    let observer: MutationObserver | undefined;
+    try {
+      const run = await same([parent(`<section><x-meter from:amount="$count + $rows.length"></x-meter></section>`), meter], [
+        (host) => {
+          const root = host.root.querySelector("meter");
+          observer = new (root.ownerDocument.defaultView.MutationObserver)((records: MutationRecord[]) => {
+            log().push(...records.map((record) => `write ${record.attributeName}`).sort());
+          });
+          observer!.observe(root, { attributes: true });
+          // 2 + 1 is the 1 + 2 it was: the child's input, validity and reflection stay as they are.
+          host.state.count = 2;
+          host.state.rows = [1];
+        },
+        (host) => { host.state.count = 5; },
+        () => { observer?.disconnect(); },
+      ]);
+      // The equal sum logs nothing and writes nothing; the new one updates the child once.
+      assert.deepEqual(run.events.slice(4, 11), [
+        "1 state |undefined", "1 props amount=3/3/true", "1 root meter true", "1 connect true null true",
+        "1 props amount=6/6/true", "write data-amount", "write value",
+      ]);
+    } finally {
+      observer?.disconnect();
+    }
+  });
+
   it("binds invocation props by their values, after their attribute text", async () => {
     await same([parent(`
       <section><x-badge from:count="$label" from:tone="$flag ? 'warn' : 'nope'" from:open="$flag"></x-badge></section>`), badge], [

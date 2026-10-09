@@ -131,7 +131,7 @@ additional observer is introduced. Per-instance values, guards and ownership rem
 | Static markup | 6,875 | Cloned blocks, slot ranges, compiled-root handle and host |
 | Numeric state and handler | 6,856 | Same, with root bits and a handler |
 | Numeric computed state | 7,155 | Same, with a computed root, read-only to the controller |
-| Scalar and enum props | 11,287 | Same, with the live prop boundary and validity, each type compiled to its own checks |
+| Scalar and enum props | 11,353 | Same, with the live prop boundary and validity, each type compiled to its own checks |
 | Keyed list | 7,577 | Cloned blocks and `KeyedList` |
 | Declared read | 7,536 | Cloned blocks and `DataResource` |
 | Controller lifecycle | 6,907 | Cloned blocks and the generated controller host |

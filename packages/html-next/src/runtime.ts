@@ -1573,7 +1573,15 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        block.scope.set("loop", locals.loop!);
+        // A row's loop fields change one by one, so a reader of one that holds does not run again;
+        // a row whose position and count hold writes nothing.
+        const rowScope = block.scope;
+        const next = locals.loop as Record<string, Value>;
+        const plain = untracked(() => rowScope.read("loop")) as Record<string, Value>;
+        if (plain.index !== next.index || plain.first !== next.first || plain.last !== next.last || plain.count !== next.count) {
+          const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
+          loop.index = next.index!; loop.first = next.first!; loop.last = next.last!; loop.count = next.count!;
+        }
       }
       next.set(key, block);
       ordered?.push(block);
@@ -2771,7 +2779,7 @@ function installPropReflection(instance: RuntimeInstance): void {
       const serialized = value === undefined || value === ABSENT || value === null
         ? null : reflectedPropValue(value, selected);
       if (serialized === null) root.removeAttribute(attributeName);
-      else root.setAttribute(attributeName, serialized);
+      else if (root.getAttribute(attributeName) !== serialized) root.setAttribute(attributeName, serialized);
     }, 2));
   }
 
@@ -3690,7 +3698,12 @@ function applyComponentProps(
   for (const [name, input] of Object.entries(props)) {
     const prop = contract.props[name];
     if (prop === undefined) continue;
-    instance.propInputs[name]!.set({ value: input === undefined ? null : input, source: "value", present: input !== undefined });
+    // An input that holds what it held notifies nothing: validity and the input handle stay as they are.
+    const record: PropInput = { value: input === undefined ? null : input, source: "value", present: input !== undefined };
+    const previous = untracked(() => instance.propInputs[name]!.get());
+    if (previous.source !== record.source || previous.present !== record.present || !Object.is(previous.value, record.value)) {
+      instance.propInputs[name]!.set(record);
+    }
     const attributeName = `data-${kebabCase(name)}`;
     const value = next[name] as Value;
     // A bound data-* attribute is template output. Direct input still updates the prop handle,
@@ -3705,7 +3718,8 @@ function applyComponentProps(
     } else {
       instance.explicit.add(name);
       const selected = selectedPropType(contract, prop, next);
-      if (!bound) element.setAttribute(attributeName, reflectedPropValue(input, selected));
+      const reflected = reflectedPropValue(input, selected);
+      if (!bound && element.getAttribute(attributeName) !== reflected) element.setAttribute(attributeName, reflected);
     }
     if (!Object.is(untracked(() => instance.scope.get(name)), value)) instance.scope.set(name, value);
   }
